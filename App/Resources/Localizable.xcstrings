@@ -1,12 +1,62 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    " · untested": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · non testé"
+          }
+        }
+      }
+    },
+    "%@ more free space is needed. Free up space on this Mac, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il manque %@ d'espace libre. Libère de la place sur ce Mac, puis réessaie."
+          }
+        }
+      }
+    },
+    "%@/s": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@/s"
+          }
+        }
+      }
+    },
+    "A file arrived damaged twice in a row. Check your connection, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un fichier est arrivé abîmé deux fois de suite. Vérifie ta connexion, puis réessaie."
+          }
+        }
+      }
+    },
     "Accessing the microphone…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Accès au micro…"
+          }
+        }
+      }
+    },
+    "Advanced": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avancé"
           }
         }
       }
@@ -31,12 +81,92 @@
         }
       }
     },
+    "Automatic": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatique"
+          }
+        }
+      }
+    },
+    "Automatic: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatique : %@"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler"
+          }
+        }
+      }
+    },
+    "Change": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer"
+          }
+        }
+      }
+    },
+    "Change tier?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer de palier ?"
+          }
+        }
+      }
+    },
     "Chip": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Puce"
+          }
+        }
+      }
+    },
+    "Chip and memory": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puce et mémoire"
+          }
+        }
+      }
+    },
+    "Choose another tier…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir un autre palier…"
+          }
+        }
+      }
+    },
+    "Chosen in the settings (Advanced). Recommended tier for this Mac: %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
           }
         }
       }
@@ -57,6 +187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Calcul"
+          }
+        }
+      }
+    },
+    "Connection lost. The download will resume by itself as soon as the Internet is back.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion interrompue. Le téléchargement reprendra tout seul dès qu'Internet revient."
           }
         }
       }
@@ -87,6 +227,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copier les mesures"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer"
+          }
+        }
+      }
+    },
+    "Delete the models?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer les modèles ?"
+          }
+        }
+      }
+    },
+    "Delete the models…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer les modèles…"
+          }
+        }
+      }
+    },
+    "Delete the other tiers' models (%@)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer les modèles des autres paliers (%@)"
+          }
+        }
+      }
+    },
+    "Download (%@)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Télécharger (%@)"
+          }
+        }
+      }
+    },
+    "Downloading: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En cours : %@"
           }
         }
       }
@@ -127,6 +327,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Premier son de la voix"
+          }
+        }
+      }
+    },
+    "Free space on this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace libre sur ce Mac"
           }
         }
       }
@@ -237,6 +447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Je t'écoute"
+          }
+        }
+      }
+    },
+    "If the problem comes back, a model may be damaged: deleting the models lets you download them again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si le problème revient, un modèle est peut-être abîmé : les supprimer permet de les télécharger à nouveau."
           }
         }
       }
@@ -421,6 +641,16 @@
         }
       }
     },
+    "Missing file": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichier manquant"
+          }
+        }
+      }
+    },
     "Mode": {
       "localizations": {
         "fr": {
@@ -441,16 +671,6 @@
         }
       }
     },
-    "Model not found": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modèle introuvable"
-          }
-        }
-      }
-    },
     "Model's first token": {
       "localizations": {
         "fr": {
@@ -461,12 +681,32 @@
         }
       }
     },
+    "Models on this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèles sur ce Mac"
+          }
+        }
+      }
+    },
     "New conversation": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "Not enough free space: %@ is needed and %@ is left. Free up space, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il n'y a plus assez d'espace libre : il faut %@ et il reste %@. Libère de la place, puis réessaie."
           }
         }
       }
@@ -511,6 +751,26 @@
         }
       }
     },
+    "Pause": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mettre en pause"
+          }
+        }
+      }
+    },
+    "Paused. What has been downloaded is kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En pause. Ce qui est téléchargé est gardé."
+          }
+        }
+      }
+    },
     "Prepared during the silence (speculative start): stages overlap.": {
       "localizations": {
         "fr": {
@@ -551,6 +811,16 @@
         }
       }
     },
+    "Resume": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre"
+          }
+        }
+      }
+    },
     "Say hello to get started.": {
       "localizations": {
         "fr": {
@@ -567,6 +837,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Session"
+          }
+        }
+      }
+    },
+    "Set up %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparer %@"
           }
         }
       }
@@ -631,6 +911,16 @@
         }
       }
     },
+    "Speech recognition": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnaissance vocale"
+          }
+        }
+      }
+    },
     "Standard (16 to 24 GB)": {
       "localizations": {
         "fr": {
@@ -657,6 +947,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parle à l'assistant pour voir les mesures."
+          }
+        }
+      }
+    },
+    "The assistant runs entirely on this Mac, without the Internet. It first needs its models: one download, and the connection is not used any more.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'assistant fonctionne entièrement sur ce Mac, sans Internet. Il lui faut d'abord ses modèles : un seul téléchargement, et la connexion ne sert plus."
+          }
+        }
+      }
+    },
+    "The assistant stops and its models are erased from this Mac. To use it again, they will have to be downloaded.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'assistant s'arrête et ses modèles sont effacés de ce Mac. Pour s'en servir à nouveau, il faudra les télécharger."
+          }
+        }
+      }
+    },
+    "The assistant will restart with %@. If it is not on this Mac yet, it will have to be downloaded (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'assistant va redémarrer avec %@. S'il n'est pas encore sur ce Mac, il faudra le télécharger (%@)."
           }
         }
       }
@@ -711,12 +1031,52 @@
         }
       }
     },
-    "The model “%@” is not on this Mac yet. Automatic download comes in the next stage of the project.": {
+    "The model server (Hugging Face) refuses a file (error %@). The app probably needs an update.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le modèle « %@ » n'est pas encore sur ce Mac. Le téléchargement automatique arrive dans la prochaine étape du projet."
+            "value": "Le serveur des modèles (Hugging Face) refuse un fichier (erreur %@). Il faudra probablement une mise à jour de l'app."
+          }
+        }
+      }
+    },
+    "The model “%@”, which ships with the app, cannot be found: the app is probably damaged. Reinstall it from its disk image.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le modèle « %@ », livré avec l'app, est introuvable : l'app est sans doute abîmée. Réinstalle-la depuis son image disque."
+          }
+        }
+      }
+    },
+    "The models are saved in %@. You can quit the app during the download: it will resume where it stopped.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les modèles sont enregistrés dans %@. Tu peux quitter l'app pendant le téléchargement : il reprendra là où il s'est arrêté."
+          }
+        }
+      }
+    },
+    "The models could not be saved on the disk.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d'enregistrer les modèles sur le disque."
+          }
+        }
+      }
+    },
+    "The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le palier décide du modèle de langage. « Automatique » choisit celui qui convient à la mémoire de ce Mac."
           }
         }
       }
@@ -761,12 +1121,32 @@
         }
       }
     },
+    "This tier needs more memory than this Mac has: the assistant may be very slow.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce palier demande plus de mémoire que ce Mac n'en a : l'assistant risque d'être très lent."
+          }
+        }
+      }
+    },
     "Tier": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Palier"
+          }
+        }
+      }
+    },
+    "To download": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À télécharger"
           }
         }
       }
@@ -841,6 +1221,16 @@
         }
       }
     },
+    "Voice": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voix"
+          }
+        }
+      }
+    },
     "Voice cut after (median)": {
       "localizations": {
         "fr": {
@@ -881,6 +1271,26 @@
         }
       }
     },
+    "about %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "environ %@"
+          }
+        }
+      }
+    },
+    "already here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "déjà là"
+          }
+        }
+      }
+    },
     "end of speech → first sound": {
       "localizations": {
         "fr": {
@@ -897,6 +1307,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "interrompu"
+          }
+        }
+      }
+    },
+    "less than a minute": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "moins d'une minute"
+          }
+        }
+      }
+    },
+    "tested": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "testé"
+          }
+        }
+      }
+    },
+    "untested / estimated": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "non testé / estimé"
           }
         }
       }

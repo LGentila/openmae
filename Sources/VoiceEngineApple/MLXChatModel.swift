@@ -64,6 +64,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     /// Loads an MLX model folder (config.json, *.safetensors, tokenizer files, chat template).
+    /// Gives back to macOS the GPU memory MLX keeps for reuse, once a model has been released (tier change,
+    /// models deleted).
+    public static func releaseCachedMemory() {
+        Memory.clearCache()
+    }
+
     public static func load(directory: URL, maxAnswerTokens: Int = 400) async throws -> MLXChatModel {
         let context = try await LLMModelFactory.shared.load(from: directory, using: TokenizerLoaderBridge())
         let tokenizer = try await AutoTokenizer.from(modelFolder: directory)

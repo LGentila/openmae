@@ -132,7 +132,7 @@ struct DebugPanel: View {
             VStack(spacing: 4) {
                 if let info = model.info {
                     LabeledContent("Chip") { Text(verbatim: info.chip) }
-                    LabeledContent("Memory") { Text(verbatim: Units.gigabytes(info.memoryGiB.rounded())) }
+                    LabeledContent("Memory") { Text(verbatim: Units.memory(info.memoryGiB)) }
                     LabeledContent("Tier") {
                         Text(StateText.tier(info.tier))
                             .foregroundStyle(info.tier.isTested ? Color.primary : Color.orange)

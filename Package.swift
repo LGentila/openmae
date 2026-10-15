@@ -3,13 +3,15 @@
 // The voice engine, as a Swift package. The macOS app (App/) is built on it.
 //
 //   VoiceCore         the "core": conversation logic, turn detection, text clean-up, hardware tiers,
-//                     extension point. Pure Swift, no heavy dependency, unit-tested. Portable in spirit:
-//                     nothing here is Apple-specific except the NaturalLanguage language guesser.
+//                     model catalog and downloader, extension point. Pure Swift, no heavy dependency,
+//                     unit-tested. Portable in spirit: nothing here is Apple-specific except the
+//                     NaturalLanguage language guesser.
 //   VoiceEngineApple  the Apple Silicon implementations of the four engine interfaces:
 //                     Silero VAD + Parakeet STT + Pocket TTS on CoreML (FluidAudio), Gemma 4 on MLX.
 //                     Porting to Windows or Linux means rewriting this target only.
 //   voice-cli         command-line tool: measures the engine without an interface (feeds recorded speech in
-//                     real time, reports latencies per stage, interruption time and memory).
+//                     real time, reports latencies per stage, interruption time and memory) and manages the
+//                     models.
 //
 // Build with xcodebuild, not `swift build`: MLX needs Xcode to compile its Metal shaders.
 // See README.md for the exact command.

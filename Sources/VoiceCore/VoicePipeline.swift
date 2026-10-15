@@ -162,6 +162,14 @@ public actor VoicePipeline {
         config.pushToTalk = enabled
     }
 
+    /// Stops for good, before the models are released (another tier chosen, or the models deleted).
+    public func stop() async {
+        await cancelTurn(stopAudio: true)
+        warmTask?.cancel()
+        warmTask = nil
+        emit.finish()
+    }
+
     /// Forget the conversation (new session).
     public func resetConversation() async throws {
         await cancelTurn(stopAudio: true)
@@ -481,6 +489,9 @@ public actor VoicePipeline {
     /// Barge-in: silence the assistant immediately, keep what it already said in the history.
     private func interruptAssistant() async {
         guard let turn else { return }
+        turn.player?.cancel()
+        await output.stopImmediately()  // silence at once…
+        await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
         await output.stopImmediately()
         await cancelTurn(stopAudio: false)
         if !turn.userText.isEmpty {
@@ -504,7 +515,10 @@ public actor VoicePipeline {
         await turn.gate.open()  // release a player waiting for the end of the turn
         await turn.stream?.cancel()
         DebugLog.log("turn \(turn.id): cancelled")
-        if stopAudio, turn.audioStarted { await output.stopImmediately() }
+        if stopAudio, turn.audioStarted {
+            await turn.player?.value  // no frame can reach the speakers after the stop
+            await output.stopImmediately()
+        }
     }
 
     private func localAnswer(to text: String, language: SpeechLanguage) async -> String? {

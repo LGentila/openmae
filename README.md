@@ -4,9 +4,11 @@ A voice assistant for Apple silicon Macs that runs **entirely on your Mac**. You
 French or English, in real time — like the voice mode of the big chat apps, but local: speech recognition,
 the language model and the voice all run on the Mac, and nothing you say ever leaves it.
 
-> **Status:** proof of concept, under active development. The app does not download its models by itself
-> yet, and is not distributed as a disk image: for now it is built from source, with models fetched during
-> development (see below).
+The only network access is the one-time download of the models, at first launch. After that, OpenMaé works
+in airplane mode.
+
+> **Status:** proof of concept, under active development. Distribution as a signed, notarized disk image is
+> not ready yet: for now the app is built from source (see below).
 
 ## Features
 
@@ -17,24 +19,41 @@ the language model and the voice all run on the Mac, and nothing you say ever le
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.
-- **Private by design.** No account, no telemetry, no cloud.
-- **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below).
+- **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
+  never goes online again.
+- **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
+  be forced in Settings › Advanced.
 - **Measurements built in.** A side panel shows the latency of each stage, interruption times, memory and
   audio devices.
 - Interface in French and English.
 
 ## Requirements
 
-A Mac with Apple silicon (M1 or later) and macOS 15 or later.
+- A Mac with Apple silicon (M1 or later) and macOS 15 or later.
+- Free disk space for the models, from 5.7 GB to 30 GB depending on the Mac (table below).
 
-| Tier | Memory | Language model | Status |
-|---|---|---|---|
-| Minimum | 8 GB | Gemma 4 E2B, 4-bit | untested, estimated |
-| Standard | 16 to 24 GB | Gemma 4 E4B, 4-bit | untested, estimated |
-| Comfort | 32 to 36 GB | Gemma 4 26B-A4B, 4-bit | tested (M1 Pro, 32 GB) |
-| Maximum | 48 GB and more | Gemma 4 26B-A4B, 8-bit | untested, estimated |
+| Tier | Memory | Language model | First download | Status |
+|---|---|---|---|---|
+| Minimum | 8 GB | Gemma 4 E2B, 4-bit | 5.7 GB | untested, estimated |
+| Standard | 16 to 24 GB | Gemma 4 E4B, 4-bit | 7.3 GB | untested, estimated |
+| Comfort | 32 to 36 GB | Gemma 4 26B-A4B, 4-bit | 17.5 GB | tested (M1 Pro, 32 GB) |
+| Maximum | 48 GB and more | Gemma 4 26B-A4B, 8-bit | 30.1 GB | untested, estimated |
 
 Only the comfort tier could be measured so far. The app says so when it runs on another one.
+
+## First launch
+
+1. macOS asks for access to the microphone: click "Allow". Sound never leaves the Mac.
+2. The app shows the Mac, its tier, the models it needs with their size and license, the total to download
+   and the free space, and waits for a click on "Download".
+3. The download can be paused, or the app quit: it resumes where it stopped, and after a network cut it
+   resumes by itself. Every file is checked against the SHA-256 recorded in the app: the models are pinned to
+   the exact versions that were tested.
+4. The first loading of the models takes one to two minutes (macOS prepares speech recognition for the
+   chip), then about twenty seconds at each launch.
+
+Settings › Advanced shows the space taken by the models, and can delete the models of the other tiers, or
+all of them.
 
 ## How it works
 
@@ -72,17 +91,6 @@ porting to another platform means rewriting that target and the interface, not t
 | [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | runs the language model | MIT | |
 | [swift-transformers](https://github.com/huggingface/swift-transformers) | tokenizers | Apache-2.0 | |
 
-## Models during development
-
-The engine reads the models from the download caches:
-- speech recognition and the voice are fetched by FluidAudio into its own caches the first time they are
-  used;
-- the language model of the Mac's tier must be in the Hugging Face cache, for instance for the comfort tier:
-
-```bash
-hf download mlx-community/gemma-4-26b-a4b-it-4bit
-```
-
 ## Building from source
 
 Requirements:
@@ -111,9 +119,6 @@ Launch it:
 open .build/app/Build/Products/Release/OpenMae.app
 ```
 
-macOS asks for access to the microphone: click "Allow". The first loading of the models takes one to two
-minutes (macOS prepares speech recognition for the chip), then about twenty seconds at each launch.
-
 The app's file name has no accent (`codesign` rejects one in an executable's name); macOS shows "OpenMaé"
 through the localized display name. To sign with your own Apple Developer team, copy
 `App/Signing.local.xcconfig.example` to `App/Signing.local.xcconfig` and fill it in; without it, the app is
@@ -139,8 +144,22 @@ xcodebuild test -scheme VoiceEngine-Package -destination 'platform=macOS,arch=ar
 
 ## Command-line tool
 
-`voice-cli` measures the engine without any interface: it plays recorded speech in real time, as a
-microphone would. First generate the test phrases with macOS's built-in voices:
+`voice-cli` uses the same engine and the same models as the app, without any interface.
+
+Download the models of this Mac's tier (or of `--tier minimum|standard|comfort|max`):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli download
+```
+
+Check every downloaded file against its SHA-256 (about one second per GB):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli verify
+```
+
+Measure the engine with recorded speech, played in real time as a microphone would. First generate the test
+phrases with macOS's built-in voices:
 
 ```bash
 zsh scripts/make-test-audio.sh
@@ -164,6 +183,14 @@ Memory over time (here 10 minutes):
 .build/xcode/Build/Products/Release/voice-cli endurance --minutes 10 measurements/audio/0*.wav
 ```
 
+To move a model to another version (a deliberate change, to be measured again): edit its `revision` in
+`Sources/VoiceCore/ModelCatalog.swift`, then regenerate the list of its files, sizes and SHA-256 from Hugging
+Face:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli catalog
+```
+
 ## Project layout
 
 ```
@@ -171,7 +198,7 @@ App/                         the macOS app (SwiftUI): screens only; its Xcode pr
                              App/project.yml
 Package.swift                the voice engine, as a Swift package:
 Sources/VoiceCore/             conversation logic, end-of-turn detection, text clean-up for the voice,
-                               hardware tiers, extension point
+                               hardware tiers, model catalog and downloader, extension point
 Sources/VoiceEngineApple/      the Apple implementations: Silero, Parakeet and Pocket TTS (CoreML),
                                Gemma 4 (MLX), microphone and speakers (AVAudioEngine)
 Sources/VoiceCLI/              voice-cli
@@ -181,6 +208,15 @@ scripts/                     build script, test phrases
 
 The app's name is defined in one place for the engine (`Sources/VoiceCore/AppIdentity.swift`), and in
 `App/project.yml` and `App/Resources/InfoPlist.xcstrings` for the app bundle.
+
+## Uninstalling
+
+Move the app to the Trash. To get back the space taken by the models, either use Settings › Advanced ›
+"Delete the models…" first, or delete these folders by hand:
+- `~/Library/Application Support/OpenMaé` (the models);
+- `~/Library/Caches/io.github.lgentilla.openmae` (the models compiled for the chip, about 2 GB).
+
+The settings live in `~/Library/Preferences/io.github.lgentilla.openmae.plist`.
 
 ## License
 

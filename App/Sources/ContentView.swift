@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import VoiceCore
 
-/// The single window: loading, problem, or conversation; settings in a popover, measurements in a
-/// side panel.
+/// The single window: model download (first launch), loading, problem, or conversation; settings in a
+/// popover, measurements in a side panel.
 struct ContentView: View {
     @Bindable var model: AssistantModel
     @State private var showSettings = false
@@ -13,7 +13,9 @@ struct ContentView: View {
         Group {
             switch model.phase {
             case .loading(let step): LoadingView(step: step)
-            case .problem(let problem): ProblemView(problem: problem, retry: model.start)
+            case .setup(let setup): SetupView(model: model, setup: setup) { showSettings = true }
+            case .problem(let problem):
+                ProblemView(problem: problem, retry: model.start, deleteModels: model.deleteModels)
             case .ready: ConversationView(model: model)
             }
         }

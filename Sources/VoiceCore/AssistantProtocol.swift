@@ -21,6 +21,8 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     /// The user holds a key (or a button) while speaking, instead of the engine detecting the end of
     /// their sentence.
     public var pushToTalk = false
+    /// Tier forced in Settings › Advanced; nil = the tier recommended for this Mac.
+    public var tierOverride: HardwareTier?
     public init() {}
 }
 
@@ -34,6 +36,14 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case stopSpeaking
     /// Forget the conversation.
     case newConversation
+    /// Download the missing models (after `.setupNeeded`), or resume after a pause or a failure.
+    case downloadModels
+    /// Pause the download: what is downloaded stays on disk.
+    case pauseDownload
+    /// Delete every model (Settings › Advanced): the assistant stops and offers to download them again.
+    case deleteModels
+    /// Delete the language models of the tiers not in use.
+    case deleteUnusedModels
     /// Release the microphone and the speakers (the app is quitting).
     case shutdown
 }
@@ -49,7 +59,7 @@ public enum AssistantProblem: Sendable, Codable, Equatable {
     case microphoneDenied
     /// Not an Apple Silicon Mac, or less than 8 GB of memory.
     case unsupportedMac(chip: String, memoryGiB: Double)
-    /// A model is not on disk.
+    /// A model that ships inside the app is missing (damaged app).
     case modelMissing(String)
     /// The microphone or the speakers could not be opened.
     case audioDevice(String)
@@ -61,19 +71,85 @@ public struct EngineInfo: Sendable, Codable, Equatable {
     public var chip: String
     public var memoryGiB: Double
     public var tier: HardwareTier
+    /// The tier this Mac would get without the override of Settings › Advanced.
+    public var recommendedTier: HardwareTier
     public var languageModel: String
     public var speechRecognition: String
     public var voice: String
 
-    public init(chip: String, memoryGiB: Double, tier: HardwareTier, languageModel: String,
-                speechRecognition: String, voice: String)
+    public init(chip: String, memoryGiB: Double, tier: HardwareTier, recommendedTier: HardwareTier,
+                languageModel: String, speechRecognition: String, voice: String)
     {
         self.chip = chip
         self.memoryGiB = memoryGiB
         self.tier = tier
+        self.recommendedTier = recommendedTier
         self.languageModel = languageModel
         self.speechRecognition = speechRecognition
         self.voice = voice
+    }
+}
+
+/// What the first-launch screen shows before anything is downloaded.
+public struct ModelSetup: Sendable, Codable, Equatable {
+    public struct Item: Sendable, Codable, Equatable {
+        public var role: ModelRole
+        public var displayName: String
+        public var license: String
+        public var totalBytes: Int64
+        /// Still to download (0 when already on disk).
+        public var missingBytes: Int64
+
+        public init(role: ModelRole, displayName: String, license: String, totalBytes: Int64, missingBytes: Int64) {
+            self.role = role
+            self.displayName = displayName
+            self.license = license
+            self.totalBytes = totalBytes
+            self.missingBytes = missingBytes
+        }
+    }
+
+    public var chip: String
+    public var memoryGiB: Double
+    public var tier: HardwareTier
+    public var recommendedTier: HardwareTier
+    public var items: [Item]
+    /// What is left to download, in bytes (a download interrupted earlier counts for what it got).
+    public var bytesToDownload: Int64
+    /// What the download needs on disk (with a safety margin), and what is free.
+    public var neededBytes: Int64
+    public var availableBytes: Int64?
+    /// The models folder, shown to the user.
+    public var folder: String
+
+    public init(chip: String, memoryGiB: Double, tier: HardwareTier, recommendedTier: HardwareTier, items: [Item],
+                bytesToDownload: Int64, neededBytes: Int64, availableBytes: Int64?, folder: String)
+    {
+        self.chip = chip
+        self.memoryGiB = memoryGiB
+        self.tier = tier
+        self.recommendedTier = recommendedTier
+        self.items = items
+        self.bytesToDownload = bytesToDownload
+        self.neededBytes = neededBytes
+        self.availableBytes = availableBytes
+        self.folder = folder
+    }
+
+    public var hasEnoughSpace: Bool { availableBytes.map { $0 >= neededBytes } ?? true }
+}
+
+/// Space taken by the models (Settings › Advanced).
+public struct ModelStorage: Sendable, Codable, Equatable {
+    public var usedBytes: Int64
+    /// Language models of the tiers not in use, which can be deleted.
+    public var unusedBytes: Int64
+    public var folder: String
+
+    public init(usedBytes: Int64, unusedBytes: Int64, folder: String) {
+        self.usedBytes = usedBytes
+        self.unusedBytes = unusedBytes
+        self.folder = folder
     }
 }
 
@@ -99,6 +175,14 @@ public struct EngineDiagnostics: Sendable, Codable, Equatable {
 }
 
 public enum AssistantEvent: Sendable, Codable {
+    /// Models are missing (first launch, another tier chosen, models deleted): what has to be downloaded.
+    /// The engine waits for `.downloadModels`.
+    case setupNeeded(ModelSetup)
+    case downloadProgress(DownloadProgress)
+    /// The download stopped: nil when paused, otherwise why it failed.
+    case downloadStopped(DownloadFailure?)
+    /// Space taken by the models, sent when the assistant is ready and after a deletion.
+    case storage(ModelStorage)
     case loading(LoadingStep)
     case ready(EngineInfo)
     case state(PipelineState)

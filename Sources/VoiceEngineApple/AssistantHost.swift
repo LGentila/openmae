@@ -4,12 +4,23 @@ import VoiceCore
 /// The engine as the app sees it: it receives `AssistantCommand`s and sends `AssistantEvent`s
 /// (see AssistantProtocol.swift). It owns the models, the microphone and the speakers, and runs in the
 /// app's process. A future separate-process engine would wrap this same object.
+///
+/// Its life: microphone permission and hardware check → if models are missing, say what has to be
+/// downloaded and wait for the user's go (first launch) → download → load the models → converse.
+/// Choosing another tier or deleting the models goes through all of it again.
 public actor AssistantHost: AssistantConnection {
     public nonisolated let events: AsyncStream<AssistantEvent>
     private nonisolated let emit: AsyncStream<AssistantEvent>.Continuation
     private nonisolated let commands: AsyncStream<AssistantCommand>.Continuation
 
+    private enum Stage { case idle, setup, downloading, loading, running }
+    private var stage = Stage.idle
+    /// The tier changed while the models were loading: start again once they are loaded.
+    private var restartWhenLoaded = false
+
     private var settings = AssistantSettings()
+    private let store = ModelStore()
+    private var download: Task<Void, Never>?
     private var pipeline: VoicePipeline?
     private var model: MLXChatModel?
     private var audio: SystemAudio?
@@ -47,6 +58,14 @@ public actor AssistantHost: AssistantConnection {
             await pipeline?.interrupt()
         case .newConversation:
             do { try await pipeline?.resetConversation() } catch { emit.yield(.warning("\(error)")) }
+        case .downloadModels:
+            startDownload()
+        case .pauseDownload:
+            download?.cancel()
+        case .deleteModels:
+            await deleteModels()
+        case .deleteUnusedModels:
+            deleteUnusedModels()
         case .shutdown:
             shutdown()
         }
@@ -54,25 +73,37 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Start-up
 
+    private var tier: HardwareTier {
+        settings.tierOverride ?? HardwareTier.recommended(for: .current)
+    }
+
     private func start() async {
-        guard pipeline == nil else { return }
+        guard stage == .idle || stage == .setup else { return }
+        stage = .loading
         emit.yield(.loading(.microphone))
         guard await SystemAudio.requestMicrophoneAccess() else {
-            emit.yield(.problem(.microphoneDenied))
+            fail(.microphoneDenied)
             return
         }
         let hardware = HardwareProfile.current
-        let tier = HardwareTier.recommended(for: hardware)
-        guard let languageSpec = ModelCatalog.languageModel(for: tier) else {
-            emit.yield(.problem(.unsupportedMac(chip: hardware.chipName, memoryGiB: hardware.memoryGiB)))
+        let recommended = HardwareTier.recommended(for: hardware)
+        guard recommended != .unsupported else {
+            fail(.unsupportedMac(chip: hardware.chipName, memoryGiB: hardware.memoryGiB))
             return
         }
-        guard let languageURL = ModelLocator.languageModel() else {
-            emit.yield(.problem(.modelMissing(languageSpec.displayName)))
+        let tier = self.tier
+        guard let languageModel = ModelCatalog.languageModel(for: tier) else {
+            fail(.unsupportedMac(chip: hardware.chipName, memoryGiB: hardware.memoryGiB))
+            return
+        }
+        guard store.isComplete(ModelCatalog.packs(for: tier)) else {
+            stage = .setup
+            emit.yield(.setupNeeded(setup(tier: tier, recommended: recommended, hardware: hardware)))
+            reportStorage()
             return
         }
         guard let vadURL = ModelLocator.voiceActivity() else {
-            emit.yield(.problem(.modelMissing(ModelCatalog.voiceActivity.displayName)))
+            fail(.modelMissing("Silero VAD"))
             return
         }
 
@@ -81,7 +112,7 @@ public actor AssistantHost: AssistantConnection {
         do {
             route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
         } catch {
-            emit.yield(.problem(.audioDevice("\(error)")))
+            fail(.audioDevice("\(error)"))
             return
         }
         audio.onConfigurationChange = { [weak self] in
@@ -94,11 +125,13 @@ public actor AssistantHost: AssistantConnection {
         do {
             emit.yield(.loading(.speechRecognition))
             let detector = try SileroSpeechDetector(modelURL: vadURL)
-            let transcriber = try await ParakeetTranscriber.load()
+            let transcriber = try await ParakeetTranscriber.load(
+                directory: store.folder(ModelCatalog.speechRecognition))
             emit.yield(.loading(.languageModel))
-            model = try await MLXChatModel.load(directory: languageURL)
+            MLXChatModel.releaseCachedMemory()  // what a previous tier's model may have left
+            model = try await MLXChatModel.load(directory: store.folder(languageModel))
             emit.yield(.loading(.voice))
-            let synthesizer = PocketSpeechSynthesizer()
+            let synthesizer = PocketSpeechSynthesizer(store: store)
             try await synthesizer.preload([.french, .english])
             if synthesizer.outputSampleRate != playbackSampleRate {
                 playbackSampleRate = synthesizer.outputSampleRate
@@ -113,12 +146,13 @@ public actor AssistantHost: AssistantConnection {
         } catch {
             audio.stop()
             self.audio = nil
-            emit.yield(.problem(.engine("\(error)")))
+            fail(.engine("\(error)"))
             return
         }
 
         self.model = model
         self.pipeline = pipeline
+        stage = .running
         let emit = emit
         tasks = [
             Task { for await event in pipeline.events { await self.forward(event) } },
@@ -141,14 +175,61 @@ public actor AssistantHost: AssistantConnection {
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiated, .latencyCritical], reason: "Conversation vocale")
         emit.yield(.ready(EngineInfo(
-            chip: hardware.chipName, memoryGiB: hardware.memoryGiB, tier: tier,
-            languageModel: languageSpec.displayName,
+            chip: hardware.chipName, memoryGiB: hardware.memoryGiB, tier: tier, recommendedTier: recommended,
+            languageModel: languageModel.displayName,
             speechRecognition: ModelCatalog.speechRecognition.displayName,
             voice: "Pocket TTS · " + PocketSpeechSynthesizer.voices.values.sorted().joined(separator: ", "))))
         await reportDiagnostics()
+        reportStorage()
+        if restartWhenLoaded {
+            restartWhenLoaded = false
+            await restart()
+        }
+    }
+
+    private func fail(_ problem: AssistantProblem) {
+        stage = .idle
+        restartWhenLoaded = false  // the next start reads the settings anyway
+        emit.yield(.problem(problem))
+    }
+
+    /// What the first-launch screen shows: the Mac, its tier, and what has to be downloaded.
+    private func setup(tier: HardwareTier, recommended: HardwareTier, hardware: HardwareProfile) -> ModelSetup {
+        let packs = ModelCatalog.packs(for: tier)
+        let toDownload = store.bytesToDownload(packs)
+        return ModelSetup(
+            chip: hardware.chipName, memoryGiB: hardware.memoryGiB, tier: tier, recommendedTier: recommended,
+            items: packs.map {
+                ModelSetup.Item(role: $0.role, displayName: $0.displayName, license: $0.license,
+                                totalBytes: $0.totalBytes, missingBytes: store.bytesToDownload([$0]))
+            },
+            bytesToDownload: toDownload, neededBytes: toDownload + ModelDownloader.safetyMarginBytes,
+            availableBytes: store.availableBytes(), folder: store.root.path)
+    }
+
+    /// Stops everything, before another tier is loaded or the models are deleted.
+    private func stopEngine() async {
+        let running = tasks
+        tasks = []
+        running.forEach { $0.cancel() }
+        await pipeline?.stop()
+        // The tasks hold the pipeline, hence the models: wait until they are over, so that dropping the
+        // references below really frees the models.
+        for task in running { await task.value }
+        pipeline = nil
+        model = nil
+        audio?.stop()
+        audio = nil
+        route = nil
+        if let activity { ProcessInfo.processInfo.endActivity(activity) }
+        activity = nil
+        // MLX keeps freed GPU memory for reuse: give it back to macOS (about 15 GB for the 26B model).
+        MLXChatModel.releaseCachedMemory()
+        stage = .idle
     }
 
     private func shutdown() {
+        download?.cancel()
         tasks.forEach { $0.cancel() }
         tasks = []
         audio?.stop()
@@ -156,11 +237,126 @@ public actor AssistantHost: AssistantConnection {
         activity = nil
     }
 
+    // MARK: - Models: download, tier, deletion
+
+    private enum DownloadOutcome { case finished, paused, failed(DownloadFailure) }
+
+    private func startDownload() {
+        guard stage == .setup else { return }
+        stage = .downloading
+        let packs = ModelCatalog.packs(for: tier)
+        let downloader = ModelDownloader(store: store)
+        let emit = emit
+        DebugLog.log("download: \(packs.map(\.id)), \(store.bytesToDownload(packs)) bytes to go")
+        download = Task {
+            let outcome: DownloadOutcome
+            do {
+                try await downloader.download(packs) { emit.yield(.downloadProgress($0)) }
+                outcome = .finished
+            } catch is CancellationError {
+                outcome = .paused
+            } catch let failure as DownloadFailure {
+                outcome = .failed(failure)
+            } catch {
+                outcome = .failed(.disk("\(error)"))
+            }
+            await self.downloadEnded(outcome)
+        }
+    }
+
+    private func downloadEnded(_ outcome: DownloadOutcome) async {
+        download = nil
+        stage = .setup
+        switch outcome {
+        case .finished:
+            DebugLog.log("download: complete")
+            await start()
+        case .paused:
+            DebugLog.log("download: paused")
+            emit.yield(.downloadStopped(nil))
+            reportStorage()
+        case .failed(let failure):
+            DebugLog.log("download: failed, \(failure)")
+            emit.yield(.downloadStopped(failure))
+            reportStorage()
+        }
+    }
+
+    /// Another tier was chosen: stop whatever is going on and go through start-up again (which shows the
+    /// download screen if that tier's language model is not on disk yet).
+    private func restart() async {
+        switch stage {
+        case .loading:
+            restartWhenLoaded = true
+            return
+        case .downloading:
+            download?.cancel()
+            await download?.value
+        case .running:
+            await stopEngine()
+        case .idle, .setup:
+            break
+        }
+        await start()
+    }
+
+    private func deleteModels() async {
+        switch stage {
+        case .loading:
+            return  // the interface does not offer it while loading
+        case .downloading:
+            download?.cancel()
+            await download?.value
+        case .running:
+            await stopEngine()
+        case .idle, .setup:
+            break
+        }
+        do {
+            try store.deleteAll()
+            DebugLog.log("models deleted")
+        } catch {
+            emit.yield(.warning("\(error.localizedDescription)"))
+        }
+        deleteCompiledModelCaches()
+        stage = .idle
+        await start()
+    }
+
+    private func deleteUnusedModels() {
+        for pack in store.unusedPacks(keeping: ModelCatalog.packs(for: tier)) {
+            do { try store.delete(pack) } catch { emit.yield(.warning("\(error.localizedDescription)")) }
+        }
+        reportStorage()
+    }
+
+    /// CoreML keeps versions of the models compiled for this Mac's Neural Engine in the app's cache folder
+    /// (about 2 GB); they are of no use without the models. Only called when no model is loaded.
+    private func deleteCompiledModelCaches() {
+        guard let identifier = Bundle.main.bundleIdentifier else { return }
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(
+            at: caches.appending(path: identifier).appending(path: "com.apple.e5rt.e5bundlecache"))
+    }
+
+    private func reportStorage() {
+        let unused = store.unusedPacks(keeping: ModelCatalog.packs(for: tier))
+        emit.yield(.storage(ModelStorage(
+            usedBytes: store.usedBytes(), unusedBytes: unused.reduce(0) { $0 + store.usedBytes($1) },
+            folder: store.root.path)))
+    }
+
     // MARK: - Settings and audio devices
 
     private func apply(_ new: AssistantSettings) async {
+        let oldTier = tier
         let old = settings
         settings = new
+        if tier != oldTier {
+            DebugLog.log("tier: \(oldTier.rawValue) → \(tier.rawValue)")
+            await restart()
+            return
+        }
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk { await pipeline.setPushToTalk(new.pushToTalk) }
         if new.audioMode != old.audioMode { await restartAudio() }

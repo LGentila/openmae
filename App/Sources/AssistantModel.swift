@@ -22,11 +22,21 @@ struct TranscriptEntry: Identifiable, Equatable {
 final class AssistantModel {
     enum Phase: Equatable {
         case loading(LoadingStep?)
+        /// Models to download first (first launch, another tier, models deleted).
+        case setup(ModelSetup)
         case ready
         case problem(AssistantProblem)
     }
 
     private(set) var phase = Phase.loading(nil)
+    /// The download in progress, or where it stopped (pause, failure); nil before it starts.
+    private(set) var download: DownloadProgress?
+    private(set) var isDownloading = false
+    private(set) var downloadFailure: DownloadFailure?
+    /// Space taken by the models (Settings › Advanced).
+    private(set) var storage: ModelStorage?
+    /// The tier this Mac would get on its own (the "Automatic" choice of Settings › Advanced).
+    private(set) var recommendedTier: HardwareTier?
     private(set) var state = PipelineState.listening
     private(set) var transcript: [TranscriptEntry] = []
     /// Completed turns, for the debug panel (the most recent last).
@@ -51,6 +61,19 @@ final class AssistantModel {
 
     var isReady: Bool { phase == .ready }
 
+    var isLoading: Bool {
+        if case .loading = phase { return true }
+        return false
+    }
+
+    /// The tier in use, or about to be.
+    var tier: HardwareTier? {
+        switch phase {
+        case .setup(let setup): setup.tier
+        default: info?.tier ?? settings.tierOverride ?? recommendedTier
+        }
+    }
+
     @ObservationIgnored private let connection: any AssistantConnection
     /// Where the pieces of the current answer go in the transcript.
     @ObservationIgnored private var answerIndex: Int?
@@ -61,7 +84,26 @@ final class AssistantModel {
         Task { [weak self] in
             for await event in connection.events { self?.apply(event) }
         }
+        #if DEBUG
+        DebugCommands.listen { [weak self] command in self?.debugCommand(command) }
+        #endif
     }
+
+    #if DEBUG
+    /// A command from a test script (DebugTools.swift), handled as if a button had been clicked.
+    private func debugCommand(_ command: AssistantCommand) {
+        DebugLog.log("debug command: \(command)")
+        switch command {
+        case .downloadModels: downloadModels()
+        case .pauseDownload: pauseDownload()
+        case .deleteModels: deleteModels()
+        case .deleteUnusedModels: deleteUnusedModels()
+        case .updateSettings(let settings): self.settings = settings
+        case .newConversation: newConversation()
+        default: connection.send(command)
+        }
+    }
+    #endif
 
     // MARK: - Commands
 
@@ -87,14 +129,60 @@ final class AssistantModel {
         connection.send(.newConversation)
     }
 
+    func downloadModels() {
+        downloadFailure = nil
+        isDownloading = true
+        connection.send(.downloadModels)
+    }
+
+    func pauseDownload() {
+        connection.send(.pauseDownload)
+    }
+
+    func deleteModels() {
+        info = nil
+        phase = .loading(nil)
+        connection.send(.deleteModels)
+    }
+
+    func deleteUnusedModels() {
+        connection.send(.deleteUnusedModels)
+    }
+
     // MARK: - Events
 
     private func apply(_ event: AssistantEvent) {
+        #if DEBUG
         switch event {
+        case .levels, .diagnostics: break
+        case .downloadProgress(let p) where p.doneBytes % 20 != 0: break  // about one in twenty
+        default: DebugLog.log("event: \(event)")
+        }
+        #endif
+        switch event {
+        case .setupNeeded(let setup):
+            phase = .setup(setup)
+            recommendedTier = setup.recommendedTier
+            info = nil
+            download = nil
+            isDownloading = false
+            downloadFailure = nil
+        case .downloadProgress(let progress):
+            download = progress
+            isDownloading = true
+            downloadFailure = nil
+        case .downloadStopped(let failure):
+            isDownloading = false
+            downloadFailure = failure
+        case .storage(let storage):
+            self.storage = storage
         case .loading(let step):
             phase = .loading(step)
+            download = nil
+            isDownloading = false
         case .ready(let info):
             self.info = info
+            recommendedTier = info.recommendedTier
             phase = .ready
         case .problem(let problem):
             phase = .problem(problem)

@@ -7,8 +7,10 @@
 //                                                       loops a conversation; memory after every turn
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
 //                                                       silence the voice produces before speaking
+//   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 // Options:
-//   --llm <repo-or-folder>   language model (default: the one chosen for this Mac's tier)
+//   --tier <name>            minimum, standard, comfort or max (default: this Mac's tier)
+//   --llm <folder>           another language model folder (default: the tier's)
 //   --tts gpu|cpu            where the voice runs (default gpu)
 //   --no-speculative         disable speculative start (for comparison)
 //   --silence-ms <n>         end-of-turn silence (default 500)
@@ -26,6 +28,8 @@ import VoiceEngineApple
 
 struct Options {
     var command = ""
+    var tier: String?
+    var all = false
     var llm: String?
     var ttsOnCPU = false
     var speculative = true
@@ -45,6 +49,8 @@ struct Options {
         o.command = command
         while let a = it.next() {
             switch a {
+            case "--tier": o.tier = it.next()
+            case "--all": o.all = true
             case "--llm": o.llm = it.next()
             case "--tts": o.ttsOnCPU = it.next() == "cpu"
             case "--no-speculative": o.speculative = false
@@ -126,22 +132,29 @@ struct Engine {
 
 func buildEngine(_ o: Options) async throws -> Engine {
     let hw = HardwareProfile.current
-    let tier = HardwareTier.recommended(for: hw)
+    let tier = try tierOption(o)
     print("Mac: \(hw.chipName), \(Int(hw.memoryGiB.rounded())) GB → tier “\(tier.rawValue)”"
           + (tier.isTested ? "" : " (UNTESTED)"))
-    guard let llmURL = ModelLocator.languageModel(o.llm) else { throw CLIError("language model not found") }
+    let store = ModelStore()
+    let packs = ModelCatalog.packs(for: tier).filter { o.llm == nil || $0.role != .languageModel }
+    guard let languageModel = ModelCatalog.languageModel(for: tier), store.isComplete(packs) else {
+        throw CLIError("models missing or incomplete: run “voice-cli download"
+                       + (o.tier.map { " --tier \($0)" } ?? "") + "” first")
+    }
+    let llmURL = o.llm.map { URL(fileURLWithPath: $0) } ?? store.folder(languageModel)
     guard let vadURL = ModelLocator.voiceActivity() else { throw CLIError("silero_vad.mlmodelc not found") }
 
     let clock = ContinuousClock()
     var t = clock.now
     let detector = try SileroSpeechDetector(modelURL: vadURL)
-    let transcriber = try await ParakeetTranscriber.load()
+    let transcriber = try await ParakeetTranscriber.load(directory: store.folder(ModelCatalog.speechRecognition))
     print("loaded: voice detection + transcription in \(clock.now - t)")
     t = clock.now
     let model = try await MLXChatModel.load(directory: llmURL)
-    print("loaded: \(llmURL.path.components(separatedBy: "models--").last ?? llmURL.lastPathComponent) in \(clock.now - t)")
+    print("loaded: \(llmURL.lastPathComponent) in \(clock.now - t)")
     t = clock.now
-    let synthesizer = PocketSpeechSynthesizer(computeUnits: o.ttsOnCPU ? .uniform(.cpuOnly) : .avoidNeuralEngine)
+    let synthesizer = PocketSpeechSynthesizer(
+        computeUnits: o.ttsOnCPU ? .uniform(.cpuOnly) : .avoidNeuralEngine, store: store)
     try await synthesizer.preload([.french, .english])
     print("loaded: voice (\(o.ttsOnCPU ? "CPU" : "GPU")) in \(clock.now - t)")
 
@@ -277,7 +290,9 @@ func runVoiceOnset(_ o: Options) async throws {
         "Tu pourrais faire une randonnée en forêt.", "Oui, ça marche parfaitement sans four.",
         "Tu voulais cuisiner des courgettes ce soir.",
     ]
-    let manager = PocketTtsManager(defaultVoice: o.voices[0], language: .french24L, directory: nil,
+    // Only "estelle" is downloaded with the app: other voices are fetched by FluidAudio into its own cache.
+    let directory = o.voices == ["estelle"] ? ModelStore().voiceBaseFolder : nil
+    let manager = PocketTtsManager(defaultVoice: o.voices[0], language: .french24L, directory: directory,
                                    computeUnits: o.ttsOnCPU ? .uniform(.cpuOnly) : .avoidNeuralEngine)
     try await manager.initialize()
     let clock = ContinuousClock()
@@ -325,14 +340,28 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 // MARK: - Entry point
 
-if let options = Options.parse(CommandLine.arguments), options.command == "voice-onset" {
-    do { try await runVoiceOnset(options) } catch { print("ERROR: \(error)") }
+if let options = Options.parse(CommandLine.arguments),
+   ["voice-onset", "download", "verify", "catalog"].contains(options.command)
+{
+    do {
+        switch options.command {
+        case "download": try await runDownload(options)
+        case "verify": try runVerify(options)
+        case "catalog": try await runCatalog(options)
+        default: try await runVoiceOnset(options)
+        }
+    } catch {
+        print("\nERROR: \(error)")
+        exit(1)
+    }
     exit(0)
 }
 guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty else {
     print("""
-        usage: voice-cli conversation|interruption|endurance [--llm <repository|folder>] [--tts gpu|cpu]
+        usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu]
                          [--no-speculative] [--silence-ms 500] [--minutes 10] [--out folder] files.wav…
+               voice-cli download [--tier minimum|standard|comfort|max]
+               voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
         """)
     exit(2)

@@ -13,9 +13,10 @@ public actor ParakeetTranscriber: Transcriber {
 
     private init(asr: AsrManager) { self.asr = asr }
 
-    /// Loads the models from `directory` (FluidAudio's default cache when nil, downloading if absent).
-    public static func load(directory: URL? = nil) async throws -> ParakeetTranscriber {
-        let models = try await AsrModels.downloadAndLoad(to: directory, version: .v3)
+    /// Loads the models from their folder in the models directory. `loadLocal` never goes online: a missing
+    /// or damaged file is an error (the downloader is the only one that fetches models).
+    public static func load(directory: URL) async throws -> ParakeetTranscriber {
+        let models = try AsrModels.loadLocal(from: directory, version: .v3)
         let asr = AsrManager(config: .default)
         try await asr.loadModels(models)
         let transcriber = ParakeetTranscriber(asr: asr)

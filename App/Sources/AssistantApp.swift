@@ -14,8 +14,17 @@ struct AssistantApp: App {
 
     var body: some Scene {
         Window(AppIdentity.name, id: "main") {
+            #if DEBUG
+            if let folder = Snapshots.folder {
+                SnapshotRunner(folder: folder)
+            } else {
+                ContentView(model: model)
+                    .frame(minWidth: 420, minHeight: 560)
+            }
+            #else
             ContentView(model: model)
                 .frame(minWidth: 420, minHeight: 560)
+            #endif
         }
         .defaultSize(width: 520, height: 720)
         .commands {

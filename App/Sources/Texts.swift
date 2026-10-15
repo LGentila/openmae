@@ -47,6 +47,14 @@ enum StateText {
         }
     }
 
+    static func role(_ role: ModelRole) -> LocalizedStringKey {
+        switch role {
+        case .speechRecognition: "Speech recognition"
+        case .languageModel: "Language model"
+        case .voice: "Voice"
+        }
+    }
+
     static func audioMode(_ mode: AudioMode) -> LocalizedStringKey {
         switch mode {
         case .speakers: "Speakers"
@@ -74,6 +82,33 @@ enum Units {
         return Measurement(value: value, unit: UnitInformationStorage.gigabytes)
             .formatted(.measurement(width: .abbreviated, usage: .asProvided,
                                     numberFormatStyle: .number.precision(.fractionLength(1))))
+    }
+
+    /// Memory of the Mac: "32 Go".
+    static func memory(_ gibibytes: Double) -> String {
+        Measurement(value: gibibytes.rounded(), unit: UnitInformationStorage.gigabytes)
+            .formatted(.measurement(width: .abbreviated, usage: .asProvided,
+                                    numberFormatStyle: .number.precision(.fractionLength(0))))
+    }
+
+    /// "17,5 Go" (decimal units, like the Finder).
+    static func bytes(_ value: Int64?) -> String {
+        guard let value else { return "—" }
+        return value.formatted(.byteCount(style: .file))
+    }
+
+    /// "45 Mo/s".
+    static func speed(_ bytesPerSecond: Double?) -> String? {
+        guard let bytesPerSecond, bytesPerSecond > 0 else { return nil }
+        return String(localized: "\(bytes(Int64(bytesPerSecond)))/s")
+    }
+
+    /// "about 6 min", "less than a minute".
+    static func remaining(_ seconds: Double?) -> String? {
+        guard let seconds, seconds.isFinite else { return nil }
+        if seconds < 60 { return String(localized: "less than a minute") }
+        let minutes = Duration.seconds((seconds / 60).rounded(.up) * 60)
+        return String(localized: "about \(minutes.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))")
     }
 
     static func kilohertz(_ hertz: Double?) -> String {

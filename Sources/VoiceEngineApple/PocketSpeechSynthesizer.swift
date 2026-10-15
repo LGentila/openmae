@@ -15,7 +15,7 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
     private static let packs: [SpeechLanguage: PocketTtsLanguage] = [.french: .french24L, .english: .english]
 
     private let computeUnits: PocketTtsComputeUnits
-    private let directory: URL?
+    private let directory: URL
     private var managers: [SpeechLanguage: PocketTtsManager] = [:]
     private var lastLanguage = SpeechLanguage.french
     private var warmRounds = 0
@@ -23,10 +23,11 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
     /// - Parameters:
     ///   - computeUnits: `.avoidNeuralEngine` (GPU + CPU, default) or `.uniform(.cpuOnly)` to leave the
     ///     GPU entirely to the language model.
-    ///   - directory: where the models are (FluidAudio's default cache when nil).
-    public init(computeUnits: PocketTtsComputeUnits = .avoidNeuralEngine, directory: URL? = nil) {
+    ///   - store: the models folder, where the downloader put the voice with FluidAudio's layout. Every
+    ///     file FluidAudio looks for is there, so it never goes online.
+    public init(computeUnits: PocketTtsComputeUnits = .avoidNeuralEngine, store: ModelStore) {
         self.computeUnits = computeUnits
-        self.directory = directory
+        self.directory = store.voiceBaseFolder
     }
 
     /// Loads (and warms up) the voices for these languages now rather than at their first use.
