@@ -1,0 +1,916 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Accessing the microphone…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès au micro…"
+          }
+        }
+      }
+    },
+    "Answering": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je réponds"
+          }
+        }
+      }
+    },
+    "Audio": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio"
+          }
+        }
+      }
+    },
+    "Chip": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puce"
+          }
+        }
+      }
+    },
+    "Comfort (32 to 36 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confort (32 à 36 Go)"
+          }
+        }
+      }
+    },
+    "Compute time": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calcul"
+          }
+        }
+      }
+    },
+    "Conversation": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversation"
+          }
+        }
+      }
+    },
+    "Copies all measurements of this session (JSON)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copie toutes les mesures de la session (format JSON)"
+          }
+        }
+      }
+    },
+    "Copy measurements": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copier les mesures"
+          }
+        }
+      }
+    },
+    "Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'annulation d'écho empêche l'assistant de s'entendre lui-même. Les autres apps sont un peu baissées pendant la conversation."
+          }
+        }
+      }
+    },
+    "English": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "anglais"
+          }
+        }
+      }
+    },
+    "First sentence": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Première phrase"
+          }
+        }
+      }
+    },
+    "First sound of the voice": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premier son de la voix"
+          }
+        }
+      }
+    },
+    "Full recomputations": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recalculs complets"
+          }
+        }
+      }
+    },
+    "Headphones": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Casque"
+          }
+        }
+      }
+    },
+    "History size": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Taille de l'historique"
+          }
+        }
+      }
+    },
+    "Hold Space to interrupt me, or press Escape.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens Espace pour me couper la parole, ou appuie sur Échap."
+          }
+        }
+      }
+    },
+    "Hold Space to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens Espace pour parler"
+          }
+        }
+      }
+    },
+    "Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens la barre d'espace (ou le bouton en bas de la fenêtre) pendant que tu parles. Utile dans un lieu bruyant."
+          }
+        }
+      }
+    },
+    "Hold the space bar to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens la barre d'espace pour parler"
+          }
+        }
+      }
+    },
+    "Hold to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens pour parler"
+          }
+        }
+      }
+    },
+    "I hear you…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je t'entends…"
+          }
+        }
+      }
+    },
+    "I'll answer as soon as you're done.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je réponds dès que tu as fini."
+          }
+        }
+      }
+    },
+    "I'm listening": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je t'écoute"
+          }
+        }
+      }
+    },
+    "Interrupt me whenever you like, or press Escape.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coupe-moi la parole quand tu veux, ou appuie sur Échap."
+          }
+        }
+      }
+    },
+    "Interruptions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interruptions"
+          }
+        }
+      }
+    },
+    "Language model": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de langage"
+          }
+        }
+      }
+    },
+    "Last incident": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernier incident"
+          }
+        }
+      }
+    },
+    "Last turn": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernier tour"
+          }
+        }
+      }
+    },
+    "Loading speech recognition…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de la reconnaissance vocale…"
+          }
+        }
+      }
+    },
+    "Loading the language model…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement du modèle de langage…"
+          }
+        }
+      }
+    },
+    "Loading the voice…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de la voix…"
+          }
+        }
+      }
+    },
+    "Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        }
+      }
+    },
+    "Maximum (48 GB and more)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum (48 Go et plus)"
+          }
+        }
+      }
+    },
+    "Measurements": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesures"
+          }
+        }
+      }
+    },
+    "Measurements (latency of each stage)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesures (latence de chaque étape)"
+          }
+        }
+      }
+    },
+    "Median latency": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latence médiane"
+          }
+        }
+      }
+    },
+    "Memory": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mémoire"
+          }
+        }
+      }
+    },
+    "Memory used by the app": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mémoire utilisée par l'app"
+          }
+        }
+      }
+    },
+    "Microphone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Micro"
+          }
+        }
+      }
+    },
+    "Microphone format": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format du micro"
+          }
+        }
+      }
+    },
+    "Minimum (8 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimum (8 Go)"
+          }
+        }
+      }
+    },
+    "Mode": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode"
+          }
+        }
+      }
+    },
+    "Model": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle"
+          }
+        }
+      }
+    },
+    "Model not found": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle introuvable"
+          }
+        }
+      }
+    },
+    "Model's first token": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premier mot du modèle"
+          }
+        }
+      }
+    },
+    "New conversation": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "Not supported": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non pris en charge"
+          }
+        }
+      }
+    },
+    "Open System Settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir les Réglages Système"
+          }
+        }
+      }
+    },
+    "Or hold the button at the bottom of the window.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ou maintiens le bouton en bas de la fenêtre."
+          }
+        }
+      }
+    },
+    "Output": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sortie"
+          }
+        }
+      }
+    },
+    "Prepared during the silence (speculative start): stages overlap.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparé pendant le silence (démarrage anticipé) : les étapes se chevauchent."
+          }
+        }
+      }
+    },
+    "Push to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appuyer pour parler"
+          }
+        }
+      }
+    },
+    "Release to send": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relâche pour envoyer"
+          }
+        }
+      }
+    },
+    "Release to send.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relâche pour envoyer."
+          }
+        }
+      }
+    },
+    "Say hello to get started.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis bonjour pour commencer."
+          }
+        }
+      }
+    },
+    "Session": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages"
+          }
+        }
+      }
+    },
+    "Silence wait": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attente du silence"
+          }
+        }
+      }
+    },
+    "Sound": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son"
+          }
+        }
+      }
+    },
+    "Sound does not start": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le son ne démarre pas"
+          }
+        }
+      }
+    },
+    "Speak whenever you like.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux."
+          }
+        }
+      }
+    },
+    "Speakers": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haut-parleurs"
+          }
+        }
+      }
+    },
+    "Standard (16 to 24 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard (16 à 24 Go)"
+          }
+        }
+      }
+    },
+    "Starting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Démarrage…"
+          }
+        }
+      }
+    },
+    "Talk to the assistant to see measurements.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle à l'assistant pour voir les mesures."
+          }
+        }
+      }
+    },
+    "The conversation will appear here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversation s'affichera ici"
+          }
+        }
+      }
+    },
+    "The engine did not start": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le moteur n'a pas démarré"
+          }
+        }
+      }
+    },
+    "The first launch can take a minute or two.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le premier lancement peut prendre une à deux minutes."
+          }
+        }
+      }
+    },
+    "The microphone is blocked": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le micro est bloqué"
+          }
+        }
+      }
+    },
+    "The microphone or the speakers could not be opened. Check that they are connected, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le micro ou les haut-parleurs n'ont pas pu être ouverts. Vérifie qu'ils sont branchés, puis réessaie."
+          }
+        }
+      }
+    },
+    "The model “%@” is not on this Mac yet. Automatic download comes in the next stage of the project.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le modèle « %@ » n'est pas encore sur ce Mac. Le téléchargement automatique arrive dans la prochaine étape du projet."
+          }
+        }
+      }
+    },
+    "Thinking…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je réfléchis…"
+          }
+        }
+      }
+    },
+    "This Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce Mac"
+          }
+        }
+      }
+    },
+    "This Mac is not supported": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce Mac n'est pas compatible"
+          }
+        }
+      }
+    },
+    "This tier could not be tested: performance is estimated.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce palier n'a pas pu être testé : les performances sont estimées."
+          }
+        }
+      }
+    },
+    "Tier": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Palier"
+          }
+        }
+      }
+    },
+    "To hear you, the assistant needs the microphone. Allow it in System Settings › Privacy & Security › Microphone, then come back here. Sound never leaves this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour t'entendre, l'assistant a besoin du micro. Autorise-le dans Réglages Système › Confidentialité et sécurité › Micro, puis reviens ici. Le son ne quitte jamais ce Mac."
+          }
+        }
+      }
+    },
+    "Tokens already in memory": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mots déjà en mémoire"
+          }
+        }
+      }
+    },
+    "Tokens computed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mots calculés"
+          }
+        }
+      }
+    },
+    "Transcription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcription"
+          }
+        }
+      }
+    },
+    "Try again": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réessayer"
+          }
+        }
+      }
+    },
+    "Turns": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tours"
+          }
+        }
+      }
+    },
+    "Untested tier: performance is estimated.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Palier non testé : performances estimées."
+          }
+        }
+      }
+    },
+    "Voice cut after (median)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voix coupée en (médiane)"
+          }
+        }
+      }
+    },
+    "Voice dropouts": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coupures de la voix"
+          }
+        }
+      }
+    },
+    "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avec un casque, il n'y a pas d'écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l'assistant se couperait la parole."
+          }
+        }
+      }
+    },
+    "You need a Mac with Apple silicon (M1 or later) and at least 8 GB of memory. This Mac: %@, %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
+          }
+        }
+      }
+    },
+    "end of speech → first sound": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "fin de parole → premier son"
+          }
+        }
+      }
+    },
+    "interrupted": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "interrompu"
+          }
+        }
+      }
+    },
+    "“Tokens” are the word pieces the model works with.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« Mots » = tokens, les morceaux de mots du modèle."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

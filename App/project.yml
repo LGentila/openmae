@@ -1,0 +1,87 @@
+# The macOS app. The Xcode project is generated from this file, never edited by hand:
+#
+#   xcodegen generate --spec App/project.yml
+#
+# (or simply: zsh scripts/build-app.sh, which generates, builds and prints the path of the app).
+#
+# The app's name, "OpenMaé", appears here (CFBundleName, CFBundleDisplayName, and its translations in
+# Resources/InfoPlist.xcstrings) and in Sources/VoiceCore/AppIdentity.swift. Files and folders use the plain
+# spelling "OpenMae" (OpenMae.app): codesign refuses an executable whose name has an accent, so macOS shows
+# the accented name through the "localized display name", like Apple's own apps.
+
+name: OpenMae
+
+options:
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  VoiceEngine:
+    path: ..
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ARCHS: arm64  # Apple Silicon only
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+
+targets:
+  OpenMae:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - silero_vad.mlmodelc
+          - silero_vad.mlmodelc/**
+      # Voice activity model (640 KB, MIT), shipped inside the app: copied as-is (already compiled).
+      - path: Resources/silero_vad.mlmodelc
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: VoiceEngine
+        product: VoiceCore
+      - package: VoiceEngine
+        product: VoiceEngineApple
+    info:
+      path: Resources/Info.plist
+      properties:
+        # Same as the file name, so that macOS shows the translated name ("OpenMaé", InfoPlist.xcstrings).
+        CFBundleName: OpenMae
+        CFBundleDisplayName: OpenMae
+        LSHasLocalizedDisplayName: true
+        # The interface's source text is English with a French translation; French stays the language
+        # of Macs set to neither French nor English.
+        CFBundleDevelopmentRegion: fr
+        CFBundleLocalizations: [fr, en]
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "3"
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: >-
+          The assistant listens to what you say in order to answer. Sound never leaves this Mac.
+    entitlements:
+      path: Resources/App.entitlements
+      properties:
+        # Hardened runtime: the only resource the app needs is the microphone. No App Sandbox
+        # (the models live in ~/Library/Application Support/<name>/Models, shared with the command-line tool), so
+        # no network entitlement is needed either (it only exists inside the sandbox).
+        com.apple.security.device.audio-input: true
+    # Signing: Signing.xcconfig, completed on each Mac by Signing.local.xcconfig (not published, so the
+    # Apple Developer team stays private). Distributed builds need a "Developer ID Application" certificate.
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_NAME: OpenMae
+        # Derived from the GitHub repository (github.com/lgentilla/openmae); may change before the first release.
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.lgentilla.openmae
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: NO
+        DEAD_CODE_STRIPPING: YES

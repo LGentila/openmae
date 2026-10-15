@@ -1,0 +1,11 @@
+// Code signing of the app.
+//
+// Without Signing.local.xcconfig the app is signed "to run locally" (ad hoc): it works on this Mac, but
+// macOS asks again for the microphone after every build. To sign with your Apple Developer team, copy
+// Signing.local.xcconfig.example to Signing.local.xcconfig (ignored by git) and put your team ID in it.
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Signing.local.xcconfig"

@@ -1,0 +1,12 @@
+.build/
+# voice-cli's test phrases and measurement reports
+measurements/
+.DS_Store
+.swiftpm/
+# Generated from App/project.yml by xcodegen
+App/*.xcodeproj/
+App/Resources/Info.plist
+App/Resources/App.entitlements
+App/Signing.local.xcconfig
+# Code-coverage data written by the test runs
+*.profraw
