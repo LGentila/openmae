@@ -10,28 +10,54 @@ import VoiceEngineApple
 @main
 struct AssistantApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
-    @State private var model = AssistantModel(connection: AssistantHost())
+    @State private var model: AssistantModel
+    @State private var window = WindowState()
+
+    init() {
+        Fonts.register()
+        #if DEBUG
+        _model = State(initialValue: AssistantModel(connection: Demo.isOn ? DemoConnection() : AssistantHost()))
+        #else
+        _model = State(initialValue: AssistantModel(connection: AssistantHost()))
+        #endif
+    }
 
     var body: some Scene {
-        Window(AppIdentity.name, id: "main") {
-            #if DEBUG
-            if let folder = Snapshots.folder {
-                SnapshotRunner(folder: folder)
-            } else {
-                ContentView(model: model)
-                    .frame(minWidth: 420, minHeight: 560)
+        Window(AppIdentity.name, id: "assistant") {
+            Group {
+                #if DEBUG
+                if let folder = Snapshots.folder {
+                    SnapshotRunner(folder: folder)
+                } else {
+                    ContentView(model: model, window: window)
+                }
+                #else
+                ContentView(model: model, window: window)
+                #endif
             }
-            #else
-            ContentView(model: model)
-                .frame(minWidth: 420, minHeight: 560)
-            #endif
+            .frame(minWidth: 820, minHeight: 700)
+            // The design has no dark theme yet: the window, its menus and alerts stay light.
+            .preferredColorScheme(.light)
         }
-        .defaultSize(width: 520, height: 720)
+        .windowStyle(.hiddenTitleBar)
+        .windowBackgroundDragBehavior(.enabled)
+        .defaultSize(width: 960, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New conversation") { model.newConversation() }
                     .keyboardShortcut("n")
                     .disabled(!model.isReady)
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { window.toggle(.settings) }
+                    .keyboardShortcut(",")
+            }
+            CommandGroup(before: .sidebar) {
+                Button(window.showMeasurements ? "Hide Measurements" : "Show Measurements") {
+                    window.showMeasurements.toggle()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .option])
+                Divider()
             }
         }
     }

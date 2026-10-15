@@ -2,68 +2,104 @@ import AppKit
 import SwiftUI
 import VoiceCore
 
-/// First launch (and after another tier was chosen, or the models deleted): the Mac, its tier, what will be
-/// downloaded and how much space it takes, then the download itself.
+/// First launch (and after another tier was chosen, or the models deleted). On the left, the orb wakes up
+/// while the models download, with what is going on and the button; on the right, the Mac, its tier, and the
+/// three models with their progress.
 struct SetupView: View {
     let model: AssistantModel
     let setup: ModelSetup
-    /// Opens the settings (to choose another tier).
-    let showSettings: () -> Void
+    /// Opens the settings at the tier.
+    let chooseTier: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 22) {
-                VStack(spacing: 10) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 46, weight: .light))
-                        .foregroundStyle(.tint)
-                    Text("Set up \(AppIdentity.name)")
-                        .font(.title.weight(.semibold))
-                    Text("The assistant runs entirely on this Mac, without the Internet. It first needs its models: one download, and the connection is not used any more.")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 36) {
+                welcome
+                    .frame(width: 330)
+                VStack(spacing: 14) {
+                    MacCard(setup: setup, isLocked: model.isDownloading, chooseTier: chooseTier)
+                    ModelsCard(setup: setup, progress: model.download, isDownloading: model.isDownloading)
                 }
-
-                MacSummary(setup: setup, showSettings: showSettings)
-                ModelList(setup: setup)
-
-                if model.download != nil || model.downloadFailure != nil {
-                    DownloadStatus(model: model)
-                }
-                actions
-
-                Text("The models are saved in \((setup.folder as NSString).abbreviatingWithTildeInPath). You can quit the app during the download: it will resume where it stopped.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
             }
-            .padding(28)
-            .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity)
+            .padding(EdgeInsets(top: 50, leading: 32, bottom: 30, trailing: 32))
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.automatic)
     }
 
-    @ViewBuilder private var actions: some View {
-        if model.isDownloading {
-            Button("Pause", action: model.pauseDownload)
-                .controlSize(.large)
-        } else if !setup.hasEnoughSpace, model.download == nil {
-            Label("\(Units.bytes(setup.neededBytes - (setup.availableBytes ?? 0))) more free space is needed. Free up space on this Mac, then try again.",
-                  systemImage: "externaldrive.badge.exclamationmark")
-                .foregroundStyle(.red)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Try again", action: model.start)
-                .controlSize(.large)
-        } else {
-            Button(action: model.downloadModels) {
-                Text(buttonTitle)
-                    .frame(minWidth: 220)
+    private var welcome: some View {
+        VStack(spacing: 0) {
+            Orb(look: .setup(downloading: model.isDownloading), style: .setup) {
+                SetupCore(fraction: model.isDownloading ? model.download?.fraction : nil)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
+            .anchorPreference(key: OrbPlacement.self, value: .bounds) {
+                OrbPlacement.Orb(anchor: $0, halo: (420, 660))
+            }
+            Text(title)
+                .textStyle(.screenTitle)
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.top, 14)
+            subtitle
+                .padding(.top, 12)
+                .frame(minHeight: 94, alignment: .top)
+            action
+                .padding(.top, 24)
+            Text("The models are saved in \(folder). You can quit the app during the download: it will resume where it stopped.")
+                .textStyle(.note)
+                .foregroundStyle(Palette.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 16)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private var title: LocalizedStringKey {
+        model.download == nil && model.downloadFailure == nil ? "Set up \(AppIdentity.name)" : "Downloading"
+    }
+
+    /// What is going on, in one or two sentences.
+    @ViewBuilder private var subtitle: some View {
+        Group {
+            if let failure = model.downloadFailure {
+                FailureMessage(failure: failure)
+            } else if !setup.hasEnoughSpace, model.download == nil {
+                Text("\(Units.bytes(setup.neededBytes - (setup.availableBytes ?? 0))) more free space is needed. Free up space on this Mac, then try again.")
+                    .foregroundStyle(Palette.danger)
+            } else if let progress = model.download {
+                if !model.isDownloading {
+                    Text("Paused. What has been downloaded is kept.")
+                } else if progress.waitingForNetwork {
+                    Text("Connection lost. The download will resume by itself as soon as the Internet is back.")
+                } else {
+                    Text("One download, then everything works without a connection.")
+                }
+            } else {
+                Text("The assistant runs entirely on this Mac, without the Internet. It first needs its models: one download, and the connection is not used any more.")
+            }
+        }
+        .textStyle(.body)
+        .foregroundStyle(Palette.inkMuted)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Download → progress bar → (once done the assistant loads by itself).
+    @ViewBuilder private var action: some View {
+        if model.isDownloading, let progress = model.download {
+            VStack(spacing: 12) {
+                DownloadPill(fraction: progress.fraction)
+                Button("Pause", action: model.pauseDownload)
+                    .buttonStyle(PillButtonStyle())
+            }
+        } else if !setup.hasEnoughSpace, model.download == nil {
+            Button(action: model.start) { Text("Try again") }
+                .buttonStyle(PrimaryButtonStyle(icon: .download, disc: Palette.coral, metrics: .setup))
+        } else {
+            Button(action: model.downloadModels) { Text(buttonTitle) }
+                .buttonStyle(PrimaryButtonStyle(icon: .download, disc: Palette.coral, metrics: .setup))
+                .keyboardShortcut(.defaultAction)
         }
     }
 
@@ -72,140 +108,99 @@ struct SetupView: View {
         if model.download != nil { return "Resume" }
         return "Download (\(Units.bytes(setup.bytesToDownload)))"
     }
+
+    /// The models folder, in the monospaced style of a path.
+    private var folder: AttributedString {
+        var path = AttributedString((setup.folder as NSString).abbreviatingWithTildeInPath)
+        path.font = TextStyle.path.font
+        path.foregroundColor = Palette.ink.color
+        path.backgroundColor = Palette.line.color
+        return path
+    }
 }
 
-/// The Mac and its tier.
-private struct MacSummary: View {
-    let setup: ModelSetup
-    let showSettings: () -> Void
+/// What the white core of the first-launch orb shows: an arrow that bounces, then the download's progress.
+private struct SetupCore: View {
+    /// nil before the download.
+    let fraction: Double?
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                Row("This Mac") {
-                    Text(verbatim: "\(setup.chip) · \(Units.memory(setup.memoryGiB))")
+        ZStack {
+            if let fraction {
+                Circle()
+                    .stroke(Palette.track, lineWidth: 5)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(Palette.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.3), value: fraction)
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(verbatim: "\(Int((fraction * 100).rounded(.down)))")
+                        .textStyle(.percentage)
+                    Text(verbatim: "%")
+                        .textStyle(.percentSign)
                 }
-                Row("Tier") {
-                    HStack(spacing: 6) {
-                        Text(StateText.tier(setup.tier))
-                        TierBadge(tier: setup.tier)
-                    }
-                }
-                if setup.tier != setup.recommendedTier {
-                    Text("Chosen in the settings (Advanced). Recommended tier for this Mac: \(Text(StateText.tier(setup.recommendedTier))).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if setup.tier > setup.recommendedTier {
-                    Text("This tier needs more memory than this Mac has: the assistant may be very slow.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                Button("Choose another tier…", action: showSettings)
-                    .buttonStyle(.link)
-                    .font(.caption)
+                .foregroundStyle(Palette.ink)
+            } else {
+                BouncingArrow(size: 44)
+                    .foregroundStyle(Palette.ink)
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(4)
+        }
+        .frame(width: 82, height: 82)
+    }
+}
+
+/// The download icon whose arrow goes down and up again.
+struct BouncingArrow: View {
+    var size: CGFloat
+    @State private var down = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            IconView(icon: .downloadArrow, size: size)
+                .offset(y: (down ? 3 : -2.5) * size / 24)
+            IconView(icon: .downloadBase, size: size)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { down = true }
         }
     }
 }
 
-/// "tested" in green, or "untested / estimated" in orange: untested tiers must say so.
-struct TierBadge: View {
-    let tier: HardwareTier
+/// The main pill, become a progress bar while the models download.
+private struct DownloadPill: View {
+    let fraction: Double
 
     var body: some View {
-        Text(tier.isTested ? "tested" : "untested / estimated")
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(Capsule().fill((tier.isTested ? Color.green : Color.orange).opacity(0.18)))
-            .foregroundStyle(tier.isTested ? Color.green : Color.orange)
-    }
-}
-
-/// What will be downloaded, model by model, and the total against the free space.
-private struct ModelList: View {
-    let setup: ModelSetup
-
-    var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(setup.items, id: \.displayName) { item in
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(StateText.role(item.role))
-                            Text(verbatim: "\(item.displayName) · \(item.license)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if item.missingBytes == 0 {
-                            Label("already here", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        } else {
-                            Text(verbatim: Units.bytes(item.totalBytes))
-                                .monospacedDigit()
-                        }
-                    }
-                }
-                Divider()
-                Row("To download") {
-                    Text(verbatim: Units.bytes(setup.bytesToDownload))
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                }
-                Row("Free space on this Mac") {
-                    Text(verbatim: Units.bytes(setup.availableBytes))
-                        .monospacedDigit()
-                        .foregroundStyle(setup.hasEnoughSpace ? Color.primary : Color.red)
-                }
-            }
-            .padding(4)
+        HStack(spacing: 12) {
+            Circle()
+                .fill(Palette.sun)
+                .frame(width: 40, height: 40)
+                .overlay { BouncingArrow(size: 22).foregroundStyle(Palette.ink) }
+            Text("Downloading… \(Units.percent(fraction))")
+                .textStyle(.button)
+                .foregroundStyle(Palette.onInk)
+                .lineLimit(1)
         }
-    }
-}
-
-/// Progress bar and what is going on: speed, time left, waiting for the network, paused, failure.
-private struct DownloadStatus: View {
-    let model: AssistantModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let progress = model.download {
-                ProgressView(value: progress.fraction)
-                HStack {
-                    Text(verbatim: "\(Units.bytes(progress.doneBytes)) / \(Units.bytes(progress.totalBytes))")
-                        .monospacedDigit()
-                    Spacer()
-                    if model.isDownloading, !progress.waitingForNetwork {
-                        Text(verbatim: [Units.speed(progress.bytesPerSecond), Units.remaining(progress.secondsRemaining)]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .monospacedDigit()
-                    }
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .background {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Palette.ink.color
+                    Palette.progress.color
+                        .frame(width: proxy.size.width * fraction)
+                        .animation(.linear(duration: 0.3), value: fraction)
                 }
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                if progress.waitingForNetwork, model.isDownloading {
-                    Label("Connection lost. The download will resume by itself as soon as the Internet is back.",
-                          systemImage: "wifi.exclamationmark")
-                        .foregroundStyle(.orange)
-                } else if model.isDownloading, let current = progress.currentModel {
-                    Text("Downloading: \(current)")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else if !model.isDownloading, model.downloadFailure == nil {
-                    Text("Paused. What has been downloaded is kept.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let failure = model.downloadFailure {
-                FailureMessage(failure: failure)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
+        .clipShape(Capsule())
+        .buttonShadow()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Model download"))
+        .accessibilityValue(Text(verbatim: Units.percent(fraction)))
     }
 }
 
@@ -214,46 +209,283 @@ private struct FailureMessage: View {
     let failure: DownloadFailure
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 6) {
             switch failure {
             case .notEnoughSpace(let needed, let available):
-                Label("Not enough free space: \(Units.bytes(needed)) is needed and \(Units.bytes(available)) is left. Free up space, then try again.",
-                      systemImage: "externaldrive.badge.exclamationmark")
+                Text("Not enough free space: \(Units.bytes(needed)) is needed and \(Units.bytes(available)) is left. Free up space, then try again.")
             case .unavailable(let file, let status):
-                Label("The model server (Hugging Face) refuses a file (error \(String(status))). The app probably needs an update.",
-                      systemImage: "xmark.icloud")
-                Text(verbatim: file).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text("The model server (Hugging Face) refuses a file (error \(String(status))). The app probably needs an update.")
+                detail(file)
             case .corrupted(let file):
-                Label("A file arrived damaged twice in a row. Check your connection, then try again.",
-                      systemImage: "exclamationmark.triangle")
-                Text(verbatim: file).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text("A file arrived damaged twice in a row. Check your connection, then try again.")
+                detail(file)
             case .disk(let detail):
-                Label("The models could not be saved on the disk.", systemImage: "externaldrive.badge.xmark")
-                Text(verbatim: detail).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text("The models could not be saved on the disk.")
+                self.detail(detail)
             }
         }
-        .foregroundStyle(.red)
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.08)))
+        .foregroundStyle(Palette.danger)
+    }
+
+    private func detail(_ text: String) -> some View {
+        Text(verbatim: text)
+            .textStyle(.path)
+            .foregroundStyle(Palette.inkMuted)
+            .lineLimit(2)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+    }
+}
+
+// MARK: - Cards
+
+/// The Mac and its tier.
+private struct MacCard: View {
+    let setup: ModelSetup
+    /// The tier cannot change during the download.
+    let isLocked: Bool
+    let chooseTier: () -> Void
+
+    var body: some View {
+        Card {
+            InfoRow("This Mac") {
+                Text(verbatim: "\(setup.chip) · \(Units.memory(setup.memoryGiB))")
+                    .textStyle(.value)
+            }
+            Hairline()
+            InfoRow("Tier") {
+                HStack(spacing: 8) {
+                    Text(StateText.tier(setup.tier))
+                        .textStyle(.value)
+                    TierBadge(isTested: setup.tier.isTested)
+                }
+            }
+            if setup.tier != setup.recommendedTier {
+                HelpText(Text("Chosen in the settings (Advanced). Recommended tier for this Mac: \(Text(StateText.tier(setup.recommendedTier)))."))
+                    .padding(.bottom, 8)
+            }
+            if setup.tier > setup.recommendedTier {
+                HelpText("This tier needs more memory than this Mac has: the assistant may be very slow.",
+                         color: Palette.danger)
+                    .padding(.bottom, 8)
+            }
+            Button(action: chooseTier) {
+                HStack(spacing: 8) {
+                    IconView(icon: .settings, size: 16, strokeWidth: 2)
+                    Text("Choose another tier…")
+                }
+            }
+            .buttonStyle(PillButtonStyle(kind: .link))
+            .disabled(isLocked)
+            .padding(.top, 2)
+        }
+    }
+}
+
+/// The three models, what they weigh, how far their download is; then the total and the free space.
+private struct ModelsCard: View {
+    let setup: ModelSetup
+    let progress: DownloadProgress?
+    let isDownloading: Bool
+
+    /// Speech recognition, voice, language model: always in this order.
+    private var items: [ModelSetup.Item] {
+        let order: [ModelRole] = [.speechRecognition, .voice, .languageModel]
+        return setup.items.sorted { order.firstIndex(of: $0.role) ?? 0 < order.firstIndex(of: $1.role) ?? 0 }
+    }
+
+    var body: some View {
+        Card(padding: EdgeInsets(top: 6, leading: 18, bottom: 8, trailing: 18)) {
+            ForEach(items, id: \.role) { item in
+                if item.role != items.first?.role { Hairline() }
+                ModelRow(item: item, missing: missing(item), started: progress != nil,
+                         isActive: isDownloading && progress?.currentModel == item.displayName)
+            }
+            Hairline(color: Palette.lineStrong)
+            if progress != nil {
+                SegmentedProgress(parts: items.map {
+                    (weight: Double($0.totalBytes), fraction: fraction($0), color: RowColors($0.role).fill)
+                })
+                    .padding(.top, 14)
+                    .padding(.bottom, 2)
+            }
+            HStack {
+                Text(progress == nil ? "To download" : "Downloaded")
+                    .textStyle(.rowTitle)
+                Spacer()
+                Group {
+                    if let progress {
+                        Text("\(Units.bytes(progress.doneBytes)) of \(Units.bytes(progress.totalBytes))")
+                    } else {
+                        Text(verbatim: Units.bytes(setup.bytesToDownload))
+                    }
+                }
+                .textStyle(.total)
+            }
+            .foregroundStyle(Palette.ink)
+            .frame(minHeight: 42)
+            .padding(.top, 4)
+            HStack {
+                Text("Free space on this Mac")
+                    .textStyle(.label)
+                Spacer()
+                Text(verbatim: Units.bytes(freeBytes))
+                    .textStyle(.value)
+            }
+            .foregroundStyle(setup.hasEnoughSpace ? Palette.inkMuted : Palette.danger)
+            .frame(minHeight: 34)
+        }
+    }
+
+    /// Bytes still to download for a model.
+    private func missing(_ item: ModelSetup.Item) -> Int64 {
+        progress?.missingBytes[item.role] ?? item.missingBytes
+    }
+
+    private func fraction(_ item: ModelSetup.Item) -> Double {
+        guard item.totalBytes > 0 else { return 1 }
+        return min(1, max(0, 1 - Double(missing(item)) / Double(item.totalBytes)))
+    }
+
+    /// The free space measured before the download, minus what has been downloaded since.
+    private var freeBytes: Int64? {
+        guard let available = setup.availableBytes else { return nil }
+        guard let progress else { return available }
+        let left = progress.missingBytes.values.reduce(0, +)
+        return max(0, available - max(0, setup.bytesToDownload - left))
+    }
+}
+
+/// The colours of a model: a pastel disc, and the full colour for its progress.
+private struct RowColors {
+    let disc: RGBA
+    let fill: RGBA
+    let icon: Icon
+
+    init(_ role: ModelRole) {
+        switch role {
+        case .speechRecognition: (disc, fill, icon) = (Palette.azureSoft, Palette.azure, .microphone)
+        case .voice: (disc, fill, icon) = (Palette.coralSoft, Palette.coral, .speaker)
+        case .languageModel: (disc, fill, icon) = (Palette.sunSoft, Palette.sun, .sparkles)
+        }
+    }
+}
+
+/// One model: before the download, waiting, downloading (its disc pulses), done (a check).
+private struct ModelRow: View {
+    let item: ModelSetup.Item
+    let missing: Int64
+    /// The download has started (or was paused).
+    let started: Bool
+    let isActive: Bool
+
+    private var fraction: Double {
+        item.totalBytes > 0 ? min(1, max(0, 1 - Double(missing) / Double(item.totalBytes))) : 1
+    }
+
+    private var isDone: Bool { missing == 0 }
+    private var isRunning: Bool { started && !isDone && (isActive || fraction > 0) }
+
+    var body: some View {
+        let colors = RowColors(item.role)
+        HStack(spacing: 14) {
+            Circle()
+                .fill(colors.disc)
+                .frame(width: 40, height: 40)
+                .overlay { IconView(icon: isDone ? .check : colors.icon, size: 20).foregroundStyle(Palette.ink) }
+                .phaseAnimator([false, true]) { disc, up in
+                    disc.scaleEffect(isRunning && isActive && up ? 1.08 : 1)
+                } animation: { _ in .easeInOut(duration: 0.7) }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(StateText.role(item.role))
+                    .textStyle(.rowTitle)
+                    .foregroundStyle(Palette.ink)
+                Text(verbatim: "\(item.displayName) · \(item.license)")
+                    .textStyle(.rowDetail)
+                    .foregroundStyle(Palette.inkMuted)
+                if started {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3).fill(Palette.track)
+                            RoundedRectangle(cornerRadius: 3).fill(colors.fill)
+                                .frame(width: proxy.size.width * fraction)
+                                .animation(.linear(duration: 0.3), value: fraction)
+                        }
+                    }
+                    .frame(height: 5)
+                    .padding(.top, 7)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trailing
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if isRunning {
+            Text(verbatim: Units.percent(fraction))
+                .textStyle(.strongValue)
+                .foregroundStyle(Palette.ink)
+        } else if isDone, !started, item.missingBytes == 0 {
+            Text("already here")
+                .textStyle(.value)
+                .foregroundStyle(Palette.success)
+        } else {
+            Text(verbatim: Units.bytes(item.totalBytes))
+                .textStyle(started && !isDone ? TextStyle.waitingValue : .value)
+                .foregroundStyle(started && !isDone ? Palette.inkMuted : Palette.ink)
+        }
+    }
+}
+
+/// The global progress: one segment per model, as wide as the model is large.
+private struct SegmentedProgress: View {
+    let parts: [(weight: Double, fraction: Double, color: RGBA)]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let total = max(1, parts.reduce(0) { $0 + $1.weight })
+            let available = proxy.size.width - CGFloat(parts.count - 1) * 3
+            HStack(spacing: 3) {
+                ForEach(parts.indices, id: \.self) { i in
+                    let width = available * parts[i].weight / total
+                    ZStack(alignment: .leading) {
+                        Palette.track.color
+                        parts[i].color.color
+                            .frame(width: width * parts[i].fraction)
+                            .animation(.linear(duration: 0.3), value: parts[i].fraction)
+                    }
+                    .frame(width: width)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+            }
+        }
+        .frame(height: 8)
+        .accessibilityHidden(true)
     }
 }
 
 /// A label on the left, a value on the right.
-private struct Row<Content: View>: View {
+private struct InfoRow<Value: View>: View {
     let label: LocalizedStringKey
-    @ViewBuilder let content: Content
+    @ViewBuilder let value: Value
 
-    init(_ label: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+    init(_ label: LocalizedStringKey, @ViewBuilder value: () -> Value) {
         self.label = label
-        self.content = content()
+        self.value = value()
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(spacing: 12) {
             Text(label)
-            Spacer()
-            content
+                .textStyle(.label)
+                .foregroundStyle(Palette.inkMuted)
+            Spacer(minLength: 0)
+            value
+                .foregroundStyle(Palette.ink)
         }
+        .frame(minHeight: 46)
     }
 }

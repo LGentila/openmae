@@ -14,8 +14,8 @@ in airplane mode.
 
 - **Spoken conversation.** The assistant starts talking while the language model is still writing: the
   answer goes to the voice sentence by sentence.
-- **Interrupt at any time.** Speak over the assistant and it stops within about a quarter of a second. A
-  click on the indicator or the Escape key works too.
+- **Interrupt at any time.** Speak over the assistant and it stops within about a quarter of a second. The
+  Interrupt button, a click on the orb or the Escape key work too.
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.
@@ -23,8 +23,8 @@ in airplane mode.
   never goes online again.
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
-- **Measurements built in.** A side panel shows the latency of each stage, interruption times, memory and
-  audio devices.
+- **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
+  interruption times, memory and audio devices.
 - Interface in French and English.
 
 ## Requirements
@@ -90,6 +90,7 @@ porting to another platform means rewriting that target and the interface, not t
 | [FluidAudio](https://github.com/FluidInference/FluidAudio) | runs the CoreML models | Apache-2.0 | |
 | [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | runs the language model | MIT | |
 | [swift-transformers](https://github.com/huggingface/swift-transformers) | tokenizers | Apache-2.0 | |
+| Bricolage Grotesque, Figtree | interface typefaces | SIL Open Font License 1.1 | shipped in the app with their license (`App/Resources/Fonts`) |
 
 ## Building from source
 

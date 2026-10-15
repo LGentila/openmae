@@ -1,68 +1,38 @@
 import SwiftUI
 import VoiceCore
 
-/// The few settings, in a popover from the toolbar.
+/// The settings, in a panel under the top bar's button: sound, conversation, advanced.
 struct SettingsPanel: View {
     @Bindable var model: AssistantModel
-    @Environment(\.dismiss) private var dismiss
+    /// Opened from "Choose another tier…": the tier row is outlined for a moment.
+    var pointsAtTier = false
+    let close: () -> Void
     /// Tier picked in the menu, waiting for confirmation: changing tier restarts the assistant.
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
 
     var body: some View {
-        Form {
-            Section("Sound") {
-                Picker("Output", selection: $model.settings.audioMode) {
-                    ForEach(AudioMode.allCases, id: \.self) { mode in
-                        Text(StateText.audioMode(mode)).tag(mode)
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            SectionTitle("Sound", isFirst: true)
+            PanelBlock { sound }
+            SectionTitle("Conversation")
+            PanelBlock(padding: EdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16)) {
+                Button("New conversation") {
+                    model.newConversation()
+                    close()
                 }
-                .pickerStyle(.segmented)
-                Group {
-                    if model.settings.audioMode == .speakers {
-                        Text("Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.")
-                    } else {
-                        Text("With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                Toggle("Push to talk", isOn: $model.settings.pushToTalk)
-                Text("Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(PillButtonStyle())
+                .disabled(!model.isReady)
             }
-            Section("Conversation") {
-                Button("New conversation") { model.newConversation() }
-                    .disabled(!model.isReady)
-            }
-            if let info = model.info {
-                Section("This Mac") {
-                    LabeledContent("Chip and memory") {
-                        Text(verbatim: "\(info.chip) · \(Units.memory(info.memoryGiB))")
-                    }
-                    LabeledContent("Tier") { Text(StateText.tier(info.tier)) }
-                    LabeledContent("Language model", value: info.languageModel)
-                    if !info.tier.isTested {
-                        Text("This tier could not be tested: performance is estimated.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-            advanced
+            SectionTitle("Advanced")
+            PanelBlock(padding: EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16)) { advanced }
         }
-        .formStyle(.grouped)
-        .frame(width: 380)
-        .fixedSize(horizontal: false, vertical: true)
         .alert("Change tier?", isPresented: Binding(get: { pendingTier != nil }, set: { if !$0 { pendingTier = nil } }),
                presenting: pendingTier)
         { choice in
             Button("Change") {
                 model.settings.tierOverride = choice.tier
-                dismiss()
+                close()
             }
             Button("Cancel", role: .cancel) {}
         } message: { choice in
@@ -70,8 +40,37 @@ struct SettingsPanel: View {
         }
         .modifier(DeleteModelsConfirmation(isPresented: $confirmDeletion) {
             model.deleteModels()
-            dismiss()
+            close()
         })
+    }
+
+    // MARK: - Sound
+
+    @ViewBuilder private var sound: some View {
+        HStack(spacing: 12) {
+            Text("Output")
+                .textStyle(.setting)
+            Spacer(minLength: 0)
+            Segmented(selection: $model.settings.audioMode,
+                      options: AudioMode.allCases.map { (value: $0, title: StateText.audioMode($0)) })
+        }
+        .frame(minHeight: 48)
+        Group {
+            if model.settings.audioMode == .speakers {
+                HelpText("Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.")
+            } else {
+                HelpText("With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.")
+            }
+        }
+        .padding(.bottom, 6)
+        Hairline()
+        Toggle(isOn: $model.settings.pushToTalk) {
+            Text("Push to talk")
+                .textStyle(.setting)
+        }
+        .toggleStyle(SwitchStyle())
+        .frame(minHeight: 48)
+        HelpText("Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.")
     }
 
     // MARK: - Advanced
@@ -88,44 +87,86 @@ struct SettingsPanel: View {
     }
 
     @ViewBuilder private var advanced: some View {
-        Section("Advanced") {
-            Picker("Tier", selection: Binding(
+        HStack(spacing: 12) {
+            Text("Tier")
+                .textStyle(.setting)
+            Spacer(minLength: 0)
+            tierMenu
+        }
+        .frame(minHeight: 48)
+        .padding(.horizontal, 8)
+        .modifier(PointedAt(isOn: pointsAtTier))
+        .padding(.horizontal, -8)
+        HelpText("The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.")
+            .padding(.top, 2)
+            .padding(.bottom, 6)
+        if let tier = model.tier, !tier.isTested {
+            HelpText("This tier could not be tested: performance is estimated.")
+                .padding(.bottom, 6)
+        }
+        if let forced = model.settings.tierOverride, let recommended = model.recommendedTier, forced > recommended {
+            HelpText("This tier needs more memory than this Mac has: the assistant may be very slow.",
+                     color: Palette.danger)
+                .padding(.bottom, 6)
+        }
+        Hairline()
+        HStack(spacing: 12) {
+            Text("Models on this Mac")
+                .textStyle(.setting)
+            Spacer(minLength: 0)
+            Text(verbatim: Units.bytes(model.storage?.usedBytes))
+                .textStyle(.value)
+                .foregroundStyle(Palette.inkMuted)
+        }
+        .frame(minHeight: 46)
+        Hairline()
+        VStack(alignment: .leading, spacing: 8) {
+            if let storage = model.storage, storage.unusedBytes > 0 {
+                Button("Delete the other tiers' models (\(Units.bytes(storage.unusedBytes)))") {
+                    model.deleteUnusedModels()
+                }
+                .buttonStyle(PillButtonStyle())
+            }
+            Button("Delete the models…") { confirmDeletion = true }
+                .buttonStyle(PillButtonStyle(kind: .destructive))
+                .disabled(model.isLoading || model.isDownloading || (model.storage?.usedBytes ?? 0) == 0)
+        }
+        .padding(.vertical, 9)
+    }
+
+    /// The tier's pop-up menu; locked while models load or download.
+    private var tierMenu: some View {
+        Menu {
+            Picker(selection: Binding(
                 get: { model.settings.tierOverride.map(TierChoice.forced) ?? .automatic },
                 set: { choice in
                     if choice.tier != model.settings.tierOverride { pendingTier = choice }
                 }))
             {
-                if let recommended = model.recommendedTier {
-                    Text("Automatic: \(Text(StateText.tier(recommended)))").tag(TierChoice.automatic)
-                } else {
-                    Text("Automatic").tag(TierChoice.automatic)
-                }
+                automaticLabel.tag(TierChoice.automatic)
                 ForEach(HardwareTier.selectable, id: \.self) { tier in
                     tierLabel(tier).tag(TierChoice.forced(tier))
                 }
+            } label: {
+                EmptyView()
             }
-            .disabled(model.isLoading)
-            Text("The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let forced = model.settings.tierOverride, let recommended = model.recommendedTier, forced > recommended {
-                Text("This tier needs more memory than this Mac has: the assistant may be very slow.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let storage = model.storage {
-                LabeledContent("Models on this Mac", value: Units.bytes(storage.usedBytes))
-                if storage.unusedBytes > 0 {
-                    Button("Delete the other tiers' models (\(Units.bytes(storage.unusedBytes)))") {
-                        model.deleteUnusedModels()
-                    }
-                }
-            }
-            Button("Delete the models…", role: .destructive) { confirmDeletion = true }
-                .disabled(model.isLoading || (model.storage?.usedBytes ?? 0) == 0)
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            MenuFieldLabel(title: model.settings.tierOverride.map { Text(StateText.tier($0)) } ?? automaticLabel)
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.isLoading || model.isDownloading)
+    }
+
+    private var automaticLabel: Text {
+        if let recommended = model.recommendedTier {
+            return Text("Automatic: \(Text(StateText.tier(recommended)))")
+        }
+        return Text("Automatic")
     }
 
     private func tierLabel(_ tier: HardwareTier) -> Text {
@@ -138,6 +179,32 @@ struct SettingsPanel: View {
         let tier = choice.tier ?? model.recommendedTier ?? .comfort
         guard let pack = ModelCatalog.languageModel(for: tier) else { return "" }
         return String(localized: "The assistant will restart with \(pack.displayName). If it is not on this Mac yet, it will have to be downloaded (\(Units.bytes(pack.totalBytes))).")
+    }
+}
+
+/// A coral outline that fades away, around the row "Choose another tier…" leads to.
+private struct PointedAt: ViewModifier {
+    let isOn: Bool
+    @State private var faded = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if isOn {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Palette.coral, lineWidth: 2)
+                        .opacity(faded ? 0 : 1)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Palette.coral.opacity(faded ? 0 : 0.45), lineWidth: faded ? 24 : 0)
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
+            .onAppear {
+                guard isOn else { return }
+                withAnimation(.easeOut(duration: 1.8)) { faded = true }
+            }
     }
 }
 

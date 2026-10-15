@@ -162,6 +162,8 @@ struct DownloaderTests {
         #expect(!FileManager.default.fileExists(atPath: store.incompleteDirectory.path))
         #expect(log.all.last?.doneBytes == pack.totalBytes)
         #expect(log.all.last?.totalBytes == pack.totalBytes)
+        #expect(log.all.first?.missingBytes == [pack.role: pack.totalBytes])
+        #expect(log.all.last?.missingBytes == [pack.role: 0])
         // Already there: nothing more is asked of the server.
         let before = hub.requests.count
         try await downloader().download([pack]) { _ in }
@@ -195,6 +197,7 @@ struct DownloaderTests {
         #expect(store.isComplete([pack]))
         #expect(hub.requests.map(\.range) == ["bytes=120000-"])
         #expect(log.all.first?.doneBytes == 120_000)
+        #expect(log.all.first?.missingBytes == [pack.role: 80_000])
     }
 
     @Test func serverIgnoringTheRangeMeansStartingAgain() async throws {

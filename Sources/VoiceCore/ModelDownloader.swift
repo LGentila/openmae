@@ -20,6 +20,8 @@ public struct DownloadProgress: Sendable, Codable, Equatable {
     public var currentModel: String?
     /// The connection dropped: the download waits, then resumes by itself.
     public var waitingForNetwork = false
+    /// Bytes still missing for each model being downloaded, for a progress per model.
+    public var missingBytes: [ModelRole: Int64] = [:]
 
     public init(doneBytes: Int64, totalBytes: Int64) {
         self.doneBytes = doneBytes
@@ -101,7 +103,11 @@ public actor ModelDownloader {
         let todo = packs.flatMap { pack in store.missingFiles(pack).map { (pack, $0) } }
         let total = todo.reduce(Int64(0)) { $0 + $1.1.size }
         let alreadyThere = todo.reduce(Int64(0)) { $0 + min(store.partialSize($1.1), $1.1.size) }
-        let reporter = ProgressReporter(DownloadProgress(doneBytes: alreadyThere, totalBytes: total), progress)
+        var start = DownloadProgress(doneBytes: alreadyThere, totalBytes: total)
+        for (pack, file) in todo {
+            start.missingBytes[pack.role, default: 0] += file.size - min(store.partialSize(file), file.size)
+        }
+        let reporter = ProgressReporter(start, progress)
 
         let needed = total - alreadyThere + Self.safetyMarginBytes
         if !todo.isEmpty, let available = availableBytes(), available < needed {
@@ -165,7 +171,10 @@ public actor ModelDownloader {
                 DebugLog.log("download: \(name) arrived damaged (attempt \(damagedAttempts))")
                 let removed = min(store.partialSize(file), file.size)
                 try? FileManager.default.removeItem(at: store.partialLocation(file))
-                reporter.update { $0.doneBytes -= removed }
+                reporter.update {
+                    $0.doneBytes -= removed
+                    $0.missingBytes[pack.role, default: 0] += removed
+                }
                 if damagedAttempts >= 2 { throw DownloadFailure.corrupted(file: name) }
             } catch AttemptError.network(let progressed) {
                 if progressed { networkFailures = 0 }
@@ -211,7 +220,10 @@ public actor ModelDownloader {
             var request = URLRequest(url: pack.downloadURL(file))
             if offset > 0 { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
             let writer = ResponseWriter(partial: partial, offset: offset, hasher: hasher) { delta in
-                reporter.update { $0.doneBytes += delta }
+                reporter.update {
+                    $0.doneBytes += delta
+                    $0.missingBytes[pack.role, default: 0] -= delta
+                }
             }
             try await writer.run(request, session: session)
             hasher = writer.hasher

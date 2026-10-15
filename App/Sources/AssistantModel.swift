@@ -66,6 +66,14 @@ final class AssistantModel {
         return false
     }
 
+    /// The exchange in progress, or the last one: what the user said and Maé's answer so far.
+    var currentExchange: (user: TranscriptEntry?, answer: TranscriptEntry?) {
+        guard let last = transcript.last else { return (nil, nil) }
+        guard last.speaker == .assistant else { return (last, nil) }
+        let previous = transcript.dropLast().last
+        return (previous?.speaker == .user ? previous : nil, last)
+    }
+
     /// The tier in use, or about to be.
     var tier: HardwareTier? {
         switch phase {

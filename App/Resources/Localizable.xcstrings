@@ -16,17 +16,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Il manque %@ d'espace libre. Libère de la place sur ce Mac, puis réessaie."
+            "value": "Il manque %@ d’espace libre. Libère de la place sur ce Mac, puis réessaie."
           }
         }
       }
     },
-    "%@/s": {
+    "%@ of %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@/s"
+            "value": "%1$@ sur %2$@"
           }
         }
       }
@@ -61,16 +61,6 @@
         }
       }
     },
-    "Answering": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Je réponds"
-          }
-        }
-      }
-    },
     "Audio": {
       "localizations": {
         "fr": {
@@ -96,7 +86,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatique : %@"
+            "value": "Automatique : %@"
           }
         }
       }
@@ -126,7 +116,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Changer de palier ?"
+            "value": "Changer de palier ?"
           }
         }
       }
@@ -137,16 +127,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Puce"
-          }
-        }
-      }
-    },
-    "Chip and memory": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Puce et mémoire"
           }
         }
       }
@@ -166,7 +146,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
+            "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
           }
         }
       }
@@ -176,7 +156,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confort (32 à 36 Go)"
+            "value": "Confort (32 à 36 Go)"
           }
         }
       }
@@ -196,7 +176,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connexion interrompue. Le téléchargement reprendra tout seul dès qu'Internet revient."
+            "value": "Connexion interrompue. Le téléchargement reprendra tout seul dès qu’Internet revient."
           }
         }
       }
@@ -207,6 +187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Conversation"
+          }
+        }
+      }
+    },
+    "Conversation history": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Historique de la conversation"
           }
         }
       }
@@ -246,7 +236,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Supprimer les modèles ?"
+            "value": "Supprimer les modèles ?"
           }
         }
       }
@@ -281,12 +271,32 @@
         }
       }
     },
-    "Downloading: %@": {
+    "Downloaded": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "En cours : %@"
+            "value": "Téléchargé"
+          }
+        }
+      }
+    },
+    "Downloading": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement"
+          }
+        }
+      }
+    },
+    "Downloading… %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement… %@"
           }
         }
       }
@@ -296,7 +306,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'annulation d'écho empêche l'assistant de s'entendre lui-même. Les autres apps sont un peu baissées pendant la conversation."
+            "value": "L’annulation d’écho empêche l’assistant de s’entendre lui-même. Les autres apps sont un peu baissées pendant la conversation."
           }
         }
       }
@@ -307,6 +317,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "anglais"
+          }
+        }
+      }
+    },
+    "Finish": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminer"
           }
         }
       }
@@ -361,32 +381,32 @@
         }
       }
     },
+    "Hide Measurements": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Masquer les mesures"
+          }
+        }
+      }
+    },
     "History size": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Taille de l'historique"
+            "value": "Taille de l’historique"
           }
         }
       }
     },
-    "Hold Space to interrupt me, or press Escape.": {
+    "Hold": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maintiens Espace pour me couper la parole, ou appuie sur Échap."
-          }
-        }
-      }
-    },
-    "Hold Space to talk": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maintiens Espace pour parler"
+            "value": "Maintiens"
           }
         }
       }
@@ -396,7 +416,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maintiens la barre d'espace (ou le bouton en bas de la fenêtre) pendant que tu parles. Utile dans un lieu bruyant."
+            "value": "Maintiens la barre d’espace (ou le bouton en bas de la fenêtre) pendant que tu parles. Utile dans un lieu bruyant."
           }
         }
       }
@@ -406,47 +426,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maintiens la barre d'espace pour parler"
+            "value": "Maintiens la barre d’espace pour parler"
           }
         }
       }
     },
-    "Hold to talk": {
+    "Idle": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maintiens pour parler"
-          }
-        }
-      }
-    },
-    "I hear you…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Je t'entends…"
-          }
-        }
-      }
-    },
-    "I'll answer as soon as you're done.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Je réponds dès que tu as fini."
-          }
-        }
-      }
-    },
-    "I'm listening": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Je t'écoute"
+            "value": "Au repos"
           }
         }
       }
@@ -456,17 +446,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Si le problème revient, un modèle est peut-être abîmé : les supprimer permet de les télécharger à nouveau."
+            "value": "Si le problème revient, un modèle est peut-être abîmé : les supprimer permet de les télécharger à nouveau."
           }
         }
       }
     },
-    "Interrupt me whenever you like, or press Escape.": {
+    "Interrupt": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Coupe-moi la parole quand tu veux, ou appuie sur Échap."
+            "value": "Interrompre"
           }
         }
       }
@@ -507,6 +497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dernier tour"
+          }
+        }
+      }
+    },
+    "Listening": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écoute"
           }
         }
       }
@@ -556,17 +556,27 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maximum (48 Go et plus)"
+            "value": "Maximum (48 Go et plus)"
           }
         }
       }
     },
-    "Measurements": {
+    "Maé is speaking": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mesures"
+            "value": "Maé parle"
+          }
+        }
+      }
+    },
+    "Maé is thinking…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé réfléchit…"
           }
         }
       }
@@ -606,7 +616,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mémoire utilisée par l'app"
+            "value": "Mémoire utilisée par l’app"
           }
         }
       }
@@ -636,7 +646,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Minimum (8 Go)"
+            "value": "Minimum (8 Go)"
           }
         }
       }
@@ -667,6 +677,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Modèle"
+          }
+        }
+      }
+    },
+    "Model download": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement des modèles"
           }
         }
       }
@@ -706,7 +726,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Il n'y a plus assez d'espace libre : il faut %@ et il reste %@. Libère de la place, puis réessaie."
+            "value": "Il n’y a plus assez d’espace libre : il faut %@ et il reste %@. Libère de la place, puis réessaie."
           }
         }
       }
@@ -721,22 +741,42 @@
         }
       }
     },
+    "Off": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé"
+          }
+        }
+      }
+    },
+    "On": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activé"
+          }
+        }
+      }
+    },
+    "One download, then everything works without a connection.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un seul téléchargement : ensuite, tout fonctionne sans connexion."
+          }
+        }
+      }
+    },
     "Open System Settings": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Ouvrir les Réglages Système"
-          }
-        }
-      }
-    },
-    "Or hold the button at the bottom of the window.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ou maintiens le bouton en bas de la fenêtre."
           }
         }
       }
@@ -771,12 +811,22 @@
         }
       }
     },
+    "Performance": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Performances"
+          }
+        }
+      }
+    },
     "Prepared during the silence (speculative start): stages overlap.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Préparé pendant le silence (démarrage anticipé) : les étapes se chevauchent."
+            "value": "Préparé pendant le silence (démarrage anticipé) : les étapes se chevauchent."
           }
         }
       }
@@ -787,26 +837,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuyer pour parler"
-          }
-        }
-      }
-    },
-    "Release to send": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Relâche pour envoyer"
-          }
-        }
-      }
-    },
-    "Release to send.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Relâche pour envoyer."
           }
         }
       }
@@ -861,6 +891,26 @@
         }
       }
     },
+    "Settings…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages…"
+          }
+        }
+      }
+    },
+    "Show Measurements": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher les mesures"
+          }
+        }
+      }
+    },
     "Silence wait": {
       "localizations": {
         "fr": {
@@ -891,12 +941,22 @@
         }
       }
     },
-    "Speak whenever you like.": {
+    "Space": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Parle quand tu veux."
+            "value": "Espace"
+          }
+        }
+      }
+    },
+    "Speak whenever you like": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux"
           }
         }
       }
@@ -926,7 +986,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Standard (16 à 24 Go)"
+            "value": "Standard (16 à 24 Go)"
           }
         }
       }
@@ -941,12 +1001,22 @@
         }
       }
     },
+    "Talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parler"
+          }
+        }
+      }
+    },
     "Talk to the assistant to see measurements.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Parle à l'assistant pour voir les mesures."
+            "value": "Parle à l’assistant pour voir les mesures."
           }
         }
       }
@@ -956,7 +1026,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'assistant fonctionne entièrement sur ce Mac, sans Internet. Il lui faut d'abord ses modèles : un seul téléchargement, et la connexion ne sert plus."
+            "value": "L’assistant fonctionne entièrement sur ce Mac, sans Internet. Il lui faut d’abord ses modèles : un seul téléchargement, et la connexion ne sert plus."
           }
         }
       }
@@ -966,7 +1036,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'assistant s'arrête et ses modèles sont effacés de ce Mac. Pour s'en servir à nouveau, il faudra les télécharger."
+            "value": "L’assistant s’arrête et ses modèles sont effacés de ce Mac. Pour s’en servir à nouveau, il faudra les télécharger."
           }
         }
       }
@@ -976,7 +1046,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'assistant va redémarrer avec %@. S'il n'est pas encore sur ce Mac, il faudra le télécharger (%@)."
+            "value": "L’assistant va redémarrer avec %@. S’il n’est pas encore sur ce Mac, il faudra le télécharger (%@)."
           }
         }
       }
@@ -986,7 +1056,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La conversation s'affichera ici"
+            "value": "La conversation s’affichera ici"
           }
         }
       }
@@ -996,7 +1066,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le moteur n'a pas démarré"
+            "value": "Le moteur n’a pas démarré"
           }
         }
       }
@@ -1026,7 +1096,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le micro ou les haut-parleurs n'ont pas pu être ouverts. Vérifie qu'ils sont branchés, puis réessaie."
+            "value": "Le micro ou les haut-parleurs n’ont pas pu être ouverts. Vérifie qu’ils sont branchés, puis réessaie."
           }
         }
       }
@@ -1036,7 +1106,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le serveur des modèles (Hugging Face) refuse un fichier (erreur %@). Il faudra probablement une mise à jour de l'app."
+            "value": "Le serveur des modèles (Hugging Face) refuse un fichier (erreur %@). Il faudra probablement une mise à jour de l’app."
           }
         }
       }
@@ -1046,7 +1116,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le modèle « %@ », livré avec l'app, est introuvable : l'app est sans doute abîmée. Réinstalle-la depuis son image disque."
+            "value": "Le modèle « %@ », livré avec l’app, est introuvable : l’app est sans doute abîmée. Réinstalle-la depuis son image disque."
           }
         }
       }
@@ -1056,7 +1126,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les modèles sont enregistrés dans %@. Tu peux quitter l'app pendant le téléchargement : il reprendra là où il s'est arrêté."
+            "value": "Les modèles sont enregistrés dans %@. Tu peux quitter l’app pendant le téléchargement : il reprendra là où il s’est arrêté."
           }
         }
       }
@@ -1066,7 +1136,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Impossible d'enregistrer les modèles sur le disque."
+            "value": "Impossible d’enregistrer les modèles sur le disque."
           }
         }
       }
@@ -1076,17 +1146,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le palier décide du modèle de langage. « Automatique » choisit celui qui convient à la mémoire de ce Mac."
+            "value": "Le palier décide du modèle de langage. « Automatique » choisit celui qui convient à la mémoire de ce Mac."
           }
         }
       }
     },
-    "Thinking…": {
+    "Thinking": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Je réfléchis…"
+            "value": "Réflexion"
           }
         }
       }
@@ -1106,7 +1176,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce Mac n'est pas compatible"
+            "value": "Ce Mac n’est pas compatible"
+          }
+        }
+      }
+    },
+    "This conversation": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette conversation"
           }
         }
       }
@@ -1116,7 +1196,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce palier n'a pas pu être testé : les performances sont estimées."
+            "value": "Ce palier n’a pas pu être testé : les performances sont estimées."
           }
         }
       }
@@ -1126,7 +1206,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce palier demande plus de mémoire que ce Mac n'en a : l'assistant risque d'être très lent."
+            "value": "Ce palier demande plus de mémoire que ce Mac n’en a : l’assistant risque d’être très lent."
           }
         }
       }
@@ -1156,7 +1236,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pour t'entendre, l'assistant a besoin du micro. Autorise-le dans Réglages Système › Confidentialité et sécurité › Micro, puis reviens ici. Le son ne quitte jamais ce Mac."
+            "value": "Pour t’entendre, l’assistant a besoin du micro. Autorise-le dans Réglages Système › Confidentialité et sécurité › Micro, puis reviens ici. Le son ne quitte jamais ce Mac."
           }
         }
       }
@@ -1216,7 +1296,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Palier non testé : performances estimées."
+            "value": "Palier non testé : performances estimées."
           }
         }
       }
@@ -1256,7 +1336,17 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avec un casque, il n'y a pas d'écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l'assistant se couperait la parole."
+            "value": "Avec un casque, il n’y a pas d’écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l’assistant se couperait la parole."
+          }
+        }
+      }
+    },
+    "You": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toi"
           }
         }
       }
@@ -1266,17 +1356,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
-          }
-        }
-      }
-    },
-    "about %@": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "environ %@"
+            "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
           }
         }
       }
@@ -1311,22 +1391,22 @@
         }
       }
     },
-    "less than a minute": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "moins d'une minute"
-          }
-        }
-      }
-    },
     "tested": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "testé"
+          }
+        }
+      }
+    },
+    "to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pour parler"
           }
         }
       }
@@ -1346,7 +1426,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "« Mots » = tokens, les morceaux de mots du modèle."
+            "value": "« Mots » = tokens, les morceaux de mots du modèle."
           }
         }
       }

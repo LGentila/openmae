@@ -2,28 +2,16 @@ import Foundation
 import SwiftUI
 import VoiceCore
 
-/// The interface's wording for the engine's states. French is the source language; translations are in
-/// Resources/Localizable.xcstrings.
+/// The interface's wording for the engine's states. The source text is English; the French translation is
+/// in Resources/Localizable.xcstrings.
 enum StateText {
-    static func title(_ state: PipelineState, pushToTalk: Bool) -> LocalizedStringKey {
+    /// What VoiceOver says of the orb.
+    static func accessibilityName(_ state: PipelineState) -> Text {
         switch state {
-        case .listening: pushToTalk ? "Hold Space to talk" : "I'm listening"
-        case .userSpeaking: "I hear you…"
-        case .thinking: "Thinking…"
-        case .speaking: "Answering"
-        }
-    }
-
-    static func hint(_ state: PipelineState, pushToTalk: Bool) -> LocalizedStringKey {
-        switch state {
-        case .listening:
-            pushToTalk ? "Or hold the button at the bottom of the window." : "Speak whenever you like."
-        case .userSpeaking:
-            pushToTalk ? "Release to send." : "I'll answer as soon as you're done."
-        case .thinking, .speaking:
-            pushToTalk
-                ? "Hold Space to interrupt me, or press Escape."
-                : "Interrupt me whenever you like, or press Escape."
+        case .listening: Text("Idle")
+        case .userSpeaking: Text("Listening")
+        case .thinking: Text("Thinking")
+        case .speaking: Text("Maé is speaking")
         }
     }
 
@@ -97,18 +85,9 @@ enum Units {
         return value.formatted(.byteCount(style: .file))
     }
 
-    /// "45 Mo/s".
-    static func speed(_ bytesPerSecond: Double?) -> String? {
-        guard let bytesPerSecond, bytesPerSecond > 0 else { return nil }
-        return String(localized: "\(bytes(Int64(bytesPerSecond)))/s")
-    }
-
-    /// "about 6 min", "less than a minute".
-    static func remaining(_ seconds: Double?) -> String? {
-        guard let seconds, seconds.isFinite else { return nil }
-        if seconds < 60 { return String(localized: "less than a minute") }
-        let minutes = Duration.seconds((seconds / 60).rounded(.up) * 60)
-        return String(localized: "about \(minutes.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))")
+    /// "46 %": a share, rounded down (100 % only when it is complete).
+    static func percent(_ fraction: Double) -> String {
+        ((fraction * 100).rounded(.down) / 100).formatted(.percent.precision(.fractionLength(0)))
     }
 
     static func kilohertz(_ hertz: Double?) -> String {
