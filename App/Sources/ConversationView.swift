@@ -32,6 +32,7 @@ struct ConversationView: View {
 private struct OrbStage: View {
     let model: AssistantModel
     let state: PipelineState
+    @Environment(\.windowIsVisible) private var windowIsVisible
 
     var body: some View {
         Orb(look: OrbLook(state), level: level)
@@ -47,19 +48,22 @@ private struct OrbStage: View {
             .accessibilityAddTraits(.updatesFrequently)
     }
 
-    /// The level of whoever is speaking.
+    /// The level of whoever is speaking. Not read while the window cannot be seen: it changes twenty times a
+    /// second, and each change would redraw the window for nothing.
     private var level: Float {
+        guard windowIsVisible else { return 0 }
         switch state {
-        case .userSpeaking: model.inputLevel
-        case .speaking: model.outputLevel
-        case .listening, .thinking: 0
+        case .userSpeaking: return model.inputLevel
+        case .speaking: return model.outputLevel
+        case .listening, .thinking: return 0
         }
     }
 }
 
 /// The main button. Its label says what it does in each state: talk (push-to-talk), finish, cancel the
 /// answer being prepared, interrupt Maé. Without push-to-talk there is nothing to press while the assistant
-/// listens: the button only appears once Maé thinks or speaks.
+/// listens (except to finish a turn started with the global shortcut): the button only appears once Maé thinks
+/// or speaks.
 private struct ConversationControls: View {
     let model: AssistantModel
     let isLoading: Bool
@@ -97,7 +101,7 @@ private struct ConversationControls: View {
         case .thinking: return .cancel
         case .speaking: return .interrupt
         case .listening, .userSpeaking:
-            guard model.settings.pushToTalk else { return nil }
+            guard model.settings.pushToTalk || model.talkKeyDown else { return nil }
             return .talk(held: model.talkKeyDown || model.state == .userSpeaking)
         }
     }

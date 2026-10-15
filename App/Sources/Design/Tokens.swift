@@ -28,6 +28,7 @@ struct RGBA: Equatable, Sendable {
     }
 
     var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
+    var cgColor: CGColor { CGColor(srgbRed: red, green: green, blue: blue, alpha: alpha) }
 
     func opacity(_ value: Double) -> RGBA {
         RGBA(red: red, green: green, blue: blue, alpha: alpha * value)
@@ -108,6 +109,10 @@ struct StatePalette: Equatable {
     var deep: RGBA
     /// Voice bars inside the white core.
     var bar: RGBA
+    /// Background of the capsule, over a blur (it is never shown at rest: that value is only a fallback).
+    var glass: RGBA
+    /// Status and most recent words on the capsule: darker than `deep`, the glass being more translucent.
+    var deepOnGlass: RGBA
 
     init(_ state: PipelineState) {
         switch state {
@@ -117,24 +122,32 @@ struct StatePalette: Equatable {
             glow = Palette.coralSoft
             deep = Palette.inkMuted
             bar = Palette.ink
+            glass = RGBA(rgba: 0xFBF6_ECE6)
+            deepOnGlass = Palette.inkMuted
         case .userSpeaking:
             surface = RGBA(0xE4F1FB)
             blobs = [Palette.azure, Palette.turquoise, Palette.mint, Palette.sky]
             glow = Palette.azure
             deep = Palette.link
             bar = RGBA(0x1D86F0)
+            glass = RGBA(rgba: 0xE8F4_FCE6)
+            deepOnGlass = RGBA(0x0A4F8E)
         case .thinking:
             surface = RGBA(0xFBF3E0)
             blobs = [Palette.coral, Palette.sun, Palette.turquoise, Palette.azure]
             glow = Palette.sun
             deep = Palette.inkMuted
             bar = Palette.ink
+            glass = RGBA(rgba: 0xFFF6_E2EB)
+            deepOnGlass = RGBA(0x7A5200)
         case .speaking:
             surface = RGBA(0xFFEBDD)
             blobs = [Palette.coral, Palette.sun, Palette.pink, Palette.orange]
             glow = Palette.coral
             deep = RGBA(0xB8381A)
             bar = RGBA(0xFF5A36)
+            glass = RGBA(rgba: 0xFFEC_E0EB)
+            deepOnGlass = RGBA(0xA8300F)
         }
     }
 }
@@ -157,6 +170,7 @@ enum Timing {
     static let color = 0.35  // longer, blue ↔ coral would pass through a purplish grey
     static let word = 0.4
     static let rise = 0.5
+    static let capsule = 0.55  // the capsule comes up
     static let pop = 0.8
     static let surface = 1.0
 }
@@ -168,6 +182,7 @@ enum Easing {
     static let pop = CubicBezier(0.3, 0.1, 0.3, 1)  // the orb's bounce at each change of state
     static let spring = CubicBezier(0.3, 1.35, 0.5, 1)  // orbit radius, slight overshoot
     static let rise = CubicBezier(0.2, 0.8, 0.3, 1)  // transcript words
+    static let capsule = CubicBezier(0.2, 1.3, 0.4, 1)  // the capsule comes up, with a marked bounce
     static let ripple = CubicBezier(0.25, 0.6, 0.35, 1)
 
     static func animation(_ curve: CubicBezier, _ duration: Double) -> Animation {

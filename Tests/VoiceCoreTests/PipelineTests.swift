@@ -227,6 +227,58 @@ struct PipelineTests {
         await waitFor { await log.states.last == .listening }
         #expect(await log.states.last == .listening)
     }
+
+    @Test func talkKeyDecidesTheTurnInHandsFreeMode() async throws {
+        let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)  // hands-free
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await pipeline.setTalkKey(pressed: true)  // the global shortcut
+        await waitFor { await log.states.last == .userSpeaking }
+        #expect(await log.states.last == .userSpeaking)
+        // Speech, then a silence that would end a hands-free turn, then more speech: the key keeps the turn open.
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 30) + "11111")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await stt.calls.isEmpty)
+        #expect(await speaker.played == 0)
+        await pipeline.setTalkKey(pressed: false)
+        await waitFor { await speaker.played >= 1000 }
+        #expect(await speaker.played == 1000)
+        #expect(await stt.calls == [45 * 512])  // everything heard while the key was down, once
+        await waitFor { await log.states.last == .listening }
+        #expect(await log.states.last == .listening)
+    }
+
+    @Test func talkKeyReleasedWithoutSoundGoesBackToRest() async throws {
+        let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await pipeline.setTalkKey(pressed: true)
+        await pipeline.setTalkKey(pressed: false)  // pressed twice at once: no audio came in between
+        await waitFor { await log.states.last == .listening }
+        #expect(await log.states.last == .listening)
+        #expect(await stt.calls.isEmpty)
+    }
+
+    @Test func pushToTalkDropsASentenceHalfHeardHandsFree() async throws {
+        let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "11111111")  // the user starts a sentence…
+        await waitFor { await log.states.last == .userSpeaking }
+        await pipeline.setPushToTalk(true)  // …and the window is closed: only the talk key counts now
+        await waitFor { await log.states.last == .listening }
+        #expect(await log.states.last == .listening)
+        await push(pipeline, String(repeating: "0", count: 30) + "1111111111" + String(repeating: "0", count: 30))
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(await stt.calls.isEmpty)
+        #expect(await speaker.played == 0)
+    }
 }
 
 actor EventRecorder {

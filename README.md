@@ -16,6 +16,11 @@ in airplane mode.
   answer goes to the voice sentence by sentence.
 - **Interrupt at any time.** Speak over the assistant and it stops within about a quarter of a second. The
   Interrupt button, a click on the orb or the Escape key work too.
+- **From any app.** Press ⌥ Space to talk, and again to finish: a small capsule at the bottom of the screen
+  shows that Maé listens, thinks or answers, without bringing the window forward (Escape cancels or
+  interrupts). Closing the window leaves OpenMaé in the menu bar, where its icon shows when Maé is active and
+  has Quit; with the window closed, Maé only listens after ⌥ Space. While OpenMaé runs, ⌥ Space no longer
+  types a non-breaking space in other apps.
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.

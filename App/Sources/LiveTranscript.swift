@@ -133,9 +133,7 @@ private struct SpeakerChip: View {
         .background(Palette.white, in: Capsule())
         .hairline(Capsule())
         .animation(.easeOut(duration: Timing.ui), value: state)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { dimmed = true }
-        }
+        .repeatsWhileVisible($dimmed, .easeInOut(duration: 0.7))
     }
 
     private var title: Text {
@@ -159,7 +157,7 @@ private struct InvitationView: View {
             case .holdSpace:
                 HStack(spacing: 8) {
                     Text("Hold")
-                    KeyCap(title: "Space")
+                    KeyCap(title: Text("Space"))
                     Text("to talk")
                 }
                 .accessibilityElement(children: .combine)

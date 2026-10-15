@@ -158,8 +158,17 @@ public actor VoicePipeline {
         emit.yield(.state(.listening))
     }
 
-    public func setPushToTalk(_ enabled: Bool) {
+    public func setPushToTalk(_ enabled: Bool) async {
+        guard enabled != config.pushToTalk else { return }
         config.pushToTalk = enabled
+        // What the turn detector was following belongs to the other mode: a sentence half-heard is dropped.
+        turnDetector.reset()
+        guard !talkKeyPressed else { return }
+        if let turn, !turn.committed { await cancelTurn(stopAudio: false) }
+        guard turn == nil else { return }
+        utterance = []
+        utteranceOpen = false
+        if state == .userSpeaking { setState(.listening) }
     }
 
     /// Stops for good, before the models are released (another tier chosen, or the models deleted).
@@ -211,7 +220,7 @@ public actor VoicePipeline {
         let preRollMax = Int(config.preRollMs / 1000 * EngineAudio.inputSampleRate)
         if preRoll.count > preRollMax { preRoll.removeFirst(preRoll.count - preRollMax) }
 
-        if config.pushToTalk {
+        if config.pushToTalk || talkKeyPressed {
             if talkKeyPressed { utterance += chunk }
             return
         }
@@ -296,19 +305,28 @@ public actor VoicePipeline {
         }
     }
 
-    // MARK: - Push-to-talk
+    // MARK: - Talk key
 
+    /// The talk key: the space bar or the button in push-to-talk mode, the global shortcut in either mode. While
+    /// it is down, everything the microphone hears is the user's turn, which ends when it is released; in
+    /// hands-free mode the key, not the silence, decides that one turn.
     public func setTalkKey(pressed: Bool) async {
-        guard config.pushToTalk, pressed != talkKeyPressed else { return }
+        guard pressed != talkKeyPressed else { return }
         talkKeyPressed = pressed
         if pressed {
             if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
+            turnDetector.reset()
             utterance = preRoll
             utteranceOpen = true
             setState(.userSpeaking)
         } else {
             lastSpeechEnd = clock.now
             commitTurn()
+            guard turn == nil else { return }
+            // Nothing was heard: back to rest.
+            utterance = []
+            utteranceOpen = false
+            setState(.listening)
         }
     }
 

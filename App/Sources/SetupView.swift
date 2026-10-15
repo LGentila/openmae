@@ -162,10 +162,7 @@ struct BouncingArrow: View {
                 .offset(y: (down ? 3 : -2.5) * size / 24)
             IconView(icon: .downloadBase, size: size)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { down = true }
-        }
+        .repeatsWhileVisible($down, .easeInOut(duration: 0.9), enabled: !reduceMotion)
     }
 }
 

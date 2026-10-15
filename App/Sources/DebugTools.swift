@@ -14,7 +14,8 @@ import VoiceCore
 ///
 /// A second notification, "OpenMaeDebugCapture", whose object is a file path, saves a picture of the window
 /// there (PNG), title bar included. A third, "OpenMaeDebugClick", whose object is "x,y" (points from the
-/// window's top-left corner), clicks there.
+/// window's top-left corner), clicks there. The shortcuts, the capsule and the menu bar icon have their own
+/// (DesktopPresence.swift).
 enum DebugCommands {
     static let name = Notification.Name("OpenMaeDebugCommand")
     static let capture = Notification.Name("OpenMaeDebugCapture")
@@ -30,7 +31,7 @@ enum DebugCommands {
         DistributedNotificationCenter.default().addObserver(forName: capture, object: nil, queue: .main) { note in
             guard let path = note.object as? String else { return }
             MainActor.assumeIsolated {
-                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
                       let frame = window.contentView?.superview
                 else { return }
                 Snapshots.write(frame, to: URL(fileURLWithPath: path))
@@ -40,7 +41,7 @@ enum DebugCommands {
             let numbers = (note.object as? String)?.split(separator: ",").compactMap { Double($0) } ?? []
             guard numbers.count == 2 else { return }
             MainActor.assumeIsolated {
-                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
+                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return }
                 let point = NSPoint(x: numbers[0], y: window.frame.height - numbers[1])
                 let target = window.contentView?.superview?.hitTest(point)
                 FileHandle.standardError.write(Data("click \(point) → \(target.map { String(describing: type(of: $0)) } ?? "nothing")\n".utf8))
@@ -139,6 +140,39 @@ enum Snapshots {
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
+        await renderPresence(to: folder)
+    }
+
+    /// The capsule over a pretend desktop, as in the design's Overlay screen (at rest: no capsule, the icon's
+    /// outline), and the menu bar icon in its four states on a dark and a light bar.
+    @MainActor
+    private static func renderPresence(to folder: URL) async {
+        let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
+        let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0)]
+        let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
+        let speaking: [AssistantEvent] = thinking
+            + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
+        let scenes: [(name: String, events: [AssistantEvent], state: PipelineState?)] = [
+            ("overlay-0-rest", ready, nil),
+            ("overlay-1-listening", heard, .userSpeaking),
+            ("overlay-2-thinking", thinking, .thinking),
+            ("overlay-3-speaking", speaking, .speaking),
+        ]
+        for scene in scenes {
+            let model = await scriptedModel(scene.events)
+            let capsule = CapsuleState()
+            if let state = scene.state {
+                capsule.state = state
+                capsule.isShown = true
+                capsule.isPresented = true
+            }
+            let view = PretendDesktop(model: model, capsule: capsule)
+                .environment(\.stillFrame, 1.7)
+                .preferredColorScheme(.light)
+            await save(view, size: CGSize(width: 1280, height: 720), to: folder.appending(path: scene.name + ".png"))
+        }
+        await save(MenuBarIconSheet().preferredColorScheme(.light), size: CGSize(width: 640, height: 300),
+                   to: folder.appending(path: "menubar-icons.png"))
     }
 
     @MainActor
@@ -167,6 +201,151 @@ enum Snapshots {
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+    }
+
+    /// A window as the screen shows it, blur included, with what lies under it (macOS leaves the other apps out
+    /// without the Screen Recording permission). CGWindowListCreateImage is obsolete in the macOS 15 SDK, whose
+    /// replacement (ScreenCaptureKit) asks for that permission, but it still answers for the app's own windows:
+    /// good enough for a test picture. Falls back to drawing the window's content.
+    /// `alone`: the window by itself, without what lies under it.
+    @MainActor
+    static func writeOnScreen(_ window: NSWindow, alone: Bool = false, to url: URL) {
+        typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        let top = NSScreen.screens.first?.frame.maxY ?? 0
+        let frame = window.frame
+        let rect = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+        // Options: 1 = everything on screen in `rect`; 8 = this window only (with "ignore framing", 1).
+        let (options, windowID, imageOptions): (UInt32, UInt32?, UInt32) = alone
+            ? (8, UInt32(exactly: window.windowNumber), 1) : (1, 0, 0)
+        DebugLog.log("picture of window \(window.windowNumber) \(window.frame)")
+        guard let windowID, let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage"),
+              let image = unsafeBitCast(symbol, to: CreateImage.self)(alone ? .null : rect, options, windowID,
+                                                                       imageOptions)?.takeRetainedValue()
+        else {
+            if let view = window.contentView { write(view, to: url) }
+            return
+        }
+        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
+    }
+
+    /// The menu bar icon as it is now, four times its size, on a dark bar and on a light one (the outline at rest
+    /// has the colour macOS gives it for the real bar). The bars are drawn still.
+    @MainActor
+    static func writeMenuBarButton(_ button: NSView, to url: URL) {
+        let scale: CGFloat = 4
+        let width = Int(button.bounds.width * scale), height = Int(button.bounds.height * scale)
+        guard let layer = button.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: 2 * width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return }
+        for (i, bar) in [RGBA(0x1B363F), RGBA(0xE4E0D6)].enumerated() {
+            context.saveGState()
+            context.translateBy(x: CGFloat(i * width), y: 0)
+            context.setFillColor(bar.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            context.scaleBy(x: scale, y: scale)
+            layer.render(in: context)
+            context.restoreGState()
+        }
+        guard let image = context.makeImage() else { return }
+        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
+    }
+}
+
+/// A pretend desktop, as in the design's Overlay screen: wallpaper, a window, the menu bar with OpenMaé's icon,
+/// and the capsule when it is presented. Its colours only serve to see the glass; they are not the design's.
+private struct PretendDesktop: View {
+    let model: AssistantModel
+    let capsule: CapsuleState
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            RGBA(0x1B363F).color
+            Circle().fill(RGBA(0x244B56)).frame(width: 820, height: 820).offset(x: -260, y: 360)
+            Circle().fill(RGBA(0x2A5663)).frame(width: 760, height: 760).offset(x: 880, y: -300)
+            VStack(alignment: .leading, spacing: 14) {
+                RoundedRectangle(cornerRadius: 10).fill(RGBA(0xDAD5CA)).frame(width: 260, height: 20)
+                ForEach([1, 0.92, 0.96], id: \.self) { width in
+                    RoundedRectangle(cornerRadius: 6).fill(RGBA(0xE6E2D9)).frame(width: 708 * width, height: 12)
+                }
+                RoundedRectangle(cornerRadius: 12).fill(RGBA(0xEAE5DB)).frame(width: 708, height: 120)
+            }
+            .padding(EdgeInsets(top: 62, leading: 56, bottom: 0, trailing: 56))
+            .frame(width: 820, height: 470, alignment: .topLeading)
+            .background(RGBA(0xF7F4EE), in: RoundedRectangle(cornerRadius: 16))
+            .offset(x: 230, y: 92)
+            HStack {
+                Spacer()
+                menuBarIcon
+                    .padding(.trailing, 200)
+            }
+            .frame(width: 1280, height: 32)
+            .background(RGBA(red: 14 / 255, green: 26 / 255, blue: 30 / 255, alpha: 0.5).color)
+            if capsule.isPresented {
+                CapsuleView(model: model, capsule: capsule)
+                    .position(x: 640, y: 574)
+            }
+        }
+        .frame(width: 1280, height: 720)
+        .clipped()
+    }
+
+    @ViewBuilder private var menuBarIcon: some View {
+        if capsule.isPresented {
+            Image(nsImage: ActiveMenuBarIcon.picture(color: StatePalette(capsule.state).glow, side: MenuBarIcon.side,
+                                                     time: 1.7))
+        } else {
+            Image(nsImage: MenuBarIcon.restImage)
+                .renderingMode(.template)
+                .foregroundStyle(Palette.white.opacity(0.92))
+        }
+    }
+}
+
+/// The menu bar icon's four states at 48 points, on a dark and on a light bar, as in the design's MenuBarIcon
+/// screen.
+private struct MenuBarIconSheet: View {
+    private let states: [PipelineState?] = [nil, .userSpeaking, .thinking, .speaking]
+
+    var body: some View {
+        VStack(spacing: 12) {
+            row(dark: true)
+            row(dark: false)
+            HStack(spacing: 0) {
+                ForEach(states, id: \.self) { state in
+                    StateText.accessibilityName(state ?? .listening)
+                        .textStyle(.chip)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .foregroundStyle(Palette.inkMuted)
+        }
+        .padding(28)
+        .frame(width: 640, height: 300)
+        .background(RGBA(0xF4F1EA).color)
+    }
+
+    private func row(dark: Bool) -> some View {
+        HStack(spacing: 0) {
+            ForEach(states, id: \.self) { state in
+                icon(state, dark: dark)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 96)
+        .background(dark ? RGBA(0x1B363F) : RGBA(0xE4E0D6), in: RoundedRectangle(cornerRadius: Radius.section))
+    }
+
+    @ViewBuilder private func icon(_ state: PipelineState?, dark: Bool) -> some View {
+        if let state {
+            Image(nsImage: ActiveMenuBarIcon.picture(color: StatePalette(state).glow, side: 48, time: 1.7))
+        } else {
+            Image(nsImage: MenuBarIcon.restImage)
+                .renderingMode(.template)
+                .resizable()
+                .foregroundStyle(dark ? Palette.white.opacity(0.92) : Palette.ink.opacity(0.9))
+                .frame(width: 48, height: 48)
+        }
     }
 }
 
@@ -249,6 +428,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     }
 
     func send(_ command: AssistantCommand) {
+        DebugLog.log("demo engine: \(command)")
         switch command {
         case .start:
             play(Demo.startsWithSetup ? setupScript : conversationScript)
@@ -262,8 +442,33 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
                 sink.yield(.state(.listening))
                 await conversationScript(sink)
             }
+        case .talkKey(let pressed):
+            play(pressed ? talkScript : answerScript)
         default:
             break
+        }
+    }
+
+    /// The talk key is down (the global shortcut, or push-to-talk): the user speaks until it goes up.
+    private var talkScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
+        { sink in
+            sink.yield(.state(.userSpeaking))
+            _ = await Self.voice(sink, seconds: 120, input: true)
+        }
+    }
+
+    /// The talk key went up: Maé thinks, answers, then the conversation goes on as before.
+    private var answerScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
+        { [conversationScript] sink in
+            sink.yield(.levels(input: 0, output: 0))
+            sink.yield(.userTranscript(Demo.question, .french))
+            sink.yield(.state(.thinking))
+            guard await Self.wait(2) else { return }
+            Demo.answer.forEach { sink.yield(.assistantPiece($0)) }
+            sink.yield(.state(.speaking))
+            guard await Self.voice(sink, seconds: 8.8, input: false) else { return }
+            sink.yield(.state(.listening))
+            await conversationScript(sink)
         }
     }
 

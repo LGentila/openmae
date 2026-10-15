@@ -11,6 +11,26 @@
         }
       }
     },
+    "%@ (active)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (actif)"
+          }
+        }
+      }
+    },
+    "%@ (idle)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (au repos)"
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -431,6 +451,26 @@
         }
       }
     },
+    "I'm listening…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je t’écoute…"
+          }
+        }
+      }
+    },
+    "I'm thinking…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je réfléchis…"
+          }
+        }
+      }
+    },
     "Idle": {
       "localizations": {
         "fr": {
@@ -557,6 +597,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maximum (48 Go et plus)"
+          }
+        }
+      }
+    },
+    "Maé is answering": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé répond"
           }
         }
       }
@@ -841,6 +891,16 @@
         }
       }
     },
+    "Quit %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitter %@"
+          }
+        }
+      }
+    },
     "Resume": {
       "localizations": {
         "fr": {
@@ -897,6 +957,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réglages…"
+          }
+        }
+      }
+    },
+    "Show %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher %@"
           }
         }
       }
@@ -1427,6 +1497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "« Mots » = tokens, les morceaux de mots du modèle."
+          }
+        }
+      }
+    },
+    "⌥ Space": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌥ Espace"
           }
         }
       }

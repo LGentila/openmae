@@ -100,6 +100,7 @@ extension TextStyle {
     static let wordmarkStrong = TextStyle(.display, 18, weight: 700, lineHeight: 22, letterSpacing: -0.01)
     static let screenTitle = TextStyle(.display, 34, weight: 700, lineHeight: 34 * 1.1, letterSpacing: -0.02)
     static let transcript = TextStyle(.display, 21, weight: 500, lineHeight: 21 * 1.3, letterSpacing: -0.01)
+    static let capsuleTranscript = TextStyle(.display, 16.5, weight: 500, lineHeight: 22, letterSpacing: -0.01)
     static let percentage = TextStyle(.display, 26, weight: 700, lineHeight: 26, letterSpacing: -0.02,
                                       tabular: true)
     static let percentSign = TextStyle(.display, 14, weight: 600, lineHeight: 14)
@@ -121,6 +122,10 @@ extension TextStyle {
     static let previousLine = TextStyle(.sans, 14, weight: 400, lineHeight: 20)
     static let prompt = TextStyle(.sans, 16, weight: 400, lineHeight: 24)
     static let key = TextStyle(.sans, 14, weight: 600, lineHeight: 20)
+    // The capsule: its status, the action on the right and its key (13 points there).
+    static let capsuleStatus = TextStyle(.sans, 12.5, weight: 700, lineHeight: 16, letterSpacing: 0.01)
+    static let capsuleAction = TextStyle(.sans, 13, weight: 500, lineHeight: 16)
+    static let capsuleKey = TextStyle(.sans, 13, weight: 600, lineHeight: 16)
     static let control = TextStyle(.sans, 14, weight: 600, lineHeight: 20)  // pop-up value, chosen segment
     static let controlOff = TextStyle(.sans, 14, weight: 500, lineHeight: 20)  // other segments
     static let section = TextStyle(.sans, 12.5, weight: 700, lineHeight: 16, letterSpacing: 0.02)

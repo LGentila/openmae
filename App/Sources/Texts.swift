@@ -7,11 +7,16 @@ import VoiceCore
 enum StateText {
     /// What VoiceOver says of the orb.
     static func accessibilityName(_ state: PipelineState) -> Text {
+        Text(spokenName(state))
+    }
+
+    /// The same, as VoiceOver announces it when the capsule changes.
+    static func spokenName(_ state: PipelineState) -> String {
         switch state {
-        case .listening: Text("Idle")
-        case .userSpeaking: Text("Listening")
-        case .thinking: Text("Thinking")
-        case .speaking: Text("Maé is speaking")
+        case .listening: String(localized: "Idle")
+        case .userSpeaking: String(localized: "Listening")
+        case .thinking: String(localized: "Thinking")
+        case .speaking: String(localized: "Maé is speaking")
         }
     }
 

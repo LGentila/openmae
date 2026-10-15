@@ -264,19 +264,22 @@ struct MenuFieldLabel: View {
 
 /// A keyboard key, as in "Hold [Space] to talk".
 struct KeyCap: View {
-    let title: LocalizedStringKey
+    let title: Text
+    /// On the capsule's glass: 13 points, on white at 90 %.
+    var onGlass = false
 
     var body: some View {
-        Text(title)
-            .textStyle(.key)
+        title
+            .textStyle(onGlass ? .capsuleKey : .key)
             .foregroundStyle(Palette.ink)
             .fixedSize()
             .padding(.horizontal, 9)
             .padding(.vertical, 3)
-            .background(Palette.white, in: RoundedRectangle(cornerRadius: Radius.key, style: .continuous))
+            .background(Palette.white.opacity(onGlass ? 0.9 : 1),
+                        in: RoundedRectangle(cornerRadius: Radius.key, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Radius.key, style: .continuous)
                 .strokeBorder(Palette.lineKey, lineWidth: 1))
-            .shadow(color: Palette.ink.opacity(0.08).color, radius: 0, y: 1)
+            .shadow(color: Palette.ink.opacity(onGlass ? 0.1 : 0.08).color, radius: 0, y: 1)
     }
 }
 

@@ -226,7 +226,8 @@ private struct PanelOpening: ViewModifier {
 
 // MARK: - Keyboard
 
-/// Space bar = push-to-talk (when enabled), Escape = close a panel, or silence the assistant.
+/// Space bar = push-to-talk (when enabled, or to finish a turn started with the global shortcut), Escape = close a
+/// panel, or silence the assistant.
 struct KeyboardControls: ViewModifier {
     let model: AssistantModel
     let window: WindowState
@@ -256,7 +257,7 @@ struct KeyboardControls: ViewModifier {
         }
         guard model.isReady else { return false }
         switch event.keyCode {
-        case 49 where model.settings.pushToTalk:  // space
+        case 49 where model.settings.pushToTalk || model.talkKeyDown:  // space
             if event.type == .keyDown, !event.isARepeat { model.setTalkKey(true) }
             if event.type == .keyUp { model.setTalkKey(false) }
             return true

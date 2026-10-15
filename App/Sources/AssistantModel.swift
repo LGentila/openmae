@@ -28,7 +28,13 @@ final class AssistantModel {
         case problem(AssistantProblem)
     }
 
-    private(set) var phase = Phase.loading(nil)
+    private(set) var phase = Phase.loading(nil) {
+        didSet {
+            guard phase != .ready else { return }
+            talkKeyDown = false
+            isShortcutExchange = false
+        }
+    }
     /// The download in progress, or where it stopped (pause, failure); nil before it starts.
     private(set) var download: DownloadProgress?
     private(set) var isDownloading = false
@@ -48,15 +54,34 @@ final class AssistantModel {
     private(set) var inputLevel: Float = 0
     private(set) var outputLevel: Float = 0
     private(set) var lastWarning: String?
+    /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
+    /// pressed once (and not yet a second time).
     private(set) var talkKeyDown = false
+    /// The exchange in progress was started with the global shortcut: the capsule follows it to its end.
+    private(set) var isShortcutExchange = false
 
     var settings: AssistantSettings {
         didSet {
             guard settings != oldValue else { return }
             Self.save(settings)
-            if !settings.pushToTalk { talkKeyDown = false }
-            connection.send(.updateSettings(settings))
+            connection.send(.updateSettings(engineSettings))
         }
+    }
+
+    /// The conversation window is open. Once it is closed, OpenMaé stays in the menu bar and only listens after
+    /// the global shortcut, even in hands-free mode.
+    var isWindowOpen = true {
+        didSet {
+            guard isWindowOpen != oldValue else { return }
+            connection.send(.updateSettings(engineSettings))
+        }
+    }
+
+    /// The settings as the engine gets them: with the window closed, push-to-talk.
+    private var engineSettings: AssistantSettings {
+        var engine = settings
+        if !isWindowOpen { engine.pushToTalk = true }
+        return engine
     }
 
     var isReady: Bool { phase == .ready }
@@ -108,6 +133,7 @@ final class AssistantModel {
         case .deleteUnusedModels: deleteUnusedModels()
         case .updateSettings(let settings): self.settings = settings
         case .newConversation: newConversation()
+        case .talkKey(let pressed): setTalkKey(pressed)
         default: connection.send(command)
         }
     }
@@ -118,13 +144,20 @@ final class AssistantModel {
     func start() {
         guard phase != .ready else { return }
         phase = .loading(nil)
-        connection.send(.start(settings))
+        connection.send(.start(engineSettings))
     }
 
     func setTalkKey(_ down: Bool) {
-        guard settings.pushToTalk, isReady, down != talkKeyDown else { return }
+        guard isReady, down != talkKeyDown else { return }
         talkKeyDown = down
         connection.send(.talkKey(pressed: down))
+    }
+
+    /// The global shortcut: a first press starts the user's turn (and silences Maé), a second one ends it.
+    func toggleTalk() {
+        guard isReady else { return }
+        if !talkKeyDown { isShortcutExchange = true }
+        setTalkKey(!talkKeyDown)
     }
 
     func stopSpeaking() {
@@ -197,6 +230,7 @@ final class AssistantModel {
         case .state(let state):
             self.state = state
             updateTranscript(for: state)
+            if state == .listening, !talkKeyDown { isShortcutExchange = false }
         case .userTranscript(let text, let language):
             setUserText(text, language: language)
         case .assistantPiece(let piece):
