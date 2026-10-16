@@ -174,7 +174,7 @@ public actor AssistantHost: AssistantConnection {
         // Sound first: a microphone or speaker problem shows up at once, not after a minute of loading.
         let audio = SystemAudio()
         do {
-            route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
+            route = try await startReliably(audio)
         } catch {
             fail(.audioDevice("\(error)"))
             return
@@ -184,7 +184,7 @@ public actor AssistantHost: AssistantConnection {
         }
         self.audio = audio
         pipelineState = .listening
-        muteMicrophoneIfUnused()
+        audio.setOtherApps(.normal)
 
         let model: MLXChatModel
         let pipeline: VoicePipeline
@@ -201,7 +201,7 @@ public actor AssistantHost: AssistantConnection {
             try await synthesizer.preload([.french, .english])
             if synthesizer.outputSampleRate != playbackSampleRate {
                 playbackSampleRate = synthesizer.outputSampleRate
-                route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
+                route = try await startReliably(audio)
             }
 
             var config = PipelineConfig()
@@ -456,7 +456,6 @@ public actor AssistantHost: AssistantConnection {
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk {
             await pipeline.setPushToTalk(new.pushToTalk)
-            muteMicrophoneIfUnused()
         }
         if new.audioMode != old.audioMode { await restartAudio() }
         if new.actionsEnabled != old.actionsEnabled {
@@ -596,7 +595,7 @@ public actor AssistantHost: AssistantConnection {
         guard remote == nil, let pipeline, let audio else { return }
         await pipeline.interrupt()
         do {
-            route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
+            route = try await startReliably(audio)
         } catch {
             emit.yield(.problem(.audioDevice("\(error)")))
             return
@@ -605,10 +604,30 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
     }
 
-    /// At rest in push-to-talk nothing the microphone hears is used: muted, so that the voices it hears do
-    /// not turn the other apps down (see `SystemAudio.setMicrophoneMuted`).
-    private func muteMicrophoneIfUnused() {
-        audio?.setMicrophoneMuted(settings.pushToTalk && pipelineState == .listening)
+    /// Other apps are silent while the user speaks (hands-free: from voice detection; push-to-talk: while the key
+    /// or button is held), lower while Maé prepares and says the answer, and left alone at rest.
+    private func adjustOtherApps() {
+        switch pipelineState {
+        case .listening: audio?.setOtherApps(.normal)
+        case .userSpeaking: audio?.setOtherApps(.silent)
+        case .thinking, .speaking: audio?.setOtherApps(.lowered)
+        }
+    }
+
+    /// (Re)starts the Mac's microphone and speakers, and checks that the microphone really hears: a new engine made
+    /// too soon after the previous one sometimes stays deaf. It is then rebuilt, a little later each time.
+    private func startReliably(_ audio: SystemAudio) async throws -> SystemAudio.Route {
+        audio.stop()
+        for attempt in 1...4 {
+            // Gives the previous voice-processing device time to go away.
+            try? await Task.sleep(for: .milliseconds(attempt == 1 ? 300 : 700 * attempt))
+            let route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
+            if await audio.waitForMicrophone(timeout: .milliseconds(1500)) { return route }
+            DebugLog.log("audio: the microphone stays deaf (attempt \(attempt)), restarting it")
+            audio.stop()
+        }
+        // Still nothing: maybe a truly silent microphone. Keep the last engine rather than none.
+        return try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
     }
 
     /// A device was plugged or unplugged: the system stopped the audio engine.
@@ -646,7 +665,7 @@ public actor AssistantHost: AssistantConnection {
         switch event {
         case .state(let state):
             pipelineState = state
-            muteMicrophoneIfUnused()
+            adjustOtherApps()
             emit.yield(.state(state))
         case .userTranscript(let text, let language):
             DebugLog.log("user [\(language.rawValue)]: \(text)")

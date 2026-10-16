@@ -6,7 +6,8 @@ import VoiceCore
 /// The Mac's microphone and speakers, through ONE `AVAudioEngine`: Apple's voice processing (echo
 /// cancellation) must know what the speakers play to remove it from what the microphone hears.
 ///
-/// - Speakers mode: voice processing on (echo cancellation, noise reduction, automatic gain).
+/// - Speakers mode: voice processing on (echo cancellation, noise reduction, automatic gain). Other apps keep their
+///   level at rest; `setOtherApps` silences them while the user speaks and lowers them while Maé answers.
 /// - Headphones mode: raw microphone, nothing to cancel, other apps are not turned down.
 ///
 /// Microphone audio comes out of `microphone` in the engine's format (16 kHz mono); the assistant's
@@ -70,10 +71,12 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
     /// Times the speakers ran out of audio in the middle of an answer.
     public var underruns: Int { lock.withLock { _underruns } }
     private var _underruns = 0
-    /// Voice processing is on (speakers mode): it is what turns other apps down.
-    private var voiceProcessing = false
-    /// See `setMicrophoneMuted`.
-    private var microphoneMuted = false
+    /// Speakers mode: the devices whose other apps `setOtherApps` turns down (the speakers, and voice processing's
+    /// own device). Empty otherwise.
+    private var duckedDevices: [AudioObjectID] = []
+    private var otherAppsLevel = OtherAppsLevel.normal
+    /// Microphone buffers that were not pure silence, since the engine started (see `waitForMicrophone`).
+    private var heardBuffers = 0
 
     public init() {
         (microphone, microphoneSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(500))
@@ -102,12 +105,14 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
             // Apple's voice-processing unit.
             try input.setVoiceProcessingEnabled(true)
             input.isVoiceProcessingAGCEnabled = true
-            // By default voice processing turns other apps down a lot (like a FaceTime call). Here: hardly at
-            // all, and further only while it hears a voice, the user's or the assistant's (see
-            // `setMicrophoneMuted`). It reads this once, when the engine starts.
+            // By default voice processing turns other apps down a lot (like a FaceTime call). Here: as little as it
+            // can, and steadily (its advanced ducking would follow any voice the microphone hears: the singing in
+            // the music, people in the room). `OtherAppsSound` then sets their level itself, at once.
             input.voiceProcessingOtherAudioDuckingConfiguration = .init(
-                enableAdvancedDucking: true, duckingLevel: .min)
-            input.isVoiceProcessingInputMuted = lock.withLock { microphoneMuted }
+                enableAdvancedDucking: false, duckingLevel: .min)
+            if let speakers = Self.defaultDevice(input: false) {
+                OtherAppsSound.set(lock.withLock { otherAppsLevel }, on: [speakers], ramp: 0.05)
+            }
         }
 
         let player = AVAudioPlayerNode()
@@ -142,6 +147,7 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
                          format: tapFormat)
         { [weak self] buffer, _ in
             guard let self, let samples = resampler.convert(buffer) else { return }
+            if samples.contains(where: { $0 != 0 }) { self.lock.withLock { self.heardBuffers += 1 } }
             self.microphoneSink.yield(samples)
             self.reportLevels(input: Self.level(of: samples))
         }
@@ -160,6 +166,16 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
         }
         player.play()
 
+        // Voice processing turned the other apps down again as it started, through a device of its own that gathers
+        // the speakers and the microphone: their level is set once more, after it, on both.
+        var ducked: [AudioObjectID] = []
+        if mode == .speakers, let speakers = Self.defaultDevice(input: false) {
+            ducked = [speakers] + Self.aggregateDevices(containing: speakers)
+            let level = lock.withLock { otherAppsLevel }
+            OtherAppsSound.set(level, on: ducked, ramp: 0.05)
+            DebugLog.log("audio: other apps \(level) on devices \(ducked)")
+        }
+
         let observer = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil)
         { [weak self] _ in
@@ -171,7 +187,8 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
             self.player = player
             self.playbackFormat = playback
             self.observer = observer
-            self.voiceProcessing = mode == .speakers
+            self.duckedDevices = ducked
+            self.heardBuffers = 0
         }
         let route = Route(mode: mode, inputDevice: Self.defaultDeviceName(input: true),
                           outputDevice: Self.defaultDeviceName(input: false),
@@ -182,35 +199,47 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
 
     /// Releases the microphone and the speakers.
     public func stop() {
-        let (engine, observer) = lock.withLock {
+        let (engine, observer, ducked) = lock.withLock {
             defer {
                 self.engine = nil
                 self.player = nil
                 self.observer = nil
+                self.duckedDevices = []
             }
-            return (self.engine, self.observer)
+            return (self.engine, self.observer, self.duckedDevices)
         }
         if let observer { NotificationCenter.default.removeObserver(observer) }
         guard let engine else { return }
+        OtherAppsSound.set(.normal, on: ducked)  // their sound comes back
         dropQueuedAudio()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
 
-    // MARK: - Muting
+    // MARK: - Other apps and the microphone
 
-    /// Mutes the microphone while nothing it hears is used (at rest in push-to-talk): it stays open, but
-    /// hears silence. Voice processing turns other apps down whenever it hears a voice, so the singing in
-    /// the music or people talking in the room would otherwise make the music go down and up again while
-    /// nobody is using the assistant. Speakers mode only: without voice processing nothing is turned down.
-    public func setMicrophoneMuted(_ muted: Bool) {
-        let input: AVAudioInputNode? = lock.withLock {
-            guard muted != microphoneMuted else { return nil }
-            microphoneMuted = muted
-            return voiceProcessing ? engine?.inputNode : nil
+    /// How loud the other apps are (speakers mode only). Kept across restarts of the engine.
+    public func setOtherApps(_ level: OtherAppsLevel) {
+        let devices: [AudioObjectID]? = lock.withLock {
+            guard level != otherAppsLevel else { return nil }
+            otherAppsLevel = level
+            return duckedDevices
         }
-        input?.isVoiceProcessingInputMuted = muted
-        if input != nil { DebugLog.log("audio: microphone \(muted ? "muted" : "open")") }
+        guard let devices, !devices.isEmpty else { return }
+        OtherAppsSound.set(level, on: devices)
+        DebugLog.log("audio: other apps \(level)")
+    }
+
+    /// True once the microphone delivers sound (anything but pure silence) after a start. A new voice-processing
+    /// engine made right after the previous one was released sometimes stays deaf ("Error setting device on
+    /// iounit" in the system log): nothing arrives until it is rebuilt.
+    public func waitForMicrophone(timeout: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if lock.withLock({ heardBuffers > 0 }) { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return lock.withLock { heardBuffers > 0 }
     }
 
     // MARK: - AudioOutput (the assistant's voice)
@@ -313,22 +342,53 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
     }
 
     static func defaultDeviceName(input: Bool) -> String? {
+        guard let device = defaultDevice(input: input) else { return nil }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var name: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = withUnsafeMutablePointer(to: &name) {
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0)
+        }
+        guard status == noErr else { return nil }
+        return name?.takeRetainedValue() as String?
+    }
+
+    static func defaultDevice(input: Bool) -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: input ? kAudioHardwarePropertyDefaultInputDevice : kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var device = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
-            == noErr
+            == noErr, device != kAudioObjectUnknown
         else { return nil }
-        address.mSelector = kAudioObjectPropertyName
-        var name: Unmanaged<CFString>?
-        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = withUnsafeMutablePointer(to: &name) {
-            AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0)
+        return device
+    }
+
+    /// The aggregate devices playing through `device`: voice processing makes one of its own.
+    static func aggregateDevices(containing device: AudioDeviceID) -> [AudioDeviceID] {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr else { return [] }
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &devices) == noErr else { return [] }
+        return devices.prefix(Int(size) / MemoryLayout<AudioDeviceID>.size).filter { candidate in
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioAggregateDevicePropertyActiveSubDeviceList, mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            var size: UInt32 = 0
+            guard candidate != device, AudioObjectHasProperty(candidate, &address),
+                  AudioObjectGetPropertyDataSize(candidate, &address, 0, nil, &size) == noErr, size > 0
+            else { return false }
+            var parts = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+            guard AudioObjectGetPropertyData(candidate, &address, 0, nil, &size, &parts) == noErr else { return false }
+            return parts.contains(device)
         }
-        guard status == noErr else { return nil }
-        return name?.takeRetainedValue() as String?
     }
 }
 
