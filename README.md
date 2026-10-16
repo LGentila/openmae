@@ -29,8 +29,15 @@ in airplane mode.
   runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
   out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
   set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars.
+- **Long tasks handed to Claude Code (optional).** With the actions on, switch on Claude Code in Settings ›
+  Conversation, then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
+  Maé reads the task back, waits for your “oui”, and hands it to the Claude Code installed and signed in on
+  your Mac, which works on its own in a new folder of `~/OpenMae` (or in a folder you allowed). Ask “où en est
+  le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
+  By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
+  What you hand to Claude Code leaves your Mac — that is the point of handing it over.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
-  never goes online again.
+  never goes online again (Claude Code, when you hand it a task, goes online on its own, with your account).
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
@@ -203,6 +210,20 @@ complete call:
 .build/xcode/Build/Products/Release/voice-cli actions-bench
 ```
 
+The same with the tools that hand tasks to Claude Code (requests to hand over, questions about programming
+that must not be, and questions about a task already handed over):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
+```
+
+Hand a task to Claude Code the way the app does, without the app or a language model (it uses the Claude Code
+signed in on this Mac; `--check` only says whether it is installed and signed in):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli delegate --instruction "Crée un fichier bonjour.txt qui dit bonjour."
+```
+
 To move a model to another version (a deliberate change, to be measured again): edit its `revision` in
 `Sources/VoiceCore/ModelCatalog.swift`, then regenerate the list of its files, sizes and SHA-256 from Hugging
 Face:
@@ -223,7 +244,7 @@ Sources/VoiceEngineApple/      the Apple implementations: Silero, Parakeet and P
                                Gemma 4 (MLX), microphone and speakers (AVAudioEngine)
 Sources/VoiceCLI/              voice-cli
 Tests/VoiceCoreTests/          unit tests of the core
-Tests/Fixtures/                requests for the actions benchmark
+Tests/Fixtures/                requests for the actions benchmark, recorded Claude Code reports
 scripts/                     build script, test phrases
 ```
 

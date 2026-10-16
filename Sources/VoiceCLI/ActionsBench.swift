@@ -1,9 +1,9 @@
 // voice-cli actions-bench — does the language model pick the right action, with the right date?
 //
-// Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created).
-// Each request of the corpus (Tests/Fixtures/actions-fr.json) is sent to the model with the same system
-// prompt and tools as in the app, at a fixed reference time, and the call it writes is compared with the
-// expected one.
+// Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created, no task
+// is handed over). Each request of the corpus (Tests/Fixtures/actions-fr.json; Tests/Fixtures/agents-fr.json for
+// handing tasks to Claude Code) is sent to the model with the same system prompt and tools as in the app, at a
+// fixed reference time, and the call it writes is compared with the expected one.
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements]
@@ -15,12 +15,31 @@ import VoiceEngineApple
 private struct Corpus: Decodable {
     var now: String
     var shortcuts: [String]
+    /// The delegation tools are offered too (Claude Code switched on).
+    var agents: Bool?
     var cases: [Case]
+    /// Earlier exchanges several cases share, by name.
+    var histories: [String: [Exchange]]?
 
     struct Case: Decodable {
         var phrase: String
         var expected: Expected?
-        var before: [Exchange]?
+        var before: Before?
+    }
+
+    /// The exchanges themselves, or the name of one of `histories`.
+    enum Before: Decodable {
+        case exchanges([Exchange])
+        case named(String)
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let name = try? container.decode(String.self) {
+                self = .named(name)
+            } else {
+                self = .exchanges(try container.decode([Exchange].self))
+            }
+        }
     }
 
     struct Expected: Decodable {
@@ -30,14 +49,25 @@ private struct Corpus: Decodable {
         var end: String?
         var seconds: Int?
         var name: String?
+        /// Words a delegation's instruction (or a follow-up's message) must contain, whatever the accents and case.
+        var mentions: [String]?
     }
 
-    /// An earlier exchange, for corrections ("décale-le").
+    /// An earlier exchange, for corrections ("décale-le") and tasks already handed over; without a call for a plain
+    /// answer ("oui").
     struct Exchange: Decodable {
         var user: String
-        var call: ToolCall
-        var result: JSONValue
+        var call: ToolCall?
+        var result: JSONValue?
         var answer: String
+    }
+
+    func exchanges(before item: Case) -> [Exchange] {
+        switch item.before {
+        case nil: []
+        case .exchanges(let exchanges): exchanges
+        case .named(let name): histories?[name] ?? []
+        }
     }
 }
 
@@ -76,11 +106,14 @@ func runActionsBench(_ o: Options) async throws {
     let model = try await MLXChatModel.load(directory: folder)
     print("loaded in \(clock.now - loadStart)")
 
+    let agents = corpus.agents == true
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
+        + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
+            : [])
     await model.useTools(tools)
     var conversation = Conversation()
-    conversation.systemAddenda = [ActionCatalog.promptAddendum]
+    conversation.systemAddenda = [ActionCatalog.promptAddendum] + (agents ? [AgentCatalog.promptAddendum] : [])
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
     let prefixStart = clock.now
     try await model.prefill(conversation.messages)
@@ -91,10 +124,10 @@ func runActionsBench(_ o: Options) async throws {
     var results: [CaseResult] = []
     for (index, item) in corpus.cases.enumerated() {
         var history = conversation
-        for exchange in item.before ?? [] {
+        for exchange in corpus.exchanges(before: item) {
+            let steps: [ChatMessage] = exchange.call.map { [.call($0), .result(of: $0, exchange.result ?? .null)] } ?? []
             history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                           steps: [.call(exchange.call), .result(of: exchange.call, exchange.result)],
-                           assistant: exchange.answer, interrupted: false)
+                           steps: steps, assistant: exchange.answer, interrupted: false)
         }
         let request = history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
         var text = ""
@@ -125,7 +158,13 @@ func runActionsBench(_ o: Options) async throws {
                                 text: text, toolOK: chosen == expectedTool, firstOutputMs: firstOutput, callMs: callTime)
         let context = ToolContext(now: now, timeZone: timeZone, language: .french)
         if let call {
-            do { try ActionCatalog.check(call, context: context, shortcuts: corpus.shortcuts) } catch let refusal as ToolRefusal {
+            do {
+                if AgentCatalog.names.contains(call.name) {
+                    try AgentCatalog.check(call, context: context, agents: [ClaudeCode.displayName], folders: [])
+                } else {
+                    try ActionCatalog.check(call, context: context, shortcuts: corpus.shortcuts)
+                }
+            } catch let refusal as ToolRefusal {
                 result.refusal = refusal.forModel
             }
         }
@@ -170,6 +209,13 @@ private func argumentsMatch(_ call: ToolCall, _ expected: Corpus.Expected, _ con
     }
     if let seconds = expected.seconds, call.arguments["duree_secondes"]?.integer != seconds { return false }
     if let name = expected.name, call.text("nom") != name { return false }
+    if let mentions = expected.mentions {
+        func folded(_ text: String) -> String {
+            text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+        }
+        let text = folded(call.text("consigne") ?? call.text("message") ?? "")
+        guard mentions.allSatisfy({ text.contains(folded($0)) }) else { return false }
+    }
     return true
 }
 
@@ -194,7 +240,9 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
 
     // Expected / chosen.
     let tools = ["creer_evenement", "creer_rappel", "lire_agenda", "lister_rappels", "modifier_element",
-                 "supprimer_element", "minuteur", "lancer_raccourci", "aucun"]
+                 "supprimer_element", "minuteur", "lancer_raccourci", AgentCatalog.delegateName, AgentCatalog.statusName,
+                 AgentCatalog.followUpName, AgentCatalog.cancelName, "aucun"]
+        .filter { name in !AgentCatalog.names.contains(name) || results.contains { $0.expected == name || $0.chosen == name } }
     let others2 = Set(results.map(\.chosen)).subtracting(tools).sorted()
     let columns = tools + others2
     print("\nexpected ↓ / chosen →")

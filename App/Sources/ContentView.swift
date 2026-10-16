@@ -193,7 +193,7 @@ private struct PanelLayer: View {
                         case .settings:
                             SettingsPanel(model: model, pointsAtTier: window.pointsAtTier) { window.panel = nil }
                         case .history:
-                            HistoryPanel(entries: model.transcript)
+                            HistoryPanel(entries: model.transcript, tasks: model.tasks, stopTask: model.stopTask)
                         }
                     }
                     .padding(.top, top)

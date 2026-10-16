@@ -61,6 +61,16 @@
         }
       }
     },
+    "A task is still in progress": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une tâche est en cours"
+          }
+        }
+      }
+    },
     "Accessing the microphone…": {
       "localizations": {
         "fr": {
@@ -77,6 +87,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Actions"
+          }
+        }
+      }
+    },
+    "Add…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter…"
           }
         }
       }
@@ -221,6 +241,46 @@
         }
       }
     },
+    "Claude Code could not be started (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code n’a pas pu être lancé (%@)."
+          }
+        }
+      }
+    },
+    "Claude Code is working on a task. Quitting OpenMaé stops it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code travaille sur une tâche. Quitter OpenMaé l’arrête."
+          }
+        }
+      }
+    },
+    "Claude Code isn’t signed in. Open it once in Terminal to sign in.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code n’est pas connecté. Ouvre-le une fois dans le Terminal pour te connecter."
+          }
+        }
+      }
+    },
+    "Claude Code stopped without giving a result.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code s’est arrêté sans donner de résultat."
+          }
+        }
+      }
+    },
     "Comfort (32 to 36 GB)": {
       "localizations": {
         "fr": {
@@ -291,6 +351,16 @@
         }
       }
     },
+    "Decide alone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Décider seul"
+          }
+        }
+      }
+    },
     "Delete": {
       "localizations": {
         "fr": {
@@ -327,6 +397,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Supprimer les modèles des autres paliers (%@)"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminée"
           }
         }
       }
@@ -371,6 +451,16 @@
         }
       }
     },
+    "Each new task gets its own folder in “OpenMae”, in your home folder. Name one of these folders and Claude Code works there instead.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chaque nouvelle tâche a son propre dossier dans « OpenMae », dans ton dossier personnel. Nomme un de ces dossiers et Claude Code y travaillera."
+          }
+        }
+      }
+    },
     "Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.": {
       "localizations": {
         "fr": {
@@ -387,6 +477,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "anglais"
+          }
+        }
+      }
+    },
+    "Failed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échouée"
           }
         }
       }
@@ -417,6 +517,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Premier son de la voix"
+          }
+        }
+      }
+    },
+    "Folders": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossiers"
           }
         }
       }
@@ -457,6 +567,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Masquer les mesures"
+          }
+        }
+      }
+    },
+    "Hides the details": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Masque les détails"
           }
         }
       }
@@ -541,6 +661,26 @@
         }
       }
     },
+    "In progress": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En cours"
+          }
+        }
+      }
+    },
+    "Instruction": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consigne"
+          }
+        }
+      }
+    },
     "Interrupt": {
       "localizations": {
         "fr": {
@@ -551,12 +691,52 @@
         }
       }
     },
+    "Interrupted": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompue"
+          }
+        }
+      }
+    },
     "Interruptions": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Interruptions"
+          }
+        }
+      }
+    },
+    "It changes the files of its folder. Anything else, like installing or running a program, is refused, and Maé tells you.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il modifie les fichiers de son dossier. Le reste, comme installer ou lancer un programme, est refusé, et Maé te le dit."
+          }
+        }
+      }
+    },
+    "It decides alone what is safe to do on this Mac, without asking you. Choose this only if you trust it with your files.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il décide seul de ce qu’il peut faire sans risque sur ce Mac, sans te demander. Ne choisis ce mode que si tu lui confies tes fichiers en toute confiance."
+          }
+        }
+      }
+    },
+    "Its folder": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son dossier"
           }
         }
       }
@@ -587,6 +767,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dernier tour"
+          }
+        }
+      }
+    },
+    "Latest step": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière étape"
           }
         }
       }
@@ -661,6 +851,16 @@
         }
       }
     },
+    "Maé can hand it long tasks: a website, code, research. What you hand it leaves this Mac: Claude Code works with Anthropic’s online models. You get a notification when it is done.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé peut lui confier des tâches longues : un site, du code, une recherche. Ce que tu lui confies quitte ce Mac : Claude Code travaille avec les modèles en ligne d’Anthropic. Une notification te prévient quand c’est fini."
+          }
+        }
+      }
+    },
     "Maé can’t use them. Allow OpenMaé in System Settings, Privacy & Security.": {
       "localizations": {
         "fr": {
@@ -697,6 +897,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé réfléchit…"
+          }
+        }
+      }
+    },
+    "Maé sends the task at once. Say “cancel” right after to stop it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé envoie la tâche tout de suite. Dis « annule » juste après pour l’arrêter."
+          }
+        }
+      }
+    },
+    "Maé tells you what she is about to send and waits for your “yes”. The whole instruction is in the history.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te dit ce qu’elle va envoyer et attend ton « oui ». La consigne complète est dans l’historique."
           }
         }
       }
@@ -851,12 +1071,32 @@
         }
       }
     },
+    "Not allowed without your OK": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusé sans ton accord"
+          }
+        }
+      }
+    },
     "Not enough free space: %@ is needed and %@ is left. Free up space, then try again.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Il n’y a plus assez d’espace libre : il faut %@ et il reste %@. Libère de la place, puis réessaie."
+          }
+        }
+      }
+    },
+    "Not installed on this Mac. Once it is, Maé can hand it long tasks: a website, code, research.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas installé sur ce Mac. Une fois installé, Maé pourra lui confier des tâches longues : un site, du code, une recherche."
           }
         }
       }
@@ -907,6 +1147,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ouvrir les Réglages Système"
+          }
+        }
+      }
+    },
+    "Open the folder": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir le dossier"
           }
         }
       }
@@ -991,12 +1241,52 @@
         }
       }
     },
+    "Quit": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitter"
+          }
+        }
+      }
+    },
     "Quit %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Quitter %@"
+          }
+        }
+      }
+    },
+    "Read the task back first": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relire avant d’envoyer"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer %@"
+          }
+        }
+      }
+    },
+    "Result": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Résultat"
           }
         }
       }
@@ -1087,6 +1377,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Afficher les mesures"
+          }
+        }
+      }
+    },
+    "Shows the details": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affiche les détails"
           }
         }
       }
@@ -1191,6 +1491,26 @@
         }
       }
     },
+    "Stop": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêter"
+          }
+        }
+      }
+    },
+    "Stopped": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêtée"
+          }
+        }
+      }
+    },
     "Talk": {
       "localizations": {
         "fr": {
@@ -1217,6 +1537,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parle à l’assistant pour voir les mesures."
+          }
+        }
+      }
+    },
+    "Tasks": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tâches"
           }
         }
       }
@@ -1527,6 +1857,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Coupures de la voix"
+          }
+        }
+      }
+    },
+    "Waiting for your yes": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attend ton oui"
+          }
+        }
+      }
+    },
+    "What it may do": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce qu’il peut faire"
+          }
+        }
+      }
+    },
+    "What went wrong": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce qui n’a pas marché"
           }
         }
       }

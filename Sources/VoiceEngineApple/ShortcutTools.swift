@@ -97,12 +97,16 @@ enum Subprocess {
         var timedOut = false
     }
 
-    static func run(_ path: String, _ arguments: [String], timeout: Duration) async -> Result {
+    /// `environment`: nil to inherit the app's.
+    static func run(_ path: String, _ arguments: [String], timeout: Duration,
+                    environment: [String: String]? = nil) async -> Result
+    {
         await withCheckedContinuation { (continuation: CheckedContinuation<Result, Never>) in
             let once = Once(continuation)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: path)
             process.arguments = arguments
+            if let environment { process.environment = environment }
             let output = Pipe()
             let errors = Pipe()
             process.standardOutput = output

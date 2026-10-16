@@ -10,6 +10,8 @@ public actor ToolRunner {
         public var forModel: JSONValue
         /// The call was refused because of its arguments: the model gets one chance to correct it.
         public var retryable: Bool
+        /// The model says the answer itself, from `forModel` (see `ToolOutcome.modelSpeaks`); `spoken` if it gives nothing.
+        public var modelSpeaks = false
     }
 
     /// A short answer the app handles itself.
@@ -28,6 +30,9 @@ public actor ToolRunner {
     private let providers: [any ToolProvider]
     private var byName: [String: any ToolProvider] = [:]
     private var pending: (call: ToolCall, provider: any ToolProvider, at: Date)?
+    /// Drops the pending action once its time is up, so that its provider knows (a task read back and shown on
+    /// screen disappears).
+    private var expiry: Task<Void, Never>?
     private var last: (outcome: ToolOutcome, provider: any ToolProvider, at: Date)?
 
     public init(providers: [any ToolProvider]) {
@@ -45,6 +50,15 @@ public actor ToolRunner {
             }
         }
         return specs
+    }
+
+    /// What the providers add to the system prompt, in their order.
+    public func promptAddenda() async -> [String] {
+        var addenda: [String] = []
+        for provider in providers {
+            if let addendum = await provider.promptAddendum() { addenda.append(addendum) }
+        }
+        return addenda
     }
 
     /// Whether the user's sentence is an answer the app handles itself. Changes nothing (the turn may still
@@ -70,9 +84,10 @@ public actor ToolRunner {
         case .confirm:
             guard let pending else { return nil }
             self.pending = nil
+            expiry?.cancel()
             return await perform(pending.call, with: pending.provider, risk: .sensitive, context: context)
         case .decline:
-            pending = nil
+            await dropPending()
             return Reply(spoken: ActionPhrases.declined(context.language),
                          forModel: ["statut": "abandonné à la demande de l'utilisateur"], retryable: false)
         case .undo:
@@ -103,7 +118,7 @@ public actor ToolRunner {
 
     /// Checks a call and carries it out, or asks for confirmation first.
     public func handle(_ call: ToolCall, context: ToolContext) async -> Reply {
-        pending = nil  // a new request replaces an action still waiting for its "oui"
+        await dropPending()  // a new request replaces an action still waiting for its "oui"
         guard let provider = byName[call.name] else {
             return Reply(spoken: ActionPhrases.notUnderstood(context.language),
                          forModel: ["erreur": .string("Outil inconnu : \(call.name).")], retryable: true)
@@ -119,9 +134,16 @@ public actor ToolRunner {
         }
         let risk = await provider.risk(of: call)
         if risk == .sensitive {
+            let spoken = await provider.summary(of: call, context: context)
             pending = (call, provider, context.now)
-            return Reply(spoken: await provider.summary(of: call, context: context),
-                         forModel: ["statut": "en attente du oui de l'utilisateur"], retryable: false)
+            expiry?.cancel()
+            let at = context.now
+            expiry = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.actionLifetime))
+                guard !Task.isCancelled else { return }
+                await self?.expire(at)
+            }
+            return Reply(spoken: spoken, forModel: ["statut": "en attente du oui de l'utilisateur"], retryable: false)
         }
         return await perform(call, with: provider, risk: risk, context: context)
     }
@@ -132,7 +154,8 @@ public actor ToolRunner {
         do {
             let outcome = try await provider.perform(call, context: context)
             if risk != .read { last = (outcome, provider, context.now) }
-            return Reply(spoken: outcome.spoken, forModel: outcome.forModel, retryable: false)
+            return Reply(spoken: outcome.spoken, forModel: outcome.forModel, retryable: false,
+                         modelSpeaks: outcome.modelSpeaks)
         } catch let refusal as ToolRefusal {
             return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)],
                          retryable: refusal.retryable)
@@ -143,9 +166,22 @@ public actor ToolRunner {
         }
     }
 
+    private func expire(_ at: Date) async {
+        guard pending?.at == at else { return }
+        await dropPending()
+    }
+
+    private func dropPending() async {
+        expiry?.cancel()
+        expiry = nil
+        guard let pending else { return }
+        self.pending = nil
+        await pending.provider.dropped(pending.call)
+    }
+
     /// A new conversation: nothing waits for a "oui" any more, and "annule" has nothing to take back.
     public func resetConversation() async {
-        pending = nil
+        await dropPending()
         last = nil
         for provider in providers { await provider.resetConversation() }
     }
