@@ -10,8 +10,9 @@
 //
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
 //
-// Each request prints the tokens found in memory ("reused"), the tokens computed, and the time to compute them.
-// VOICE_DEBUG=1 adds the model's own lines ("restored the snapshot", "prefill N tokens (reused M)").
+// Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
+// memory in use after it. VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at token N", with the
+// text on each side; "restored the snapshot"; "prefill N tokens (reused M)").
 
 import Foundation
 import VoiceCore
@@ -25,6 +26,7 @@ private struct Step {
     var prefillMs: Double
     var firstOutputMs: Double?
     var rebuilt: Bool
+    var restored: Bool
 }
 
 private actor CacheCheck {
@@ -59,6 +61,7 @@ private actor CacheCheck {
         -> (text: String, calls: [ToolCall])
     {
         let rebuildsBefore = await model.cacheRebuilds
+        let restoresBefore = await model.snapshotRestores
         let promptTokens = try await model.tokenCount(messages)
         var text = ""
         var calls: [ToolCall] = []
@@ -77,11 +80,14 @@ private actor CacheCheck {
         }
         let prefill = await model.lastPrefill
         let step = Step(label: label, promptTokens: promptTokens, reused: prefill.reused, computed: prefill.computed,
-                        prefillMs: prefill.ms, firstOutputMs: first, rebuilt: await model.cacheRebuilds > rebuildsBefore)
+                        prefillMs: prefill.ms, firstOutputMs: first, rebuilt: await model.cacheRebuilds > rebuildsBefore,
+                        restored: await model.snapshotRestores > restoresBefore)
         steps.append(step)
-        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms%@", label as NSString,
-                     step.promptTokens, step.reused, step.computed, step.prefillMs,
-                     step.rebuilt ? "  ← rebuilt from scratch" : (step.reused == 0 ? "  ← from scratch" : "")))
+        let note = step.rebuilt ? "  ← rebuilt from scratch"
+            : step.reused == 0 ? "  ← from scratch" : step.restored ? "  ← back to a snapshot" : ""
+        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@",
+                     label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
+                     MLXChatModel.activeMemoryGB, note))
         return (text, calls)
     }
 
@@ -181,8 +187,11 @@ private actor CacheCheck {
     func summary() {
         let firstOutputs = steps.compactMap(\.firstOutputMs).sorted()
         let fromScratch = steps.filter { $0.reused == 0 }
-        print(String(format: "\n%d requests · computed from scratch: %d (%.0f ms in all) · first output: median %.0f ms, max %.0f ms",
-                     steps.count, fromScratch.count, fromScratch.map(\.prefillMs).reduce(0, +),
+        let restored = steps.filter(\.restored)
+        print(String(format: "\n%d requests · computed from scratch: %d (%.0f ms in all) · back to a snapshot: %d (%.0f ms in all)"
+                     + " · first output: median %.0f ms, max %.0f ms",
+                     steps.count, fromScratch.count, fromScratch.map(\.prefillMs).reduce(0, +), restored.count,
+                     restored.map(\.prefillMs).reduce(0, +),
                      firstOutputs.isEmpty ? 0 : firstOutputs[firstOutputs.count / 2], firstOutputs.last ?? 0))
     }
 }

@@ -248,8 +248,8 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
     {
         print("  \(label): median \(fmt(median(values)))")
     }
-    print(String(format: "memory: %.2f GB · cache rebuilds: %d",
-                 ProcessMemory.footprintGB, await e.model.cacheRebuilds))
+    print(String(format: "memory: %.2f GB · cache rebuilds: %d · back to a snapshot: %d",
+                 ProcessMemory.footprintGB, await e.model.cacheRebuilds, await e.model.snapshotRestores))
     try save(turns, name: "conversation", options: o)
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -35,17 +36,22 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var rawArguments: [VoiceCore.ToolCall: String] = [:]
     private var cache: [KVCache]
     private var cachedTokens: [Int] = []
-    /// Copy of the cache taken just before the last request's new tokens were fed in. Copies share
-    /// the underlying memory until one side changes, so this costs almost nothing. For a second pass
-    /// (after a tool call) it is taken once the tool's result is in instead: the next turn often has to
-    /// come back to it (the history keeps the answer as the voice said it, which is not always what the
-    /// model wrote) and computed that result again (a 700-token one: 3.4 s instead of 0.5 s with
-    /// Gemma 4 26B on the reference Mac; 5–6 s seen in the app after a web search).
+    /// Copy of the cache taken just before the last request's new tokens were fed in. It shares the
+    /// cache's memory until the cache changes, then holds its own (about 0.26 GB with Gemma 4 26B).
+    /// For a second pass (after a tool call) it is taken once the tool's result is in instead: the next
+    /// turn often has to come back to it (the history keeps the answer as the voice said it, which is not
+    /// always what the model wrote) and computed that result again (a 700-token one: 3.4 s instead of
+    /// 0.5 s with Gemma 4 26B on the reference Mac; 5–6 s seen in the app after a web search). The same
+    /// once the prompt is in, after a request that went back to a snapshot or started again from scratch:
+    /// while answers keep going into the history otherwise than the model wrote them (cut off: " […]"),
+    /// every turn otherwise went back to that same point and computed more and more again (the turns after
+    /// three answers cut off in a row: 1.04, 1.23 then 1.48 s with Gemma 4 26B, instead of 0.44 s each).
     private var snapshot: (tokens: [Int], cache: [KVCache])?
     /// While later requests answer the same user message (a second pass), the snapshot taken before the
     /// first one. If the turn is dropped then (the user spoke again before any voice), the request that
     /// replaces it differs from that message on: without this, the whole conversation was computed again
-    /// (6.5 s instead of 0.6 s for a short one with Gemma 4 26B).
+    /// (6.5 s instead of 0.6 s for a short one with Gemma 4 26B). After a request that went back, the
+    /// snapshot taken before its new tokens, for the same reason (its answer abandoned).
     private var turnSnapshot: (tokens: [Int], cache: [KVCache])?
     /// The user's message the last request answered.
     private var lastTurn: Turn?
@@ -68,6 +74,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
+    /// Diagnostics: how many times a request went back to a snapshot.
+    public private(set) var snapshotRestores = 0
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, and time to compute them.
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0)
     /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
@@ -106,9 +114,14 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         Memory.clearCache()
     }
 
+    /// Diagnostics: the GPU memory held by the arrays in use (weights, cache, snapshots), in GB.
+    public static var activeMemoryGB: Double {
+        Double(Memory.activeMemory) / 1e9
+    }
+
     public static func load(directory: URL, maxAnswerTokens: Int = 400) async throws -> MLXChatModel {
         let context = try await LLMModelFactory.shared.load(from: directory, using: TokenizerLoaderBridge())
-        let tokenizer = try await AutoTokenizer.from(modelFolder: directory)
+        let tokenizer = try await ModelTokenizer.load(from: directory)
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
                                    encoding: .utf8)
         let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
@@ -169,7 +182,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     public func prefill(_ conversation: [ChatMessage]) throws {
         let tokens = try render(conversation, generationPrompt: false)
-        let start = try reuseCache(for: tokens)
+        let start = try reuseCache(for: tokens).reused
         guard start < tokens.count else { return }
         let input = LMInput(tokens: MLXArray(tokens[start...].map { Int32($0) }))
         // Creating the iterator processes the whole prompt into the cache (it also samples one token,
@@ -257,7 +270,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     {
         hold.set(false)  // a new answer never starts paused
         let prompt = try render(conversation, generationPrompt: true)
-        let reused = try reuseCache(for: prompt)
+        let (reused, wentBack) = try reuseCache(for: prompt)
         let clock = ContinuousClock()
         let t0 = clock.now
         let start = reused > 0 ? reused : try feedEarlierTurns(of: conversation, prompt: prompt)
@@ -286,8 +299,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         lastPrefill = (reused, prompt.count - reused,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
         DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms")
-        if answeringAgain {
-            // Once the tool's result is in (see `snapshot`).
+        if answeringAgain || wentBack {
+            // Once the tool's result is in, or the prompt of a request that went back (see `snapshot`).
+            if !answeringAgain { turnSnapshot = snapshot }  // the one from before (see `turnSnapshot`)
             snapshot = (Array(prompt.prefix(cachedTokenCount(upTo: prompt.count))), cache.map { $0.copy() })
         }
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
@@ -380,13 +394,14 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
     }
 
-    /// Makes the cache match the beginning of `tokens`; returns how many tokens are already in it.
+    /// Makes the cache match the beginning of `tokens`; returns how many tokens are already in it, and whether it went
+    /// back to a snapshot or was rebuilt for that.
     ///
     /// In order of preference: keep the cache as is (the new request extends it), rewind it, go back
     /// to a snapshot when Gemma's sliding-window layers can no longer rewind (an abandoned speculative
     /// turn, an interrupted answer, an answer the history keeps otherwise than the model wrote it, a
     /// turn dropped after a tool call), rebuild it.
-    private func reuseCache(for tokens: [Int]) throws -> Int {
+    private func reuseCache(for tokens: [Int]) throws -> (reused: Int, wentBack: Bool) {
         if let r = rebuild, r.done >= r.tokens.count - 1, commonPrefix(r.tokens, tokens) >= r.done {
             cache = r.cache  // the shortened history is ready: switch to it
             cachedTokens = Array(r.tokens[..<r.done])
@@ -395,37 +410,48 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             turnSnapshot = nil
             DebugLog.log("LLM: switched to the shortened history (\(cachedTokens.count) tokens)")
         }
-        var common = commonPrefix(cachedTokens, tokens)
+        let common = commonPrefix(cachedTokens, tokens)
         let excess = cachedTokens.count - common
-        guard excess > 0 else { return common }
+        guard excess > 0 else { return (common, false) }
+        DebugLog.log("LLM: the request leaves the cache at token \(common) \(divergence(at: common, tokens))")
         if canTrimPromptCache(cache), trimPromptCache(cache, numTokens: excess) == excess {
             cachedTokens.removeLast(excess)
-            return common
+            return (common, false)
         }
         // A snapshot restored becomes the cache itself, hence dropped.
         if let snapshot, commonPrefix(snapshot.tokens, tokens) == snapshot.tokens.count {
             self.snapshot = nil
-            return restore(snapshot)
+            return (restore(snapshot), true)
         }
         if let turnSnapshot, commonPrefix(turnSnapshot.tokens, tokens) == turnSnapshot.tokens.count {
             snapshot = nil
             self.turnSnapshot = nil
-            return restore(turnSnapshot)
+            return (restore(turnSnapshot), true)
         }
         snapshot = nil  // neither can serve a request that goes on from this one
         turnSnapshot = nil
         cache = try context.model.newCache(parameters: parameters)
         cachedTokens = []
-        common = 0
         cacheRebuilds += 1
-        return common
+        return (0, true)
     }
 
     private func restore(_ snapshot: (tokens: [Int], cache: [KVCache])) -> Int {
         cache = snapshot.cache
         cachedTokens = snapshot.tokens
+        snapshotRestores += 1
         DebugLog.log("LLM: restored the snapshot (\(cachedTokens.count) tokens)")
         return cachedTokens.count
+    }
+
+    /// Diagnostics: the text around the first token where a request and the cache differ, on each side.
+    private func divergence(at index: Int, _ tokens: [Int]) -> String {
+        func text(_ t: [Int], _ range: Range<Int>) -> String {
+            let range = range.clamped(to: 0..<t.count)
+            return tokenizer.decode(tokens: Array(t[range]), skipSpecialTokens: false).debugDescription
+        }
+        return "(after \(text(tokens, index - 8..<index))): cache \(text(cachedTokens, index..<index + 24)), "
+            + "request \(text(tokens, index..<index + 24))"
     }
 
     /// For a request computed from scratch: the turns before its user's message go in first, so that the snapshot holds
@@ -609,11 +635,28 @@ enum GemmaTemplateFix {
     }
 }
 
+/// A model folder's tokenizer, as `AutoTokenizer.from(modelFolder:)` loads it, except that it decodes the text exactly as
+/// the model wrote it. When the tokenizer's settings do not say otherwise, swift-transformers tidies decoded text the
+/// English way: it removes the space before "?", "!", "." and "," (Hugging Face's own library no longer does by
+/// default). Gemma writes French typography ("ta journée ?"), so its answers went into the history as "ta journée?",
+/// which is another token than the one in the model's memory: the next request had to go back to a snapshot and compute
+/// the answer again. That was the most common reason for a request to go back (13 of 25 in `voice-cli cache-check`).
+enum ModelTokenizer {
+    static func load(from directory: URL) async throws -> any Tokenizers.Tokenizer {
+        let files = LanguageModelConfigurationFromHub(modelFolder: directory)
+        guard var settings = try await files.tokenizerConfig?.dictionary(or: [:]) else { throw TokenizerError.missingConfig }
+        if settings["clean_up_tokenization_spaces"]?.boolean() == nil {
+            settings["clean_up_tokenization_spaces"] = Config(false)
+        }
+        return try PreTrainedTokenizer(tokenizerConfig: Config(settings), tokenizerData: try await files.tokenizerData)
+    }
+}
+
 /// Adapts swift-transformers' tokenizer to mlx-swift-lm (what its `#huggingFaceTokenizerLoader()`
 /// macro expands to, written out to avoid compiling Swift macros).
 struct TokenizerLoaderBridge: MLXLMCommon.TokenizerLoader {
     func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
-        TokenizerBridge(upstream: try await AutoTokenizer.from(modelFolder: directory))
+        TokenizerBridge(upstream: try await ModelTokenizer.load(from: directory))
     }
 }
 
