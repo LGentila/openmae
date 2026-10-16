@@ -410,6 +410,77 @@ struct ToolRunnerTests {
         #expect(reply.retryable)
         #expect(reply.spoken == ActionPhrases.missingTitle(.french))
     }
+
+    @Test func misspelledToolNameIsTheTools() async {
+        let tools = RecordingTools()
+        let runner = ToolRunner(providers: [tools])
+        _ = await runner.tools()
+        #expect(await runner.named(ToolCall(name: "Notre", arguments: ["titre": "Pain"])).name == "noter")
+        _ = await runner.handle(ToolCall(name: "noteer", arguments: ["titre": "Pain"]), context: context())
+        #expect(await tools.performed.map(\.name) == ["noter"])
+        // Too far from any tool: refused, and the model is told the real names for its second try.
+        let unknown = await runner.handle(ToolCall(name: "effacer", arguments: ["titre": "Pain"]), context: context())
+        #expect(unknown.retryable)
+        #expect(unknown.forModel == ["erreur": "Outil inconnu : effacer. Les outils existants sont : noter, lancer."])
+        #expect(await tools.performed.count == 1)
+    }
+}
+
+@Suite("Tool names")
+struct ToolNameTests {
+    let names = ActionCatalog.names(shortcuts: ["Salon"])
+
+    @Test func slipsOfOneOrTwoLettersAreRead() {
+        let slips = [
+            "crer_rappel": "creer_rappel", "cerer_rappel": "creer_rappel", "créer_rappel": "creer_rappel",
+            "Creer-Rappel": "creer_rappel", "creer rappel": "creer_rappel", "creer_rappels": "creer_rappel",
+            "lister_rappel": "lister_rappels", "liste_rappels": "lister_rappels", "creer_événements": "creer_evenement",
+            "lire_agendas": "lire_agenda", "modifer_element": "modifier_element", "suprimer_element": "supprimer_element",
+            "minuteurs": "minuteur", "lancer_racourci": "lancer_raccourci",
+        ]
+        for (written, meant) in slips {
+            #expect(ToolNames.match(written, among: names) == meant, "\(written)")
+        }
+    }
+
+    /// Another word is not a slip: the model gets the real names and chooses again.
+    @Test func otherWordsAreNotRead() {
+        for written in ["lire_rappels", "cocher_rappel", "modifier_rappel", "supprimer_rappel", "lire_calendrier",
+                        "rappel", "creer", ""] {
+            #expect(ToolNames.match(written, among: names) == nil, "\(written)")
+        }
+        // A short name allows fewer slips.
+        #expect(ToolNames.match("notr", among: ["noter"]) == "noter")
+        #expect(ToolNames.match("note", among: ["notez"]) == "notez")
+        #expect(ToolNames.match("not", among: ["noter"]) == nil)
+        #expect(ToolNames.match("ab", among: ["abc"]) == nil)
+    }
+
+    @Test func aSlipNearTwoToolsIsNotRead() {
+        let close = ["lire_agenda", "lire_agendas"]
+        #expect(ToolNames.match("lire_agend", among: close) == nil)
+        #expect(ToolNames.match("lire_agenda", among: close) == "lire_agenda")  // the exact name always wins
+    }
+
+    /// So that a slip of two letters can only stand for one of them.
+    @Test func builtInToolsAreFarApart() {
+        for (i, a) in names.enumerated() {
+            for b in names[(i + 1)...] {
+                #expect(ToolNames.distance(ToolNames.folded(a), ToolNames.folded(b)) >= 5, "\(a), \(b)")
+            }
+        }
+    }
+
+    @Test func unknownToolIsRefusedWithTheRealNames() throws {
+        do {
+            try ActionCatalog.check(ToolCall(name: "lire_rappels", arguments: ["quand": "demain"]), context: context())
+            Issue.record("lire_rappels was accepted")
+        } catch let refusal as ToolRefusal {
+            #expect(refusal.retryable)
+            #expect(refusal.forModel == "Outil inconnu : lire_rappels. Les outils existants sont : creer_rappel, "
+                    + "lister_rappels, creer_evenement, lire_agenda, modifier_element, supprimer_element, minuteur.")
+        }
+    }
 }
 
 /// Returns the given sentences, one per turn.
@@ -486,6 +557,27 @@ struct PipelineActionTests {
         #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
         #expect(history[2].toolCalls.first?.name == "noter")
         #expect(history[3].toolResult == ["id": "n1"])
+    }
+
+    @Test func misspelledToolNameIsCarriedOutAndNotSeenAgain() async throws {
+        let slip: [ModelOutput] = [.toolCall(ToolCall(name: "noteer", arguments: ["titre": "Pain"]))]
+        let (model, speaker, tools) = (ScriptedModel(scripts: [slip, [.text("Avec plaisir, à ton service.")]]),
+                                       FakeSpeaker(), RecordingTools())
+        let pipeline = make(model, ScriptedTranscriber(["Rappelle-moi le pain", "Merci beaucoup"]), speaker, tools)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("Pain") }
+        #expect(await tools.performed.map(\.name) == ["noter"])
+        #expect(await model.requests.count == 1)  // no second try needed
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 2 }
+        let history = try #require(await model.requests.last)
+        // The history holds the tool's real name: the model does not copy its slip in the next turns.
+        #expect(history[2].toolCalls.first?.name == "noter")
+        #expect(history[3].content == "noter")
     }
 
     @Test func fillerCoversTheTimeTheCallIsWritten() async throws {

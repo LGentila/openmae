@@ -511,10 +511,11 @@ public actor VoicePipeline {
                     // Nothing is ever carried out before the user's turn is really over.
                     try await waitForCommit(turn)
                     chunker.flush().forEach(send)
-                    guard let call = calls.first else {
+                    guard let written = calls.first else {
                         say(ActionPhrases.notUnderstood(lang), to: turn)
                         break
                     }
+                    let call = await tools.named(written)  // a misspelled tool name, read as the tool's
                     DebugLog.log("turn \(turn.id): tool call \(call.name) \(call.arguments)")
                     metrics.tool = call.name
                     let reply = await tools.handle(call, context: toolContext(turn, now: now))

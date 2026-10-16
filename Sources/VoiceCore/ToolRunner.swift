@@ -27,6 +27,8 @@ public actor ToolRunner {
 
     private let providers: [any ToolProvider]
     private var byName: [String: any ToolProvider] = [:]
+    /// The tools' names, in the providers' order.
+    private var names: [String] = []
     private var pending: (call: ToolCall, provider: any ToolProvider, at: Date)?
     private var last: (outcome: ToolOutcome, provider: any ToolProvider, at: Date)?
 
@@ -44,7 +46,18 @@ public actor ToolRunner {
                 specs.append(spec)
             }
         }
+        names = specs.map(\.name)
         return specs
+    }
+
+    /// The call with the name of the tool it stands for, when the model misspelled it ("crer_rappel"); unchanged
+    /// otherwise (`ToolNames`). It is what goes into the history, so the model does not see its slip again.
+    public func named(_ call: ToolCall) -> ToolCall {
+        guard let name = ToolNames.match(call.name, among: names), name != call.name else { return call }
+        DebugLog.log("tool name \(call.name) read as \(name)")
+        var named = call
+        named.name = name
+        return named
     }
 
     /// Whether the user's sentence is an answer the app handles itself. Changes nothing (the turn may still
@@ -101,12 +114,14 @@ public actor ToolRunner {
         }
     }
 
-    /// Checks a call and carries it out, or asks for confirmation first.
+    /// Checks a call and carries it out, or asks for confirmation first. A misspelled tool name is read as the
+    /// tool's; a name that stands for none is refused with the real ones, for the model's second try.
     public func handle(_ call: ToolCall, context: ToolContext) async -> Reply {
         pending = nil  // a new request replaces an action still waiting for its "oui"
+        let call = named(call)
         guard let provider = byName[call.name] else {
             return Reply(spoken: ActionPhrases.notUnderstood(context.language),
-                         forModel: ["erreur": .string("Outil inconnu : \(call.name).")], retryable: true)
+                         forModel: ["erreur": .string(ToolNames.unknown(call.name, among: names))], retryable: true)
         }
         do {
             try await provider.check(call, context: context)

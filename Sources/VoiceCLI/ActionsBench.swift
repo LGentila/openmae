@@ -3,7 +3,8 @@
 // Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created).
 // Each request of the corpus (Tests/Fixtures/actions-fr.json) is sent to the model with the same system
 // prompt and tools as in the app, at a fixed reference time, and what the app would make of the call it writes
-// (the date worked out from the words it copied, the length, the shortcut) is compared with the expected one.
+// (the tool its name stands for, misspelled or not; the date worked out from the words it copied, the length, the
+// shortcut) is compared with the expected one.
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
@@ -55,6 +56,8 @@ private struct CaseResult: Encodable {
     var phrase: String
     var expected: String
     var chosen: String
+    /// The tool name as the model wrote it, when the app reads it as another tool's (`ToolNames`).
+    var writtenName: String?
     var arguments: [String: JSONValue]?
     var text: String
     var toolOK: Bool
@@ -97,6 +100,12 @@ func runActionsBench(_ o: Options) async throws {
 
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
+    // As in the app (`ToolRunner.named`): a misspelled tool name is read as the tool's.
+    func named(_ call: ToolCall) -> ToolCall {
+        var named = call
+        named.name = ToolNames.match(call.name, among: tools.map(\.name)) ?? call.name
+        return named
+    }
     await model.useTools(tools)
     await model.watchToolCalls(o.watchCalls)
     var conversation = Conversation()
@@ -149,10 +158,13 @@ func runActionsBench(_ o: Options) async throws {
         }
         var filter = ReasoningFilter()
         text = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+        let written = call?.name
+        call = call.map(named)
 
         let expectedTool = item.expected?.tool ?? "aucun"
         let chosen = call?.name ?? (unreadable != nil ? "illisible" : "aucun")
-        var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen, arguments: call?.arguments,
+        var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
+                                writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
                                 text: text, toolOK: chosen == expectedTool, firstOutputMs: firstOutput, callMs: callTime)
         if o.watchCalls, let chances = await model.lastToolCallChances {
             result.firstCallChance = chances.first
@@ -183,7 +195,9 @@ func runActionsBench(_ o: Options) async throws {
             for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal.forModel)])]) {
                 if case .toolCall(let made) = output, retried == nil { retried = made }
             }
-            result.secondTry = retried.map { "\($0.name) \(describe($0.arguments))" } ?? "no call"
+            let writtenAgain = retried?.name
+            retried = retried.map(named)
+            result.secondTry = retried.map { describe($0, written: writtenAgain) } ?? "no call"
             if let retried, let expected = item.expected, retried.name == expectedTool,
                let resolved = try? resolve(retried, created: created, context: context, shortcuts: corpus.shortcuts)
             {
@@ -195,7 +209,7 @@ func runActionsBench(_ o: Options) async throws {
         }
         results.append(result)
         let mark = result.toolOK ? (result.argumentsOK == false ? "~" : "✓") : "✗"
-        let detail = call.map { "\($0.name) \(describe($0.arguments))" } ?? (unreadable.map { "unreadable: \($0)" } ?? "“\(text.prefix(70))”")
+        let detail = call.map { describe($0, written: written) } ?? (unreadable.map { "unreadable: \($0)" } ?? "“\(text.prefix(70))”")
         print(String(format: "%3d %@ %@", index + 1, mark, item.phrase))
         let watched = result.bestCallChance.map {
             String(format: "  call chance %.0f %% first, %.0f %% at token %d", (result.firstCallChance ?? 0) * 100,
@@ -315,6 +329,9 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
     print("calls the app would refuse: \(results.filter { $0.refusal != nil }.count)")
+    let misspelled = results.filter { $0.writtenName != nil }
+    print("misspelled tool names read as the tool's: \(misspelled.count)"
+          + misspelled.map { "\n    · \($0.writtenName ?? "") → \($0.chosen)" }.joined())
     let copied = results.filter { $0.text.range(of: #"\(\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil }
     print("answers copying the date line (removed before the voice): \(copied.count) / \(results.filter { !$0.text.isEmpty }.count)")
 
@@ -368,6 +385,11 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     } catch {
         print("could not write the report: \(error)")
     }
+}
+
+/// "creer_rappel {quand: …}", after the name the model wrote when the app read it as another ("crer_rappel → …").
+private func describe(_ call: ToolCall, written: String?) -> String {
+    (written.flatMap { $0 == call.name ? nil : "\($0) → " } ?? "") + "\(call.name) \(describe(call.arguments))"
 }
 
 private func describe(_ arguments: [String: JSONValue]) -> String {
