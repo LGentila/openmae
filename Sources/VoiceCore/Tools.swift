@@ -213,15 +213,19 @@ public struct ToolContext: Sendable {
     public var now: Date
     public var timeZone: TimeZone
     public var language: SpeechLanguage
+    /// What the user said in this turn, then in the ones before (without the date line): when the model changed the
+    /// user's words about a moment, the app reads it from theirs.
+    public var userSaid: [String]
     /// Says a sentence at once, before the outcome (e.g. just before macOS asks for a permission).
     public var say: @Sendable (String) async -> Void
 
-    public init(now: Date, timeZone: TimeZone = .current, language: SpeechLanguage,
+    public init(now: Date, timeZone: TimeZone = .current, language: SpeechLanguage, userSaid: [String] = [],
                 say: @escaping @Sendable (String) async -> Void = { _ in })
     {
         self.now = now
         self.timeZone = timeZone
         self.language = language
+        self.userSaid = userSaid
         self.say = say
     }
 

@@ -28,17 +28,44 @@ struct ActionPhraseTests {
 
     @Test func refusesDatesInThePastOrTooFar() {
         func check(_ value: String) throws {
-            _ = try DateCheck.upcoming(ToolCall(name: "x", arguments: ["d": .string(value)]), "d", context: context(),
-                                       required: true)
+            _ = try ActionCatalog.reminderDue(ToolCall(name: "creer_rappel", arguments: ["quand": .string(value)]),
+                                              context: context())
         }
         #expect(throws: Never.self) { try check("2026-10-15T19:00") }
         #expect(throws: Never.self) { try check("2026-10-15") }  // today, no time
+        #expect(throws: Never.self) { try check("ce soir à 20 h") }
         #expect(throws: ToolRefusal.self) { try check("2026-10-15T09:00") }
+        #expect(throws: ToolRefusal.self) { try check("ce matin à 9 h") }
+        #expect(throws: ToolRefusal.self) { try check("hier") }
         #expect(throws: ToolRefusal.self) { try check("2027-11-01T09:00") }
-        #expect(throws: ToolRefusal.self) { try check("jeudi") }
+        #expect(throws: ToolRefusal.self) { try check("bientôt") }
         #expect(throws: ToolRefusal.self) {
-            _ = try DateCheck.upcoming(ToolCall(name: "x"), "d", context: context(), required: true)
+            _ = try ActionCatalog.eventTimes(ToolCall(name: "creer_evenement", arguments: ["titre": "Yoga"]), context: context())
         }
+    }
+
+    /// The app works the date out from the user's words; what it cannot decide, it asks.
+    @Test func refusalsSayWhatIsWrong() throws {
+        func refusal(_ value: String) -> ToolRefusal? {
+            do {
+                _ = try ActionCatalog.reminderDue(ToolCall(name: "creer_rappel", arguments: ["quand": .string(value)]),
+                                                  context: context())
+                return nil
+            } catch {
+                return error as? ToolRefusal
+            }
+        }
+        // An hour that may be the morning or the afternoon: asked to the user at once, not to the model.
+        let hour = try #require(refusal("lundi à 3 h"))
+        #expect(!hour.retryable)
+        #expect(hour.spoken == "Tu veux dire 3\(nb)h du matin, ou 15\(nb)h\(nb)?")
+        let weekday = try #require(refusal("dimanche 22 octobre"))
+        #expect(weekday.retryable)
+        #expect(weekday.spoken == "Le 22 octobre tombe un jeudi. Tu peux me redire la date\(nb)?")
+        // Words it cannot read: the model may write the date itself on its second try.
+        let words = try #require(refusal("tomorrow at 3 pm"))
+        #expect(words.retryable && words.forModel.contains("AAAA-MM-JJTHH:MM"))
+        #expect(try #require(refusal("hier à 15 h")).forModel.contains("mercredi 14 octobre"))
     }
 
     @Test func saysDatesInFull() {
@@ -103,6 +130,9 @@ struct ActionPhraseTests {
                 ActionPhrases.timerFinished(seconds: 60, label: nil, language),
                 ActionPhrases.shortcutDone(name: "Salon", output: nil, language),
                 ActionPhrases.confirmShortcut(name: "Salon", language),
+                ActionPhrases.morningOrAfternoon(hour: 3, minute: 0, context(language)),
+                ActionPhrases.wrongWeekday(date("2026-10-22"), context(language)),
+                ActionPhrases.earlierOrLater(language),
             ]
             for sentence in sentences {
                 #expect(ActionPhrases.wordCount(SpeakableText.forVoice(sentence, language: language)) >= 5, "\(sentence)")
@@ -132,15 +162,111 @@ struct ActionPhraseTests {
 @Suite("Action calls")
 struct ActionCallTests {
     @Test func eventLastsAnHourByDefault() throws {
-        let call = ToolCall(name: "creer_evenement", arguments: ["titre": "Yoga", "debut": "2026-10-16T18:00"])
-        let times = try ActionCatalog.eventTimes(call, context: context())
-        #expect(times.end.timeIntervalSince(times.start) == 3600)
-        #expect(!times.allDay)
-        let long = ToolCall(name: "creer_evenement", arguments: ["titre": "Yoga", "debut": "2026-10-16T18:00",
-                                                                 "duree_minutes": "90"])
-        #expect(try ActionCatalog.eventTimes(long, context: context()).end == date("2026-10-16T19:30"))
-        let day = ToolCall(name: "creer_evenement", arguments: ["titre": "Anniversaire", "debut": "2026-11-03"])
-        #expect(try ActionCatalog.eventTimes(day, context: context()).allDay)
+        func times(_ arguments: [String: JSONValue]) throws -> (start: Date, end: Date, allDay: Bool) {
+            var all: [String: JSONValue] = ["titre": "Yoga"]
+            all.merge(arguments) { $1 }
+            return try ActionCatalog.eventTimes(ToolCall(name: "creer_evenement", arguments: all), context: context())
+        }
+        let plain = try times(["quand": "vendredi à 18 h"])
+        #expect(plain.start == date("2026-10-16T18:00") && plain.end == date("2026-10-16T19:00") && !plain.allDay)
+        #expect(try times(["quand": "vendredi à 18 h", "duree": "une heure et demie"]).end == date("2026-10-16T19:30"))
+        #expect(try times(["quand": "vendredi à 18 h pendant une heure et demie"]).end == date("2026-10-16T19:30"))
+        #expect(try times(["quand": "demain de 10 h à midi"]).end == date("2026-10-16T12:00"))
+        let day = try times(["quand": "le 3 novembre"])
+        #expect(day.allDay && day.start == date("2026-11-03") && day.end == date("2026-11-04"))
+        let holidays = try times(["quand": "du 20 au 24 décembre"])
+        #expect(holidays.allDay && holidays.start == date("2026-12-20") && holidays.end == date("2026-12-25"))
+        // Written the model's own way: dates and minutes.
+        #expect(try times(["debut": "2026-10-16T18:00", "duree_minutes": "90"]).end == date("2026-10-16T19:30"))
+        #expect(try times(["debut": "2026-11-03"]).allDay)
+        #expect(throws: ToolRefusal.self) { try times(["quand": "vendredi à 18 h", "duree": "90"]) }  // no unit
+    }
+
+    @Test func timersAndReadingsUseTheUsersWords() throws {
+        func seconds(_ arguments: [String: JSONValue]) throws -> Int {
+            try ActionCatalog.timerSeconds(ToolCall(name: "minuteur", arguments: arguments), context: context())
+        }
+        #expect(try seconds(["duree": "une heure et quart"]) == 4500)
+        #expect(try seconds(["duree": "45 secondes"]) == 45)
+        #expect(try seconds(["duree_secondes": 600]) == 600)
+        #expect(throws: ToolRefusal.self) { try seconds(["duree": "10"]) }
+        #expect(throws: ToolRefusal.self) { try seconds(["duree": "deux jours"]) }  // more than a day
+        let week = try #require(try ActionCatalog.period(ToolCall(name: "lire_agenda", arguments: ["quand": "cette semaine"]),
+                                                         context: context(), required: true))
+        #expect(week.0 == date("2026-10-15") && week.1 == date("2026-10-19"))
+        #expect(try ActionCatalog.period(ToolCall(name: "lister_rappels"), context: context(), required: false) == nil)
+        let old = try #require(try ActionCatalog.period(
+            ToolCall(name: "lire_agenda", arguments: ["debut": "2026-10-16T00:00", "fin": "2026-10-16T23:59"]),
+            context: context(), required: true))
+        #expect(old.0 == date("2026-10-16") && old.1 == date("2026-10-17"))
+        #expect(throws: ToolRefusal.self) {
+            try ActionCatalog.period(ToolCall(name: "lire_agenda", arguments: ["quand": "l'année prochaine"]),
+                                     context: context(), required: true)
+        }
+    }
+
+    /// When the model changed the user's words, the app reads the moment from what the user said.
+    @Test func theUsersWordsWinOverTheModels() throws {
+        func due(_ quand: String, said: [String]) throws -> Date? {
+            try ActionCatalog.reminderDue(ToolCall(name: "creer_rappel", arguments: ["titre": "x", "quand": .string(quand)]),
+                                          context: ToolContext(now: now, timeZone: paris, language: .french, userSaid: said))?.date
+        }
+        // A day taken from the date line ("jeudi": next Thursday for the app), a weekday instead of "demain" that lost
+        // "du matin", a date the model worked out.
+        #expect(try due("jeudi à 23 h", said: ["Rappelle-moi à 23 h de fermer la fenêtre"]) == date("2026-10-15T23:00"))
+        #expect(try due("vendredi à 7 h", said: ["Rappelle-moi demain à 7 h du matin d'aller courir"]) == date("2026-10-16T07:00"))
+        #expect(try due("2026-10-15T15:00", said: ["Rappelle-moi demain à 15 h d'appeler Léo"]) == date("2026-10-16T15:00"))
+        // Copied without what settled the hour: the user's sentence settles it; when it cannot, the user is asked.
+        #expect(try due("demain à 7 h 30", said: ["Rappelle-moi demain matin à 7 h 30 de prendre mes médicaments"])
+                == date("2026-10-16T07:30"))
+        #expect(throws: ToolRefusal.self) { try due("lundi à 3 h", said: ["Rappelle-moi lundi à 3 h d'appeler Paul"]) }
+        // The answer to the app's question completes the words the model copied from the request.
+        #expect(try due("demain à 6 h", said: ["Du matin", "Rappelle-moi demain à 6 h de partir à l'aéroport"])
+                == date("2026-10-16T06:00"))
+        #expect(try due("vendredi à 6 h", said: ["Du matin", "Rappelle-moi demain à 6 h de partir à l'aéroport"])
+                == date("2026-10-16T06:00"))
+        // The model's words are the user's, said in an earlier turn: kept.
+        #expect(try due("lundi à 3 h de l'après-midi", said: ["De l'après-midi", "Rappelle-moi lundi à 3 h d'appeler Paul"])
+                == date("2026-10-19T15:00"))
+        // Left out by the model: the user's. Not for a change, where no moment means it does not move.
+        let withoutWhen = ToolCall(name: "creer_rappel", arguments: ["titre": "x"])
+        #expect(try ActionCatalog.reminderDue(withoutWhen, context: ToolContext(
+            now: now, timeZone: paris, language: .french, userSaid: ["Rappelle-moi demain à 9 h d'appeler Léo"]))?.date
+                == date("2026-10-16T09:00"))
+        #expect(try ActionCatalog.reminderDue(withoutWhen, context: ToolContext(
+            now: now, timeZone: paris, language: .french, userSaid: ["Rappelle-moi d'acheter du pain"])) == nil)
+        #expect(try ActionCatalog.changedDue(ToolCall(name: "modifier_element", arguments: ["titre": "Réunion de 15 h"]),
+                                             due: (date("2026-10-16T10:00"), true), context: ToolContext(
+            now: now, timeZone: paris, language: .french, userSaid: ["Change le titre en réunion de 15 h"])) == nil)
+        // Two moments in the user's sentence: the model's choice stays.
+        #expect(try due("demain", said: ["Rappelle-moi demain d'appeler le resto pour samedi"]) == date("2026-10-16"))
+        let timer = ToolCall(name: "minuteur", arguments: ["duree": "1 h 30"])
+        #expect(try ActionCatalog.timerSeconds(timer, context: ToolContext(
+            now: now, timeZone: paris, language: .french, userSaid: ["Minuteur d'une heure et quart s'il te plaît"])) == 4500)
+        let reading = try #require(try ActionCatalog.period(
+            ToolCall(name: "lire_agenda", arguments: ["quand": "vendredi 16 octobre"]),
+            context: ToolContext(now: now, timeZone: paris, language: .french, userSaid: ["Qu'est-ce que j'ai demain ?"]),
+            required: true))
+        #expect(reading.0 == date("2026-10-16") && reading.1 == date("2026-10-17"))
+    }
+
+    /// "Décale-le à 16 h" keeps the day of the item, "samedi à la même heure" its time, its length goes along.
+    @Test func changesStartFromTheItem() throws {
+        func change(_ arguments: [String: JSONValue]) throws -> (start: Date, end: Date, allDay: Bool)? {
+            var all: [String: JSONValue] = ["reference": "e1"]
+            all.merge(arguments) { $1 }
+            return try ActionCatalog.changedEvent(ToolCall(name: "modifier_element", arguments: all),
+                                                  start: date("2026-10-16T15:00"), end: date("2026-10-16T16:30"),
+                                                  allDay: false, context: context())
+        }
+        let later = try #require(try change(["quand": "à 16 h"]))
+        #expect(later.start == date("2026-10-16T16:00") && later.end == date("2026-10-16T17:30"))
+        #expect(try change(["quand": "samedi à la même heure"])?.start == date("2026-10-17T15:00"))
+        #expect(try change(["duree": "2 heures"])?.end == date("2026-10-16T17:00"))
+        #expect(try change(["titre": "Dentiste"]) == nil)
+        let due = try ActionCatalog.changedDue(ToolCall(name: "modifier_element", arguments: ["quand": "plutôt à 11 h"]),
+                                               due: (date("2026-10-16T10:00"), true), context: context())
+        #expect(due?.date == date("2026-10-16T11:00"))
     }
 
     @Test func emptyTitleOrUnknownShortcutIsRefused() {
@@ -152,7 +278,7 @@ struct ActionCallTests {
                                     shortcuts: ["Salon"])
         }
         #expect(throws: Never.self) {
-            try ActionCatalog.check(ToolCall(name: "minuteur", arguments: ["duree_secondes": 600]), context: context())
+            try ActionCatalog.check(ToolCall(name: "minuteur", arguments: ["duree": "10 minutes"]), context: context())
         }
     }
 

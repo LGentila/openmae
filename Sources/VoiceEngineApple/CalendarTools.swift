@@ -152,7 +152,7 @@ public actor CalendarTools: ToolProvider {
     private func createReminder(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.reminder, context: context)
         let title = try ActionCatalog.title(call, context: context)
-        let due = try DateCheck.upcoming(call, "echeance", context: context, required: false)
+        let due = try ActionCatalog.reminderDue(call, context: context)
         let named = call.text("liste")
         let list = try reminderList(named: named, context: context)
         let reminder = EKReminder(eventStore: store)
@@ -182,7 +182,7 @@ public actor CalendarTools: ToolProvider {
     private func readAgenda(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.event, context: context)
         guard let (start, end) = try ActionCatalog.period(call, context: context, required: true) else {
-            throw DateCheck.refusal(.missing, key: "debut", context: context)
+            throw DateCheck.refusal(.missing, key: "quand", raw: "", context: context)
         }
         let events = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: nil))
             .sorted { $0.startDate < $1.startDate }
@@ -290,24 +290,17 @@ public actor CalendarTools: ToolProvider {
                 throw ToolRefusal(forModel: "L'événement \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
+            // Worked out before anything changes: a refused call leaves the event as it was.
+            let times = try ActionCatalog.changedEvent(call, start: event.startDate, end: event.endDate,
+                                                      allDay: event.isAllDay, context: context)
             let before = snapshot(event)
-            var moved = false
+            let moved = times.map { $0.start != event.startDate || $0.allDay != event.isAllDay } ?? false
             if let title = call.text("titre") { event.title = title }
             if let place = call.text("lieu") { event.location = place }
-            let length = event.endDate.timeIntervalSince(event.startDate)
-            if let start = try DateCheck.upcoming(call, "debut", context: context, required: false)
-                ?? DateCheck.upcoming(call, "echeance", context: context, required: false)
-            {
-                event.isAllDay = !start.hasTime
-                event.startDate = start.hasTime ? start.date : context.calendar.startOfDay(for: start.date)
-                event.endDate = event.startDate.addingTimeInterval(start.hasTime ? length : 24 * 3600)
-                moved = true
-            }
-            if let minutes = call.arguments["duree_minutes"]?.integer, minutes > 0 {
-                event.endDate = event.startDate.addingTimeInterval(TimeInterval(minutes * 60))
-            }
-            if let end = try DateCheck.any(call, "fin", context: context, required: false), end.date > event.startDate {
-                event.endDate = end.date
+            if let times {
+                event.isAllDay = times.allDay
+                event.startDate = times.start
+                event.endDate = times.end
             }
             try store.save(event, span: .thisEvent, commit: true)
             let saved = store.event(withIdentifier: id) ?? event
@@ -322,17 +315,15 @@ public actor CalendarTools: ToolProvider {
                 throw ToolRefusal(forModel: "Le rappel \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
+            let due = try ActionCatalog.changedDue(call, due: dueDate(of: reminder, context), context: context)
             let before = snapshot(reminder)
-            var moved = false
             if let title = call.text("titre") { reminder.title = title }
-            if let due = try DateCheck.upcoming(call, "echeance", context: context, required: false)
-                ?? DateCheck.upcoming(call, "debut", context: context, required: false)
-            {
+            if let due {
                 reminder.dueDateComponents = components(due.date, hasTime: due.hasTime, context)
                 reminder.alarms?.forEach { reminder.removeAlarm($0) }
                 if due.hasTime { reminder.addAlarm(EKAlarm(absoluteDate: due.date)) }
-                moved = true
             }
+            let moved = due != nil
             try store.save(reminder, commit: true)
             let when = dueDate(of: reminder, context)
             return ToolOutcome(

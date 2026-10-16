@@ -6,31 +6,36 @@ import Foundation
 ///
 /// Names, descriptions and the prompt are written in French on purpose, like the system prompt: the model
 /// follows the language of its instructions.
+///
+/// Moments and lengths are never computed by the model: it copies the user's words ("samedi à 20 h", "une heure
+/// et quart") into `quand` and `duree`, and the app works out the date (`FrenchDates`). A date the model writes
+/// itself (ISO) is still read.
 public enum ActionCatalog {
     // MARK: - The system prompt's part
 
     /// Appended to the system prompt when actions are on. In short: use a tool only when the user clearly asks
     /// for something to be done now (create, read or change), never for a question (even about what the
-    /// assistant can do), a memory, a taste or a remark; dates are local ISO, computed from the date line at the
-    /// end of each user message (added by the app, never to be copied into answers); ask when the hour is
-    /// ambiguous (1 to 7 o'clock) or something essential is missing; for an action, say nothing before the call,
-    /// not even the short opening sentence the main prompt asks for (the app confirms aloud); never pretend an
-    /// action was done without a call. Then, when the model can write one (`LanguageModel.toolCallText`), a whole
-    /// answer that is a call, for `example`.
+    /// assistant can do), a memory, a taste or a remark; for a moment or a length, copy the user's words without
+    /// computing anything (the app does); the date line at the end of each user message (added by the app) is
+    /// never to be copied, into a tool or an answer; ask when something essential is missing; for an action, say
+    /// nothing before the call, not even the short opening sentence the main prompt asks for (the app confirms
+    /// aloud); never pretend an action was done without a call. Then, when the model can write one
+    /// (`LanguageModel.toolCallText`), a whole answer that is a call, for `example`.
     ///
     /// The exception to the opening sentence and the example are for the smaller models: without them they
-    /// announce the action ("Je crée ton rendez-vous…") and stop there, without calling the tool.
+    /// announce the action ("Je crée ton rendez-vous…") and stop there, without calling the tool. An hour that may
+    /// be the morning or the afternoon ("à 3 h") is asked about by the app.
     public static func promptAddendum(exampleCall: String?) -> String {
         let rules = """
             Tu peux agir grâce à des outils : rappels, calendrier, minuteurs et raccourcis. \
             Appelle un outil seulement quand l'utilisateur te demande clairement de faire quelque chose \
             maintenant : créer, lire ou modifier ; une question (même sur ce que tu sais faire), un souvenir, \
             un goût ou une remarque n'en demandent pas. \
+            Pour un moment ou une durée, ne calcule rien : recopie les mots exacts de l'utilisateur \
+            (« samedi soir », « dans 10 minutes »), c'est l'app qui calcule les dates. \
             Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre parenthèses, \
-            ajoutées par l'app : sers-t'en pour calculer les dates des outils, au format AAAA-MM-JJTHH:MM en heure \
-            locale, mais ne les recopie jamais dans tes réponses. \
-            Si l'heure est ambiguë, par exemple « à 3 h » sans préciser le matin ou l'après-midi, \
-            ou s'il manque une information indispensable, pose d'abord une question courte. \
+            ajoutées par l'app : ne les recopie jamais, ni dans un outil ni dans tes réponses. \
+            S'il manque une information indispensable, pose d'abord une question courte. \
             Pour une action, ne dis rien avant l'appel, pas même la première phrase courte : ta réponse commence \
             directement par l'appel de l'outil, et c'est l'app qui confirme à voix haute. \
             Ne dis jamais qu'une action est faite sans avoir appelé l'outil.
@@ -42,7 +47,7 @@ public enum ActionCatalog {
     /// The request and the call the prompt shows as an example: a timer, which is always there and has no date
     /// the model could copy.
     public static let example = (request: "Mets un minuteur de 5 minutes pour le thé",
-                                 call: ToolCall(name: "minuteur", arguments: ["duree_secondes": 300, "libelle": "le thé"]))
+                                 call: ToolCall(name: "minuteur", arguments: ["duree": "5 minutes", "libelle": "le thé"]))
 
     /// The line that ends every user message when actions are on, e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.
@@ -56,14 +61,17 @@ public enum ActionCatalog {
 
     // MARK: - Reminders and calendar
 
+    // The examples in the descriptions are not phrases of the benchmark's corpus: a model that copied one instead
+    // of the user's words must not be counted right.
+
     public static let createReminder = ToolSpec(
         name: "creer_rappel",
         description: "Crée un rappel dans l'app Rappels, quand l'utilisateur demande qu'on lui rappelle quelque chose "
             + "ou de noter une chose à faire.",
         parameters: [
             ToolParameter("titre", .string, "Ce qu'il faut faire, court, sans « rappelle-moi de ».", required: true),
-            ToolParameter("echeance", .string, "Quand le rappeler : AAAA-MM-JJTHH:MM, ou AAAA-MM-JJ pour un jour "
-                          + "sans heure. Absent si aucun moment n'est donné."),
+            ToolParameter("quand", .string, "Quand le rappeler, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« jeudi à 14 h 30 », « dans 2 heures »). Absent si aucun moment n'est donné."),
             ToolParameter("liste", .string, "Nom de la liste, seulement si l'utilisateur en nomme une."),
         ],
         risk: .undoable)
@@ -72,8 +80,8 @@ public enum ActionCatalog {
         name: "lister_rappels",
         description: "Dit les rappels pas encore faits, pour une période ou en tout.",
         parameters: [
-            ToolParameter("debut", .string, "Début de la période : AAAA-MM-JJTHH:MM. Absent pour tous les rappels."),
-            ToolParameter("fin", .string, "Fin de la période : AAAA-MM-JJTHH:MM."),
+            ToolParameter("quand", .string, "La période, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« ce week-end »). Absent pour tous les rappels."),
         ],
         risk: .read)
 
@@ -82,13 +90,13 @@ public enum ActionCatalog {
         description: "Ajoute un événement au calendrier : rendez-vous, réunion, sortie, anniversaire…",
         parameters: [
             ToolParameter("titre", .string, "Nom de l'événement, court.", required: true),
-            ToolParameter("debut", .string, "Début : AAAA-MM-JJTHH:MM, ou AAAA-MM-JJ pour toute la journée.",
+            ToolParameter("quand", .string, "Quand, avec les mots exacts de l'utilisateur, fin comprise si elle est "
+                          + "dite (par exemple « jeudi à 14 h 30 », « lundi de 9 h à 11 h », « du 2 au 5 janvier »).",
                           required: true),
-            ToolParameter("fin", .string, "Fin : AAAA-MM-JJTHH:MM, seulement si l'utilisateur la donne."),
-            ToolParameter("duree_minutes", .integer, "Durée en minutes si elle est donnée (60 par défaut)."),
+            ToolParameter("duree", .string, "La durée, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« 2 heures »), seulement si elle est dite."),
             ToolParameter("lieu", .string, "Lieu, s'il est donné."),
             ToolParameter("calendrier", .string, "Nom du calendrier, seulement si l'utilisateur en nomme un."),
-            ToolParameter("journee_entiere", .boolean, "Vrai pour un événement sur toute la journée."),
         ],
         risk: .undoable)
 
@@ -96,8 +104,8 @@ public enum ActionCatalog {
         name: "lire_agenda",
         description: "Lit les événements du calendrier sur une période, par exemple « qu'est-ce que j'ai demain ? ».",
         parameters: [
-            ToolParameter("debut", .string, "Début de la période : AAAA-MM-JJTHH:MM.", required: true),
-            ToolParameter("fin", .string, "Fin de la période : AAAA-MM-JJTHH:MM.", required: true),
+            ToolParameter("quand", .string, "La période, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« ce week-end », « jeudi prochain »).", required: true),
         ],
         risk: .read)
 
@@ -109,10 +117,9 @@ public enum ActionCatalog {
             ToolParameter("reference", .string, "« dernier » pour le dernier élément créé, ou son identifiant "
                           + "donné par l'outil (par exemple e1 ou r2).", required: true),
             ToolParameter("titre", .string, "Nouveau nom."),
-            ToolParameter("debut", .string, "Nouveau début d'un événement : AAAA-MM-JJTHH:MM."),
-            ToolParameter("fin", .string, "Nouvelle fin d'un événement : AAAA-MM-JJTHH:MM."),
-            ToolParameter("duree_minutes", .integer, "Nouvelle durée d'un événement, en minutes."),
-            ToolParameter("echeance", .string, "Nouveau moment d'un rappel : AAAA-MM-JJTHH:MM."),
+            ToolParameter("quand", .string, "Nouveau moment, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« à 10 h », « lundi à la même heure », « une heure plus tard »)."),
+            ToolParameter("duree", .string, "Nouvelle durée d'un événement, avec les mots exacts de l'utilisateur."),
             ToolParameter("lieu", .string, "Nouveau lieu d'un événement."),
         ],
         risk: .undoable)
@@ -134,7 +141,8 @@ public enum ActionCatalog {
         name: "minuteur",
         description: "Lance un minuteur, un compte à rebours qui sonne à la fin.",
         parameters: [
-            ToolParameter("duree_secondes", .integer, "Durée en secondes.", required: true),
+            ToolParameter("duree", .string, "La durée, avec les mots exacts de l'utilisateur (par exemple "
+                          + "« 2 heures », « 40 minutes »).", required: true),
             ToolParameter("libelle", .string, "À quoi il sert, court (par exemple « les pâtes »), s'il est dit."),
         ],
         risk: .undoable)
@@ -162,93 +170,266 @@ public enum ActionCatalog {
         return title
     }
 
-    /// The event a `creer_evenement` call describes: start, end, all day.
-    public static func eventTimes(_ call: ToolCall, context: ToolContext)
-        throws -> (start: Date, end: Date, allDay: Bool)
+    /// The moment a call gives in the first of `keys` it has (the user's words, or a date the model wrote): not
+    /// past, less than a year ahead. nil when absent and not required. `base`: the item a change starts from.
+    /// `orSaid`: when the call gives none, the moment the user's sentence says, if any (the model left it out).
+    static func moment(_ call: ToolCall, _ keys: [String], context: ToolContext, base: FrenchDates.Base? = nil,
+                       required: Bool, orSaid: Bool = false) throws -> FrenchDates.Moment?
     {
-        guard let start = try DateCheck.upcoming(call, "debut", context: context, required: true) else {
-            throw DateCheck.refusal(.missing, key: "debut", context: context)
-        }
-        let allDay = call.arguments["journee_entiere"]?.boolean == true || !start.hasTime
-        let calendar = context.calendar
-        if allDay {
-            let day = calendar.startOfDay(for: start.date)
-            var end = calendar.date(byAdding: .day, value: 1, to: day)!
-            if let last = try DateCheck.any(call, "fin", context: context, required: false), last.date > day {
-                end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last.date))!
+        guard let key = keys.first(where: { call.text($0) != nil }), let raw = call.text(key) else {
+            if orSaid, let said = context.userSaid.first, FrenchDates.saysWhen(said),
+               let moment = try? FrenchDates.moment(said, now: context.now, calendar: context.calendar)
+            {
+                try DateCheck.upcoming(moment, key: keys[0], raw: said, context: context)
+                return moment
             }
-            return (day, end, true)
+            if required { throw DateCheck.refusal(.missing, key: keys[0], raw: "", context: context) }
+            return nil
         }
-        var end = start.date.addingTimeInterval(TimeInterval(60 * 60))
+        func read(_ text: String) throws -> FrenchDates.Moment {
+            try FrenchDates.moment(text, now: context.now, calendar: context.calendar, base: base)
+        }
+        do {
+            let moment = try readingTheUser(raw, context: context, read: read)
+            try DateCheck.upcoming(moment, key: key, raw: raw, context: context)
+            return moment
+        } catch let problem as FrenchDates.Problem {
+            throw refusal(problem, key: key, raw: raw, context: context)
+        }
+    }
+
+    /// Reads the model's words about a moment — or the user's own sentence, when it says when by itself and the
+    /// model changed the words ("demain" became "vendredi", a day taken from the date line, a date it worked out
+    /// itself). When the model's words cannot be placed, the user's latest sentence may complete them: "demain matin
+    /// à 7 h 30" copied "demain à 7 h 30", or "du matin", the answer to the app's question.
+    private static func readingTheUser<Value>(_ raw: String, context: ToolContext,
+                                              read: (String) throws -> Value) throws -> Value
+    {
+        guard let said = context.userSaid.first else { return try read(raw) }
+        let theirs = FrenchDates.wordsAreTheUser(raw, said: context.userSaid)
+        if !theirs, FrenchDates.saysWhen(said) {
+            do {
+                return try read(said)
+            } catch FrenchDates.Problem.contradiction, FrenchDates.Problem.notUnderstood {
+                // Two moments in the sentence, or none it can place without the model: the model's words.
+            }
+        }
+        do {
+            return try read(raw)
+        } catch {
+            if let completed = try? read(raw + " " + said) { return completed }
+            if theirs, FrenchDates.saysWhen(said), let own = try? read(said) { return own }
+            throw error
+        }
+    }
+
+    /// What the app says, and tells the model, about words it cannot place in time.
+    static func refusal(_ problem: FrenchDates.Problem, key: String, raw: String, context: ToolContext) -> ToolRefusal {
+        let language = context.language
+        switch problem {
+        case .notUnderstood:
+            return ToolRefusal(
+                forModel: "Je ne comprends pas « \(key) » : « \(raw) ». Recopie les mots de l'utilisateur sur le moment, "
+                    + "par exemple « samedi à 20 h » ou « dans 2 heures », ou écris la date au format AAAA-MM-JJTHH:MM.",
+                spoken: ActionPhrases.badTime(language))
+        case .ambiguousHour(let hour, let minute):
+            // The words cannot tell: the user is asked, not the model.
+            return ToolRefusal(
+                forModel: "« \(raw) » : \(hour) h du matin ou de l'après-midi ? Rien n'est créé ni changé : l'app pose la "
+                    + "question à l'utilisateur.",
+                spoken: ActionPhrases.morningOrAfternoon(hour: hour, minute: minute, context), retryable: false)
+        case .wrongWeekday(let date):
+            return ToolRefusal(
+                forModel: "« \(raw) » : le \(ActionPhrases.dayOfMonth(date, context)) est un "
+                    + "\(ActionPhrases.weekday(date, context)).",
+                spoken: ActionPhrases.wrongWeekday(date, context))
+        case .contradiction:
+            return ToolRefusal(
+                forModel: "« \(raw) » donne deux moments différents : recopie seulement celui que l'utilisateur a dit.",
+                spoken: ActionPhrases.badTime(language))
+        case .noDirection:
+            return ToolRefusal(
+                forModel: "« \(raw) » : plus tôt ou plus tard ? Écris par exemple « une heure plus tard ».",
+                spoken: ActionPhrases.earlierOrLater(language))
+        }
+    }
+
+    /// A length in the user's words ("une heure et quart"), in seconds, within `range`.
+    static func length(_ call: ToolCall, _ key: String, range: ClosedRange<Int>, context: ToolContext) throws -> Int? {
+        guard let raw = call.text(key) else { return nil }
+        // "Une heure et quart" written "1 h 30" by the model: the user's length.
+        if let said = context.userSaid.first, !FrenchDates.wordsAreTheUser(raw, said: context.userSaid),
+           let seconds = FrenchDates.lengthSaid(said), range.contains(seconds)
+        {
+            return seconds
+        }
+        guard let seconds = FrenchDates.duration(raw), range.contains(seconds) else {
+            throw ToolRefusal(
+                forModel: "Je ne comprends pas « \(key) » : « \(raw) ». Recopie la durée dite par l'utilisateur, avec "
+                    + "son unité, par exemple « 40 minutes ».",
+                spoken: ActionPhrases.badDuration(context.language))
+        }
+        return seconds
+    }
+
+    /// An event's length: `duree`, the words of `quand` ("pendant une heure et demie"), or minutes (`duree_minutes`,
+    /// as the model may still write it).
+    private static func eventLength(_ call: ToolCall, _ moment: FrenchDates.Moment?, context: ToolContext) throws -> Int? {
+        let range = 60...(14 * 86_400)
+        if let seconds = try length(call, "duree", range: range, context: context) { return seconds }
+        if let seconds = moment?.duration, range.contains(seconds) { return seconds }
         if let minutes = call.arguments["duree_minutes"]?.integer {
-            guard (1...(60 * 24 * 14)).contains(minutes) else {
+            guard range.contains(minutes * 60) else {
                 throw ToolRefusal(forModel: "« duree_minutes » doit être entre 1 et 20160.",
                                   spoken: ActionPhrases.badDuration(context.language))
             }
-            end = start.date.addingTimeInterval(TimeInterval(minutes * 60))
+            return minutes * 60
         }
-        if let fin = try DateCheck.any(call, "fin", context: context, required: false) {
-            // "fin" without a day the model may give as the same day; a time alone is not accepted by the format.
-            guard fin.date > start.date else {
-                throw ToolRefusal(forModel: "« fin » doit être après « debut ».",
-                                  spoken: ActionPhrases.badTime(context.language))
-            }
-            end = fin.date
-        }
-        return (start.date, end, false)
+        return nil
     }
 
-    /// The period a reading covers. Without dates (reminders only): nil.
-    public static func period(_ call: ToolCall, context: ToolContext, required: Bool) throws -> (Date, Date)? {
-        let start = try DateCheck.any(call, "debut", context: context, required: required)
-        let end = try DateCheck.any(call, "fin", context: context, required: required)
-        guard let start else {
-            // "fin" alone: from now on.
-            guard let end else { return nil }
-            return (context.now, endOfPeriod(end, context))
+    /// An end the model gave on its own (`fin`), on the start's day unless it says another.
+    private static func endArgument(_ call: ToolCall, start: Date, context: ToolContext) throws -> Date? {
+        guard let raw = call.text("fin") else { return nil }
+        do {
+            return try FrenchDates.moment(raw, now: context.now, calendar: context.calendar,
+                                          base: FrenchDates.Base(date: start, hasTime: true)).start
+        } catch let problem as FrenchDates.Problem {
+            throw refusal(problem, key: "fin", raw: raw, context: context)
+        }
+    }
+
+    /// The event a `creer_evenement` call describes: start, end, all day. An hour by default; a day alone is the
+    /// whole day.
+    public static func eventTimes(_ call: ToolCall, context: ToolContext)
+        throws -> (start: Date, end: Date, allDay: Bool)
+    {
+        guard let moment = try moment(call, ["quand", "debut"], context: context, required: true, orSaid: true) else {
+            throw DateCheck.refusal(.missing, key: "quand", raw: "", context: context)
         }
         let calendar = context.calendar
-        let from = start.hasTime ? start.date : calendar.startOfDay(for: start.date)
-        guard let end else {
-            // A start alone: that day.
-            return (from, calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: from))!)
+        if !moment.hasTime || call.arguments["journee_entiere"]?.boolean == true {
+            let day = calendar.startOfDay(for: moment.start)
+            let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+            return (day, max(moment.end ?? next, next), true)
         }
-        let to = endOfPeriod(end, context)
-        guard to > from else {
-            throw ToolRefusal(forModel: "« fin » doit être après « debut ».", spoken: ActionPhrases.badTime(context.language))
+        var end = moment.start.addingTimeInterval(3600)
+        if let seconds = try eventLength(call, moment, context: context) {
+            end = moment.start.addingTimeInterval(TimeInterval(seconds))
         }
-        guard to.timeIntervalSince(from) <= 92 * 24 * 3600 else {
+        if let given = try moment.end ?? endArgument(call, start: moment.start, context: context) {
+            guard given > moment.start else {
+                throw ToolRefusal(forModel: "La fin doit être après le début.", spoken: ActionPhrases.badTime(context.language))
+            }
+            end = given
+        }
+        return (moment.start, end, false)
+    }
+
+    /// When a `creer_rappel` call's reminder is due; nil for a reminder without a date.
+    public static func reminderDue(_ call: ToolCall, context: ToolContext) throws -> (date: Date, hasTime: Bool)? {
+        try moment(call, ["quand", "echeance"], context: context, required: false, orSaid: true)
+            .map { ($0.start, $0.hasTime) }
+    }
+
+    /// The new times of an event a `modifier_element` call changes, nil when it changes none of them: "à 16 h"
+    /// keeps its day, "samedi" its time and its length, "une heure plus tard" moves it from where it is.
+    public static func changedEvent(_ call: ToolCall, start: Date, end: Date, allDay: Bool, context: ToolContext)
+        throws -> (start: Date, end: Date, allDay: Bool)?
+    {
+        let calendar = context.calendar
+        let moment = try moment(call, ["quand", "debut", "echeance"], context: context,
+                                base: FrenchDates.Base(date: start, hasTime: !allDay), required: false)
+        let seconds = try eventLength(call, moment, context: context)
+        guard moment != nil || seconds != nil || call.text("fin") != nil else { return nil }
+        var newStart = start
+        var newAllDay = allDay
+        if let moment {
+            newAllDay = !moment.hasTime
+            newStart = newAllDay ? calendar.startOfDay(for: moment.start) : moment.start
+        }
+        var newEnd: Date
+        if newAllDay {
+            // Whole days: as many as before, one when it had a time.
+            let count = allDay ? max(calendar.dateComponents([.day], from: start, to: end).day ?? 1, 1) : 1
+            newEnd = calendar.date(byAdding: .day, value: count, to: newStart) ?? newStart.addingTimeInterval(86_400)
+            if let given = moment?.end, given > newStart { newEnd = given }
+        } else {
+            let length = seconds.map { TimeInterval($0) } ?? (allDay ? 3600 : end.timeIntervalSince(start))
+            newEnd = moment?.end ?? newStart.addingTimeInterval(length)
+            if let given = try endArgument(call, start: newStart, context: context) { newEnd = given }
+        }
+        guard newEnd > newStart else {
+            throw ToolRefusal(forModel: "La fin doit être après le début.", spoken: ActionPhrases.badTime(context.language))
+        }
+        return (newStart, newEnd, newAllDay)
+    }
+
+    /// The new due date of a reminder a `modifier_element` call changes, nil when it does not move it.
+    public static func changedDue(_ call: ToolCall, due: (date: Date, hasTime: Bool)?, context: ToolContext)
+        throws -> (date: Date, hasTime: Bool)?
+    {
+        let base = due.map { FrenchDates.Base(date: $0.date, hasTime: $0.hasTime) }
+        return try moment(call, ["quand", "echeance", "debut"], context: context, base: base, required: false)
+            .map { ($0.start, $0.hasTime) }
+    }
+
+    /// The period a reading covers ("demain", "cette semaine"). Without one (reminders only): nil.
+    public static func period(_ call: ToolCall, context: ToolContext, required: Bool) throws -> (Date, Date)? {
+        let range: (start: Date, end: Date)
+        do {
+            if let raw = call.text("quand") {
+                func read(_ text: String) throws -> (start: Date, end: Date) {
+                    try FrenchDates.period(text, now: context.now, calendar: context.calendar)
+                }
+                range = try readingTheUser(raw, context: context, read: read)
+            } else if let raw = call.text("debut") ?? call.text("fin") {
+                // The way the model may still write it: dates, a start and an end.
+                let start = try FrenchDates.period(raw, now: context.now, calendar: context.calendar).start
+                let end = try call.text("fin").map {
+                    try FrenchDates.period($0, now: context.now, calendar: context.calendar).end
+                } ?? context.calendar.date(byAdding: .day, value: 1, to: context.calendar.startOfDay(for: start)) ?? start
+                range = call.text("debut") == nil ? (context.now, end) : (start, end)
+            } else if let said = context.userSaid.first, FrenchDates.saysWhen(said),
+                      let own = try? FrenchDates.period(said, now: context.now, calendar: context.calendar)
+            {
+                range = own  // the user said when, the model left it out
+            } else {
+                if required { throw DateCheck.refusal(.missing, key: "quand", raw: "", context: context) }
+                return nil
+            }
+        } catch let problem as FrenchDates.Problem {
+            throw refusal(problem, key: "quand", raw: call.text("quand") ?? call.text("debut") ?? "", context: context)
+        }
+        guard range.end > range.start else {
+            throw ToolRefusal(forModel: "La fin doit être après le début.", spoken: ActionPhrases.badTime(context.language))
+        }
+        guard range.end.timeIntervalSince(range.start) <= 92 * 24 * 3600 else {
             throw ToolRefusal(forModel: "La période ne peut pas dépasser trois mois.",
                               spoken: ActionPhrases.badTime(context.language))
         }
-        return (from, to)
+        return range
     }
 
-    /// A day alone, or 23:59, means the end of that day.
-    private static func endOfPeriod(_ end: (date: Date, hasTime: Bool), _ context: ToolContext) -> Date {
-        let calendar = context.calendar
-        let c = calendar.dateComponents([.hour, .minute], from: end.date)
-        if !end.hasTime || (c.hour == 23 && c.minute == 59) {
-            return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end.date))!
-        }
-        return end.date
-    }
-
-    /// The length of a `minuteur` call, in seconds (1 second to 24 hours).
+    /// The length of a `minuteur` call, in seconds (1 second to 24 hours): `duree` in the user's words, or
+    /// `duree_secondes`, as the model may still write it.
     public static func timerSeconds(_ call: ToolCall, context: ToolContext) throws -> Int {
-        guard let seconds = call.arguments["duree_secondes"]?.integer, (1...(24 * 3600)).contains(seconds) else {
-            throw ToolRefusal(forModel: "« duree_secondes » doit être un nombre entier de secondes, entre 1 et 86400.",
+        let range = 1...(24 * 3600)
+        if let seconds = try length(call, "duree", range: range, context: context) { return seconds }
+        guard let seconds = call.arguments["duree_secondes"]?.integer, range.contains(seconds) else {
+            throw ToolRefusal(forModel: "Il manque « duree » : la durée dite par l'utilisateur, par exemple « 40 minutes ».",
                               spoken: ActionPhrases.badDuration(context.language))
         }
         return seconds
     }
 
-    /// Checks a call against the static rules (the benchmark's "would the app accept it").
+    /// Checks a call against the static rules (the benchmark's "would the app accept it"). The dates of a change
+    /// are checked when it is carried out: they depend on the item ("à la même heure").
     public static func check(_ call: ToolCall, context: ToolContext, shortcuts: [String] = []) throws {
         switch call.name {
         case createReminder.name:
             _ = try title(call, context: context)
-            _ = try DateCheck.upcoming(call, "echeance", context: context, required: false)
+            _ = try reminderDue(call, context: context)
         case listReminders.name:
             _ = try period(call, context: context, required: false)
         case createEvent.name:
@@ -256,13 +437,7 @@ public enum ActionCatalog {
             _ = try eventTimes(call, context: context)
         case readAgenda.name:
             _ = try period(call, context: context, required: true)
-        case changeItem.name:
-            guard call.text("reference") != nil else {
-                throw ToolRefusal(forModel: "Il manque « reference ».", spoken: ActionPhrases.nothingToChange(context.language))
-            }
-            _ = try DateCheck.upcoming(call, "debut", context: context, required: false)
-            _ = try DateCheck.upcoming(call, "echeance", context: context, required: false)
-        case deleteItem.name:
+        case changeItem.name, deleteItem.name:
             guard call.text("reference") != nil else {
                 throw ToolRefusal(forModel: "Il manque « reference ».", spoken: ActionPhrases.nothingToChange(context.language))
             }

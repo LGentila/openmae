@@ -2,8 +2,8 @@
 //
 // Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created).
 // Each request of the corpus (Tests/Fixtures/actions-fr.json) is sent to the model with the same system
-// prompt and tools as in the app, at a fixed reference time, and the call it writes is compared with the
-// expected one.
+// prompt and tools as in the app, at a fixed reference time, and what the app would make of the call it writes
+// (the date worked out from the words it copied, the length, the shortcut) is compared with the expected one.
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
@@ -59,6 +59,8 @@ private struct CaseResult: Encodable {
     var text: String
     var toolOK: Bool
     var argumentsOK: Bool?
+    /// What the app would make of the call: "2026-10-17T20:00 → 2026-10-17T21:00", "600 s".
+    var resolved: String?
     /// What the app would say if it refused the call (date in the past, malformed…).
     var refusal: String?
     /// After a refusal, the call the model makes once it knows why (the app gives it that second try).
@@ -157,26 +159,36 @@ func runActionsBench(_ o: Options) async throws {
             result.bestCallChance = chances.best
             result.bestCallAt = chances.bestAt
         }
-        let context = ToolContext(now: now, timeZone: timeZone, language: .french)
+        // As in the app: what the user said, this request then the earlier ones.
+        let context = ToolContext(now: now, timeZone: timeZone, language: .french,
+                                  userSaid: [item.phrase] + (item.before ?? []).reversed().map(\.user))
+        let created = item.before?.last
+        var refusal: ToolRefusal?
         if let call {
-            do { try ActionCatalog.check(call, context: context, shortcuts: corpus.shortcuts) } catch let refusal as ToolRefusal {
-                result.refusal = refusal.forModel
+            do {
+                let resolved = try resolve(call, created: created, context: context, shortcuts: corpus.shortcuts)
+                result.resolved = resolved.description(timeZone)
+                if result.toolOK, let expected = item.expected {
+                    result.argumentsOK = matches(resolved, expected, context)
+                }
+            } catch let refused as ToolRefusal {
+                refusal = refused
+                result.refusal = refused.forModel
+                if result.toolOK, item.expected != nil { result.argumentsOK = false }
             }
         }
-        if result.toolOK, let expected = item.expected, let call {
-            result.argumentsOK = argumentsMatch(call, expected, context) && result.refusal == nil
-        }
-        if let call, let refusal = result.refusal {
+        if let call, let refusal, refusal.retryable {
             // As in the app: the model sees why its call was refused and gets one more try.
             var retried: ToolCall?
-            for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal)])]) {
+            for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal.forModel)])]) {
                 if case .toolCall(let made) = output, retried == nil { retried = made }
             }
             result.secondTry = retried.map { "\($0.name) \(describe($0.arguments))" } ?? "no call"
             if let retried, let expected = item.expected, retried.name == expectedTool,
-               (try? ActionCatalog.check(retried, context: context, shortcuts: corpus.shortcuts)) != nil
+               let resolved = try? resolve(retried, created: created, context: context, shortcuts: corpus.shortcuts)
             {
-                result.rightAfterSecondTry = argumentsMatch(retried, expected, context)
+                result.secondTry! += " = " + resolved.description(timeZone)
+                result.rightAfterSecondTry = matches(resolved, expected, context)
             } else {
                 result.rightAfterSecondTry = false
             }
@@ -189,7 +201,7 @@ func runActionsBench(_ o: Options) async throws {
             String(format: "  call chance %.0f %% first, %.0f %% at token %d", (result.firstCallChance ?? 0) * 100,
                    $0 * 100, result.bestCallAt ?? 0)
         } ?? ""
-        print("      → \(detail)" + (result.refusal.map { "  [refused: \($0)]" } ?? "")
+        print("      → \(detail)" + (result.resolved.map { " = \($0)" } ?? "") + (result.refusal.map { "  [refused: \($0)]" } ?? "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
         if let second = result.secondTry {
             print("      second try → \(second)" + (result.rightAfterSecondTry == true ? "  ✓" : "  ✗"))
@@ -199,34 +211,88 @@ func runActionsBench(_ o: Options) async throws {
     summarize(results, tier: tier, model: folder.lastPathComponent, options: o)
 }
 
-/// Compares the call's dates (to the minute, or to the day), length or shortcut with the expected ones.
-private func argumentsMatch(_ call: ToolCall, _ expected: Corpus.Expected, _ context: ToolContext) -> Bool {
-    let timeZone = context.timeZone
-    func sameMoment(_ actual: String?, _ wanted: String) -> Bool {
-        if wanted == "none" { return actual == nil }
-        guard let actual, let a = LocalDateTime.parse(actual, in: timeZone),
-              let w = LocalDateTime.parse(wanted, in: timeZone) else { return false }
-        if w.hasTime { return a.hasTime && a.date == w.date }
-        return context.calendar.isDate(a.date, inSameDayAs: w.date)
+/// What the app would do with a call: the moment, end, length or shortcut it would use. Throws the refusal it would
+/// give. `created`: for a change, the exchange that created the item.
+private struct Resolved {
+    var start: Date?
+    var hasTime = false
+    var end: Date?
+    var seconds: Int?
+    var name: String?
+
+    func description(_ timeZone: TimeZone) -> String {
+        var parts: [String] = []
+        if let start { parts.append(LocalDateTime.format(start, in: timeZone, withTime: hasTime)) }
+        if let end { parts.append("→ " + LocalDateTime.format(end, in: timeZone, withTime: hasTime)) }
+        if let seconds { parts.append("\(seconds) s") }
+        if let name { parts.append("“\(name)”") }
+        return parts.isEmpty ? "nothing" : parts.joined(separator: " ")
     }
-    if let when = expected.when {
-        let actual: String? = switch call.name {
-        case ActionCatalog.createReminder.name: call.text("echeance")
-        case ActionCatalog.changeItem.name: call.text("debut") ?? call.text("echeance")
-        case ActionCatalog.readAgenda.name, ActionCatalog.listReminders.name: call.text("debut") ?? call.text("fin")
-        default: call.text("debut")
+}
+
+private func resolve(_ call: ToolCall, created: Corpus.Exchange?, context: ToolContext, shortcuts: [String]) throws -> Resolved {
+    try ActionCatalog.check(call, context: context, shortcuts: shortcuts)
+    switch call.name {
+    case ActionCatalog.createEvent.name:
+        let times = try ActionCatalog.eventTimes(call, context: context)
+        return Resolved(start: times.start, hasTime: !times.allDay, end: times.end)
+    case ActionCatalog.createReminder.name:
+        let due = try ActionCatalog.reminderDue(call, context: context)
+        return Resolved(start: due?.date, hasTime: due?.hasTime ?? false)
+    case ActionCatalog.readAgenda.name, ActionCatalog.listReminders.name:
+        let period = try ActionCatalog.period(call, context: context, required: call.name == ActionCatalog.readAgenda.name)
+        return Resolved(start: period?.0, end: period?.1)
+    case ActionCatalog.changeItem.name, ActionCatalog.deleteItem.name:
+        // As the app: only an item created in this conversation (the corpus's earlier exchange) can be changed.
+        guard case .object(let fields)? = created?.result, fields["id"] != nil else {
+            throw ToolRefusal(forModel: "Aucun élément « \(call.text("reference") ?? "dernier") » créé dans cette "
+                              + "conversation : seuls ceux-là peuvent être modifiés ou supprimés.",
+                              spoken: ActionPhrases.nothingToChange(context.language))
         }
-        guard sameMoment(actual, when) else { return false }
+        guard call.name == ActionCatalog.changeItem.name else { return Resolved() }
+        // The item as the app saved it.
+        func saved(_ key: String) -> (date: Date, hasTime: Bool)? {
+            guard case .object(let fields)? = created?.result, let text = fields[key]?.text else { return nil }
+            return LocalDateTime.parse(text, in: context.timeZone)
+        }
+        if let start = saved("debut") {
+            let end = saved("fin")?.date ?? start.date.addingTimeInterval(3600)
+            let times = try ActionCatalog.changedEvent(call, start: start.date, end: end, allDay: !start.hasTime,
+                                                       context: context)
+            return times.map { Resolved(start: $0.start, hasTime: !$0.allDay, end: $0.end) } ?? Resolved()
+        }
+        let due = try ActionCatalog.changedDue(call, due: saved("echeance"), context: context)
+        return Resolved(start: due?.date, hasTime: due?.hasTime ?? false)
+    case ActionCatalog.timer.name:
+        return Resolved(seconds: try ActionCatalog.timerSeconds(call, context: context))
+    default:
+        return Resolved(name: call.text("nom"))
+    }
+}
+
+/// Compares what the app would do (dates to the minute, or to the day; length; shortcut) with the expected one.
+private func matches(_ resolved: Resolved, _ expected: Corpus.Expected, _ context: ToolContext) -> Bool {
+    let timeZone = context.timeZone
+    if let when = expected.when {
+        if when == "none" {
+            guard resolved.start == nil else { return false }
+        } else {
+            guard let start = resolved.start, let wanted = LocalDateTime.parse(when, in: timeZone) else { return false }
+            if wanted.hasTime ? !(resolved.hasTime && start == wanted.date)
+                : !context.calendar.isDate(start, inSameDayAs: wanted.date)
+            {
+                return false
+            }
+        }
     }
     if let end = expected.end {
-        guard let times = try? ActionCatalog.eventTimes(call, context: context),
-              let wanted = LocalDateTime.parse(end, in: timeZone) else { return false }
-        if wanted.hasTime ? times.end != wanted.date : !context.calendar.isDate(times.end, inSameDayAs: wanted.date) {
+        guard let actual = resolved.end, let wanted = LocalDateTime.parse(end, in: timeZone) else { return false }
+        if wanted.hasTime ? actual != wanted.date : !context.calendar.isDate(actual, inSameDayAs: wanted.date) {
             return false
         }
     }
-    if let seconds = expected.seconds, call.arguments["duree_secondes"]?.integer != seconds { return false }
-    if let name = expected.name, call.text("nom") != name { return false }
+    if let seconds = expected.seconds, resolved.seconds != seconds { return false }
+    if let name = expected.name, resolved.name != name { return false }
     return true
 }
 

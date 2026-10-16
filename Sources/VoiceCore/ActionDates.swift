@@ -47,61 +47,40 @@ public enum LocalDateTime {
     }
 }
 
-/// The checks every dated action shares (a malformed date, a date in the past or more than a year
-/// ahead is refused, and the user is asked again).
+/// The checks every dated action shares: a moment in the past or more than a year ahead is refused, and the user
+/// is asked again.
 public enum DateCheck {
-    /// A date the user wants something to happen at: well formed, not past, less than a year ahead.
-    /// Returns nil when the argument is absent and not required.
-    public static func upcoming(_ call: ToolCall, _ key: String, context: ToolContext, required: Bool)
-        throws -> (date: Date, hasTime: Bool)?
-    {
-        guard let raw = call.text(key) else {
-            if required { throw refusal(.missing, key: key, context: context) }
-            return nil
-        }
-        guard let parsed = LocalDateTime.parse(raw, in: context.timeZone) else {
-            throw refusal(.malformed, key: key, context: context, raw: raw)
-        }
+    /// Refuses a moment in the past (a minute's grace; a day alone, before today) or more than a year ahead.
+    public static func upcoming(_ moment: FrenchDates.Moment, key: String, raw: String, context: ToolContext) throws {
         let calendar = context.calendar
-        let past = parsed.hasTime
-            ? parsed.date < context.now.addingTimeInterval(-60)
-            : parsed.date < calendar.startOfDay(for: context.now)
-        if past { throw refusal(.past, key: key, context: context, raw: raw) }
-        if let limit = calendar.date(byAdding: .year, value: 1, to: context.now), parsed.date > limit {
-            throw refusal(.tooFar, key: key, context: context, raw: raw)
+        let past = moment.hasTime
+            ? moment.start < context.now.addingTimeInterval(-60)
+            : moment.start < calendar.startOfDay(for: context.now)
+        if past { throw refusal(.past(moment), key: key, raw: raw, context: context) }
+        if let limit = calendar.date(byAdding: .year, value: 1, to: context.now), moment.start > limit {
+            throw refusal(.tooFar(moment), key: key, raw: raw, context: context)
         }
-        return parsed
     }
 
-    /// Any well-formed date (reading the agenda may look at the past).
-    public static func any(_ call: ToolCall, _ key: String, context: ToolContext, required: Bool)
-        throws -> (date: Date, hasTime: Bool)?
-    {
-        guard let raw = call.text(key) else {
-            if required { throw refusal(.missing, key: key, context: context) }
-            return nil
-        }
-        guard let parsed = LocalDateTime.parse(raw, in: context.timeZone) else {
-            throw refusal(.malformed, key: key, context: context, raw: raw)
-        }
-        return parsed
+    public enum Problem: Sendable {
+        case missing
+        case past(FrenchDates.Moment)
+        case tooFar(FrenchDates.Moment)
     }
 
-    public enum Problem: Sendable { case missing, malformed, past, tooFar }
-
-    public static func refusal(_ problem: Problem, key: String, context: ToolContext, raw: String = "") -> ToolRefusal {
-        let now = LocalDateTime.format(context.now, in: context.timeZone)
+    public static func refusal(_ problem: Problem, key: String, raw: String, context: ToolContext) -> ToolRefusal {
+        let now = ActionPhrases.moment(context.now, hasTime: true, context)
+        func when(_ moment: FrenchDates.Moment) -> String {
+            "« \(key) » (« \(raw) ») tombe le \(ActionPhrases.moment(moment.start, hasTime: moment.hasTime, context))"
+        }
         switch problem {
         case .missing:
             return ToolRefusal(forModel: "Il manque « \(key) ».", spoken: ActionPhrases.badTime(context.language))
-        case .malformed:
-            return ToolRefusal(forModel: "« \(key) » doit être au format AAAA-MM-JJTHH:MM (reçu : \(raw)).",
-                               spoken: ActionPhrases.badTime(context.language))
-        case .past:
-            return ToolRefusal(forModel: "« \(key) » (\(raw)) est déjà passé : nous sommes le \(now).",
+        case .past(let moment):
+            return ToolRefusal(forModel: "\(when(moment)), déjà passé : nous sommes le \(now).",
                                spoken: ActionPhrases.datePassed(context.language))
-        case .tooFar:
-            return ToolRefusal(forModel: "« \(key) » (\(raw)) est à plus d'un an : nous sommes le \(now).",
+        case .tooFar(let moment):
+            return ToolRefusal(forModel: "\(when(moment)), à plus d'un an : nous sommes le \(now).",
                                spoken: ActionPhrases.dateTooFar(context.language))
         }
     }

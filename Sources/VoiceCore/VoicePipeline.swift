@@ -638,7 +638,11 @@ public actor VoicePipeline {
     }
 
     private func toolContext(_ turn: Turn, now: Date) -> ToolContext {
-        ToolContext(now: now, language: turn.language) { [weak self] sentence in
+        // The user's words, this turn's then the two before (their message without the date line).
+        let earlier = conversation.exchanges.filter { $0.role == .user }.suffix(2).reversed()
+            .map { $0.content.components(separatedBy: "\n").first ?? "" }
+        return ToolContext(now: now, language: turn.language, userSaid: [turn.userText] + earlier) {
+            [weak self] sentence in
             await self?.deliver(sentence, to: turn)
         }
     }

@@ -429,7 +429,7 @@
       "name": "creer_evenement",
       "arguments": {
        "titre": "Rendez-vous chez le médecin",
-       "debut": "2026-10-16T15:00"
+       "quand": "demain à 15 h"
       }
      },
      "result": {
@@ -456,7 +456,7 @@
       "name": "creer_evenement",
       "arguments": {
        "titre": "Rendez-vous chez le médecin",
-       "debut": "2026-10-16T15:00"
+       "quand": "demain à 15 h"
       }
      },
      "result": {
@@ -482,7 +482,7 @@
       "name": "creer_evenement",
       "arguments": {
        "titre": "Rendez-vous chez le médecin",
-       "debut": "2026-10-16T15:00"
+       "quand": "demain à 15 h"
       }
      },
      "result": {
@@ -509,7 +509,7 @@
       "name": "creer_rappel",
       "arguments": {
        "titre": "Appeler Camille",
-       "echeance": "2026-10-16T10:00"
+       "quand": "demain à 10 h"
       }
      },
      "result": {
@@ -534,7 +534,7 @@
       "name": "creer_evenement",
       "arguments": {
        "titre": "Rendez-vous chez le médecin",
-       "debut": "2026-10-16T15:00"
+       "quand": "demain à 15 h"
       }
      },
      "result": {
@@ -560,7 +560,7 @@
       "name": "creer_evenement",
       "arguments": {
        "titre": "Rendez-vous chez le médecin",
-       "debut": "2026-10-16T15:00"
+       "quand": "demain à 15 h"
       }
      },
      "result": {
@@ -586,7 +586,7 @@
       "name": "creer_rappel",
       "arguments": {
        "titre": "Appeler Camille",
-       "echeance": "2026-10-16T10:00"
+       "quand": "demain à 10 h"
       }
      },
      "result": {
@@ -611,7 +611,7 @@
       "name": "creer_rappel",
       "arguments": {
        "titre": "Appeler Camille",
-       "echeance": "2026-10-16T10:00"
+       "quand": "demain à 10 h"
       }
      },
      "result": {

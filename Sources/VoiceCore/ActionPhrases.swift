@@ -33,6 +33,24 @@ public enum ActionPhrases {
         }
     }
 
+    /// "jeudi".
+    public static func weekday(_ date: Date, _ context: ToolContext) -> String {
+        let index = context.calendar.component(.weekday, from: date) - 1
+        return context.language == .french ? frenchWeekdays[index] : englishWeekdays[index]
+    }
+
+    /// "22 octobre" ("1er" for the first; the year only when it is not the current one).
+    public static func dayOfMonth(_ date: Date, _ context: ToolContext) -> String {
+        let calendar = context.calendar
+        let c = calendar.dateComponents([.day, .month, .year], from: date)
+        let (day, month, year) = (c.day!, c.month! - 1, c.year!)
+        let thisYear = calendar.component(.year, from: context.now) == year
+        switch context.language {
+        case .french: return "\(day == 1 ? "1er" : String(day)) \(frenchMonths[month])" + (thisYear ? "" : " \(year)")
+        case .english: return "\(englishMonths[month]) \(day)" + (thisYear ? "" : ", \(year)")
+        }
+    }
+
     /// "10\u{00A0}h", "10\u{00A0}h\u{00A0}30", "midi", "3\u{00A0}h du matin" (an hour between 1 and 7 is said in full, so a
     /// morning taken for an afternoon is heard at once).
     public static func time(_ date: Date, _ context: ToolContext) -> String {
@@ -360,6 +378,28 @@ public enum ActionPhrases {
     public static func dateTooFar(_ language: SpeechLanguage) -> String {
         language == .french ? "C’est dans plus d’un an. Tu peux me redire la date\(nb)?"
             : "That’s more than a year away. Can you repeat the date?"
+    }
+
+    /// "Tu veux dire 3 h du matin, ou 15 h ?": an hour from 1 to 7 said without the morning or the afternoon.
+    public static func morningOrAfternoon(hour: Int, minute: Int, _ context: ToolContext) -> String {
+        let calendar = context.calendar
+        let day = calendar.startOfDay(for: context.now)
+        let morning = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
+        let afternoon = morning.addingTimeInterval(12 * 3600)
+        return context.language == .french
+            ? "Tu veux dire \(time(morning, context)), ou \(time(afternoon, context))\(nb)?"
+            : "Do you mean \(time(morning, context)) or \(time(afternoon, context))?"
+    }
+
+    /// "Le 22 octobre tombe un jeudi. Tu peux me redire la date ?"
+    public static func wrongWeekday(_ date: Date, _ context: ToolContext) -> String {
+        context.language == .french
+            ? "Le \(dayOfMonth(date, context)) tombe un \(weekday(date, context)). Tu peux me redire la date\(nb)?"
+            : "\(dayOfMonth(date, context)) is a \(weekday(date, context)). Which date do you mean?"
+    }
+
+    public static func earlierOrLater(_ language: SpeechLanguage) -> String {
+        language == .french ? "Plus tôt ou plus tard\(nb)? Tu peux préciser\(nb)?" : "Earlier or later? Can you tell me more?"
     }
 
     public static func badDuration(_ language: SpeechLanguage) -> String {
