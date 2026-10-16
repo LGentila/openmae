@@ -37,7 +37,9 @@ public enum AppIdentity {
 
     /// ~/OpenMae — where an agent gets a new folder for each task, unless the user named one of theirs. Plain
     /// letters, like the app's file name: agents run developer tools, and some of them still trip over accents.
+    /// `URL.homeDirectory`, the same folder on the Mac: `FileManager.homeDirectoryForCurrentUser` does not exist on
+    /// iOS, and VoiceCore is built for the iPhone app too (agents only run on the Mac).
     public static var agentWorkspace: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OpenMae", isDirectory: true)
+        URL.homeDirectory.appendingPathComponent("OpenMae", isDirectory: true)
     }
 }
