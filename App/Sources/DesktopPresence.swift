@@ -25,6 +25,9 @@ final class DesktopPresence {
     /// Opens the conversation window again once it was closed (SwiftUI's `openWindow`).
     var reopenWindow: (() -> Void)?
 
+    /// Quitting would stop a task Claude Code is working on (the app delegate asks first).
+    var hasRunningTask: Bool { model.hasRunningTask }
+
     init(model: AssistantModel, phone: PhoneAccess) {
         self.model = model
         self.phone = phone

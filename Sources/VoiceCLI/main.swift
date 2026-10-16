@@ -10,6 +10,8 @@
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json]
 //                                                       does the model pick the right action? (text only,
 //                                                       nothing carried out; see ActionsBench.swift)
+//   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
+//                                                       see Delegate.swift)
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
@@ -358,7 +360,7 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog", "actions-bench", "link-client"].contains(options.command)
+   ["voice-onset", "download", "verify", "catalog", "actions-bench", "link-client", "delegate"].contains(options.command)
 {
     do {
         switch options.command {
@@ -367,6 +369,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "catalog": try await runCatalog(options)
         case "actions-bench": try await runActionsBench(options)
         case "link-client": try await runLinkClient()
+        case "delegate": try await runDelegate(CommandLine.arguments)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -384,6 +387,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
+               voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
+                                  [--follow-up "…"] [--stop-after seconds]
         """)
     exit(2)
 }

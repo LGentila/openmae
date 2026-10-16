@@ -1,5 +1,6 @@
 import OpenMaeLink
 import SwiftUI
+import UserNotifications
 import VoiceCore
 import VoiceEngineApple
 
@@ -22,7 +23,8 @@ struct AssistantApp: App {
         Fonts.register()
         #if DEBUG
         let engine: any AssistantConnection = Demo.isOn ? DemoConnection()
-            : AssistantHost(actionsTestCollection: ActionsTestCollection.name)
+            : AssistantHost(actionsTestCollection: ActionsTestCollection.name,
+                            agentsTestFolder: ActionsTestCollection.agentsFolder)
         #else
         let engine = AssistantHost()
         #endif
@@ -81,7 +83,11 @@ struct AssistantApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     /// Closing the window leaves OpenMaé in the menu bar, whose icon has Quit.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
@@ -89,6 +95,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         DesktopPresence.current?.showMainWindow()
         return false
+    }
+
+    /// Quitting stops the task Claude Code is working on: asked first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard DesktopPresence.current?.hasRunningTask == true else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "A task is still in progress")
+        alert.informativeText = String(localized: "Claude Code is working on a task. Quitting OpenMaé stops it.")
+        alert.addButton(withTitle: String(localized: "Quit"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AssistantHost.stopAgentsNow()
+    }
+
+    /// A task's notification shows even when OpenMaé is in front (the user may be reading something else in it); a
+    /// timer's only goes to the Notification Center then, since Maé says it out loud.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions
+    {
+        notification.request.content.userInfo[AssistantHost.notificationFolderKey] == nil ? [.list] : [.banner, .list]
+    }
+
+    /// A click on a task's notification opens its folder.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse)
+        async
+    {
+        guard let folder = response.notification.request.content.userInfo[AssistantHost.notificationFolderKey] as? String
+        else { return }
+        await MainActor.run { _ = NSWorkspace.shared.open(URL(fileURLWithPath: folder, isDirectory: true)) }
     }
 }
 

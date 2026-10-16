@@ -182,12 +182,18 @@ public struct ToolOutcome: Sendable {
     public var undo: UndoToken?
     /// Said when the user asks to undo an action that cannot be (a shortcut).
     public var cannotUndo: String?
+    /// The model says it from `forModel` instead: a text that came from outside, to sum up (an agent's report).
+    /// `spoken` is then only said if the model gives nothing.
+    public var modelSpeaks: Bool
 
-    public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil) {
+    public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil,
+                modelSpeaks: Bool = false)
+    {
         self.spoken = spoken
         self.forModel = forModel
         self.undo = undo
         self.cannotUndo = cannotUndo
+        self.modelSpeaks = modelSpeaks
     }
 }
 
@@ -237,18 +243,23 @@ public struct ToolContext: Sendable {
     }
 }
 
-/// A set of tools: reminders and calendar, timers, shortcuts…
+/// A set of tools: reminders and calendar, timers, shortcuts, agents…
 public protocol ToolProvider: Sendable {
     /// Stable identifier, e.g. "calendar".
     var identifier: String { get }
     /// Constant during a session: the tools go into the system prompt, which the model keeps in memory.
     func tools() async -> [ToolSpec]
+    /// A few sentences for the system prompt about when to use these tools; constant during a session too.
+    func promptAddendum() async -> String?
     /// The risk of this call; by default the tool's.
     func risk(of call: ToolCall) async -> ToolRisk
     /// Checks a call without carrying it out (dates, names). Throws a `ToolRefusal`.
     func check(_ call: ToolCall, context: ToolContext) async throws
     /// What the app says before asking "On y va ?" for a sensitive call.
     func summary(of call: ToolCall, context: ToolContext) async -> String
+    /// A sensitive call that waited for the user's "oui" will not be carried out: they said no, it expired, another
+    /// request replaced it or a new conversation began.
+    func dropped(_ call: ToolCall) async
     /// Carries out a call that passed `check`. Throws a `ToolRefusal` when it cannot.
     func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome
     /// Takes back an action; returns what to say.
@@ -258,11 +269,13 @@ public protocol ToolProvider: Sendable {
 }
 
 extension ToolProvider {
+    public func promptAddendum() async -> String? { nil }
     public func risk(of call: ToolCall) async -> ToolRisk {
         await tools().first { $0.name == call.name }?.risk ?? .sensitive
     }
     public func check(_ call: ToolCall, context: ToolContext) async throws {}
     public func summary(of call: ToolCall, context: ToolContext) async -> String { call.name }
+    public func dropped(_ call: ToolCall) async {}
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {
         ActionPhrases.cannotUndo(context.language)
     }

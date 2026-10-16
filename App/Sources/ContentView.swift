@@ -198,7 +198,7 @@ private struct PanelLayer: View {
                             SettingsPanel(model: model, pointsAtTier: window.pointsAtTier, close: { window.panel = nil },
                                           openPhone: phone == nil ? nil : { window.panel = .phone })
                         case .history:
-                            HistoryPanel(entries: model.transcript)
+                            HistoryPanel(entries: model.transcript, tasks: model.tasks, stopTask: model.stopTask)
                         case .phone:
                             if let phone { PhonePanel(phone: phone) { window.panel = .settings } }
                         }

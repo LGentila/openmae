@@ -41,12 +41,18 @@ public actor AssistantHost: AssistantConnection {
     private let calendarTools: CalendarTools
     private let timerTools = TimerTools()
     private let shortcutTools = ShortcutTools()
+    /// Tasks handed to Claude Code: they go on across a change of tier or with the actions off, until the app quits.
+    private let agentTools: AgentTools
     private var actionsStatus: ActionsStatus?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
-    /// first use) instead of the user's own, and read only those (for trying the feature).
-    public init(actionsTestCollection: String? = nil) {
+    /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
+    /// the tasks handed to agents, and their folders, there instead of the user's own.
+    public init(actionsTestCollection: String? = nil, agentsTestFolder: URL? = nil) {
         calendarTools = CalendarTools(testCollection: actionsTestCollection)
+        agentTools = agentsTestFolder.map {
+            AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
+        } ?? AgentTools()
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
         self.commands = commands
@@ -55,7 +61,16 @@ public actor AssistantHost: AssistantConnection {
             for await command in commandStream { await self?.handle(command) }
         }
         Task { await self.observeTimers() }
+        Task { await self.observeTasks() }
     }
+
+    /// The app is quitting: the agents' runs stop with it (synchronous, from the app's last moments).
+    public static func stopAgentsNow() {
+        ClaudeCodeConnector.stopAll()
+    }
+
+    /// The `userInfo` key of the folder a task's notification opens when clicked.
+    public static let notificationFolderKey = Notifier.folderKey
 
     private func observeTimers() async {
         await timerTools.observe(
@@ -63,6 +78,18 @@ public actor AssistantHost: AssistantConnection {
                 Task { await self?.timerFinished(finished) }
             },
             onFirstTimer: { await Notifier.requestPermission() })
+    }
+
+    private func observeTasks() async {
+        let emit = emit
+        await agentTools.observe(
+            onChange: { emit.yield(.tasks($0)) },
+            onEnd: { task in
+                // Announced by a notification only, never out loud: the user may be talking about something else.
+                let notification = AgentPhrases.notification(for: task)
+                Notifier.post(title: notification.title, body: notification.body, folder: task.folder)
+            },
+            onFirstTask: { await Notifier.requestPermission() })
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
@@ -93,6 +120,9 @@ public actor AssistantHost: AssistantConnection {
             deleteUnusedModels()
         case .refreshActions:
             await refreshActions()
+        case .stopTask(let id):
+            // Not awaited: stopping can take a few seconds, and the next command must not wait for it.
+            Task { await agentTools.stop(id) }
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:
@@ -395,6 +425,14 @@ public actor AssistantHost: AssistantConnection {
         if new.shortcutsToConfirm != old.shortcutsToConfirm {
             await shortcutTools.setNeedingConfirmation(Set(new.shortcutsToConfirm))
         }
+        if new.claudeCode != old.claudeCode {
+            DebugLog.log("agents: Claude Code \(new.claudeCode.enabled ? "on" : "off")")
+            // A change the model sees (Claude Code switched on or off, a folder added) means new instructions;
+            // the conversation goes on.
+            if await configureAgents(), new.actionsEnabled, new.actionsEnabled == old.actionsEnabled {
+                do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
+            }
+        }
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk {
             await pipeline.setPushToTalk(new.pushToTalk)
@@ -415,7 +453,22 @@ public actor AssistantHost: AssistantConnection {
         guard settings.actionsEnabled else { return nil }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
-        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools])
+        await configureAgents()
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools])
+    }
+
+    /// Hands Claude Code to the delegation tools when it is switched on, with its settings. Returns true when what
+    /// the model sees changed.
+    @discardableResult
+    private func configureAgents() async -> Bool {
+        let claudeCode = settings.claudeCode
+        let agents = claudeCode.enabled
+            ? [AgentTools.Agent(connector: ClaudeCodeConnector(permissionMode: claudeCode.permissionMode),
+                                review: claudeCode.review)]
+            : []
+        let folders = claudeCode.folders.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        return await agentTools.configure(agents: agents, folders: folders)
     }
 
     /// The app is in front again: a shortcut may have been added to the folder, an access granted.
@@ -424,16 +477,20 @@ public actor AssistantHost: AssistantConnection {
         if await shortcutTools.refresh() {
             do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
         }
-        reportActions()
+        reportActions(checkingClaudeCode: true)
     }
 
-    private func reportActions() {
+    /// `checkingClaudeCode`: ask Claude Code again whether it is installed and signed in (about a second, in the
+    /// background), instead of the last answer.
+    private func reportActions(checkingClaudeCode: Bool = false) {
         guard settings.actionsEnabled else { return }
         Task {
+            var claudeCode = actionsStatus?.claudeCode
+            if checkingClaudeCode || claudeCode == nil { claudeCode = await ClaudeCodeConnector().availability() }
             let status = ActionsStatus(calendar: Self.access(CalendarTools.access(to: .event)),
                                        reminders: Self.access(CalendarTools.access(to: .reminder)),
-                                       shortcuts: await shortcutTools.names)
-            await self.send(status)
+                                       shortcuts: await shortcutTools.names, claudeCode: claudeCode)
+            self.send(status)
         }
     }
 
