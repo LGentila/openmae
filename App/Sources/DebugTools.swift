@@ -160,6 +160,7 @@ enum Snapshots {
             model.settings = saved
         }
         await renderPresence(to: folder)
+        await renderPhone(to: folder)
     }
 
     /// The capsule over a pretend desktop, as in the design's Overlay screen (at rest: no capsule, the icon's
@@ -195,7 +196,7 @@ enum Snapshots {
     }
 
     @MainActor
-    private static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
+    static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
         let model = AssistantModel(connection: ScriptedConnection(events))
         model.hasTalkShortcut = true  // as on a Mac that accepts ⌥ Space (snapshots register no shortcut)
         try? await Task.sleep(for: .milliseconds(150))  // the model applies the events asynchronously
@@ -203,7 +204,7 @@ enum Snapshots {
     }
 
     @MainActor
-    private static func save(_ view: some View, size: CGSize, to url: URL, then prepare: () -> Void = {}) async {
+    static func save(_ view: some View, size: CGSize, to url: URL, then prepare: () -> Void = {}) async {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

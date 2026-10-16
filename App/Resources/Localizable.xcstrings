@@ -31,6 +31,16 @@
         }
       }
     },
+    "%@ does not answer for now. Next try in a few seconds.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ne répond pas pour l’instant. Prochain essai dans quelques secondes."
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -47,6 +57,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ sur %2$@"
+          }
+        }
+      }
+    },
+    "%@, your own relay. It only sees encrypted packets. It sends no notifications.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, ton propre relais. Il ne voit que des paquets chiffrés. Il n’envoie pas de notifications."
+          }
+        }
+      }
+    },
+    "%@. It only sees encrypted packets: neither your voice nor your texts.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@. Il ne voit que des paquets chiffrés : ni ta voix, ni tes textes."
+          }
+        }
+      }
+    },
+    "%lld min %lld s": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld min %lld s"
+          }
+        }
+      }
+    },
+    "A code is valid for 5 minutes and serves only once.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un code vaut 5 minutes et ne sert qu’une fois."
           }
         }
       }
@@ -81,6 +131,36 @@
         }
       }
     },
+    "Add an iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter un iPhone"
+          }
+        }
+      }
+    },
+    "Added on %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouté le %@"
+          }
+        }
+      }
+    },
+    "Address of the relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse du relais"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "fr": {
@@ -101,6 +181,16 @@
         }
       }
     },
+    "Another relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un autre relais…"
+          }
+        }
+      }
+    },
     "Ask first": {
       "localizations": {
         "fr": {
@@ -117,6 +207,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Demandé au besoin"
+          }
+        }
+      }
+    },
+    "At home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison"
           }
         }
       }
@@ -147,6 +247,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatique : %@"
+          }
+        }
+      }
+    },
+    "Away": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À distance"
+          }
+        }
+      }
+    },
+    "Back": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour"
           }
         }
       }
@@ -211,12 +331,32 @@
         }
       }
     },
+    "Choose “OpenMaé relay” to talk to Maé from anywhere.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisis « Relais OpenMaé » pour parler à Maé de n’importe où."
+          }
+        }
+      }
+    },
     "Chosen in the settings (Advanced). Recommended tier for this Mac: %@.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
+          }
+        }
+      }
+    },
+    "Code expired": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code expiré"
           }
         }
       }
@@ -237,6 +377,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Calcul"
+          }
+        }
+      }
+    },
+    "Connecting to the relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion au relais…"
           }
         }
       }
@@ -327,6 +477,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Supprimer les modèles des autres paliers (%@)"
+          }
+        }
+      }
+    },
+    "Devices": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminé"
           }
         }
       }
@@ -437,6 +607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Recalculs complets"
+          }
+        }
+      }
+    },
+    "Go through": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passer par"
           }
         }
       }
@@ -561,6 +741,26 @@
         }
       }
     },
+    "It will no longer be able to talk to Maé, and its conversation in progress closes. To add it again, you will have to scan a new code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il ne pourra plus parler à Maé, et sa conversation en cours se ferme. Pour le remettre, il faudra scanner un nouveau code."
+          }
+        }
+      }
+    },
+    "Keep this Mac awake when plugged in": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder ce Mac éveillé sur secteur"
+          }
+        }
+      }
+    },
     "Language model": {
       "localizations": {
         "fr": {
@@ -677,6 +877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé répond"
+          }
+        }
+      }
+    },
+    "Maé is on your iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé est sur ton iPhone"
           }
         }
       }
@@ -841,6 +1051,26 @@
         }
       }
     },
+    "No iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun iPhone"
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun"
+          }
+        }
+      }
+    },
     "Not allowed": {
       "localizations": {
         "fr": {
@@ -867,6 +1097,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Non pris en charge"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         }
       }
@@ -921,6 +1161,16 @@
         }
       }
     },
+    "Open OpenMaé on your iPhone and scan this code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvre OpenMaé sur ton iPhone et scanne ce code."
+          }
+        }
+      }
+    },
     "Open System Settings": {
       "localizations": {
         "fr": {
@@ -931,12 +1181,32 @@
         }
       }
     },
+    "OpenMaé relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais OpenMaé"
+          }
+        }
+      }
+    },
     "Output": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Sortie"
+          }
+        }
+      }
+    },
+    "Pairing QR code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR code d’appairage"
           }
         }
       }
@@ -1017,6 +1287,76 @@
           "stringUnit": {
             "state": "translated",
             "value": "Quitter %@"
+          }
+        }
+      }
+    },
+    "Reachable at home only": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable à la maison seulement"
+          }
+        }
+      }
+    },
+    "Reachable from anywhere": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable de partout"
+          }
+        }
+      }
+    },
+    "Relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais"
+          }
+        }
+      }
+    },
+    "Relay unreachable": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais injoignable"
+          }
+        }
+      }
+    },
+    "Remove": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer"
+          }
+        }
+      }
+    },
+    "Remove %@?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer %@ ?"
+          }
+        }
+      }
+    },
+    "Remove…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer…"
           }
         }
       }
@@ -1111,12 +1451,32 @@
         }
       }
     },
+    "Show a new code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher un nouveau code"
+          }
+        }
+      }
+    },
     "Silence wait": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Attente du silence"
+          }
+        }
+      }
+    },
+    "Sleep": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Veille"
           }
         }
       }
@@ -1211,6 +1571,16 @@
         }
       }
     },
+    "Take over here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre ici"
+          }
+        }
+      }
+    },
     "Talk": {
       "localizations": {
         "fr": {
@@ -1227,6 +1597,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parler depuis une autre app"
+          }
+        }
+      }
+    },
+    "Talk to Maé from your iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle à Maé depuis ton iPhone"
           }
         }
       }
@@ -1267,6 +1647,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’assistant va redémarrer avec %@. S’il n’est pas encore sur ce Mac, il faudra le télécharger (%@)."
+          }
+        }
+      }
+    },
+    "The code stays between this Mac and your iPhone: the relay cannot read it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le code reste entre ce Mac et ton iPhone : le relais ne peut pas le lire."
+          }
+        }
+      }
+    },
+    "The conversation goes on on your iPhone until you take over.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversation continue sur ton iPhone tant que tu ne reprends pas la main."
           }
         }
       }
@@ -1361,6 +1761,16 @@
         }
       }
     },
+    "The relay does not answer. Your iPhone can reach you at home only. I keep trying.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais ne répond pas. Ton iPhone ne peut te joindre qu’à la maison. Je réessaie toute seule."
+          }
+        }
+      }
+    },
     "The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.": {
       "localizations": {
         "fr": {
@@ -1397,6 +1807,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce Mac n’est pas compatible"
+          }
+        }
+      }
+    },
+    "This code expired": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce code a expiré"
           }
         }
       }
@@ -1521,6 +1941,16 @@
         }
       }
     },
+    "Valid for another": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valable encore"
+          }
+        }
+      }
+    },
     "Voice": {
       "localizations": {
         "fr": {
@@ -1551,12 +1981,42 @@
         }
       }
     },
+    "Waiting for your iPhone…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente de ton iPhone…"
+          }
+        }
+      }
+    },
+    "Waiting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente…"
+          }
+        }
+      }
+    },
     "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Avec un casque, il n’y a pas d’écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l’assistant se couperait la parole."
+          }
+        }
+      }
+    },
+    "Without a relay, your iPhone reaches you at home only, on the same Wi-Fi as this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans relais, ton iPhone ne te joint qu’à la maison, sur le même Wi-Fi que ce Mac."
           }
         }
       }
@@ -1571,12 +2031,62 @@
         }
       }
     },
+    "You can now talk to Maé from your iPhone, at home and away. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPhone, à la maison comme ailleurs. Garde ce Mac allumé et branché pour qu’il reste joignable."
+          }
+        }
+      }
+    },
+    "You can now talk to Maé from your iPhone, at home. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPhone, à la maison. Garde ce Mac allumé et branché pour qu’il reste joignable."
+          }
+        }
+      }
+    },
     "You need a Mac with Apple silicon (M1 or later) and at least 8 GB of memory. This Mac: %@, %@.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
+          }
+        }
+      }
+    },
+    "Your Mac has turned off its microphone and speakers.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your iPhone cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone ne peut pas réveiller un Mac en veille. Capot fermé et sans écran externe, le Mac s’endort quand même."
+          }
+        }
+      }
+    },
+    "Your iPhone is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone sert de micro et de haut-parleur. Le travail reste sur ce Mac, avec ses modèles. Tout est chiffré de bout en bout."
           }
         }
       }
@@ -1597,6 +2107,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "fin de parole → premier son"
+          }
+        }
+      }
+    },
+    "iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone"
+          }
+        }
+      }
+    },
+    "iPhone added": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone ajouté"
           }
         }
       }

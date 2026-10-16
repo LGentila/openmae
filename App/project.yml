@@ -53,6 +53,8 @@ targets:
         product: VoiceCore
       - package: VoiceEngine
         product: VoiceEngineApple
+      - package: VoiceEngine
+        product: OpenMaeLink
     info:
       path: Resources/Info.plist
       properties:
@@ -77,6 +79,11 @@ targets:
           Maé adds the events you ask for to your calendar and reads it to you when you ask what is planned.
         NSRemindersFullAccessUsageDescription: >-
           Maé adds the reminders you ask for and reads you those still to do.
+        # The iPhone app finds this Mac on the local network (Settings › iPhone). Shown from
+        # Resources/InfoPlist.xcstrings too.
+        NSLocalNetworkUsageDescription: >-
+          Your iPhone finds this Mac on your Wi-Fi to talk to Maé.
+        NSBonjourServices: [_openmae._udp]
     entitlements:
       path: Resources/App.entitlements
       properties:

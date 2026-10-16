@@ -30,6 +30,11 @@ public actor AssistantHost: AssistantConnection {
     private var tasks: [Task<Void, Never>] = []
     private var activity: NSObjectProtocol?
     private var restartingAudio = false
+    /// The voice's output: the Mac's speakers, or an iPhone's (see `useRemoteAudio`).
+    private var router: AudioRouter?
+    /// While an iPhone has the conversation: its microphone and its voice output.
+    private var remote: (microphone: AsyncStream<[Float]>, output: any AudioOutput)?
+    private var remoteFeed: Task<Void, Never>?
 
     // Actions: reminders and calendar, timers, shortcuts. Kept for the app's whole life (a timer keeps running
     // across a change of tier); handed to the pipeline only while the setting is on.
@@ -166,8 +171,10 @@ public actor AssistantHost: AssistantConnection {
 
             var config = PipelineConfig()
             config.pushToTalk = settings.pushToTalk
+            let router = AudioRouter(audio)
+            self.router = router
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
-                                     synthesizer: synthesizer, output: audio, tools: await toolRunner(), config: config)
+                                     synthesizer: synthesizer, output: router, tools: await toolRunner(), config: config)
             try await pipeline.start()
         } catch {
             audio.stop()
@@ -208,6 +215,7 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
         reportStorage()
         reportActions()
+        if remote != nil { await attachRemote() }  // an iPhone took the conversation while the models loaded
         if restartWhenLoaded {
             restartWhenLoaded = false
             await restart()
@@ -450,7 +458,9 @@ public actor AssistantHost: AssistantConnection {
     }
 
     private func restartAudio() async {
-        guard let pipeline, let audio else { return }
+        // While an iPhone has the conversation the Mac's microphone and speakers stay released; they restart with
+        // the current settings when it lets go.
+        guard remote == nil, let pipeline, let audio else { return }
         await pipeline.interrupt()
         do {
             route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
@@ -475,6 +485,26 @@ public actor AssistantHost: AssistantConnection {
         defer { restartingAudio = false }
         try? await Task.sleep(for: .milliseconds(300))  // changes often come in bursts
         await restartAudio()
+    }
+
+    // MARK: - An iPhone's microphone and voice
+
+    private func attachRemote() async {
+        guard stage == .running, let remote, let pipeline, let router else { return }  // applied once running
+        await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
+        audio?.stop()  // the Mac's microphone and speakers are free again
+        await pipeline.resetAudioInput()
+        if remoteFeed == nil {
+            remoteFeed = Task { [weak self] in
+                for await chunk in remote.microphone { await self?.pushRemote(chunk) }
+            }
+        }
+        DebugLog.log("audio: the iPhone has the microphone and the voice")
+    }
+
+    /// Through the actor rather than holding the pipeline: the feed outlives a change of tier.
+    private func pushRemote(_ chunk: [Float]) async {
+        await pipeline?.push(chunk)
     }
 
     // MARK: - Events
@@ -520,5 +550,27 @@ public actor AssistantHost: AssistantConnection {
             diagnostics.inputChannels = route.inputChannels
         }
         emit.yield(.diagnostics(diagnostics))
+    }
+}
+
+/// An iPhone can take the conversation (OpenMaeLink): the engine then hears its microphone and speaks through it,
+/// and releases the Mac's microphone and speakers.
+extension AssistantHost: RemoteAudioRouting {
+    public func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
+        remoteFeed?.cancel()
+        remoteFeed = nil
+        remote = (microphone, output)
+        await attachRemote()
+    }
+
+    public func useLocalAudio() async {
+        guard remote != nil else { return }
+        remote = nil
+        remoteFeed?.cancel()
+        remoteFeed = nil
+        guard stage == .running, let audio, let router else { return }
+        await router.use(audio)
+        await restartAudio()  // the Mac's microphone and speakers again, with the current settings
+        DebugLog.log("audio: the Mac has the microphone and the voice again")
     }
 }

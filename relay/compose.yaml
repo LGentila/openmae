@@ -1,0 +1,58 @@
+# OpenMaé relay behind a TLS reverse proxy: Dokploy, Coolify, Traefik, Caddy…
+#
+# - HTTPS goes through the proxy: give the service a domain (for example
+#   relay.example.com) that the proxy forwards to the container's port 8080.
+#   It carries /v1/info, the WebSocket fallback /v1/ws and /healthz.
+# - QUIC does not go through the proxy: the host's UDP port 443 is published
+#   straight to the container's port 4433. If the proxy already holds UDP 443
+#   for HTTP/3 (Dokploy's Traefik does by default, Caddy too), publish 8443
+#   instead and set RELAY_QUIC_PUBLIC_PORT to 8443: /v1/info announces the
+#   port, so the apps need no update.
+# - Open that UDP port in the server's firewall.
+# - Keep the relay-data volume: it holds the QUIC key, and losing it changes
+#   the key pin (see "Key rotation" in README.md).
+
+services:
+  relay:
+    build: .
+    # Or a published image: image: <registry>/openmae-relay:<version>
+    restart: unless-stopped
+    environment:
+      # Rate limiting needs the client address the proxy puts in
+      # X-Forwarded-For; set to "false" if nothing sits in front of port 8080.
+      RELAY_BEHIND_PROXY: "true"
+      # The UDP port published below, as clients reach it.
+      RELAY_QUIC_PUBLIC_PORT: "443"
+      # During a key change, the previous pin, for a month:
+      # RELAY_PREVIOUS_PINS: "<old pin>"
+    ports:
+      # "443:4433/udp", in long form for "mode: host": deployed as a Swarm
+      # stack, the default ingress mode would hide the clients' addresses and
+      # all of them would share one rate limit. Plain "docker compose" warns
+      # that it ignores the mode; that is expected.
+      - target: 4433
+        published: 443
+        protocol: udp
+        mode: host
+    # Reached by the proxy only, not published on the host.
+    expose:
+      - "8080"
+    volumes:
+      - relay-data:/data
+    # Plain Traefik only (Dokploy and Coolify add the routing from their
+    # interface): route the domain to port 8080, on Traefik's network.
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.openmae-relay.rule=Host(`relay.example.com`)
+    #   - traefik.http.routers.openmae-relay.entrypoints=websecure
+    #   - traefik.http.routers.openmae-relay.tls.certresolver=letsencrypt
+    #   - traefik.http.services.openmae-relay.loadbalancer.server.port=8080
+    # networks:
+    #   - traefik
+
+volumes:
+  relay-data:
+
+# networks:
+#   traefik:
+#     external: true

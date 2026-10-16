@@ -2,10 +2,10 @@
 
 A voice assistant for Apple silicon Macs that runs **entirely on your Mac**. You talk, it answers out loud, in
 French or English, in real time — like the voice mode of the big chat apps, but local: speech recognition,
-the language model and the voice all run on the Mac, and nothing you say ever leaves it.
+the language model and the voice all run on the Mac, and nothing you say ever leaves your own devices.
 
-The only network access is the one-time download of the models, at first launch. After that, OpenMaé works
-in airplane mode.
+The only network access is the one-time download of the models, at first launch, and — only if you pair one —
+the link with your iPhone. After that, OpenMaé works in airplane mode.
 
 > **Status:** proof of concept, under active development. Distribution as a signed, notarized disk image is
 > not ready yet: for now the app is built from source (see below).
@@ -29,8 +29,12 @@ in airplane mode.
   runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
   out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
   set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars.
+- **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
+  with a QR code (Settings › iPhone), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
+  encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
-  never goes online again.
+  never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
+  the two being end-to-end encrypted.
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
@@ -88,6 +92,40 @@ Measured on an M1 Pro with 32 GB:
 The app (SwiftUI) and the engine (a Swift package) only talk through a small set of commands and events
 (`Sources/VoiceCore/AssistantProtocol.swift`). The Apple-specific parts of the engine live in one target, so
 porting to another platform means rewriting that target and the interface, not the conversation logic.
+
+## iPhone app
+
+The iPhone app (iOS 18 or later) talks to OpenMaé on your Mac: it is its microphone, its speaker and its screen,
+while the models keep running on the Mac. A conversation started on one goes on on the other, it continues with
+the screen locked, and whoever speaks last has it (the Mac's window shows "Maé is on your iPhone" and "Take over
+here").
+
+- **Pairing, once.** On the Mac, Settings › iPhone › "Add an iPhone" shows a QR code, valid five minutes and
+  usable once; scan it with the app. It carries the Mac's public key and a one-time code, after the `#` of a link
+  (a browser never sends that part to a server).
+- **At home**, the iPhone finds the Mac with Bonjour and talks to it directly over QUIC. The Mac and the iPhone
+  each ask once for access to the local network (on the Mac, when you add your first iPhone).
+- **Elsewhere**, both go through an OpenMaé relay (`relay/`, a small open-source server anyone can host): the
+  Mac stays registered on it, the iPhone asks for it, and the relay passes their packets along. If UDP is
+  blocked, a WebSocket over HTTPS takes over.
+- **End-to-end encryption.** Noise (`IK` for sessions, `XXpsk3` for pairing; Curve25519, ChaChaPoly, SHA-256,
+  checked against the official test vectors), keys in the keychain. A relay sees addresses and amounts of
+  traffic, never a word or a sound. The protocol is in [relay/PROTOCOL.md](relay/PROTOCOL.md).
+- **Sound.** Opus in 20 ms frames (Apple's own codec): 16 kHz from the iPhone's microphone, which removes the
+  echo itself; 24 kHz for the voice, through a jitter buffer that conceals lost frames.
+- **Powers.** The iPhone can talk, interrupt, start a new conversation and choose hands-free or hold-to-talk;
+  downloading or deleting models, and quitting, stay on the Mac. Sensitive actions still ask for a spoken "yes".
+- While an iPhone is paired, the Mac can stay awake when plugged in (Settings › iPhone › Sleep). An iPhone cannot
+  wake a sleeping Mac.
+
+Build it and install it on the iPhone connected to this Mac (with your Apple Developer team in
+`App/Signing.local.xcconfig`):
+
+```bash
+zsh scripts/build-iphone.sh
+```
+
+`SIMULATOR=1 zsh scripts/build-iphone.sh` builds it for the simulator instead.
 
 ## Models and licenses
 
@@ -150,8 +188,12 @@ xcodebuild -scheme VoiceEngine-Package -destination 'platform=macOS,arch=arm64' 
 Run the tests:
 
 ```bash
-xcodebuild test -scheme VoiceEngine-Package -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/xcode -skipMacroValidation -skipPackagePluginValidation -only-testing:VoiceCoreTests
+xcodebuild test -scheme VoiceEngine-Package -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/xcode -skipMacroValidation -skipPackagePluginValidation -only-testing:VoiceCoreTests -only-testing:OpenMaeLinkTests
 ```
+
+The link's end-to-end tests (pairing, sessions, sound, on this Mac) use the network: they run with
+`OPENMAE_NETWORK_TESTS=1` in the environment, and through a relay too with `OPENMAE_TEST_RELAY=<its URL>`
+(see `relay/README.md` to run one locally).
 
 ## Command-line tool
 
@@ -216,15 +258,21 @@ Face:
 ```
 App/                         the macOS app (SwiftUI): screens only; its Xcode project is generated from
                              App/project.yml
+iPhone/                      the iPhone app (SwiftUI), generated from iPhone/project.yml; it shares the design
+                             files of App/Sources/Design and the live transcript with the Mac app
 Package.swift                the voice engine, as a Swift package:
 Sources/VoiceCore/             conversation logic, end-of-turn detection, text clean-up for the voice,
                                hardware tiers, model catalog and downloader, extension point
 Sources/VoiceEngineApple/      the Apple implementations: Silero, Parakeet and Pocket TTS (CoreML),
                                Gemma 4 (MLX), microphone and speakers (AVAudioEngine)
+Sources/OpenMaeLink/           the link with the iPhone: keys, pairing, Noise, direct and relayed connections,
+                               the voice's codec and jitter buffer (both apps use it)
 Sources/VoiceCLI/              voice-cli
 Tests/VoiceCoreTests/          unit tests of the core
-Tests/Fixtures/                requests for the actions benchmark
-scripts/                     build script, test phrases
+Tests/OpenMaeLinkTests/        tests of the link (Noise test vectors, frames, jitter buffer, end to end)
+Tests/Fixtures/                requests for the actions benchmark, Noise test vectors
+relay/                       the OpenMaé relay (Go, Docker), its protocol and how to host one
+scripts/                     build scripts, test phrases
 ```
 
 The app's name is defined in one place for the engine (`Sources/VoiceCore/AppIdentity.swift`), and in

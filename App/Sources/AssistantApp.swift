@@ -1,3 +1,4 @@
+import OpenMaeLink
 import SwiftUI
 import VoiceCore
 import VoiceEngineApple
@@ -7,24 +8,33 @@ import VoiceEngineApple
 ///
 /// This is the ONLY file of the interface that knows the engine's implementation (`AssistantHost`).
 /// Everything else talks to an `AssistantConnection` through commands and events, so the engine can be
-/// replaced (another platform, a separate process) without touching the screens.
+/// replaced (another platform, a separate process) without touching the screens. That connection is the link
+/// with the iPhone (`LinkHost`), which passes everything on to the engine.
 @main
 struct AssistantApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model: AssistantModel
     @State private var window = WindowState()
     @State private var presence: DesktopPresence
+    @State private var phone: PhoneAccess
 
     init() {
         Fonts.register()
         #if DEBUG
-        let model = AssistantModel(connection: Demo.isOn ? DemoConnection()
-                                   : AssistantHost(actionsTestCollection: ActionsTestCollection.name))
+        let engine: any AssistantConnection = Demo.isOn ? DemoConnection()
+            : AssistantHost(actionsTestCollection: ActionsTestCollection.name)
         #else
-        let model = AssistantModel(connection: AssistantHost())
+        let engine = AssistantHost()
         #endif
+        // The demonstration engine has no sound to hand over: an iPhone then only sees and commands it.
+        let link = LinkHost(engine: engine, audio: engine as? any RemoteAudioRouting,
+                            identityStore: KeychainIdentityStore(service: "OpenMaé link"),
+                            storeURL: LinkHost.defaultStoreURL, macName: Host.current().localizedName ?? "Mac")
+        let model = AssistantModel(connection: link)
+        let phone = PhoneAccess(link: link)
         _model = State(initialValue: model)
-        _presence = State(initialValue: DesktopPresence(model: model))
+        _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
+        _phone = State(initialValue: phone)
     }
 
     var body: some Scene {
@@ -41,6 +51,7 @@ struct AssistantApp: App {
                 #endif
             }
             .frame(minWidth: 820, minHeight: 700)
+            .environment(phone)
             // The design has no dark theme yet: the window, its menus and alerts stay light.
             .preferredColorScheme(.light)
             .followsWindowVisibility()

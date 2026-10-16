@@ -5,9 +5,32 @@ import SwiftUI
 enum Icon {
     case microphone, speaker, sparkles, settings, history, performance, download, downloadArrow, downloadBase
     case check, smallCheck, cancel, pause, stop, chevrons
+    // The iPhone and its link with the Mac.
+    case home, globe, refresh, compose, back, forward, plus, phone, laptop, lock, camera, moon, info
 
     fileprivate var elements: [IconElement] {
         switch self {
+        case .home: [.path("M4 11.2 12 4l8 7.2"), .path("M6 10v9h12v-9"), .path("M10 19v-5h4v5")]
+        case .globe:
+            [.circle(CGPoint(x: 12, y: 12), radius: 8.5), .path("M3.5 12h17"),
+             .path("M12 3.5c2.6 2.4 3.6 5.2 3.6 8.5s-1 6.1-3.6 8.5c-2.6-2.4-3.6-5.2-3.6-8.5s1-6.1 3.6-8.5z")]
+        case .refresh: [.path("M19.5 12a7.5 7.5 0 1 1-2.2-5.3"), .path("M19.5 4.5v4h-4")]
+        case .compose:
+            [.path("M11 5H7.5A3 3 0 0 0 4.5 8v8.5a3 3 0 0 0 3 3H16a3 3 0 0 0 3-3V13"),
+             .path("M15.6 5.4l3 3-6.4 6.4-3.6.6.6-3.6z")]
+        case .back: [.path("M14.5 5.5 8 12l6.5 6.5")]
+        case .forward: [.path("M9.5 5.5 16 12l-6.5 6.5")]
+        case .plus: [.path("M12 5v14M5 12h14")]
+        case .phone: [.roundedRect(CGRect(x: 7, y: 3, width: 10, height: 18), radius: 2.5), .path("M11 17.5h2")]
+        case .laptop: [.roundedRect(CGRect(x: 5, y: 5, width: 14, height: 10), radius: 2), .path("M3 19h18")]
+        case .lock:
+            [.roundedRect(CGRect(x: 5, y: 10.5, width: 14, height: 9.5), radius: 2.5),
+             .path("M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5")]
+        case .camera:
+            [.path("M4.5 8.5A2.5 2.5 0 0 1 7 6h1.6l1.2-1.8h4.4L15.4 6H17a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 17 19H7a2.5 2.5 0 0 1-2.5-2.5z"),
+             .circle(CGPoint(x: 12, y: 12.5), radius: 3.4)]
+        case .moon: [.path("M19.5 14.2A8 8 0 0 1 9.8 4.5a8 8 0 1 0 9.7 9.7z")]
+        case .info: [.circle(CGPoint(x: 12, y: 12), radius: 8.5), .path("M12 11v5M12 7.8v.2")]
         case .microphone:
             [.roundedRect(CGRect(x: 9, y: 3, width: 6, height: 11), radius: 3),
              .path("M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3")]
@@ -44,6 +67,9 @@ enum Icon {
         case .cancel: 2.4
         case .pause: 2.8
         case .chevrons: 1.6
+        case .back, .forward: 2
+        case .plus: 2.2
+        case .moon: 1.8
         default: 1.9
         }
     }
@@ -108,13 +134,15 @@ fileprivate enum IconElement {
     }
 }
 
-/// Reads the few SVG path commands the icons use: M, L, H, V, A and Z, absolute or relative.
+/// Reads the few SVG path commands the icons use: M, L, H, V, C, S, A and Z, absolute or relative.
 fileprivate enum SVGPath {
     static func add(_ data: String, to path: inout Path) {
         var tokens = tokenize(data)[...]
         var current = CGPoint.zero
         var start = CGPoint.zero
         var command: Character = "M"
+        /// The second control point of the last curve, which an S command mirrors.
+        var lastControl: CGPoint?
         func number() -> CGFloat {
             guard case .number(let value)? = tokens.popFirst() else { return 0 }
             return value
@@ -127,7 +155,21 @@ fileprivate enum SVGPath {
             }
             let relative = command.isLowercase
             let origin = relative ? current : .zero
+            let previousControl = lastControl
+            lastControl = nil
             switch command.uppercased() {
+            case "C":
+                let c1 = CGPoint(x: origin.x + number(), y: origin.y + number())
+                let c2 = CGPoint(x: origin.x + number(), y: origin.y + number())
+                current = CGPoint(x: origin.x + number(), y: origin.y + number())
+                path.addCurve(to: current, control1: c1, control2: c2)
+                lastControl = c2
+            case "S":
+                let c1 = previousControl.map { CGPoint(x: 2 * current.x - $0.x, y: 2 * current.y - $0.y) } ?? current
+                let c2 = CGPoint(x: origin.x + number(), y: origin.y + number())
+                current = CGPoint(x: origin.x + number(), y: origin.y + number())
+                path.addCurve(to: current, control1: c1, control2: c2)
+                lastControl = c2
             case "M":
                 current = CGPoint(x: origin.x + number(), y: origin.y + number())
                 start = current

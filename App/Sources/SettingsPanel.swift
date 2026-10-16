@@ -7,10 +7,13 @@ struct SettingsPanel: View {
     /// Opened from "Choose another tier…": the tier row is outlined for a moment.
     var pointsAtTier = false
     let close: () -> Void
+    /// Opens Settings › iPhone.
+    var openPhone: (() -> Void)?
     /// Tier picked in the menu, waiting for confirmation: changing tier restarts the assistant.
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
     @Environment(\.openURL) private var openURL
+    @Environment(PhoneAccess.self) private var phone: PhoneAccess?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -110,6 +113,11 @@ struct SettingsPanel: View {
         .disabled(!model.isReady)
         .padding(.top, 9)
         .padding(.bottom, 1)
+        if let openPhone, let phone {
+            Hairline()
+                .padding(.top, 8)
+            PhoneRow(phone: phone, open: openPhone)
+        }
     }
 
     /// The smaller models are not reliable with actions (measured with `voice-cli actions-bench`): the minimum

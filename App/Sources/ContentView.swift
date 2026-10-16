@@ -7,7 +7,8 @@ import VoiceCore
 @MainActor
 @Observable
 final class WindowState {
-    enum Panel: Hashable { case settings, history }
+    /// `phone`: Settings › iPhone, in the settings' place.
+    enum Panel: Hashable { case settings, history, phone }
 
     var panel: Panel?
     /// The settings were opened from "Choose another tier…": the tier row is pointed at.
@@ -111,11 +112,13 @@ struct ContentView: View {
     }
 
     private func settingsButton(diameter: CGFloat) -> some View {
-        Button { window.toggle(.settings) } label: { IconView(icon: .settings, size: 20) }
-            .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel == .settings))
-            .accessibilityLabel(Text("Settings"))
-            .help(Text("Settings"))
-            .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0] }
+        Button { window.panel == .phone ? window.toggle(.phone) : window.toggle(.settings) } label: {
+            IconView(icon: .settings, size: 20)
+        }
+        .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel == .settings || window.panel == .phone))
+        .accessibilityLabel(Text("Settings"))
+        .help(Text("Settings"))
+        .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0, .phone: $0] }
     }
 }
 
@@ -174,6 +177,7 @@ private struct PanelLayer: View {
     @Bindable var model: AssistantModel
     let window: WindowState
     let buttons: [WindowState.Panel: Anchor<CGRect>]
+    @Environment(PhoneAccess.self) private var phone: PhoneAccess?
 
     var body: some View {
         GeometryReader { proxy in
@@ -191,9 +195,12 @@ private struct PanelLayer: View {
                     {
                         switch panel {
                         case .settings:
-                            SettingsPanel(model: model, pointsAtTier: window.pointsAtTier) { window.panel = nil }
+                            SettingsPanel(model: model, pointsAtTier: window.pointsAtTier, close: { window.panel = nil },
+                                          openPhone: phone == nil ? nil : { window.panel = .phone })
                         case .history:
                             HistoryPanel(entries: model.transcript)
+                        case .phone:
+                            if let phone { PhonePanel(phone: phone) { window.panel = .settings } }
                         }
                     }
                     .padding(.top, top)

@@ -1,9 +1,12 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import SwiftUI
 
 // Nothing moves in a window that cannot be seen. SwiftUI keeps animating a window that is closed (it keeps its
 // views to show it again), in the Dock, hidden or entirely covered; since OpenMaé stays in the menu bar once its
-// window is closed, that would cost processor time for nothing.
+// window is closed, that would cost processor time for nothing. On the iPhone: nothing moves while the app is in
+// the background or the screen is locked (a conversation may go on meanwhile).
 
 extension EnvironmentValues {
     /// False while the window cannot be seen at all: closed, in the Dock, hidden or entirely covered.
@@ -23,6 +26,7 @@ extension View {
     }
 }
 
+#if canImport(AppKit)
 private struct WindowVisibility: ViewModifier {
     @State private var isVisible = true
 
@@ -32,6 +36,15 @@ private struct WindowVisibility: ViewModifier {
             .background(VisibilityReader { isVisible = $0 })
     }
 }
+#else
+private struct WindowVisibility: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.environment(\.windowIsVisible, scenePhase == .active)
+    }
+}
+#endif
 
 private struct RepeatsWhileVisible: ViewModifier {
     @Binding var isOn: Bool
@@ -56,6 +69,7 @@ private struct RepeatsWhileVisible: ViewModifier {
     }
 }
 
+#if canImport(AppKit)
 /// Reports whether its window is visible, each time macOS says it changed.
 private struct VisibilityReader: NSViewRepresentable {
     let changed: (Bool) -> Void
@@ -96,3 +110,4 @@ private struct VisibilityReader: NSViewRepresentable {
         }
     }
 }
+#endif
