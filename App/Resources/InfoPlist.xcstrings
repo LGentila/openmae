@@ -80,6 +80,22 @@
           }
         }
       }
+    },
+    "NSLocalNetworkUsageDescription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone trouve ce Mac sur ton Wi-Fi pour parler à Maé."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your iPhone finds this Mac on your Wi-Fi to talk to Maé."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

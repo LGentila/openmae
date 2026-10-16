@@ -31,6 +31,16 @@
         }
       }
     },
+    "%@ does not answer for now. Next try in a few seconds.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ne répond pas pour l’instant. Prochain essai dans quelques secondes."
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -51,12 +61,62 @@
         }
       }
     },
+    "%@, your own relay. It only sees encrypted packets. It sends no notifications.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, ton propre relais. Il ne voit que des paquets chiffrés. Il n’envoie pas de notifications."
+          }
+        }
+      }
+    },
+    "%@. It only sees encrypted packets: neither your voice nor your texts.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@. Il ne voit que des paquets chiffrés : ni ta voix, ni tes textes."
+          }
+        }
+      }
+    },
+    "%lld min %lld s": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld min %lld s"
+          }
+        }
+      }
+    },
+    "A code is valid for 5 minutes and serves only once.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un code vaut 5 minutes et ne sert qu’une fois."
+          }
+        }
+      }
+    },
     "A file arrived damaged twice in a row. Check your connection, then try again.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Un fichier est arrivé abîmé deux fois de suite. Vérifie ta connexion, puis réessaie."
+          }
+        }
+      }
+    },
+    "A task is still in progress": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une tâche est en cours"
           }
         }
       }
@@ -81,6 +141,46 @@
         }
       }
     },
+    "Add an iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter un iPhone"
+          }
+        }
+      }
+    },
+    "Added on %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouté le %@"
+          }
+        }
+      }
+    },
+    "Address of the relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse du relais"
+          }
+        }
+      }
+    },
+    "Add…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter…"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "fr": {
@@ -101,6 +201,16 @@
         }
       }
     },
+    "Another relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un autre relais…"
+          }
+        }
+      }
+    },
     "Ask first": {
       "localizations": {
         "fr": {
@@ -117,6 +227,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Demandé au besoin"
+          }
+        }
+      }
+    },
+    "At home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison"
           }
         }
       }
@@ -147,6 +267,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatique : %@"
+          }
+        }
+      }
+    },
+    "Away": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À distance"
+          }
+        }
+      }
+    },
+    "Back": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour"
           }
         }
       }
@@ -211,12 +351,72 @@
         }
       }
     },
+    "Choose “OpenMaé relay” to talk to Maé from anywhere.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisis « Relais OpenMaé » pour parler à Maé de n’importe où."
+          }
+        }
+      }
+    },
     "Chosen in the settings (Advanced). Recommended tier for this Mac: %@.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
+          }
+        }
+      }
+    },
+    "Claude Code could not be started (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code n’a pas pu être lancé (%@)."
+          }
+        }
+      }
+    },
+    "Claude Code is working on a task. Quitting OpenMaé stops it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code travaille sur une tâche. Quitter OpenMaé l’arrête."
+          }
+        }
+      }
+    },
+    "Claude Code isn’t signed in. Open it once in Terminal to sign in.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code n’est pas connecté. Ouvre-le une fois dans le Terminal pour te connecter."
+          }
+        }
+      }
+    },
+    "Claude Code stopped without giving a result.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code s’est arrêté sans donner de résultat."
+          }
+        }
+      }
+    },
+    "Code expired": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code expiré"
           }
         }
       }
@@ -237,6 +437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Calcul"
+          }
+        }
+      }
+    },
+    "Connecting to the relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion au relais…"
           }
         }
       }
@@ -291,6 +501,16 @@
         }
       }
     },
+    "Decide alone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Décider seul"
+          }
+        }
+      }
+    },
     "Delete": {
       "localizations": {
         "fr": {
@@ -327,6 +547,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Supprimer les modèles des autres paliers (%@)"
+          }
+        }
+      }
+    },
+    "Devices": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminé"
           }
         }
       }
@@ -371,6 +611,16 @@
         }
       }
     },
+    "Each new task gets its own folder in “OpenMae”, in your home folder. Name one of these folders and Claude Code works there instead.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chaque nouvelle tâche a son propre dossier dans « OpenMae », dans ton dossier personnel. Nomme un de ces dossiers et Claude Code y travaillera."
+          }
+        }
+      }
+    },
     "Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.": {
       "localizations": {
         "fr": {
@@ -391,12 +641,32 @@
         }
       }
     },
+    "Failed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échouée"
+          }
+        }
+      }
+    },
     "Finish": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Terminer"
+          }
+        }
+      }
+    },
+    "Finished": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminée"
           }
         }
       }
@@ -421,6 +691,16 @@
         }
       }
     },
+    "Folders": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossiers"
+          }
+        }
+      }
+    },
     "Free space on this Mac": {
       "localizations": {
         "fr": {
@@ -441,6 +721,16 @@
         }
       }
     },
+    "Go through": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passer par"
+          }
+        }
+      }
+    },
     "Headphones": {
       "localizations": {
         "fr": {
@@ -457,6 +747,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Masquer les mesures"
+          }
+        }
+      }
+    },
+    "Hides the details": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Masque les détails"
           }
         }
       }
@@ -541,6 +841,26 @@
         }
       }
     },
+    "In progress": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En cours"
+          }
+        }
+      }
+    },
+    "Instruction": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consigne"
+          }
+        }
+      }
+    },
     "Interrupt": {
       "localizations": {
         "fr": {
@@ -551,12 +871,72 @@
         }
       }
     },
+    "Interrupted": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompue"
+          }
+        }
+      }
+    },
     "Interruptions": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Interruptions"
+          }
+        }
+      }
+    },
+    "It changes the files of its folder. Anything else, like installing or running a program, is refused, and Maé tells you.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il modifie les fichiers de son dossier. Le reste, comme installer ou lancer un programme, est refusé, et Maé te le dit."
+          }
+        }
+      }
+    },
+    "It decides alone what is safe to do on this Mac, without asking you. Choose this only if you trust it with your files.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il décide seul de ce qu’il peut faire sans risque sur ce Mac, sans te demander. Ne choisis ce mode que si tu lui confies tes fichiers en toute confiance."
+          }
+        }
+      }
+    },
+    "It will no longer be able to talk to Maé, and its conversation in progress closes. To add it again, you will have to scan a new code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il ne pourra plus parler à Maé, et sa conversation en cours se ferme. Pour le remettre, il faudra scanner un nouveau code."
+          }
+        }
+      }
+    },
+    "Its folder": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son dossier"
+          }
+        }
+      }
+    },
+    "Keep this Mac awake when plugged in": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder ce Mac éveillé sur secteur"
           }
         }
       }
@@ -587,6 +967,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dernier tour"
+          }
+        }
+      }
+    },
+    "Latest step": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière étape"
           }
         }
       }
@@ -661,6 +1051,16 @@
         }
       }
     },
+    "Maé can hand it long tasks: a website, code, research. What you hand it leaves this Mac: Claude Code works with Anthropic’s online models. You get a notification when it is done.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé peut lui confier des tâches longues : un site, du code, une recherche. Ce que tu lui confies quitte ce Mac : Claude Code travaille avec les modèles en ligne d’Anthropic. Une notification te prévient quand c’est fini."
+          }
+        }
+      }
+    },
     "Maé can’t use them. Allow OpenMaé in System Settings, Privacy & Security.": {
       "localizations": {
         "fr": {
@@ -681,6 +1081,16 @@
         }
       }
     },
+    "Maé is on your iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé est sur ton iPhone"
+          }
+        }
+      }
+    },
     "Maé is speaking": {
       "localizations": {
         "fr": {
@@ -697,6 +1107,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé réfléchit…"
+          }
+        }
+      }
+    },
+    "Maé sends the task at once. Say “cancel” right after to stop it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé envoie la tâche tout de suite. Dis « annule » juste après pour l’arrêter."
+          }
+        }
+      }
+    },
+    "Maé tells you what she is about to send and waits for your “yes”. The whole instruction is in the history.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te dit ce qu’elle va envoyer et attend ton « oui ». La consigne complète est dans l’historique."
           }
         }
       }
@@ -841,12 +1271,42 @@
         }
       }
     },
+    "No iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun iPhone"
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun"
+          }
+        }
+      }
+    },
     "Not allowed": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Non autorisés"
+          }
+        }
+      }
+    },
+    "Not allowed without your OK": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusé sans ton accord"
           }
         }
       }
@@ -861,12 +1321,32 @@
         }
       }
     },
+    "Not installed on this Mac. Once it is, Maé can hand it long tasks: a website, code, research.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas installé sur ce Mac. Une fois installé, Maé pourra lui confier des tâches longues : un site, du code, une recherche."
+          }
+        }
+      }
+    },
     "Not supported": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Non pris en charge"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         }
       }
@@ -921,6 +1401,16 @@
         }
       }
     },
+    "Open OpenMaé on your iPhone and scan this code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvre OpenMaé sur ton iPhone et scanne ce code."
+          }
+        }
+      }
+    },
     "Open System Settings": {
       "localizations": {
         "fr": {
@@ -931,12 +1421,42 @@
         }
       }
     },
+    "Open the folder": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir le dossier"
+          }
+        }
+      }
+    },
+    "OpenMaé relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais OpenMaé"
+          }
+        }
+      }
+    },
     "Output": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Sortie"
+          }
+        }
+      }
+    },
+    "Pairing QR code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR code d’appairage"
           }
         }
       }
@@ -1011,12 +1531,122 @@
         }
       }
     },
+    "Quit": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitter"
+          }
+        }
+      }
+    },
     "Quit %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Quitter %@"
+          }
+        }
+      }
+    },
+    "Reachable at home only": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable à la maison seulement"
+          }
+        }
+      }
+    },
+    "Reachable from anywhere": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable de partout"
+          }
+        }
+      }
+    },
+    "Read the task back first": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relire avant d’envoyer"
+          }
+        }
+      }
+    },
+    "Relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais"
+          }
+        }
+      }
+    },
+    "Relay unreachable": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais injoignable"
+          }
+        }
+      }
+    },
+    "Remove": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer %@"
+          }
+        }
+      }
+    },
+    "Remove %@?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer %@ ?"
+          }
+        }
+      }
+    },
+    "Remove…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer…"
+          }
+        }
+      }
+    },
+    "Result": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Résultat"
           }
         }
       }
@@ -1111,12 +1741,42 @@
         }
       }
     },
+    "Show a new code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher un nouveau code"
+          }
+        }
+      }
+    },
+    "Shows the details": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affiche les détails"
+          }
+        }
+      }
+    },
     "Silence wait": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Attente du silence"
+          }
+        }
+      }
+    },
+    "Sleep": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Veille"
           }
         }
       }
@@ -1211,6 +1871,36 @@
         }
       }
     },
+    "Stop": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêter"
+          }
+        }
+      }
+    },
+    "Stopped": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêtée"
+          }
+        }
+      }
+    },
+    "Take over here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre ici"
+          }
+        }
+      }
+    },
     "Talk": {
       "localizations": {
         "fr": {
@@ -1231,12 +1921,32 @@
         }
       }
     },
+    "Talk to Maé from your iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle à Maé depuis ton iPhone"
+          }
+        }
+      }
+    },
     "Talk to the assistant to see measurements.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Parle à l’assistant pour voir les mesures."
+          }
+        }
+      }
+    },
+    "Tasks": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tâches"
           }
         }
       }
@@ -1267,6 +1977,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’assistant va redémarrer avec %@. S’il n’est pas encore sur ce Mac, il faudra le télécharger (%@)."
+          }
+        }
+      }
+    },
+    "The code stays between this Mac and your iPhone: the relay cannot read it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le code reste entre ce Mac et ton iPhone : le relais ne peut pas le lire."
+          }
+        }
+      }
+    },
+    "The conversation goes on on your iPhone until you take over.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversation continue sur ton iPhone tant que tu ne reprends pas la main."
           }
         }
       }
@@ -1361,6 +2091,16 @@
         }
       }
     },
+    "The relay does not answer. Your iPhone can reach you at home only. I keep trying.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais ne répond pas. Ton iPhone ne peut te joindre qu’à la maison. Je réessaie toute seule."
+          }
+        }
+      }
+    },
     "The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.": {
       "localizations": {
         "fr": {
@@ -1397,6 +2137,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce Mac n’est pas compatible"
+          }
+        }
+      }
+    },
+    "This code expired": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce code a expiré"
           }
         }
       }
@@ -1521,6 +2271,16 @@
         }
       }
     },
+    "Valid for another": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valable encore"
+          }
+        }
+      }
+    },
     "Voice": {
       "localizations": {
         "fr": {
@@ -1551,12 +2311,72 @@
         }
       }
     },
+    "Waiting for your iPhone…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente de ton iPhone…"
+          }
+        }
+      }
+    },
+    "Waiting for your yes": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attend ton oui"
+          }
+        }
+      }
+    },
+    "Waiting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente…"
+          }
+        }
+      }
+    },
+    "What it may do": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce qu’il peut faire"
+          }
+        }
+      }
+    },
+    "What went wrong": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce qui n’a pas marché"
+          }
+        }
+      }
+    },
     "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Avec un casque, il n’y a pas d’écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l’assistant se couperait la parole."
+          }
+        }
+      }
+    },
+    "Without a relay, your iPhone reaches you at home only, on the same Wi-Fi as this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans relais, ton iPhone ne te joint qu’à la maison, sur le même Wi-Fi que ce Mac."
           }
         }
       }
@@ -1571,12 +2391,62 @@
         }
       }
     },
+    "You can now talk to Maé from your iPhone, at home and away. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPhone, à la maison comme ailleurs. Garde ce Mac allumé et branché pour qu’il reste joignable."
+          }
+        }
+      }
+    },
+    "You can now talk to Maé from your iPhone, at home. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPhone, à la maison. Garde ce Mac allumé et branché pour qu’il reste joignable."
+          }
+        }
+      }
+    },
     "You need a Mac with Apple silicon (M1 or later) and at least 8 GB of memory. This Mac: %@, %@.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
+          }
+        }
+      }
+    },
+    "Your Mac has turned off its microphone and speakers.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your iPhone cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone ne peut pas réveiller un Mac en veille. Capot fermé et sans écran externe, le Mac s’endort quand même."
+          }
+        }
+      }
+    },
+    "Your iPhone is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone sert de micro et de haut-parleur. Le travail reste sur ce Mac, avec ses modèles. Tout est chiffré de bout en bout."
           }
         }
       }
@@ -1597,6 +2467,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "fin de parole → premier son"
+          }
+        }
+      }
+    },
+    "iPhone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone"
+          }
+        }
+      }
+    },
+    "iPhone added": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone ajouté"
           }
         }
       }

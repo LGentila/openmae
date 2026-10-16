@@ -16,4 +16,17 @@ public enum AppIdentity {
             .appendingPathComponent(directoryName, isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
     }
+
+    /// ~/Library/Application Support/<name>/Tasks — the tasks handed to agents.
+    public static var tasksDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(directoryName, isDirectory: true)
+            .appendingPathComponent("Tasks", isDirectory: true)
+    }
+
+    /// ~/OpenMae — where an agent gets a new folder for each task, unless the user named one of theirs. Plain
+    /// letters, like the app's file name: agents run developer tools, and some of them still trip over accents.
+    public static var agentWorkspace: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OpenMae", isDirectory: true)
+    }
 }

@@ -1,0 +1,92 @@
+# The iPhone app. The Xcode project is generated from this file, never edited by hand:
+#
+#   xcodegen generate --spec iPhone/project.yml
+#
+# (or simply: zsh scripts/build-iphone.sh, which generates, builds and installs it on a connected iPhone).
+#
+# The iPhone is the microphone, the speaker and the screen; the work is done by OpenMaé on the Mac, through the link
+# (OpenMaeLink, relay/PROTOCOL.md). The interface uses the same design files as the Mac app (App/Sources/Design, the
+# live transcript); its own screens are in Sources.
+
+name: OpenMaeiPhone
+
+options:
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: false
+
+packages:
+  VoiceEngine:
+    path: ..
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    # As in the Mac app: builds the English tables too, French being the development region.
+    XCSTRINGS_FORCE_BUILD_ALL_STRINGS: YES
+
+targets:
+  OpenMae:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources
+      # Shared with the Mac app: the design system's tokens, fonts, icons, controls and orb, and the live transcript.
+      - path: ../App/Sources/Design
+        group: Shared
+      - path: ../App/Sources/LiveTranscript.swift
+        group: Shared
+      - path: ../App/Sources/Texts.swift
+        group: Shared
+      - path: ../App/Resources/Fonts
+        group: Shared
+        buildPhase: resources
+    dependencies:
+      - package: VoiceEngine
+        product: VoiceCore
+      - package: VoiceEngine
+        product: OpenMaeLink
+    info:
+      path: Resources/Info.plist
+      properties:
+        # The home screen shows the translated name ("OpenMaé", InfoPlist.xcstrings); files stay accent-free.
+        CFBundleName: OpenMae
+        CFBundleDisplayName: OpenMae
+        CFBundleDevelopmentRegion: fr
+        CFBundleLocalizations: [fr, en]
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # A conversation goes on with the screen locked or in another app.
+        UIBackgroundModes: [audio]
+        # Shown from Resources/InfoPlist.xcstrings, in English as in French: change them there too.
+        NSMicrophoneUsageDescription: What you say goes encrypted to your Mac, and nowhere else.
+        NSCameraUsageDescription: The camera reads the code shown on your Mac, once, to pair this iPhone.
+        NSLocalNetworkUsageDescription: OpenMaé finds your Mac on your Wi-Fi to talk to it directly.
+        NSBonjourServices: [_openmae._udp]
+        # A relay of one's own on the local network may answer in plain HTTP (its traffic is encrypted end to end
+        # anyway).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_NAME: OpenMae
+        PRODUCT_BUNDLE_IDENTIFIER: com.openmae.ios
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # No app icon yet (the logo is not final): the system's blank icon meanwhile.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""

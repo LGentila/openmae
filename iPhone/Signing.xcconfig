@@ -1,0 +1,7 @@
+// Code signing of the iPhone app: automatic, with the Apple Developer team of App/Signing.local.xcconfig (not
+// published, see App/Signing.xcconfig). Xcode makes the development profile for the iPhones registered with the team.
+
+#include? "../App/Signing.local.xcconfig"
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development

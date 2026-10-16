@@ -460,8 +460,14 @@ public enum ActionCatalog {
         return seconds
     }
 
+    /// The built-in tools' names, in the app's order (the shortcuts' tool only when there are shortcuts).
+    static func names(shortcuts: [String] = []) -> [String] {
+        (calendarTools + [timer] + [runShortcut(names: shortcuts)].compactMap { $0 }).map(\.name)
+    }
+
     /// Checks a call against the static rules (the benchmark's "would the app accept it"). The dates of a change
-    /// are checked when it is carried out: they depend on the item ("à la même heure").
+    /// are checked when it is carried out: they depend on the item ("à la même heure"). The caller reads a misspelled
+    /// tool name first (`ToolNames`), as the app does; a name that stands for no tool is refused with the real ones.
     public static func check(_ call: ToolCall, context: ToolContext, shortcuts: [String] = []) throws {
         switch call.name {
         case createReminder.name:
@@ -487,7 +493,8 @@ public enum ActionCatalog {
                                   spoken: ActionPhrases.unknownShortcut(name, context.language))
             }
         default:
-            throw ToolRefusal(forModel: "Outil inconnu : \(call.name).", spoken: ActionPhrases.notUnderstood(context.language))
+            throw ToolRefusal(forModel: ToolNames.unknown(call.name, among: names(shortcuts: shortcuts)),
+                              spoken: ActionPhrases.notUnderstood(context.language))
         }
     }
 }

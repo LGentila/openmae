@@ -1,4 +1,8 @@
+#if canImport(AppKit)
 import AppKit
+#else
+import UIKit
+#endif
 import CoreText
 import SwiftUI
 
@@ -53,14 +57,19 @@ enum Fonts {
 
     /// The system's fonts: for the monospaced family, and if a font file were missing from the app.
     private static func fallback(_ face: Typeface, size: CGFloat, weight: CGFloat, tabular: Bool) -> CTFont {
-        let systemWeight: NSFont.Weight = switch weight {
+        #if canImport(AppKit)
+        typealias SystemFont = NSFont
+        #else
+        typealias SystemFont = UIFont
+        #endif
+        let systemWeight: SystemFont.Weight = switch weight {
         case ..<450: .regular
         case ..<550: .medium
         case ..<650: .semibold
         default: .bold
         }
-        if face == .mono { return NSFont.monospacedSystemFont(ofSize: size, weight: systemWeight) }
-        let font = NSFont.systemFont(ofSize: size, weight: systemWeight)
+        if face == .mono { return SystemFont.monospacedSystemFont(ofSize: size, weight: systemWeight) }
+        let font = SystemFont.systemFont(ofSize: size, weight: systemWeight)
         guard tabular else { return font }
         let descriptor = CTFontDescriptorCreateCopyWithAttributes(
             font.fontDescriptor as CTFontDescriptor,

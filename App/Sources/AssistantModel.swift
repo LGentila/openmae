@@ -54,8 +54,12 @@ final class AssistantModel {
     private(set) var inputLevel: Float = 0
     private(set) var outputLevel: Float = 0
     private(set) var lastWarning: String?
-    /// What the actions can use (access to the calendar and reminders, shortcuts); nil while they are off.
+    /// What the actions can use (access to the calendar and reminders, shortcuts, Claude Code); nil while they are off.
     private(set) var actions: ActionsStatus?
+    /// The tasks handed to Claude Code, the most recent last.
+    private(set) var tasks: [AgentTask] = []
+    /// Quitting would stop a task.
+    var hasRunningTask: Bool { tasks.contains { $0.status == .running } }
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
     /// pressed once (and not yet a second time).
     private(set) var talkKeyDown = false
@@ -188,6 +192,11 @@ final class AssistantModel {
         connection.send(.refreshActions)
     }
 
+    /// The Stop button of a task.
+    func stopTask(_ id: UUID) {
+        connection.send(.stopTask(id))
+    }
+
     func downloadModels() {
         downloadFailure = nil
         isDownloading = true
@@ -271,6 +280,8 @@ final class AssistantModel {
             self.diagnostics = diagnostics
         case .actions(let status):
             actions = status
+        case .tasks(let tasks):
+            self.tasks = tasks
         case .warning(let message):
             lastWarning = message
         }

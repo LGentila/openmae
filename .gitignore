@@ -8,5 +8,8 @@ App/*.xcodeproj/
 App/Resources/Info.plist
 App/Resources/App.entitlements
 App/Signing.local.xcconfig
+# Generated from iPhone/project.yml by xcodegen
+iPhone/*.xcodeproj/
+iPhone/Resources/Info.plist
 # Code-coverage data written by the test runs
 *.profraw

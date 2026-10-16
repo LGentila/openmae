@@ -9,6 +9,10 @@ struct LiveTranscript: View {
         case speak(orShortcut: Bool)
         case holdSpace(orShortcut: Bool)
         case loading(LoadingStep?)
+        /// An iPhone has the conversation: the Mac's microphone and speakers are off.
+        case onPhone
+        /// Any other sentence (the iPhone's).
+        case message(Text)
     }
 
     let state: PipelineState
@@ -16,6 +20,7 @@ struct LiveTranscript: View {
     let user: TranscriptEntry?
     let answer: TranscriptEntry?
     let invitation: Invitation
+    var layout = TranscriptLayout.mac
 
     @Environment(\.stillFrame) private var stillFrame
     /// How many words of which sentence are shown.
@@ -40,7 +45,7 @@ struct LiveTranscript: View {
         ZStack(alignment: .top) {
             if state == .listening {
                 InvitationView(invitation: invitation)
-                    .padding(.top, 24)
+                    .padding(.top, layout.invitationTop)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 8) {
@@ -49,7 +54,7 @@ struct LiveTranscript: View {
                         .foregroundStyle(Palette.inkMuted)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .frame(maxWidth: 640, minHeight: 20)
+                        .frame(maxWidth: layout.previousLineWidth, minHeight: 20)
                     SpeakerChip(state: state)
                     if let sentence { words(of: sentence) }
                 }
@@ -59,7 +64,7 @@ struct LiveTranscript: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 60)
+        .padding(.horizontal, layout.horizontalPadding)
         .animation(Easing.animation(Easing.rise, Timing.rise), value: state == .listening)
         .task(id: [sentence?.id.uuidString ?? "", String(sentence?.words.count ?? 0)]) { await reveal() }
     }
@@ -79,8 +84,9 @@ struct LiveTranscript: View {
         let count = stillFrame != nil ? sentence.words.count
             : shown.sentence == sentence.id ? min(shown.count, sentence.words.count) : 0
         let deep = StatePalette(state).deep
-        let style = TextStyle.transcript
-        return WordFlow(spacing: 0.28 * style.size, lineHeight: style.lineHeight, maxLines: 3, maxWidth: 540) {
+        let style = layout.words
+        return WordFlow(spacing: 0.28 * style.size, lineHeight: style.lineHeight, maxLines: 3,
+                        maxWidth: layout.wordsWidth) {
             ForEach(0..<count, id: \.self) { i in
                 Text(verbatim: sentence.words[i])
                     .textStyle(style)
@@ -109,6 +115,17 @@ struct LiveTranscript: View {
             if Task.isCancelled { return }
         }
     }
+}
+
+/// The transcript's sizes: the Mac window's, or the iPhone's, narrower.
+struct TranscriptLayout {
+    var horizontalPadding: CGFloat = 60
+    var previousLineWidth: CGFloat = 640
+    var wordsWidth: CGFloat = 540
+    var words = TextStyle.transcript
+    var invitationTop: CGFloat = 24
+
+    static let mac = TranscriptLayout()
 }
 
 /// "You", "Maé is thinking…", "Maé", with a blinking dot of the state's colour.
@@ -182,6 +199,10 @@ private struct InvitationView: View {
                     Text("The first launch can take a minute or two.")
                         .textStyle(.note)
                 }
+            case .onPhone:
+                Text("Your Mac has turned off its microphone and speakers.")
+            case .message(let text):
+                text
             }
         }
         .textStyle(.prompt)

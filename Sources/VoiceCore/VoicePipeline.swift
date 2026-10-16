@@ -179,12 +179,14 @@ public actor VoicePipeline {
     }
 
     /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
-    /// model itself, hence `async`), and the example exchanges when the config asks for them. Set when the tools are,
-    /// and kept for the conversations that follow, so the model's memory of them stays valid.
+    /// model itself, hence `async`), then what the tools' providers add (handing tasks to an agent); and the example
+    /// exchanges when the config asks for them. Set with the tools, and kept for the conversations that follow, so the
+    /// model's memory of them stays valid.
     private func updatePrompt() async {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
-        if tools != nil {
+        if let tools {
             addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
+            addenda += await tools.promptAddenda()
         }
         conversation.systemAddenda = addenda
         conversation.examples = tools != nil && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
@@ -202,6 +204,7 @@ public actor VoicePipeline {
     /// conversation starts.
     public func setTools(_ runner: ToolRunner?) async throws {
         await cancelTurn(stopAudio: true)
+        await tools?.resetConversation()  // an action waiting for its "oui" is dropped (its read-back leaves the screen)
         tools = runner
         await updatePrompt()
         conversation.clear()
@@ -210,11 +213,12 @@ public actor VoicePipeline {
         try await model.prefill(conversation.messages)
     }
 
-    /// The list of tools changed (a shortcut was added to the folder): the model's prompt is computed again,
-    /// the conversation goes on.
+    /// The list of tools changed (a shortcut was added to the folder, an agent set up): the model's prompt is
+    /// computed again, the conversation goes on.
     public func toolsChanged() async throws {
         guard let tools else { return }
         await model.useTools(await tools.tools())
+        await updatePrompt()
         try await model.prefill(conversation.messages)
     }
 
@@ -489,36 +493,51 @@ public actor VoicePipeline {
                 var request = conversation.messages(adding: turn.userMessage!)
                 var secondTry = false
                 var fillerSaid = false
+                /// Summing up a text that came from outside (an agent's report, see `ToolOutcome.modelSpeaks`): what
+                /// the model writes is said, but no call it writes then is carried out, since that text could carry
+                /// instructions of its own. Holds what to say if the model says nothing.
+                var summing: String?
                 while true {
                     var calls: [ToolCall] = []
                     var unreadable = false
+                    let answered = turn.answer
                     DebugLog.log("turn \(turn.id): LLM request")
                     for try await output in model.reply(to: request) {
                         if metrics.firstTokenMs == nil { metrics.firstTokenMs = ms(clock.now - t1) }
                         switch output {
                         case .text(let raw): chunker.push(filter.push(raw)).forEach(send)
-                        case .toolCallStarted:
+                        case .toolCallStarted where summing == nil:
                             DebugLog.log("turn \(turn.id): tool call started")
                             if config.toolCallFiller, !fillerSaid, turn.answer.isEmpty {
                                 fillerSaid = true
                                 // Not in the history: the model would start saying it in its own answers.
                                 deliver(ActionPhrases.oneMoment(lang), to: turn, inHistory: false)
                             }
-                        case .toolCall(let call): calls.append(call)
-                        case .unreadableToolCall(let raw):
+                        case .toolCall(let call) where summing == nil: calls.append(call)
+                        case .unreadableToolCall(let raw) where summing == nil:
                             DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
                             unreadable = true
+                        case .toolCallStarted: break
+                        case .toolCall(let call):
+                            DebugLog.log("turn \(turn.id): call ignored while summing up a report: \(call.name)")
+                        case .unreadableToolCall: break
                         }
                     }
                     chunker.push(filter.flush()).forEach(send)
+                    if let fallback = summing {
+                        chunker.flush().forEach(send)
+                        if turn.answer == answered { say(fallback, to: turn) }
+                        break
+                    }
                     guard let tools, !calls.isEmpty || unreadable else { break }
                     // Nothing is ever carried out before the user's turn is really over.
                     try await waitForCommit(turn)
                     chunker.flush().forEach(send)
-                    guard let call = calls.first else {
+                    guard let written = calls.first else {
                         say(ActionPhrases.notUnderstood(lang), to: turn)
                         break
                     }
+                    let call = await tools.named(written)  // a misspelled tool name, read as the tool's
                     DebugLog.log("turn \(turn.id): tool call \(call.name) \(call.arguments)")
                     metrics.tool = call.name
                     let reply = await tools.handle(call, context: toolContext(turn, now: now))
@@ -527,6 +546,12 @@ public actor VoicePipeline {
                         // The arguments were refused: the model sees why and gets one more try.
                         DebugLog.log("turn \(turn.id): tool call refused, second try: \(reply.forModel)")
                         secondTry = true
+                        request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                        continue
+                    }
+                    if reply.modelSpeaks {
+                        DebugLog.log("turn \(turn.id): the model sums up the result")
+                        summing = reply.spoken
                         request = conversation.messages(adding: turn.userMessage!) + turn.steps
                         continue
                     }

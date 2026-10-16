@@ -159,7 +159,62 @@ enum Snapshots {
             }
             model.settings = saved
         }
+        await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
+        await renderPhone(to: folder)
+    }
+
+    /// Claude Code: its settings (a tall window, to see the whole panel), and the history with three tasks: one
+    /// done, one in progress, one waiting for the user's "oui" (its instruction shown).
+    @MainActor
+    private static func renderTasks(to folder: URL, conversation: [AssistantEvent], shortcuts: [String]) async {
+        let now = Date()
+        func task(_ number: Int, _ title: String, _ instruction: String, _ status: AgentTask.Status,
+                  minutesAgo: Double) -> AgentTask
+        {
+            var task = AgentTask(number: number, agentID: ClaudeCode.agentID, agentName: ClaudeCode.displayName,
+                                 title: title, instruction: instruction, status: status,
+                                 createdAt: now.addingTimeInterval(-minutesAgo * 60))
+            if status != .awaitingConfirmation {
+                task.startedAt = task.createdAt
+                task.folder = "/Users/me/OpenMae/2026-10-16-tache-\(number)"
+            }
+            return task
+        }
+        var done = task(1, "site de la boulangerie", "Crée un site vitrine pour la boulangerie de la sœur de "
+                        + "l’utilisateur : présentation, horaires et page de contact.", .finished, minutesAgo: 95)
+        done.endedAt = now.addingTimeInterval(-50 * 60)
+        done.resultText = "J’ai créé le site de la boulangerie : une page d’accueil, les horaires et une page de "
+            + "contact. Ouvre **index.html** dans ton navigateur pour le voir."
+        done.permissionDenials = ["npm install"]
+        var running = task(2, "tri des factures", "Trie les factures du dossier par fournisseur et par année.",
+                           .running, minutesAgo: 12)
+        running.lastStep = .edits("factures.csv")
+        let draft = task(3, "site du club de randonnée", "Crée un site pour le club de randonnée de Lucie, avec le "
+                         + "calendrier des sorties et une page de contact.", .awaitingConfirmation, minutesAgo: 0)
+
+        let history = await scriptedModel(conversation + [.tasks([done, running, draft])])
+        let window = WindowState()
+        await save(ContentView(model: history, window: window).environment(\.stillFrame, 1.7).preferredColorScheme(.light),
+                   size: CGSize(width: 960, height: 1100), to: folder.appending(path: "main-11-history-tasks.png")) {
+            window.panel = .history
+        }
+
+        let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
+        let model = await scriptedModel(ready + [.actions(ActionsStatus(calendar: .granted, reminders: .granted,
+                                                                        shortcuts: shortcuts,
+                                                                        claudeCode: .ready(version: "2.1.206")))])
+        let saved = model.settings
+        model.settings.actionsEnabled = true
+        model.settings.claudeCode.enabled = true
+        model.settings.claudeCode.folders = ["/Users/me/Projets/Sites"]
+        let settingsWindow = WindowState()
+        await save(ContentView(model: model, window: settingsWindow).environment(\.stillFrame, 1.7)
+                       .preferredColorScheme(.light),
+                   size: CGSize(width: 960, height: 1700), to: folder.appending(path: "main-12-settings-claude-code.png")) {
+            settingsWindow.panel = .settings
+        }
+        model.settings = saved
     }
 
     /// The capsule over a pretend desktop, as in the design's Overlay screen (at rest: no capsule, the icon's
@@ -195,7 +250,7 @@ enum Snapshots {
     }
 
     @MainActor
-    private static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
+    static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
         let model = AssistantModel(connection: ScriptedConnection(events))
         model.hasTalkShortcut = true  // as on a Mac that accepts ⌥ Space (snapshots register no shortcut)
         try? await Task.sleep(for: .milliseconds(150))  // the model applies the events asynchronously
@@ -203,7 +258,7 @@ enum Snapshots {
     }
 
     @MainActor
-    private static func save(_ view: some View, size: CGSize, to url: URL, then prepare: () -> Void = {}) async {
+    static func save(_ view: some View, size: CGSize, to url: URL, then prepare: () -> Void = {}) async {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -405,10 +460,16 @@ struct SnapshotRunner: View {
 
 /// `-actions-test-calendar`: every event and reminder Maé creates goes into a calendar and a list named
 /// "OpenMaé (tests)" (created on first use), so trying the actions leaves the user's own calendars unchanged (Maé
-/// still reads them all). Deleting that calendar and that list cleans everything up.
+/// still reads them all). Deleting that calendar and that list cleans everything up. The tasks handed to Claude
+/// Code go to ~/OpenMae-tests, folders and history alike: deleting that folder cleans them up.
 enum ActionsTestCollection {
     static var name: String? {
         ProcessInfo.processInfo.arguments.contains("-actions-test-calendar") ? "OpenMaé (tests)" : nil
+    }
+
+    static var agentsFolder: URL? {
+        guard name != nil else { return nil }
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: "OpenMae-tests", directoryHint: .isDirectory)
     }
 }
 
