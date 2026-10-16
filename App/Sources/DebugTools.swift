@@ -218,20 +218,27 @@ enum Snapshots {
         model.settings = saved
     }
 
-    /// The web search's settings, switched on with an address: after a test that worked, and one that was refused.
+    /// The web search's settings, switched on: with Brave Search before its key is pasted, after a test that worked and
+    /// after a refused key; with a SearXNG after a test that worked and one that was refused.
     @MainActor
     private static func renderWebSearch(to folder: URL, ready: [AssistantEvent]) async {
-        let tests: [(name: String, test: WebSearchTest)] = [
-            ("main-13-settings-web-search", .works(results: 25, seconds: 1.24)),
-            ("main-14-settings-web-search-refused", .failed(.forbidden)),
+        let tests: [(name: String, source: WebSearchSource, key: Bool, test: WebSearchTest?)] = [
+            ("main-13-settings-web-search-brave-new", .brave, false, nil),
+            ("main-14-settings-web-search-brave", .brave, true, .works(results: 5, seconds: 0.62)),
+            ("main-15-settings-web-search-brave-refused", .brave, true, .failed(.unauthorized)),
+            ("main-16-settings-web-search-searxng", .searxng, false, .works(results: 25, seconds: 1.24)),
+            ("main-17-settings-web-search-searxng-refused", .searxng, false, .failed(.forbidden)),
         ]
-        for (name, test) in tests {
-            let model = AssistantModel(connection: ScriptedConnection(ready + [.webSearchTested(test)]))
+        for (name, source, key, test) in tests {
+            let events: [AssistantEvent] = ready + (test.map { [AssistantEvent.webSearchTested($0)] } ?? [])
+            let model = AssistantModel(connection: ScriptedConnection(events))
             model.hasTalkShortcut = true
             // Before the events arrive: a change of these settings forgets the last test.
             let saved = model.settings
             model.settings.webSearch.enabled = true
-            model.settings.webSearch.address = "https://search.example.org"
+            model.settings.webSearch.source = source
+            model.settings.webSearch.braveKeySaved = key
+            model.settings.webSearch.address = source == .searxng ? "https://search.example.org" : ""
             try? await Task.sleep(for: .milliseconds(150))
             let window = WindowState()
             await save(ContentView(model: model, window: window).environment(\.stillFrame, 1.7)

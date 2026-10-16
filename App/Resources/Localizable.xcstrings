@@ -121,6 +121,16 @@
         }
       }
     },
+    "API key": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé API"
+          }
+        }
+      }
+    },
     "Accessing the microphone…": {
       "localizations": {
         "fr": {
@@ -297,6 +307,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Retour"
+          }
+        }
+      }
+    },
+    "Brave Search API key": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé API de Brave Search"
+          }
+        }
+      }
+    },
+    "Brave answered with an error (code %lld).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brave a répondu par une erreur (code %lld)."
+          }
+        }
+      }
+    },
+    "Brave refuses your key.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brave refuse ta clé."
           }
         }
       }
@@ -507,6 +547,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copier les mesures"
+          }
+        }
+      }
+    },
+    "Create a key": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Créer une clé"
+          }
+        }
+      }
+    },
+    "Create a key on Brave’s website, then paste it here. It is kept in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crée une clé sur le site de Brave, puis colle-la ici. Elle est rangée dans le trousseau de ton Mac."
           }
         }
       }
@@ -811,6 +871,26 @@
         }
       }
     },
+    "I can’t make sense of Brave’s answer.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je ne comprends pas la réponse de Brave."
+          }
+        }
+      }
+    },
+    "I can’t reach Brave.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je n’arrive pas à joindre Brave."
+          }
+        }
+      }
+    },
     "I can’t reach your SearXNG.": {
       "localizations": {
         "fr": {
@@ -977,6 +1057,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Garder ce Mac éveillé sur secteur"
+          }
+        }
+      }
+    },
+    "Key saved in the keychain": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé rangée dans le trousseau"
           }
         }
       }
@@ -1151,12 +1241,12 @@
         }
       }
     },
-    "Maé looks up what she can’t know: the news, a score, opening hours, a price. She goes through your own SearXNG.": {
+    "Maé looks up what she can’t know: the news, a score, opening hours, a price.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix. Elle passe par ton propre SearXNG."
+            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix."
           }
         }
       }
@@ -1531,6 +1621,16 @@
         }
       }
     },
+    "Paste your Brave key first.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colle d’abord ta clé Brave."
+          }
+        }
+      }
+    },
     "Pause": {
       "localizations": {
         "fr": {
@@ -1697,6 +1797,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Retirer %@ ?"
+          }
+        }
+      }
+    },
+    "Remove the key": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer la clé"
           }
         }
       }
@@ -1907,6 +2017,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Le son ne démarre pas"
+          }
+        }
+      }
+    },
+    "Source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source"
           }
         }
       }
@@ -2551,6 +2671,16 @@
         }
       }
     },
+    "What you search for goes to Brave Search. The rest of the conversation stays on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que tu cherches part chez Brave Search. Le reste de la conversation reste sur ton Mac."
+          }
+        }
+      }
+    },
     "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
       "localizations": {
         "fr": {
@@ -2611,12 +2741,32 @@
         }
       }
     },
+    "Your Brave key has reached its limit.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta clé Brave a atteint sa limite."
+          }
+        }
+      }
+    },
     "Your Mac has turned off its microphone and speakers.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your SearXNG": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton SearXNG"
           }
         }
       }

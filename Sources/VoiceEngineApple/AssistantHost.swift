@@ -440,7 +440,7 @@ public actor AssistantHost: AssistantConnection {
             }
         }
         if new.webSearch != old.webSearch, await configureWebSearch(), new.actionsEnabled == old.actionsEnabled {
-            DebugLog.log("web search: \(new.webSearch.isReady ? "on" : "off")")
+            DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
             // With the actions, its tool comes or goes and the conversation goes on. On its own, it is the only tool:
             // the tools come or go, and a new conversation starts, as when the actions are switched on or off.
             do {
@@ -481,25 +481,33 @@ public actor AssistantHost: AssistantConnection {
         return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools])
     }
 
-    /// Hands the user's SearXNG to the web search tool while the search is switched on, with the keychain's password.
-    /// Returns true when what the model sees changed.
+    /// Hands the source of the settings to the web search tool while the search is switched on, with the keychain's key
+    /// or password. Returns true when what the model sees changed.
     @discardableResult
     private func configureWebSearch() async -> Bool {
         await webSearchTools.configure(settings.webSearch.isReady ? webSearchProvider() : nil)
     }
 
-    /// The user's SearXNG, as the settings and the keychain describe it, switched on or not; nil without an address.
-    private func webSearchProvider() -> SearXNGProvider? {
+    /// The source of the settings, as they and the keychain describe it, switched on or not; nil when it is not set up
+    /// (no key in the keychain for Brave Search, no address for SearXNG).
+    private func webSearchProvider() -> (any WebSearchProvider)? {
         let search = settings.webSearch
-        guard let address = SearXNGProvider.address(search.address) else { return nil }
-        return SearXNGProvider(address: address, username: search.username, password: WebSearchKeychain.password() ?? "")
+        switch search.source {
+        case .brave:
+            guard let key = WebSearchKeychain.secret(for: .brave), !key.isEmpty else { return nil }
+            return BraveSearchProvider(key: key)
+        case .searxng:
+            guard let address = SearXNGProvider.address(search.address) else { return nil }
+            return SearXNGProvider(address: address, username: search.username,
+                                   password: WebSearchKeychain.secret(for: .searxng) ?? "")
+        }
     }
 
-    /// The settings' "Test" button: one search, with the settings and the password as they are now.
+    /// The settings' "Test" button: one search, with the settings and the key or password as they are now.
     private func testWebSearch() async {
-        await configureWebSearch()  // the password may have just been saved
+        await configureWebSearch()  // the key or the password may have just been saved
         guard let provider = webSearchProvider() else {
-            emit.yield(.webSearchTested(.noAddress))
+            emit.yield(.webSearchTested(.notSetUp))
             return
         }
         let start = ContinuousClock.now
@@ -533,10 +541,14 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// The app is in front again: a shortcut may have been added to the folder, an access granted, the web search's
-    /// password saved.
+    /// key or password saved.
     private func refreshActions() async {
         guard stage == .running else { return }
-        await configureWebSearch()
+        if await configureWebSearch() {
+            // The keychain decided otherwise than the settings (a key saved again after it was lost, or removed from it
+            // elsewhere): the search's tool comes or goes, the conversation goes on.
+            do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
+        }
         guard settings.actionsEnabled else { return }
         if await shortcutTools.refresh() {
             do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }

@@ -1,5 +1,4 @@
 import Foundation
-import Network
 
 @testable import VoiceCore
 
@@ -28,19 +27,11 @@ final class FakeSearXNG: @unchecked Sendable {
         case failing
     }
 
-    struct Request: Sendable {
-        var method: String
-        var path: String
-        var headers: [String: String]
-        var form: [String: String]
-    }
+    typealias Request = LocalHTTPServer.Request
 
+    private let server = LocalHTTPServer()
     private let lock = NSLock()
-    private let queue = DispatchQueue(label: "fake-searxng")
-    private var listener: NWListener?
-    private var log: [Request] = []
     private var currentMode = Mode.results
-    private(set) var port: UInt16 = 0
     /// "user:password" when it asks for one.
     let credentials: String?
 
@@ -48,122 +39,52 @@ final class FakeSearXNG: @unchecked Sendable {
         credentials = password.map { (username ?? "") + ":" + $0 }
     }
 
-    var address: URL { URL(string: "http://127.0.0.1:\(port)")! }
-    var requests: [Request] { lock.withLock { log } }
+    var address: URL { URL(string: "http://127.0.0.1:\(server.port)")! }
+    var requests: [Request] { server.requests }
     var mode: Mode {
         get { lock.withLock { currentMode } }
         set { lock.withLock { currentMode = newValue } }
     }
 
     func start() async throws {
-        let listener = try NWListener(using: .tcp, on: .any)
-        self.listener = listener
-        listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-        let ready = AsyncStream<UInt16>.makeStream()
-        listener.stateUpdateHandler = { state in
-            if case .ready = state, let port = listener.port?.rawValue { ready.continuation.yield(port) }
-        }
-        listener.start(queue: queue)
-        for await port in ready.stream {
-            self.port = port
-            break
+        try await server.start { [weak self] request in
+            self?.route(request) ?? LocalHTTPServer.Response(status: 503, body: "", type: "text/plain")
         }
     }
 
     func stop() {
-        listener?.cancel()
+        server.stop()
     }
 
-    // MARK: - HTTP
-
-    private func accept(_ connection: NWConnection) {
-        connection.start(queue: queue)
-        receive(connection, buffer: Data())
-    }
-
-    private func receive(_ connection: NWConnection, buffer: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, complete, error in
-            guard let self else { return }
-            var buffer = buffer
-            if let data { buffer.append(data) }
-            if let request = Self.parse(buffer) {
-                self.lock.withLock { self.log.append(request) }
-                self.route(request, connection)
-            } else if complete || error != nil {
-                connection.cancel()
-            } else {
-                self.receive(connection, buffer: buffer)
-            }
-        }
-    }
-
-    /// A whole request (headers, and as many bytes of body as they announce), or nil while it is incomplete.
-    private static func parse(_ data: Data) -> Request? {
-        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-        let parts = head.first?.split(separator: " ") ?? []
-        guard parts.count >= 2 else { return nil }
-        var headers: [String: String] = [:]
-        for line in head.dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-        }
-        let length = Int(headers["content-length"] ?? "0") ?? 0
-        let body = data[end.upperBound...]
-        guard body.count >= length else { return nil }
-        var form: [String: String] = [:]
-        for pair in String(decoding: body.prefix(length), as: UTF8.self).split(separator: "&") {
-            let field = pair.split(separator: "=", maxSplits: 1).map {
-                $0.replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? String($0)
-            }
-            if field.count == 2 { form[field[0]] = field[1] }
-        }
-        return Request(method: String(parts[0]), path: String(parts[1]), headers: headers, form: form)
-    }
-
-    private func respond(_ connection: NWConnection, _ status: Int, _ body: String, type: String = "application/json",
-                         extraHeaders: String = "")
-    {
-        let data = Data(body.utf8)
-        let head = "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Status")\r\nContent-Type: \(type)\r\n"
-            + "Content-Length: \(data.count)\r\n\(extraHeaders)Connection: close\r\n\r\n"
-        connection.send(content: Data(head.utf8) + data, completion: .contentProcessed { _ in connection.cancel() })
-    }
-
-    private func respond(_ connection: NWConnection, json: JSONValue) {
-        let data = (try? JSONEncoder().encode(json)) ?? Data()
-        respond(connection, 200, String(decoding: data, as: UTF8.self))
-    }
-
-    private func route(_ request: Request, _ connection: NWConnection) {
-        guard request.path.split(separator: "?").first == "/search" else {
-            return respond(connection, 404, "<html><body>Not Found</body></html>", type: "text/html")
+    private func route(_ request: Request) -> LocalHTTPServer.Response {
+        guard request.path == "/search" else {
+            return .init(status: 404, body: "<html><body>Not Found</body></html>", type: "text/html")
         }
         if let credentials {
             let expected = "Basic " + Data(credentials.utf8).base64EncodedString()
             guard request.headers["authorization"] == expected else {
-                return respond(connection, 401, "401 Unauthorized", type: "text/plain",
-                               extraHeaders: "WWW-Authenticate: Basic realm=\"searxng\"\r\n")
+                return .init(status: 401, body: "401 Unauthorized", type: "text/plain",
+                             headers: "WWW-Authenticate: Basic realm=\"searxng\"\r\n")
             }
         }
         let query = request.form["q"] ?? ""
         switch mode {
-        case .results: respond(connection, json: Self.page(query, answer: true))
-        case .cardOnly: respond(connection, json: Self.page(query, answer: false))
+        case .results: return .json(Self.page(query, answer: true))
+        case .cardOnly: return .json(Self.page(query, answer: false))
         case .empty:
-            respond(connection, json: ["query": .string(query), "number_of_results": 0, "results": [], "answers": [],
-                                       "corrections": [], "infoboxes": [], "suggestions": [], "unresponsive_engines": []])
-        case .jsonOff: respond(connection, 403, "<html><body><h1>Forbidden</h1></body></html>", type: "text/html")
-        case .limiter: respond(connection, 429, "Too Many Requests", type: "text/plain")
+            return .json(["query": .string(query), "number_of_results": 0, "results": [], "answers": [],
+                          "corrections": [], "infoboxes": [], "suggestions": [], "unresponsive_engines": []])
+        case .jsonOff: return .init(status: 403, body: "<html><body><h1>Forbidden</h1></body></html>", type: "text/html")
+        case .limiter: return .init(status: 429, body: "Too Many Requests", type: "text/plain")
         case .slow:
-            queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.respond(connection, json: Self.page(query, answer: true))
-            }
-        case .otherJSON: respond(connection, json: ["status": "ok", "version": "2026.10.16"])
+            var response = LocalHTTPServer.Response.json(Self.page(query, answer: true))
+            response.delay = 2
+            return response
+        case .otherJSON: return .json(["status": "ok", "version": "2026.10.16"])
         case .webPage:
-            respond(connection, 200, "<!DOCTYPE html><html><body>Vérification que vous n'êtes pas un robot…</body></html>",
-                    type: "text/html")
-        case .failing: respond(connection, 502, "Bad Gateway", type: "text/plain")
+            return .init(status: 200, body: "<!DOCTYPE html><html><body>Vérification que vous n'êtes pas un robot…</body></html>",
+                         type: "text/html")
+        case .failing: return .init(status: 502, body: "Bad Gateway", type: "text/plain")
         }
     }
 

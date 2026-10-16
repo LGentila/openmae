@@ -36,21 +36,23 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
   By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
   What you hand to Claude Code leaves your Mac — that is the point of handing it over.
-- **Searching the internet (optional).** Switch on Settings › Conversation › Search the internet and give the
-  address of your own [SearXNG](https://docs.searxng.org/), with its JSON format on (the password of a protection
-  in front of it goes in the keychain; "Test" checks it all). Ask something Maé cannot know — “qui a gagné le
-  match du PSG hier soir ?”, “à quelle heure ferme la piscine le dimanche ?” — and she searches, reads the first
-  results and answers in a sentence or two, naming the site; whatever the pages say, nothing is carried out
-  while she sums them up. Only the few keywords she searches for leave the Mac, to your SearXNG and from there to
-  the search engines. Public SearXNG instances are not used: they turn programs away, and OpenMaé never passes
-  for a browser.
+- **Searching the internet (optional).** Switch on Settings › Conversation › Search the internet and choose where
+  the searches go: **Brave Search**, with your own API key (create one on [Brave's site](https://brave.com/search/api/)
+  and paste it), or **your own [SearXNG](https://docs.searxng.org/)**, with its JSON format on (and the password of
+  a protection in front of it, if any). Keys and passwords go in the keychain; "Test" checks it all. Ask something
+  Maé cannot know — “qui a gagné le match du PSG hier soir ?”, “à quelle heure ferme la piscine le dimanche ?” —
+  and she searches, reads the first results and answers in a sentence or two, naming the site; whatever the pages
+  say, nothing is carried out while she sums them up. Only the few keywords she searches for leave the Mac: to
+  Brave Search, or to your SearXNG and from there to the search engines. The results are never stored (no cache):
+  they only live in the conversation. Public SearXNG instances are not used: they turn programs away, and OpenMaé
+  never passes for a browser.
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
   never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
   the two being end-to-end encrypted. (Claude Code, when you hand it a task, goes online on its own, with your
-  account; the web search, when you turn it on, sends its keywords to your SearXNG.)
+  account; the web search, when you turn it on, sends its keywords to Brave Search or to your SearXNG.)
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,

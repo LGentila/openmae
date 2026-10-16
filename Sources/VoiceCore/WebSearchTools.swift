@@ -121,7 +121,8 @@ public enum WebSearchPhrases {
 /// sums up what was found, naming the site. Nothing it writes while summing up is carried out (VoicePipeline): a page
 /// found on the internet may hold instructions of its own.
 ///
-/// Kept for the app's whole life; it offers its tool only while a provider is set up (switched on, with an address).
+/// Kept for the app's whole life; it offers its tool only while a provider is set up (switched on, with its key or its
+/// address).
 public actor WebSearchTools: ToolProvider {
     public nonisolated let identifier = "web"
     private var provider: (any WebSearchProvider)?

@@ -132,6 +132,9 @@ final class AssistantModel {
     @ObservationIgnored private let connection: any AssistantConnection
     /// Where the pieces of the current answer go in the transcript.
     @ObservationIgnored private var answerIndex: Int?
+    /// The web search's settings when its "Test" button was clicked: a result that comes back after they changed
+    /// (another source chosen meanwhile) is not shown.
+    @ObservationIgnored private var testedWebSearch: WebSearchSettings?
 
     init(connection: any AssistantConnection) {
         self.connection = connection
@@ -193,16 +196,24 @@ final class AssistantModel {
     }
 
     /// The app is in front again: a shortcut may have been added, an access granted in System Settings; or the web
-    /// search's password was just saved.
+    /// search's key or password was just saved.
     func refreshActions() {
         guard isReady, settings.actionsEnabled || settings.webSearch.enabled else { return }
         connection.send(.refreshActions)
+    }
+
+    /// The web search's key or password was just saved or removed. It is in the keychain, not in the settings: the
+    /// engine reads it again, and the last test no longer tells anything.
+    func webSearchSecretChanged() {
+        webSearchTest = nil
+        refreshActions()
     }
 
     /// The web search's "Test" button: one search with its settings, as they are now.
     func testWebSearch() {
         webSearchTest = nil
         isTestingWebSearch = true
+        testedWebSearch = settings.webSearch
         connection.send(.testWebSearch)
     }
 
@@ -297,7 +308,7 @@ final class AssistantModel {
         case .tasks(let tasks):
             self.tasks = tasks
         case .webSearchTested(let test):
-            webSearchTest = test
+            if testedWebSearch.map({ $0 == settings.webSearch }) ?? true { webSearchTest = test }
             isTestingWebSearch = false
         case .warning(let message):
             lastWarning = message

@@ -30,7 +30,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var shortcutsToConfirm: [String] = []
     /// Handing long tasks to Claude Code (with the actions on).
     public var claudeCode = AgentSettings()
-    /// Searching the internet through the user's SearXNG (with the actions on or off).
+    /// Searching the internet, through Brave Search or the user's SearXNG (with the actions on or off).
     public var webSearch = WebSearchSettings()
     public init() {}
 
@@ -51,36 +51,58 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     }
 }
 
-/// Searching the internet. Only the keywords the model writes leave the Mac, to the user's SearXNG and from there to
-/// the search engines; the password of the protection in front of it is kept in the keychain, never here.
+/// Where the searches go, in the order the settings offer them: Brave Search first.
+public enum WebSearchSource: String, Sendable, Codable, CaseIterable {
+    /// Brave Search's API, with the user's own key (`BraveSearchProvider`).
+    case brave
+    /// The user's own SearXNG (`SearXNGProvider`).
+    case searxng
+}
+
+/// Searching the internet. Only the keywords the model writes leave the Mac, to Brave Search, or to the user's SearXNG
+/// and from there to the search engines. Brave's key and the password of the protection in front of the SearXNG are
+/// kept in the keychain, never here.
 public struct WebSearchSettings: Sendable, Codable, Equatable {
     /// Off by default: what is searched leaves the Mac.
     public var enabled = false
+    public var source = WebSearchSource.brave
+    /// A Brave Search key is in the keychain (the key itself is never here).
+    public var braveKeySaved = false
     /// The user's SearXNG, as typed: "https://search.example.org".
     public var address = ""
     /// The user name of the password protection in front of it, if any.
     public var username = ""
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case enabled, address, username }
+    private enum CodingKeys: String, CodingKey { case enabled, source, braveKeySaved, address, username }
 
+    /// Settings of a version that only knew SearXNG keep it when it has an address.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        braveKeySaved = try c.decodeIfPresent(Bool.self, forKey: .braveKeySaved) ?? false
         address = try c.decodeIfPresent(String.self, forKey: .address) ?? ""
         username = try c.decodeIfPresent(String.self, forKey: .username) ?? ""
+        source = (try? c.decodeIfPresent(WebSearchSource.self, forKey: .source)) ?? (address.isEmpty ? .brave : .searxng)
     }
 
-    /// The search can be offered to the model: switched on, with an address that can be one.
-    public var isReady: Bool { enabled && SearXNGProvider.address(address) != nil }
+    /// The search can be offered to the model: switched on, with its source set up (a key saved for Brave Search, an
+    /// address that can be one for SearXNG).
+    public var isReady: Bool {
+        guard enabled else { return false }
+        switch source {
+        case .brave: return braveKeySaved
+        case .searxng: return SearXNGProvider.address(address) != nil
+        }
+    }
 }
 
 /// What the settings' "Test" button found: how many results, how fast, or why it failed.
 public enum WebSearchTest: Sendable, Codable, Equatable {
     case works(results: Int, seconds: Double)
     case failed(WebSearchError)
-    /// The address cannot be one.
-    case noAddress
+    /// The source is not set up: no key saved for Brave Search, no address that can be one for SearXNG.
+    case notSetUp
 }
 
 /// The settings of an agent Maé hands tasks to.
@@ -138,8 +160,8 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case refreshActions
     /// Stop a task handed to an agent (the Stop button of the task list).
     case stopTask(UUID)
-    /// Search once with the web search's settings and the password in the keychain (the "Test" button), switched on
-    /// or not; answered by `.webSearchTested`.
+    /// Search once with the web search's settings and the key or password in the keychain (the "Test" button),
+    /// switched on or not; answered by `.webSearchTested`.
     case testWebSearch
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)

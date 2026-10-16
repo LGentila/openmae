@@ -74,7 +74,7 @@ struct SearXNGTests {
         #expect(first.url.absoluteString == "https://www.lequipe.fr/Football/match-direct/ligue-1/psg-lens")
         #expect(first.published == utc("2026-10-14T21:00:00Z"))
         let long = found.results[1]
-        #expect(long.snippet.count <= SearXNGProvider.snippetLimit)
+        #expect(long.snippet.count <= WebResult.snippetLimit)
         #expect(long.snippet.hasSuffix("minute par minute, Un…"))  // between two words
         #expect(long.published == utc("2026-10-15T00:00:00Z"))
         #expect(found.results[2].published == nil)
@@ -291,10 +291,38 @@ struct WebSearchToolTests {
         let partial = Data(#"{"webSearch":{"enabled":true}}"#.utf8)
         let search = try JSONDecoder().decode(AssistantSettings.self, from: partial).webSearch
         #expect(search.enabled && search.address.isEmpty && !search.isReady)
-        var ready = WebSearchSettings()
-        ready.enabled = true
-        ready.address = "search.example.org"
-        #expect(ready.isReady)
+        #expect(search.source == .brave)
+        // A version that only knew SearXNG: its address keeps it.
+        let searxng = Data(#"{"webSearch":{"enabled":true,"address":"https://search.example.org","username":"mae"}}"#.utf8)
+        let kept = try JSONDecoder().decode(AssistantSettings.self, from: searxng).webSearch
+        #expect(kept.source == .searxng && kept.isReady && kept.username == "mae")
+        // A source of a later version: the one that suits.
+        let later = Data(#"{"webSearch":{"enabled":true,"source":"staan","braveKeySaved":true}}"#.utf8)
+        #expect(try JSONDecoder().decode(AssistantSettings.self, from: later).webSearch.source == .brave)
+    }
+
+    /// Brave Search is offered first; each source is ready once it is set up, and only when the search is on.
+    @Test func eachSourceIsReadyOnceSetUp() throws {
+        #expect(WebSearchSource.allCases == [.brave, .searxng])
+        var search = WebSearchSettings()
+        #expect(search.source == .brave)
+        search.enabled = true
+        #expect(!search.isReady)
+        search.address = "search.example.org"  // the other source's
+        #expect(!search.isReady)
+        search.braveKeySaved = true
+        #expect(search.isReady)
+        search.source = .searxng
+        #expect(search.isReady)
+        search.address = "pas une adresse"
+        #expect(!search.isReady)
+        search.address = "search.example.org"
+        search.enabled = false
+        #expect(!search.isReady)
+        // Saved and read back as it was.
+        search.enabled = true
+        let saved = try JSONDecoder().decode(WebSearchSettings.self, from: JSONEncoder().encode(search))
+        #expect(saved == search)
     }
 }
 
