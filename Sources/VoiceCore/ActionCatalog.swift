@@ -9,22 +9,40 @@ import Foundation
 public enum ActionCatalog {
     // MARK: - The system prompt's part
 
-    /// Appended to the system prompt when actions are on. In short: use a tool only for a clear request to
-    /// create, read or change something; dates are local ISO, computed from the date line at the end of each
-    /// user message (added by the app, never to be copied into answers); ask when the hour is ambiguous (1 to 7 o'clock) or something essential is missing; write
-    /// nothing besides the call (the app confirms); never pretend an action was done without a call.
-    public static let promptAddendum = """
-        Tu peux agir grâce à des outils : rappels, calendrier, minuteurs et raccourcis. \
-        Appelle un outil seulement quand l'utilisateur demande clairement de créer, de lire ou de modifier \
-        quelque chose ; une question générale, un souvenir ou une remarque n'en demandent pas. \
-        Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre parenthèses, \
-        ajoutées par l'app : sers-t'en pour calculer les dates des outils, au format AAAA-MM-JJTHH:MM en heure \
-        locale, mais ne les recopie jamais dans tes réponses. \
-        Si l'heure est ambiguë, par exemple « à 3 h » sans préciser le matin ou l'après-midi, \
-        ou s'il manque une information indispensable, pose d'abord une question courte. \
-        Quand tu appelles un outil, n'écris rien d'autre : c'est l'app qui confirme à voix haute. \
-        Ne dis jamais qu'une action est faite sans avoir appelé l'outil.
-        """
+    /// Appended to the system prompt when actions are on. In short: use a tool only when the user clearly asks
+    /// for something to be done now (create, read or change), never for a question (even about what the
+    /// assistant can do), a memory, a taste or a remark; dates are local ISO, computed from the date line at the
+    /// end of each user message (added by the app, never to be copied into answers); ask when the hour is
+    /// ambiguous (1 to 7 o'clock) or something essential is missing; for an action, say nothing before the call,
+    /// not even the short opening sentence the main prompt asks for (the app confirms aloud); never pretend an
+    /// action was done without a call. Then, when the model can write one (`LanguageModel.toolCallText`), a whole
+    /// answer that is a call, for `example`.
+    ///
+    /// The exception to the opening sentence and the example are for the smaller models: without them they
+    /// announce the action ("Je crée ton rendez-vous…") and stop there, without calling the tool.
+    public static func promptAddendum(exampleCall: String?) -> String {
+        let rules = """
+            Tu peux agir grâce à des outils : rappels, calendrier, minuteurs et raccourcis. \
+            Appelle un outil seulement quand l'utilisateur te demande clairement de faire quelque chose \
+            maintenant : créer, lire ou modifier ; une question (même sur ce que tu sais faire), un souvenir, \
+            un goût ou une remarque n'en demandent pas. \
+            Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre parenthèses, \
+            ajoutées par l'app : sers-t'en pour calculer les dates des outils, au format AAAA-MM-JJTHH:MM en heure \
+            locale, mais ne les recopie jamais dans tes réponses. \
+            Si l'heure est ambiguë, par exemple « à 3 h » sans préciser le matin ou l'après-midi, \
+            ou s'il manque une information indispensable, pose d'abord une question courte. \
+            Pour une action, ne dis rien avant l'appel, pas même la première phrase courte : ta réponse commence \
+            directement par l'appel de l'outil, et c'est l'app qui confirme à voix haute. \
+            Ne dis jamais qu'une action est faite sans avoir appelé l'outil.
+            """
+        guard let exampleCall else { return rules }
+        return rules + " Exemple : à « \(example.request) », ta réponse entière est \(exampleCall)"
+    }
+
+    /// The request and the call the prompt shows as an example: a timer, which is always there and has no date
+    /// the model could copy.
+    public static let example = (request: "Mets un minuteur de 5 minutes pour le thé",
+                                 call: ToolCall(name: "minuteur", arguments: ["duree_secondes": 300, "libelle": "le thé"]))
 
     /// The line that ends every user message when actions are on, e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.

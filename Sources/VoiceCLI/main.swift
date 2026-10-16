@@ -45,6 +45,9 @@ struct Options {
     var now: String?
     var corpus: String?
     var showPrompt = false
+    var watchCalls = false
+    var addendum: String?
+    var examples: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -70,6 +73,9 @@ struct Options {
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
+            case "--watch-calls": o.watchCalls = true
+            case "--addendum": o.addendum = it.next()
+            case "--examples": o.examples = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }

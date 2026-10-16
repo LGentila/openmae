@@ -89,6 +89,9 @@ public protocol LanguageModel: Sendable {
     /// The tools the model may call. They are part of the system prompt: change them only between
     /// conversations, then `prefill` again.
     func useTools(_ tools: [ToolSpec]) async
+    /// A tool call written the way this model writes it, to show it an example in its instructions; nil when
+    /// it has no such written form.
+    func toolCallText(_ call: ToolCall) async -> String?
     /// Processes the conversation without answering (e.g. the system prompt at launch).
     func prefill(_ conversation: [ChatMessage]) async throws
     /// Size of the conversation in model tokens (used to keep it inside the context window).
@@ -103,6 +106,7 @@ public protocol LanguageModel: Sendable {
 
 extension LanguageModel {
     public func useTools(_ tools: [ToolSpec]) async {}
+    public func toolCallText(_ call: ToolCall) async -> String? { nil }
     public func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws { try await prefill(conversation) }
     public func allowBackgroundWork(_ allowed: Bool) async {}
 }

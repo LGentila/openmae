@@ -52,6 +52,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var cacheRebuilds = 0
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, and time to compute them.
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0)
+    /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
+    private var watchingToolCalls = false
+    /// With `watchToolCalls(true)`, for the last request: the chance the model gave to opening a tool call at the
+    /// first token of its answer, and at its most tempted token before any call (`bestAt`: index in the answer).
+    public private(set) var lastToolCallChances: (first: Double, best: Double, bestAt: Int)?
+    /// With `watchToolCalls(true)`: the last answer exactly as the model wrote it, special tokens included.
+    public private(set) var lastRawAnswer = ""
 
     /// Template variables: no hidden "thinking" before answering (it would delay the voice).
     private let templateContext: [String: any Sendable] = ["enable_thinking": false]
@@ -88,7 +95,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                                    encoding: .utf8)
         let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
         let model = try MLXChatModel(context: context, tokenizer: tokenizer,
-                                     chatTemplate: template.flatMap(GemmaTemplateFix.patched),
+                                     chatTemplate: template.map { GemmaTemplateFix.patched($0) ?? $0 },
                                      parameters: parameters)
         try await model.warmUp()
         return model
@@ -116,6 +123,30 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public func useTools(_ tools: [VoiceCore.ToolSpec]) async {
         self.tools = tools
         toolSchemas = tools.isEmpty ? nil : tools.map(Self.schema)
+    }
+
+    /// `<|tool_call>call:name{key:<|"|>text<|"|>,count:3}<tool_call|>`, keys in alphabetical order like the model
+    /// writes them. `async` like the protocol's default (see `useTools`).
+    public func toolCallText(_ call: VoiceCore.ToolCall) async -> String? {
+        guard toolCallStart != nil, toolCallEnd != nil else { return nil }
+        return "<|tool_call>call:\(call.name)\(Self.callText(.object(call.arguments)))<tool_call|>"
+    }
+
+    private static func callText(_ value: VoiceCore.JSONValue) -> String {
+        switch value {
+        case .null: "null"
+        case .bool(let b): b ? "true" : "false"
+        case .int(let i): String(i)
+        case .double(let d): String(d)
+        case .string(let s): "<|\"|>" + s + "<|\"|>"
+        case .array(let a): "[" + a.map(callText).joined(separator: ",") + "]"
+        case .object(let o):
+            "{" + o.sorted { $0.key < $1.key }.map { $0.key + ":" + callText($0.value) }.joined(separator: ",") + "}"
+        }
+    }
+
+    public func watchToolCalls(_ on: Bool) {
+        watchingToolCalls = on
     }
 
     public func prefill(_ conversation: [ChatMessage]) throws {
@@ -213,7 +244,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
         let clock = ContinuousClock()
         let t0 = clock.now
-        var iterator = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+        let chances = ToolCallWatch.Chances()
+        var components = GenerationComponents()
+        if watchingToolCalls, let toolCallStart, !tools.isEmpty {
+            components = components.appendingLogitProcessor { ToolCallWatch(token: toolCallStart, chances: chances) }
+        }
+        var iterator = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
+                                         components: components)
         let d = clock.now - t0
         lastPrefill = (start, prompt.count - start,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
@@ -252,6 +289,16 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             detokenizer.append(token: token)
             if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
             hold.waitWhileHeld(atMost: .milliseconds(1500))
+        }
+        if watchingToolCalls {
+            // values[i] is the chance at the i-th token of the answer (the iterator reads one token ahead: the last
+            // value is past the end); after a call opens, they mean nothing.
+            let end = min(produced.firstIndex { $0 == toolCallStart }.map { $0 + 1 } ?? produced.count,
+                          chances.values.count)
+            let before = chances.values.prefix(end)
+            lastToolCallChances = before.indices.max { before[$0] < before[$1] }
+                .map { (before.first ?? 0, before[$0], $0) }
+            lastRawAnswer = context.tokenizer.decode(tokenIds: produced, skipSpecialTokens: false)
         }
         if let tokens = callTokens {  // cut off before its end
             onOutput(.unreadableToolCall(context.tokenizer.decode(tokenIds: tokens)))
@@ -412,6 +459,27 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 }
 
+/// Reads, at every token, the chance the model gives to opening a tool call (benchmark diagnostics: a call the
+/// model considered but did not pick shows up here).
+private struct ToolCallWatch: LogitProcessor {
+    final class Chances: @unchecked Sendable {
+        var values: [Double] = []
+    }
+
+    let token: Int
+    let chances: Chances
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray {
+        let chance = softmax(logits.asType(.float32), axis: -1)[0, token].item(Float.self)
+        chances.values.append(Double(chance))
+        return logits
+    }
+
+    mutating func didSample(token: MLXArray) {}
+}
+
 /// Lets the pipeline pause token generation (see `YieldsToVoice`). The generation loop runs without
 /// suspension points, so the pause is a short blocking wait on a condition, bounded in time.
 final class GenerationHold: @unchecked Sendable {
@@ -443,18 +511,23 @@ final class GenerationHold: @unchecked Sendable {
 /// The history therefore stops matching the cache at every turn, and since Gemma's sliding-window
 /// layers cannot be rewound, the whole conversation was recomputed each time (+0.3–0.5 s).
 /// The fix renders past answers exactly as they were generated. Model files are not modified.
+///
+/// Only the larger models' template opens answers that way: the E2B and E4B ones answer right after
+/// `<|turn>model`, so theirs already matches and is left alone (patching it would add to past answers a block
+/// the model never wrote, and break the cache the same way).
 enum GemmaTemplateFix {
     private static let anchor = "        {{- '<|turn>' + role + '\\n' }}\n    {%- endif -%}\n"
+    private static let emptyThought = "{{- '<|channel>thought\\n<channel|>' -}}"
     private static let insertion = """
             {%- if role == 'model' and not continue_same_model_turn and not (enable_thinking | default(false)) -%}
-                {{- '<|channel>thought\\n<channel|>' -}}
+                \(emptyThought)
             {%- endif -%}
 
         """
 
-    /// The patched template, or nil when the template is not Gemma 4's (then the model's own is used).
+    /// The patched template, or nil when it needs no fix (not Gemma 4's, or answers open without a thought block).
     static func patched(_ template: String) -> String? {
-        guard template.contains(anchor), !template.contains(insertion) else { return nil }
+        guard template.contains(anchor), template.contains(emptyThought), !template.contains(insertion) else { return nil }
         return template.replacingOccurrences(of: anchor, with: anchor + insertion)
     }
 }

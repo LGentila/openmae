@@ -51,6 +51,7 @@ actor ScriptedModel: LanguageModel {
         return scripts.count > 1 ? scripts.removeFirst() : scripts[0]
     }
     func useTools(_ tools: [ToolSpec]) { self.tools = tools }
+    func toolCallText(_ call: ToolCall) async -> String? { "[\(call.name)]" }
     func prefill(_ conversation: [ChatMessage]) async throws {}
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
     private(set) var shortenings = 0

@@ -190,6 +190,15 @@ struct ActionCallTests {
     @Test func dateLineNamesTheDay() {
         #expect(ActionCatalog.dateLine(now, timeZone: paris) == "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)")
     }
+
+    @Test func promptShowsAnExampleCallWhenTheModelCanWriteOne() {
+        let rules = ActionCatalog.promptAddendum(exampleCall: nil)
+        #expect(!rules.contains("Exemple"))
+        #expect(rules.contains("pas même la première phrase courte"))  // the main prompt's opening sentence
+        let withExample = ActionCatalog.promptAddendum(exampleCall: "<call>")
+        #expect(withExample.hasPrefix(rules))
+        #expect(withExample.hasSuffix("« Mets un minuteur de 5 minutes pour le thé », ta réponse entière est <call>"))
+    }
 }
 
 // MARK: - Runner and pipeline
@@ -328,6 +337,8 @@ struct PipelineActionTests {
         #expect(await tools.performed.count == 1)
         let request = try #require(await model.requests.last)
         #expect(request.last?.content.contains("\n(Nous sommes le ") == true)  // the date line ends the message
+        // The actions' part of the system prompt, with its example call written the model's way.
+        #expect(request.first?.content.hasSuffix(ActionCatalog.promptAddendum(exampleCall: "[minuteur]")) == true)
     }
 
     @Test func oneActionPerTurnAndHistoryKeepsTheCall() async throws {

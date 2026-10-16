@@ -172,16 +172,23 @@ public actor VoicePipeline {
         self.config = config
         self.turnDetector = TurnDetector(config: config.turn)
         var conversation = Conversation(systemPrompt: systemPrompt)
-        conversation.systemAddenda = Self.addenda(extensions, actions: tools != nil)
+        conversation.systemAddenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         self.conversation = conversation
     }
 
-    private static func addenda(_ extensions: [any ConversationExtension], actions: Bool) -> [String] {
-        extensions.compactMap { $0.systemPromptAddendum(language: .french) } + (actions ? [ActionCatalog.promptAddendum] : [])
+    /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
+    /// model itself, hence `async`).
+    private func updateAddenda() async {
+        var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
+        if tools != nil {
+            addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
+        }
+        conversation.systemAddenda = addenda
     }
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
     public func start() async throws {
+        await updateAddenda()
         if let tools { await model.useTools(await tools.tools()) }
         try await model.prefill(conversation.messages)
         emit.yield(.state(.listening))
@@ -192,7 +199,7 @@ public actor VoicePipeline {
     public func setTools(_ runner: ToolRunner?) async throws {
         await cancelTurn(stopAudio: true)
         tools = runner
-        conversation.systemAddenda = Self.addenda(extensions, actions: runner != nil)
+        await updateAddenda()
         conversation.clear()
         await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])

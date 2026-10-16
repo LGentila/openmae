@@ -91,6 +91,10 @@ struct SettingsPanel: View {
         .frame(minHeight: 48)
         HelpText("Maé adds events and reminders, reads your calendar, sets timers and runs the shortcuts of the “OpenMaé” folder in the Shortcuts app. She tells you what she saved: say “cancel” to take it back.")
             .padding(.bottom, 6)
+        if let warning = actionsWarning {
+            HelpText(warning)
+                .padding(.bottom, 6)
+        }
         if model.settings.actionsEnabled, let actions = model.actions {
             Hairline()
             calendarAccess(actions)
@@ -106,6 +110,17 @@ struct SettingsPanel: View {
         .disabled(!model.isReady)
         .padding(.top, 9)
         .padding(.bottom, 1)
+    }
+
+    /// The smaller models are not reliable with actions (measured with `voice-cli actions-bench`): the minimum
+    /// tier's misses nearly all of them, often saying it did what it did not do; the standard tier's gets some
+    /// wrong, which the confirmation lets the user hear.
+    private var actionsWarning: LocalizedStringKey? {
+        switch model.tier {
+        case .minimum: "On this Mac, Maé misses most actions: she may say she saved something without doing it."
+        case .standard: "On this Mac, Maé sometimes gets an action wrong: listen to what she confirms."
+        default: nil
+        }
     }
 
     @ViewBuilder private func calendarAccess(_ actions: ActionsStatus) -> some View {
