@@ -24,24 +24,33 @@ actor CountingTranscriber: Transcriber {
 
 actor ScriptedModel: LanguageModel {
     private(set) var requests: [[ChatMessage]] = []
-    let answer: [String]
-    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"]) { self.answer = answer }
+    private(set) var tools: [ToolSpec] = []
+    /// What to answer, request after request (the last one is repeated).
+    private var scripts: [[ModelOutput]]
+    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"]) {
+        scripts = [answer.map { .text($0) }]
+    }
+    init(scripts: [[ModelOutput]]) { self.scripts = scripts }
 
-    nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
+    nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                await self.log(conversation)
-                for piece in answer {
+                let script = await self.log(conversation)
+                for output in script {
                     try? await Task.sleep(for: .milliseconds(5))
                     if Task.isCancelled { break }
-                    continuation.yield(piece)
+                    continuation.yield(output)
                 }
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
     }
-    private func log(_ c: [ChatMessage]) { requests.append(c) }
+    private func log(_ c: [ChatMessage]) -> [ModelOutput] {
+        requests.append(c)
+        return scripts.count > 1 ? scripts.removeFirst() : scripts[0]
+    }
+    func useTools(_ tools: [ToolSpec]) { self.tools = tools }
     func prefill(_ conversation: [ChatMessage]) async throws {}
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
     private(set) var shortenings = 0
@@ -109,10 +118,10 @@ struct PipelineTests {
     }
 
     func make(_ model: ScriptedModel, _ stt: CountingTranscriber, _ speaker: FakeSpeaker,
-              config: PipelineConfig = .init()) -> VoicePipeline
+              tools: ToolRunner? = nil, config: PipelineConfig = .init()) -> VoicePipeline
     {
         VoicePipeline(detector: LoudnessDetector(), transcriber: stt, model: model, synthesizer: FakeSynthesizer(),
-                      output: speaker, config: config)
+                      output: speaker, tools: tools, config: config)
     }
 
     @Test func longHistoryIsShortened() async throws {

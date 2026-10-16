@@ -7,6 +7,9 @@
 //                                                       loops a conversation; memory after every turn
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
 //                                                       silence the voice produces before speaking
+//   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json]
+//                                                       does the model pick the right action? (text only,
+//                                                       nothing carried out; see ActionsBench.swift)
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 // Options:
 //   --tier <name>            minimum, standard, comfort or max (default: this Mac's tier)
@@ -39,6 +42,9 @@ struct Options {
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
     var repeats = 3
+    var now: String?
+    var corpus: String?
+    var showPrompt = false
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -61,6 +67,9 @@ struct Options {
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
             case "--repeats": o.repeats = Int(it.next() ?? "") ?? o.repeats
+            case "--now": o.now = it.next()
+            case "--corpus": o.corpus = it.next()
+            case "--show-prompt": o.showPrompt = true
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -341,13 +350,14 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog"].contains(options.command)
+   ["voice-onset", "download", "verify", "catalog", "actions-bench"].contains(options.command)
 {
     do {
         switch options.command {
         case "download": try await runDownload(options)
         case "verify": try runVerify(options)
         case "catalog": try await runCatalog(options)
+        case "actions-bench": try await runActionsBench(options)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -363,6 +373,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli download [--tier minimum|standard|comfort|max]
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
+               voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
         """)
     exit(2)
 }

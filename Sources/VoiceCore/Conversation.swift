@@ -40,14 +40,23 @@ public struct Conversation: Sendable {
         ChatMessage(.system, ([systemPrompt] + systemAddenda).joined(separator: " "))
     }
 
-    /// The user's message as stored in history (with the language hint when needed).
-    public static func userMessage(_ text: String, language: SpeechLanguage) -> ChatMessage {
-        ChatMessage(.user, language == .english ? text + englishHint : text)
+    /// The user's message as stored in history (with the language hint when needed). With actions on, it ends
+    /// with the date and time (`ActionCatalog.dateLine`): in the message rather than in the system prompt, so the
+    /// prompt stays constant, and kept in history so the model's memory of the conversation stays valid.
+    public static func userMessage(_ text: String, language: SpeechLanguage, dateLine: String? = nil) -> ChatMessage {
+        var content = text
+        if let dateLine { content += "\n" + dateLine }
+        if language == .english { content += englishHint }
+        return ChatMessage(.user, content)
     }
 
     /// Messages to send for a new user turn (history is not modified: the turn may be speculative).
     public func messages(addingUser text: String, language: SpeechLanguage) -> [ChatMessage] {
-        [systemMessage] + exchanges + [Self.userMessage(text, language: language)]
+        messages(adding: Self.userMessage(text, language: language))
+    }
+
+    public func messages(adding userMessage: ChatMessage) -> [ChatMessage] {
+        [systemMessage] + exchanges + [userMessage]
     }
 
     public var messages: [ChatMessage] { [systemMessage] + exchanges }
@@ -56,22 +65,34 @@ public struct Conversation: Sendable {
     public mutating func record(user text: String, language: SpeechLanguage, assistant answer: String,
                                 interrupted: Bool)
     {
-        exchanges.append(Self.userMessage(text, language: language))
+        record(user: Self.userMessage(text, language: language), steps: [], assistant: answer, interrupted: interrupted)
+    }
+
+    /// Records an exchange with the tool calls made on the way (`steps`: call, result, possibly a second try).
+    public mutating func record(user message: ChatMessage, steps: [ChatMessage], assistant answer: String,
+                                interrupted: Bool)
+    {
+        exchanges.append(message)
+        exchanges += steps
         // Tell the model it was cut off, so it does not assume the user heard everything.
         exchanges.append(ChatMessage(.assistant, interrupted ? answer + " […]" : answer))
     }
 
-    /// Drops the oldest user/assistant pair. Returns false when nothing is left to drop.
+    /// Drops the oldest exchange: a user message and everything up to the next one. Returns false when nothing
+    /// is left to drop.
     @discardableResult
     public mutating func dropOldestExchange() -> Bool {
         guard exchanges.count >= 2 else { return false }
-        exchanges.removeFirst(2)
+        let next = exchanges.dropFirst().firstIndex { $0.role == .user } ?? exchanges.endIndex
+        exchanges.removeSubrange(..<next)
         return true
     }
 
-    /// Drops the `count` oldest user/assistant pairs.
+    /// Drops the `count` oldest exchanges.
     public mutating func dropOldestExchanges(_ count: Int) {
-        exchanges.removeFirst(min(count * 2, exchanges.count))
+        for _ in 0..<count {
+            guard dropOldestExchange() else { return }
+        }
     }
 
     public mutating func clear() { exchanges.removeAll() }

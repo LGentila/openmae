@@ -10,20 +10,14 @@ struct SettingsPanel: View {
     /// Tier picked in the menu, waiting for confirmation: changing tier restarts the assistant.
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             SectionTitle("Sound", isFirst: true)
             PanelBlock { sound }
             SectionTitle("Conversation")
-            PanelBlock(padding: EdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16)) {
-                Button("New conversation") {
-                    model.newConversation()
-                    close()
-                }
-                .buttonStyle(PillButtonStyle())
-                .disabled(!model.isReady)
-            }
+            PanelBlock { conversation }
             SectionTitle("Advanced")
             PanelBlock(padding: EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16)) { advanced }
         }
@@ -84,6 +78,103 @@ struct SettingsPanel: View {
             .accessibilityElement(children: .combine)
             HelpText("Press once to talk, and again to finish. When the window is closed, Maé only listens after this shortcut.")
         }
+    }
+
+    // MARK: - Conversation
+
+    @ViewBuilder private var conversation: some View {
+        Toggle(isOn: $model.settings.actionsEnabled) {
+            Text("Actions")
+                .textStyle(.setting)
+        }
+        .toggleStyle(SwitchStyle())
+        .frame(minHeight: 48)
+        HelpText("Maé adds events and reminders, reads your calendar, sets timers and runs the shortcuts of the “OpenMaé” folder in the Shortcuts app. She tells you what she saved: say “cancel” to take it back.")
+            .padding(.bottom, 6)
+        if model.settings.actionsEnabled, let actions = model.actions {
+            Hairline()
+            calendarAccess(actions)
+            Hairline()
+            shortcuts(actions.shortcuts)
+        }
+        Hairline()
+        Button("New conversation") {
+            model.newConversation()
+            close()
+        }
+        .buttonStyle(PillButtonStyle())
+        .disabled(!model.isReady)
+        .padding(.top, 9)
+        .padding(.bottom, 1)
+    }
+
+    @ViewBuilder private func calendarAccess(_ actions: ActionsStatus) -> some View {
+        let accesses = [actions.calendar, actions.reminders]
+        HStack(spacing: 12) {
+            Text("Calendar and reminders")
+                .textStyle(.setting)
+            Spacer(minLength: 0)
+            Group {
+                if accesses.contains(.denied) {
+                    Text("Not allowed")
+                } else if accesses.allSatisfy({ $0 == .granted }) {
+                    Text("Allowed")
+                } else {
+                    Text("Asked when needed")
+                }
+            }
+            .textStyle(.value)
+            .foregroundStyle(accesses.contains(.denied) ? Palette.danger : Palette.inkMuted)
+        }
+        .frame(minHeight: 46)
+        if accesses.contains(.denied) {
+            HelpText("Maé can’t use them. Allow OpenMaé in System Settings, Privacy & Security.")
+            Button("Open System Settings") {
+                let pane = actions.calendar == .denied ? "Privacy_Calendars" : "Privacy_Reminders"
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { openURL(url) }
+            }
+            .buttonStyle(PillButtonStyle(kind: .link))
+            .padding(.vertical, 8)
+        } else if accesses.contains(.notAsked) {
+            HelpText("macOS will ask for access the first time you need it.")
+                .padding(.bottom, 6)
+        }
+    }
+
+    @ViewBuilder private func shortcuts(_ names: [String]) -> some View {
+        HStack(spacing: 12) {
+            Text("Shortcuts")
+                .textStyle(.setting)
+            Spacer(minLength: 0)
+            if !names.isEmpty {
+                Text("Ask first")
+                    .textStyle(.value)
+                    .foregroundStyle(Palette.inkMuted)
+            }
+        }
+        .frame(minHeight: 46)
+        ForEach(names, id: \.self) { name in
+            Toggle(isOn: Binding(
+                get: { model.settings.shortcutsToConfirm.contains(name) },
+                set: { ask in
+                    model.settings.shortcutsToConfirm.removeAll { $0 == name }
+                    if ask { model.settings.shortcutsToConfirm.append(name) }
+                }))
+            {
+                Text(verbatim: name)
+                    .textStyle(.setting)
+            }
+            .toggleStyle(SwitchStyle())
+            .frame(minHeight: 40)
+        }
+        Group {
+            if names.isEmpty {
+                HelpText("Put shortcuts in a folder named “OpenMaé” in the Shortcuts app: Maé will be able to run them.")
+            } else {
+                HelpText("“Ask first”: Maé says which shortcut she is about to run and waits for your “yes”.")
+            }
+        }
+        .padding(.bottom, 6)
     }
 
     // MARK: - Advanced

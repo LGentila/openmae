@@ -30,13 +30,52 @@ public protocol Transcriber: Sendable {
 }
 
 public struct ChatMessage: Sendable, Equatable, Codable {
-    public enum Role: String, Sendable, Codable { case system, user, assistant }
+    public enum Role: String, Sendable, Codable { case system, user, assistant, tool }
     public var role: Role
     public var content: String
+    /// Assistant: the tool calls it wrote.
+    public var toolCalls: [ToolCall] = []
+    /// Tool: the result of the call written in the assistant message just before.
+    public var toolResult: JSONValue?
+
     public init(_ role: Role, _ content: String) {
         self.role = role
         self.content = content
     }
+
+    /// The assistant's tool call, as it goes into the history.
+    public static func call(_ call: ToolCall) -> ChatMessage {
+        var message = ChatMessage(.assistant, "")
+        message.toolCalls = [call]
+        return message
+    }
+
+    /// What the tool returned, right after the call.
+    public static func result(of call: ToolCall, _ result: JSONValue) -> ChatMessage {
+        var message = ChatMessage(.tool, call.name)
+        message.toolResult = result
+        return message
+    }
+
+    private enum CodingKeys: String, CodingKey { case role, content, toolCalls, toolResult }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(Role.self, forKey: .role)
+        content = try c.decode(String.self, forKey: .content)
+        toolCalls = try c.decodeIfPresent([ToolCall].self, forKey: .toolCalls) ?? []
+        toolResult = try c.decodeIfPresent(JSONValue.self, forKey: .toolResult)
+    }
+}
+
+/// What the language model writes: text for the voice, or a tool call.
+public enum ModelOutput: Sendable, Equatable {
+    case text(String)
+    /// A tool call has begun: no text for the voice until it is complete.
+    case toolCallStarted
+    case toolCall(ToolCall)
+    /// A call the model wrote but that could not be read (the raw text, for the model's second try).
+    case unreadableToolCall(String)
 }
 
 /// The conversational model.
@@ -46,7 +85,10 @@ public struct ChatMessage: Sendable, Equatable, Codable {
 /// interrupted, or a speculative turn was abandoned) must leave the model usable for the next call.
 public protocol LanguageModel: Sendable {
     /// Streams the answer to the conversation, piece by piece. Cancel the consuming task to stop.
-    func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<String, Error>
+    func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error>
+    /// The tools the model may call. They are part of the system prompt: change them only between
+    /// conversations, then `prefill` again.
+    func useTools(_ tools: [ToolSpec]) async
     /// Processes the conversation without answering (e.g. the system prompt at launch).
     func prefill(_ conversation: [ChatMessage]) async throws
     /// Size of the conversation in model tokens (used to keep it inside the context window).
@@ -60,6 +102,7 @@ public protocol LanguageModel: Sendable {
 }
 
 extension LanguageModel {
+    public func useTools(_ tools: [ToolSpec]) async {}
     public func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws { try await prefill(conversation) }
     public func allowBackgroundWork(_ allowed: Bool) async {}
 }

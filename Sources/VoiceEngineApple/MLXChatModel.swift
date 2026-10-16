@@ -24,6 +24,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private let chatTemplate: String?
     private let parameters: GenerateParameters
     private let stopTokens: Set<Int>
+    /// Gemma 4 writes a tool call between these two tokens: `<|tool_call>call:name{…}<tool_call|>`.
+    private let toolCallStart: Int?
+    private let toolCallEnd: Int?
+    /// The tools, as the chat template wants them (in the system turn).
+    private var tools: [VoiceCore.ToolSpec] = []
+    private var toolSchemas: [[String: any Sendable]]?
+    /// The arguments of recent calls exactly as the model wrote them, so that the history renders them
+    /// identically and the cache stays valid.
+    private var rawArguments: [VoiceCore.ToolCall: String] = [:]
     private var cache: [KVCache]
     private var cachedTokens: [Int] = []
     /// Copy of the cache taken just before the last request's new tokens were fed in. Copies share
@@ -60,6 +69,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if let id = context.tokenizer.convertTokenToId(token) { stops.insert(id) }
         }
         stopTokens = stops
+        toolCallStart = tokenizer.convertTokenToId("<|tool_call>")
+        toolCallEnd = tokenizer.convertTokenToId("<tool_call|>")
         cache = try context.model.newCache(parameters: parameters)
     }
 
@@ -85,7 +96,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     // MARK: - VoiceCore.LanguageModel
 
-    public nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
+    public nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { continuation in
             let requested = ContinuousClock.now
             let task = Task {
@@ -101,6 +112,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
     }
 
+    /// `async` like the protocol's default: a synchronous version would lose to that default in async callers.
+    public func useTools(_ tools: [VoiceCore.ToolSpec]) async {
+        self.tools = tools
+        toolSchemas = tools.isEmpty ? nil : tools.map(Self.schema)
+    }
+
     public func prefill(_ conversation: [ChatMessage]) throws {
         let tokens = try render(conversation, generationPrompt: false)
         let start = try reuseCache(for: tokens)
@@ -111,6 +128,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
+    }
+
+    /// The conversation as the model reads it, special tokens included (for checking the prompt).
+    public func promptText(_ conversation: [ChatMessage]) throws -> String {
+        tokenizer.decode(tokens: try render(conversation, generationPrompt: false), skipSpecialTokens: false)
     }
 
     public func tokenCount(_ conversation: [ChatMessage]) throws -> Int {
@@ -182,7 +204,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     // MARK: - Generation
 
     private func generate(_ conversation: [ChatMessage], maxTokens: Int? = nil,
-                          onText: @Sendable (String) -> Void) throws
+                          onOutput: @Sendable (ModelOutput) -> Void) throws
     {
         hold.set(false)  // a new answer never starts paused
         let prompt = try render(conversation, generationPrompt: true)
@@ -198,6 +220,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         DebugLog.log("LLM: prefill \(prompt.count - start) tokens (reused \(start)) in \(lastPrefill.ms) ms")
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
         var produced: [Int] = []
+        var callTokens: [Int]?  // inside a tool call
         defer {
             // The iterator feeds each token back into the cache *before* returning it, so the cache
             // holds the prompt plus every token returned. Its offset is the ground truth.
@@ -212,9 +235,53 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                 break
             }
             if let maxTokens, produced.count >= maxTokens { break }
+            if token == toolCallStart, !tools.isEmpty {
+                callTokens = []
+                onOutput(.toolCallStarted)
+                continue
+            }
+            if let tokens = callTokens {
+                if token == toolCallEnd {
+                    callTokens = nil
+                    onOutput(toolCall(from: tokens))
+                } else {
+                    callTokens = tokens + [token]
+                }
+                continue
+            }
             detokenizer.append(token: token)
-            if let text = detokenizer.next(), !text.isEmpty { onText(text) }
+            if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
             hold.waitWhileHeld(atMost: .milliseconds(1500))
+        }
+        if let tokens = callTokens {  // cut off before its end
+            onOutput(.unreadableToolCall(context.tokenizer.decode(tokenIds: tokens)))
+        }
+    }
+
+    /// Reads a call with mlx-swift-lm's Gemma 4 parser (`call:name{key:<|"|>value<|"|>,…}`).
+    private func toolCall(from tokens: [Int]) -> ModelOutput {
+        let body = context.tokenizer.decode(tokenIds: tokens)  // special tokens kept: <|"|> delimits strings
+        guard let parsed = ToolCallFormat.gemma4.createParser()
+            .parse(content: "<|tool_call>" + body + "<tool_call|>", tools: toolSchemas)
+        else { return .unreadableToolCall(body) }
+        let call = VoiceCore.ToolCall(name: parsed.function.name,
+                                      arguments: parsed.function.arguments.mapValues(Self.value))
+        if let open = body.firstIndex(of: "{"), let close = body.lastIndex(of: "}"), open < close {
+            if rawArguments.count > 50 { rawArguments.removeAll() }
+            rawArguments[call] = String(body[body.index(after: open)..<close])
+        }
+        return .toolCall(call)
+    }
+
+    private static func value(_ value: MLXLMCommon.JSONValue) -> VoiceCore.JSONValue {
+        switch value {
+        case .null: .null
+        case .bool(let b): .bool(b)
+        case .int(let i): .int(i)
+        case .double(let d): .double(d)
+        case .string(let s): .string(s)
+        case .array(let a): .array(a.map(Self.value))
+        case .object(let o): .object(o.mapValues(Self.value))
         }
     }
 
@@ -264,11 +331,79 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     private func render(_ conversation: [ChatMessage], generationPrompt: Bool) throws -> [Int] {
-        let messages: [Tokenizers.Message] = conversation.map { ["role": $0.role.rawValue, "content": $0.content] }
-        return try tokenizer.applyChatTemplate(
-            messages: messages, chatTemplate: chatTemplate.map { .literal($0) },
-            addGenerationPrompt: generationPrompt, truncation: false, maxLength: nil, tools: nil,
+        try tokenizer.applyChatTemplate(
+            messages: templateMessages(conversation), chatTemplate: chatTemplate.map { .literal($0) },
+            addGenerationPrompt: generationPrompt, truncation: false, maxLength: nil, tools: toolSchemas,
             additionalContext: templateContext)
+    }
+
+    /// The conversation as Gemma 4's template reads it. A tool's result goes into the assistant message that
+    /// made the call (`tool_responses`, Gemma's own form), which renders it right after the call.
+    private func templateMessages(_ conversation: [ChatMessage]) -> [Tokenizers.Message] {
+        var messages: [Tokenizers.Message] = []
+        for message in conversation {
+            switch message.role {
+            case .tool:
+                guard var last = messages.popLast() else { continue }
+                var responses = last["tool_responses"] as? [[String: any Sendable]] ?? []
+                let result: [String: any Sendable]
+                if case .object(let object)? = message.toolResult {
+                    result = object.filter { $0.value != .null }.mapValues(Self.sendable)
+                } else {
+                    result = ["valeur": message.toolResult.map(Self.sendable) ?? ""]
+                }
+                responses.append(["name": message.content, "response": result])
+                last["tool_responses"] = responses
+                messages.append(last)
+            case .assistant where !message.toolCalls.isEmpty:
+                let calls: [[String: any Sendable]] = message.toolCalls.map { call in
+                    let arguments: any Sendable = rawArguments[call]
+                        ?? (Self.sendable(.object(call.arguments)) as? [String: any Sendable] ?? [:])
+                    return ["function": ["name": call.name, "arguments": arguments] as [String: any Sendable]]
+                }
+                messages.append(["role": "assistant", "content": message.content, "tool_calls": calls])
+            default:
+                messages.append(["role": message.role.rawValue, "content": message.content])
+            }
+        }
+        return messages
+    }
+
+    /// A tool, as the template wants it (an OpenAI-style function declaration).
+    private static func schema(_ tool: VoiceCore.ToolSpec) -> [String: any Sendable] {
+        var properties: [String: any Sendable] = [:]
+        for parameter in tool.parameters {
+            var property: [String: any Sendable] = ["description": parameter.description]
+            switch parameter.kind {
+            case .string: property["type"] = "string"
+            case .integer: property["type"] = "integer"
+            case .boolean: property["type"] = "boolean"
+            case .oneOf(let values):
+                property["type"] = "string"
+                property["enum"] = values
+            }
+            properties[parameter.name] = property
+        }
+        let parameters: [String: any Sendable] = [
+            "type": "object", "properties": properties,
+            "required": tool.parameters.filter(\.required).map(\.name),
+        ]
+        return ["type": "function",
+                "function": ["name": tool.name, "description": tool.description, "parameters": parameters]
+                    as [String: any Sendable]]
+    }
+
+    /// A JSON value for the template (absent values are left out of objects).
+    private static func sendable(_ value: VoiceCore.JSONValue) -> any Sendable {
+        switch value {
+        case .null: ""
+        case .bool(let b): b
+        case .int(let i): i
+        case .double(let d): d
+        case .string(let s): s
+        case .array(let a): a.map(Self.sendable)
+        case .object(let o): o.filter { $0.value != .null }.mapValues(Self.sendable)
+        }
     }
 
     private func warmUp() throws {

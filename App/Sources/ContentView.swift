@@ -62,6 +62,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             // Back from System Settings after allowing the microphone: try again.
             if model.phase == .problem(.microphoneDenied) { model.start() }
+            model.refreshActions()
         }
         .onChange(of: model.phase) { window.panel = nil }
     }

@@ -30,7 +30,17 @@ public actor AssistantHost: AssistantConnection {
     private var activity: NSObjectProtocol?
     private var restartingAudio = false
 
-    public init() {
+    // Actions: reminders and calendar, timers, shortcuts. Kept for the app's whole life (a timer keeps running
+    // across a change of tier); handed to the pipeline only while the setting is on.
+    private let calendarTools: CalendarTools
+    private let timerTools = TimerTools()
+    private let shortcutTools = ShortcutTools()
+    private var actionsStatus: ActionsStatus?
+
+    /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
+    /// first use) instead of the user's own, and read only those (for trying the feature).
+    public init(actionsTestCollection: String? = nil) {
+        calendarTools = CalendarTools(testCollection: actionsTestCollection)
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
         self.commands = commands
@@ -38,6 +48,15 @@ public actor AssistantHost: AssistantConnection {
         Task { [weak self] in
             for await command in commandStream { await self?.handle(command) }
         }
+        Task { await self.observeTimers() }
+    }
+
+    private func observeTimers() async {
+        await timerTools.observe(
+            onFinish: { [weak self] finished in
+                Task { await self?.timerFinished(finished) }
+            },
+            onFirstTimer: { await Notifier.requestPermission() })
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
@@ -66,6 +85,10 @@ public actor AssistantHost: AssistantConnection {
             await deleteModels()
         case .deleteUnusedModels:
             deleteUnusedModels()
+        case .refreshActions:
+            await refreshActions()
+        case .typedTurn(let text):
+            await pipeline?.submit(text: text)
         case .shutdown:
             shutdown()
         }
@@ -141,7 +164,7 @@ public actor AssistantHost: AssistantConnection {
             var config = PipelineConfig()
             config.pushToTalk = settings.pushToTalk
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
-                                     synthesizer: synthesizer, output: audio, config: config)
+                                     synthesizer: synthesizer, output: audio, tools: await toolRunner(), config: config)
             try await pipeline.start()
         } catch {
             audio.stop()
@@ -181,6 +204,7 @@ public actor AssistantHost: AssistantConnection {
             voice: "Pocket TTS · " + PocketSpeechSynthesizer.voices.values.sorted().joined(separator: ", "))))
         await reportDiagnostics()
         reportStorage()
+        reportActions()
         if restartWhenLoaded {
             restartWhenLoaded = false
             await restart()
@@ -357,9 +381,66 @@ public actor AssistantHost: AssistantConnection {
             await restart()
             return
         }
+        if new.shortcutsToConfirm != old.shortcutsToConfirm {
+            await shortcutTools.setNeedingConfirmation(Set(new.shortcutsToConfirm))
+        }
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk { await pipeline.setPushToTalk(new.pushToTalk) }
         if new.audioMode != old.audioMode { await restartAudio() }
+        if new.actionsEnabled != old.actionsEnabled {
+            DebugLog.log("actions: \(new.actionsEnabled ? "on" : "off")")
+            do { try await pipeline.setTools(await toolRunner()) } catch { emit.yield(.warning("\(error)")) }
+            reportActions()
+        }
+    }
+
+    // MARK: - Actions
+
+    /// The tools for a new pipeline or conversation; nil when actions are off.
+    private func toolRunner() async -> ToolRunner? {
+        guard settings.actionsEnabled else { return nil }
+        await shortcutTools.refresh()
+        await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools])
+    }
+
+    /// The app is in front again: a shortcut may have been added to the folder, an access granted.
+    private func refreshActions() async {
+        guard settings.actionsEnabled, stage == .running else { return }
+        if await shortcutTools.refresh() {
+            do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
+        }
+        reportActions()
+    }
+
+    private func reportActions() {
+        guard settings.actionsEnabled else { return }
+        Task {
+            let status = ActionsStatus(calendar: Self.access(CalendarTools.access(to: .event)),
+                                       reminders: Self.access(CalendarTools.access(to: .reminder)),
+                                       shortcuts: await shortcutTools.names)
+            await self.send(status)
+        }
+    }
+
+    private func send(_ status: ActionsStatus) {
+        guard status != actionsStatus else { return }
+        actionsStatus = status
+        emit.yield(.actions(status))
+    }
+
+    private static func access(_ access: CalendarTools.Access) -> ActionsStatus.Access {
+        switch access {
+        case .notAsked: .notAsked
+        case .granted: .granted
+        case .denied: .denied
+        }
+    }
+
+    private func timerFinished(_ finished: TimerTools.Finished) async {
+        DebugLog.log("timer: \(finished.text)")
+        Notifier.post(title: AppIdentity.name, body: finished.text)
+        await pipeline?.announce(finished.text, note: finished.note, language: finished.language)
     }
 
     private func restartAudio() async {
@@ -399,6 +480,7 @@ public actor AssistantHost: AssistantConnection {
                 : "turn done: latency \(Int(metrics.latencyMs ?? -1)) ms — \(metrics.assistantText)")
             emit.yield(.turnFinished(metrics))
             await reportDiagnostics()
+            if metrics.tool != nil { reportActions() }  // an access may just have been granted
         case .bargeIn(let stopMs, let detectionMs): emit.yield(.bargeIn(stopMs: stopMs, detectionMs: detectionMs))
         case .failure(let message): emit.yield(.warning(message))
         }

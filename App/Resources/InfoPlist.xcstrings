@@ -48,6 +48,38 @@
           }
         }
       }
+    },
+    "NSCalendarsFullAccessUsageDescription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ajoute à ton calendrier les événements que tu lui demandes, et te le lit quand tu veux savoir ce qui est prévu."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé adds the events you ask for to your calendar and reads it to you when you ask what is planned."
+          }
+        }
+      }
+    },
+    "NSRemindersFullAccessUsageDescription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ajoute les rappels que tu lui demandes et te lit ceux qui restent à faire."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé adds the reminders you ask for and reads you those still to do."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

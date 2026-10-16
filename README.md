@@ -24,6 +24,11 @@ in airplane mode.
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.
+- **Actions (optional).** Turn on Settings › Conversation › Actions, and Maé adds events and reminders to your
+  calendars (every account macOS knows: iCloud, Google, Exchange…), reads you what is planned, sets timers and
+  runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
+  out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
+  set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
   never goes online again.
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
@@ -189,6 +194,15 @@ Memory over time (here 10 minutes):
 .build/xcode/Build/Products/Release/voice-cli endurance --minutes 10 measurements/audio/0*.wav
 ```
 
+Check that the language model picks the right action, with the right date. Text only, nothing is created: the
+French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a
+fixed reference time, and the report gives the right-tool rate, the dates, false triggers and the time to a
+complete call:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench
+```
+
 To move a model to another version (a deliberate change, to be measured again): edit its `revision` in
 `Sources/VoiceCore/ModelCatalog.swift`, then regenerate the list of its files, sizes and SHA-256 from Hugging
 Face:
@@ -209,6 +223,7 @@ Sources/VoiceEngineApple/      the Apple implementations: Silero, Parakeet and P
                                Gemma 4 (MLX), microphone and speakers (AVAudioEngine)
 Sources/VoiceCLI/              voice-cli
 Tests/VoiceCoreTests/          unit tests of the core
+Tests/Fixtures/                requests for the actions benchmark
 scripts/                     build script, test phrases
 ```
 

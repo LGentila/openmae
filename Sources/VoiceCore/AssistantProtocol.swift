@@ -23,7 +23,26 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var pushToTalk = false
     /// Tier forced in Settings › Advanced; nil = the tier recommended for this Mac.
     public var tierOverride: HardwareTier?
+    /// Actions: reminders, calendar, timers and shortcuts. Off by default for now; the default of each tier
+    /// is to be set from the benchmark (`voice-cli actions-bench`).
+    public var actionsEnabled = false
+    /// Shortcuts (of the "OpenMaé" folder) that Maé reads out and runs only after the user's "oui".
+    public var shortcutsToConfirm: [String] = []
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm
+    }
+
+    /// Settings saved by an earlier version lack the newer fields: they get their default value.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        audioMode = try c.decodeIfPresent(AudioMode.self, forKey: .audioMode) ?? .speakers
+        pushToTalk = try c.decodeIfPresent(Bool.self, forKey: .pushToTalk) ?? false
+        tierOverride = try c.decodeIfPresent(HardwareTier.self, forKey: .tierOverride)
+        actionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .actionsEnabled) ?? false
+        shortcutsToConfirm = try c.decodeIfPresent([String].self, forKey: .shortcutsToConfirm) ?? []
+    }
 }
 
 public enum AssistantCommand: Sendable, Codable, Equatable {
@@ -44,6 +63,11 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case deleteModels
     /// Delete the language models of the tiers not in use.
     case deleteUnusedModels
+    /// Look again at what actions can use (the app came back to the front: a shortcut may have been added
+    /// to the folder, a permission granted in System Settings).
+    case refreshActions
+    /// A turn typed instead of spoken (debug tools).
+    case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
     case shutdown
 }
@@ -153,6 +177,21 @@ public struct ModelStorage: Sendable, Codable, Equatable {
     }
 }
 
+/// What the actions can use, for the settings.
+public struct ActionsStatus: Sendable, Codable, Equatable {
+    public enum Access: String, Sendable, Codable { case notAsked, granted, denied }
+    public var calendar: Access
+    public var reminders: Access
+    /// The shortcuts of the "OpenMaé" folder of the Shortcuts app.
+    public var shortcuts: [String]
+
+    public init(calendar: Access, reminders: Access, shortcuts: [String]) {
+        self.calendar = calendar
+        self.reminders = reminders
+        self.shortcuts = shortcuts
+    }
+}
+
 /// Live measurements for the debug panel.
 public struct EngineDiagnostics: Sendable, Codable, Equatable {
     /// Memory used by the whole app, in GB.
@@ -195,6 +234,8 @@ public enum AssistantEvent: Sendable, Codable {
     /// Sound levels (0…1), about 20 times per second, for the animated indicator.
     case levels(input: Float, output: Float)
     case diagnostics(EngineDiagnostics)
+    /// What the actions can use; sent when the actions are on and whenever it changes.
+    case actions(ActionsStatus)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)

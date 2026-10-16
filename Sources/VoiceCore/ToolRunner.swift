@@ -1,0 +1,152 @@
+import Foundation
+
+/// Carries out the model's tool calls for the pipeline: finds the provider, checks the call, asks for the
+/// user's "oui" when the action is sensitive, and remembers the last action so that "annule" can take it back.
+/// The model decides nothing here: the risk of a tool, the yes/no and the undo are the app's.
+public actor ToolRunner {
+    /// What the app says, and what goes into the history for the model.
+    public struct Reply: Sendable {
+        public var spoken: String
+        public var forModel: JSONValue
+        /// The call was refused because of its arguments: the model gets one chance to correct it.
+        public var retryable: Bool
+    }
+
+    /// A short answer the app handles itself.
+    public enum Interception: Sendable, Equatable {
+        /// "oui" to an action waiting for confirmation.
+        case confirm
+        /// "non" to it.
+        case decline
+        /// "annule" right after an action.
+        case undo
+    }
+
+    /// How long an action waits for its "oui", and how long "annule" can take back the last one.
+    public static let actionLifetime: TimeInterval = 120
+
+    private let providers: [any ToolProvider]
+    private var byName: [String: any ToolProvider] = [:]
+    private var pending: (call: ToolCall, provider: any ToolProvider, at: Date)?
+    private var last: (outcome: ToolOutcome, provider: any ToolProvider, at: Date)?
+
+    public init(providers: [any ToolProvider]) {
+        self.providers = providers
+    }
+
+    /// Every tool, in the providers' order (asks each provider again: call it when the list may have changed).
+    public func tools() async -> [ToolSpec] {
+        var specs: [ToolSpec] = []
+        byName = [:]
+        for provider in providers {
+            for spec in await provider.tools() where byName[spec.name] == nil {
+                byName[spec.name] = provider
+                specs.append(spec)
+            }
+        }
+        return specs
+    }
+
+    /// Whether the user's sentence is an answer the app handles itself. Changes nothing (the turn may still
+    /// be dropped): `resolve` does the work once the turn is confirmed.
+    public func interception(for text: String, now: Date) -> Interception? {
+        if let pending, now.timeIntervalSince(pending.at) < Self.actionLifetime {
+            switch ReplyMatcher.confirmation(text) {
+            case .yes: return .confirm
+            case .no: return .decline
+            default: return nil  // something else: the action keeps waiting, the model answers
+            }
+        }
+        if ReplyMatcher.isCancel(text), let last, now.timeIntervalSince(last.at) < Self.actionLifetime {
+            return .undo
+        }
+        return nil
+    }
+
+    /// Handles an interception; nil when it no longer applies (the action expired meanwhile).
+    public func resolve(_ interception: Interception, context: ToolContext) async -> Reply? {
+        guard stillApplies(interception, now: context.now) else { return nil }
+        switch interception {
+        case .confirm:
+            guard let pending else { return nil }
+            self.pending = nil
+            return await perform(pending.call, with: pending.provider, risk: .sensitive, context: context)
+        case .decline:
+            pending = nil
+            return Reply(spoken: ActionPhrases.declined(context.language),
+                         forModel: ["statut": "abandonné à la demande de l'utilisateur"], retryable: false)
+        case .undo:
+            guard let last else { return nil }
+            self.last = nil
+            guard let token = last.outcome.undo else {
+                return Reply(spoken: last.outcome.cannotUndo ?? ActionPhrases.cannotUndo(context.language),
+                             forModel: ["statut": "impossible à défaire"], retryable: false)
+            }
+            do {
+                let spoken = try await last.provider.undo(token, context: context)
+                return Reply(spoken: spoken, forModel: ["statut": "annulé"], retryable: false)
+            } catch let refusal as ToolRefusal {
+                return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)], retryable: false)
+            } catch {
+                return Reply(spoken: ActionPhrases.saveFailed(context.language),
+                             forModel: ["erreur": .string("\(error)")], retryable: false)
+            }
+        }
+    }
+
+    private func stillApplies(_ interception: Interception, now: Date) -> Bool {
+        switch interception {
+        case .confirm, .decline: pending.map { now.timeIntervalSince($0.at) < Self.actionLifetime } ?? false
+        case .undo: last.map { now.timeIntervalSince($0.at) < Self.actionLifetime } ?? false
+        }
+    }
+
+    /// Checks a call and carries it out, or asks for confirmation first.
+    public func handle(_ call: ToolCall, context: ToolContext) async -> Reply {
+        pending = nil  // a new request replaces an action still waiting for its "oui"
+        guard let provider = byName[call.name] else {
+            return Reply(spoken: ActionPhrases.notUnderstood(context.language),
+                         forModel: ["erreur": .string("Outil inconnu : \(call.name).")], retryable: true)
+        }
+        do {
+            try await provider.check(call, context: context)
+        } catch let refusal as ToolRefusal {
+            return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)],
+                         retryable: refusal.retryable)
+        } catch {
+            return Reply(spoken: ActionPhrases.notUnderstood(context.language),
+                         forModel: ["erreur": .string("\(error)")], retryable: true)
+        }
+        let risk = await provider.risk(of: call)
+        if risk == .sensitive {
+            pending = (call, provider, context.now)
+            return Reply(spoken: await provider.summary(of: call, context: context),
+                         forModel: ["statut": "en attente du oui de l'utilisateur"], retryable: false)
+        }
+        return await perform(call, with: provider, risk: risk, context: context)
+    }
+
+    private func perform(_ call: ToolCall, with provider: any ToolProvider, risk: ToolRisk,
+                         context: ToolContext) async -> Reply
+    {
+        do {
+            let outcome = try await provider.perform(call, context: context)
+            if risk != .read { last = (outcome, provider, context.now) }
+            return Reply(spoken: outcome.spoken, forModel: outcome.forModel, retryable: false)
+        } catch let refusal as ToolRefusal {
+            return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)],
+                         retryable: refusal.retryable)
+        } catch {
+            DebugLog.log("tool \(call.name) failed: \(error)")
+            return Reply(spoken: ActionPhrases.saveFailed(context.language),
+                         forModel: ["erreur": .string("\(error)")], retryable: false)
+        }
+    }
+
+    /// A new conversation: nothing waits for a "oui" any more, and "annule" has nothing to take back.
+    public func resetConversation() async {
+        pending = nil
+        last = nil
+        for provider in providers { await provider.resetConversation() }
+    }
+}

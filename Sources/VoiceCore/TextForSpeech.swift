@@ -142,11 +142,15 @@ public enum SpeakableText {
         // Markdown that models sometimes produce despite the "no markdown" instruction.
         s = s.replacingOccurrences(of: #"\*\*|__|\*|`|#+ "#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: #"(?m)^\s*([-•]|\d+[.)])\s+"#, with: "", options: .regularExpression)
+        // A timestamp in brackets: the model copying the date line that ends the user's messages.
+        s = s.replacingOccurrences(of: #"[(\[]\s*\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\s*[)\]]"#, with: "",
+                                   options: .regularExpression)
         // Links: say nothing rather than read an URL letter by letter.
         s = s.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
         // Emojis and pictographs.
         s = String(String.UnicodeScalarView(s.unicodeScalars.filter { !isPictograph($0) }))
-        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        // Runs of spaces become one; non-breaking spaces stay (French typography, shown in the transcript).
+        s = s.replacingOccurrences(of: #"[^\S\u00A0\u202F]+"#, with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -156,5 +160,45 @@ public enum SpeakableText {
         case 0xFE0F, 0x200D, 0x1F000...0x1FAFF, 0x2600...0x27BF: return true
         default: return false
         }
+    }
+}
+
+extension SpeakableText {
+    /// What the voice reads, from text written for the eye: French times "10 h 30" become "10 heures 30",
+    /// non-breaking spaces and typographic apostrophes become plain ones, guillemets are dropped.
+    public static func forVoice(_ text: String, language: SpeechLanguage) -> String {
+        var s = text.replacingOccurrences(of: "[\u{00A0}\u{202F}]", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "’", with: "'")
+        s = s.replacingOccurrences(of: #"\s*[«»“”]\s*"#, with: " ", options: .regularExpression)
+        if language == .french {
+            s = s.replacingOccurrences(of: #"\b1 ?h ?(\d{2})\b"#, with: "1 heure $1", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"\b(\d{1,2}) ?h ?(\d{2})\b"#, with: "$1 heures $2", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"\b1 ?h\b"#, with: "1 heure", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"\b(\d{1,2}) ?h\b"#, with: "$1 heures", options: .regularExpression)
+        }
+        s = s.replacingOccurrences(of: #" +([.,:;!?])"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// A short, soft two-note chime played before the app speaks on its own (a timer that rings).
+public enum Chime {
+    public static func samples(sampleRate: Double) -> [Float] {
+        // E5 then A5, each fading out; about 0.7 s in all.
+        let notes: [(frequency: Double, start: Double, length: Double)] = [(659.25, 0, 0.45), (880, 0.16, 0.55)]
+        let count = Int(0.75 * sampleRate)
+        var out = [Float](repeating: 0, count: count)
+        for note in notes {
+            let first = Int(note.start * sampleRate)
+            let length = Int(note.length * sampleRate)
+            for i in 0..<length where first + i < count {
+                let t = Double(i) / sampleRate
+                let attack = min(1, t / 0.008)
+                let decay = exp(-t * 6)
+                out[first + i] += Float(0.16 * attack * decay * sin(2 * .pi * note.frequency * t))
+            }
+        }
+        return out
     }
 }

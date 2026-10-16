@@ -71,12 +71,52 @@
         }
       }
     },
+    "Actions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actions"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Avancé"
+          }
+        }
+      }
+    },
+    "Allowed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisés"
+          }
+        }
+      }
+    },
+    "Ask first": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Demander d’abord"
+          }
+        }
+      }
+    },
+    "Asked when needed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Demandé au besoin"
           }
         }
       }
@@ -107,6 +147,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatique : %@"
+          }
+        }
+      }
+    },
+    "Calendar and reminders": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendrier et rappels"
           }
         }
       }
@@ -601,6 +651,26 @@
         }
       }
     },
+    "Maé adds events and reminders, reads your calendar, sets timers and runs the shortcuts of the “OpenMaé” folder in the Shortcuts app. She tells you what she saved: say “cancel” to take it back.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ajoute des événements et des rappels, lit ton agenda, lance des minuteurs et les raccourcis du dossier « OpenMaé » de l’app Raccourcis. Elle te dit ce qu’elle a enregistré : dis « annule » pour revenir en arrière."
+          }
+        }
+      }
+    },
+    "Maé can’t use them. Allow OpenMaé in System Settings, Privacy & Security.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne peut pas s’en servir. Autorise OpenMaé dans Réglages Système, Confidentialité et sécurité."
+          }
+        }
+      }
+    },
     "Maé is answering": {
       "localizations": {
         "fr": {
@@ -771,6 +841,16 @@
         }
       }
     },
+    "Not allowed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non autorisés"
+          }
+        }
+      }
+    },
     "Not enough free space: %@ is needed and %@ is left. Free up space, then try again.": {
       "localizations": {
         "fr": {
@@ -901,6 +981,16 @@
         }
       }
     },
+    "Put shortcuts in a folder named “OpenMaé” in the Shortcuts app: Maé will be able to run them.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Range des raccourcis dans un dossier « OpenMaé » de l’app Raccourcis : Maé pourra les lancer."
+          }
+        }
+      }
+    },
     "Quit %@": {
       "localizations": {
         "fr": {
@@ -967,6 +1057,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réglages…"
+          }
+        }
+      }
+    },
+    "Shortcuts": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raccourcis"
           }
         }
       }
@@ -1491,6 +1591,16 @@
         }
       }
     },
+    "macOS will ask for access the first time you need it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS te demandera l’accès la première fois que tu en auras besoin."
+          }
+        }
+      }
+    },
     "or press": {
       "localizations": {
         "fr": {
@@ -1527,6 +1637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "non testé / estimé"
+          }
+        }
+      }
+    },
+    "“Ask first”: Maé says which shortcut she is about to run and waits for your “yes”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« Demander d’abord » : Maé dit quel raccourci elle va lancer et attend ton « oui »."
           }
         }
       }

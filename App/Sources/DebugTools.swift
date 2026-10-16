@@ -140,6 +140,25 @@ enum Snapshots {
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
+        // The settings with the actions on: access not asked yet, then refused.
+        let shortcuts = ["Allumer le salon", "Mode concentration"]
+        for (name, access) in [("main-9-settings-actions", ActionsStatus.Access.notAsked),
+                               ("main-10-settings-actions-denied", .denied)]
+        {
+            let model = await scriptedModel(ready + [.actions(ActionsStatus(calendar: access, reminders: access,
+                                                                            shortcuts: shortcuts))])
+            let saved = model.settings
+            model.settings.actionsEnabled = true
+            model.settings.shortcutsToConfirm = ["Mode concentration"]
+            let window = WindowState()
+            let view = ContentView(model: model, window: window)
+                .environment(\.stillFrame, 1.7)
+                .preferredColorScheme(.light)
+            await save(view, size: CGSize(width: 960, height: 700), to: folder.appending(path: name + ".png")) {
+                window.panel = .settings
+            }
+            model.settings = saved
+        }
         await renderPresence(to: folder)
     }
 
@@ -383,6 +402,15 @@ struct SnapshotRunner: View {
 }
 
 // MARK: - Demonstration
+
+/// `-actions-test-calendar`: every event and reminder Maé creates goes into a calendar and a list named
+/// "OpenMaé (tests)" (created on first use), so trying the actions leaves the user's own calendars unchanged (Maé
+/// still reads them all). Deleting that calendar and that list cleans everything up.
+enum ActionsTestCollection {
+    static var name: String? {
+        ProcessInfo.processInfo.arguments.contains("-actions-test-calendar") ? "OpenMaé (tests)" : nil
+    }
+}
 
 /// A pretend engine that plays a conversation in a loop, to look at the screens moving without talking:
 ///

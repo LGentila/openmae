@@ -71,13 +71,21 @@ targets:
         # Shown from Resources/InfoPlist.xcstrings, in English as in French: change it there too.
         NSMicrophoneUsageDescription: >-
           The assistant listens to what you say in order to answer. Sound never leaves this Mac.
+        # Actions (Settings › Conversation): asked the first time the user requests something that needs them.
+        # Shown from Resources/InfoPlist.xcstrings too.
+        NSCalendarsFullAccessUsageDescription: >-
+          Maé adds the events you ask for to your calendar and reads it to you when you ask what is planned.
+        NSRemindersFullAccessUsageDescription: >-
+          Maé adds the reminders you ask for and reads you those still to do.
     entitlements:
       path: Resources/App.entitlements
       properties:
-        # Hardened runtime: the only resource the app needs is the microphone. No App Sandbox
-        # (the models live in ~/Library/Application Support/<name>/Models, shared with the command-line tool), so
-        # no network entitlement is needed either (it only exists inside the sandbox).
+        # Hardened runtime: the app needs the microphone, and the calendar and reminders for the actions (one
+        # entitlement covers both). No App Sandbox (the models live in ~/Library/Application Support/<name>/Models,
+        # shared with the command-line tool), so no network entitlement is needed either (it only exists inside the
+        # sandbox).
         com.apple.security.device.audio-input: true
+        com.apple.security.personal-information.calendars: true
     # Signing: Signing.xcconfig, completed on each Mac by Signing.local.xcconfig (not published, so the
     # Apple Developer team stays private). Distributed builds need a "Developer ID Application" certificate.
     configFiles:

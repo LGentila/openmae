@@ -28,6 +28,9 @@ public struct PipelineConfig: Sendable {
     /// While nobody speaks, the models are used briefly every this many seconds so that macOS keeps
     /// them in memory (see `KeepsWarm`). 0 = never.
     public var keepWarmSeconds: Double = 30
+    /// While the model writes a tool call (no voice until it is complete: about 1.5 s with Gemma 4 26B on the
+    /// reference Mac), say "Un instant, je m'en occupe tout de suite." so the user is not left in silence.
+    public var toolCallFiller = true
     public init() {}
 }
 
@@ -55,6 +58,8 @@ public struct TurnMetrics: Sendable, Codable {
     /// THE number: end of the user's speech → first audio sent to the speakers.
     public var latencyMs: Double?
     public var historyTokens: Int?
+    /// The tool the model called, if any.
+    public var tool: String?
     public init() {}
 }
 
@@ -85,6 +90,8 @@ public actor VoicePipeline {
     private let synthesizer: any SpeechSynthesizer
     private let output: any AudioOutput
     private let extensions: [any ConversationExtension]
+    /// Actions (reminders, calendar…); nil when they are off.
+    private var tools: ToolRunner?
     public private(set) var config: PipelineConfig
 
     private var conversation: Conversation
@@ -111,6 +118,15 @@ public actor VoicePipeline {
     private var turn: Turn?
     private var nextTurnID = 0
 
+    /// What the app has to say on its own (a timer that rings), as soon as nobody speaks.
+    private struct Announcement {
+        var text: String
+        var note: String
+        var language: SpeechLanguage
+        var chime: Bool
+    }
+    private var announcements: [Announcement] = []
+
     private final class Turn: @unchecked Sendable {
         // Mutated only from the pipeline actor.
         let id: Int
@@ -129,13 +145,20 @@ public actor VoicePipeline {
         /// Pieces of a speculative answer, announced only if the turn is committed.
         var unannouncedPieces: [String] = []
         var language = SpeechLanguage.french
+        /// The user's message as sent to the model (with the date line when actions are on).
+        var userMessage: ChatMessage?
+        /// Tool calls and their results, between the user's message and the answer, for the history.
+        var steps: [ChatMessage] = []
+        var isAnnouncement = false
+        /// A turn typed instead of spoken: no transcription.
+        var typedText: String?
         init(id: Int) { self.id = id }
     }
 
     public init(
         detector: any SpeechDetector, transcriber: any Transcriber, model: any LanguageModel,
         synthesizer: any SpeechSynthesizer, output: any AudioOutput,
-        extensions: [any ConversationExtension] = [], config: PipelineConfig = .init(),
+        extensions: [any ConversationExtension] = [], tools: ToolRunner? = nil, config: PipelineConfig = .init(),
         systemPrompt: String = Conversation.defaultSystemPrompt
     ) {
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
@@ -145,17 +168,50 @@ public actor VoicePipeline {
         self.synthesizer = synthesizer
         self.output = output
         self.extensions = extensions
+        self.tools = tools
         self.config = config
         self.turnDetector = TurnDetector(config: config.turn)
         var conversation = Conversation(systemPrompt: systemPrompt)
-        conversation.systemAddenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
+        conversation.systemAddenda = Self.addenda(extensions, actions: tools != nil)
         self.conversation = conversation
+    }
+
+    private static func addenda(_ extensions: [any ConversationExtension], actions: Bool) -> [String] {
+        extensions.compactMap { $0.systemPromptAddendum(language: .french) } + (actions ? [ActionCatalog.promptAddendum] : [])
     }
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
     public func start() async throws {
+        if let tools { await model.useTools(await tools.tools()) }
         try await model.prefill(conversation.messages)
         emit.yield(.state(.listening))
+    }
+
+    /// Turns actions on (a runner) or off (nil). The tools are part of the system prompt, so a new
+    /// conversation starts.
+    public func setTools(_ runner: ToolRunner?) async throws {
+        await cancelTurn(stopAudio: true)
+        tools = runner
+        conversation.systemAddenda = Self.addenda(extensions, actions: runner != nil)
+        conversation.clear()
+        await runner?.resetConversation()
+        await model.useTools(await runner?.tools() ?? [])
+        try await model.prefill(conversation.messages)
+    }
+
+    /// The list of tools changed (a shortcut was added to the folder): the model's prompt is computed again,
+    /// the conversation goes on.
+    public func toolsChanged() async throws {
+        guard let tools else { return }
+        await model.useTools(await tools.tools())
+        try await model.prefill(conversation.messages)
+    }
+
+    /// Says something on the app's own initiative (a timer rang), after a short chime, as soon as nobody
+    /// speaks. `note` tells the model what happened; it stays in the history with what was said.
+    public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool = true) {
+        announcements.append(Announcement(text: text, note: note, language: language, chime: chime))
+        startAnnouncementIfIdle()
     }
 
     public func setPushToTalk(_ enabled: Bool) async {
@@ -183,6 +239,7 @@ public actor VoicePipeline {
     public func resetConversation() async throws {
         await cancelTurn(stopAudio: true)
         conversation.clear()
+        await tools?.resetConversation()
         try await model.prefill(conversation.messages)
     }
 
@@ -305,6 +362,18 @@ public actor VoicePipeline {
         }
     }
 
+    /// A turn typed instead of spoken (debug tools, tests): answered as if the user had just said it.
+    public func submit(text: String) async {
+        if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
+        nextTurnID += 1
+        let turn = Turn(id: nextTurnID)
+        turn.typedText = text
+        turn.speechEnd = clock.now
+        self.turn = turn
+        commit(turn)
+        turn.task = Task { await self.runTurn(turn, audio: []) }
+    }
+
     // MARK: - Talk key
 
     /// The talk key: the space bar or the button in push-to-talk mode, the global shortcut in either mode. While
@@ -367,7 +436,8 @@ public actor VoicePipeline {
         do {
             // 1. Speech → text.
             let t0 = clock.now
-            let text = try await transcriber.transcribe(audio).trimmingCharacters(in: .whitespacesAndNewlines)
+            let heard = if let typed = turn.typedText { typed } else { try await transcriber.transcribe(audio) }
+            let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
             metrics.transcriptionMs = ms(clock.now - t0)
             try Task.checkCancellation()
             guard text.contains(where: \.isLetter) else {
@@ -380,78 +450,81 @@ public actor VoicePipeline {
             metrics.userText = text
             metrics.language = lang
             if turn.committed { emit.yield(.userTranscript(text, lang)) }
+            let now = Date()
+            turn.userMessage = Conversation.userMessage(
+                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now))
+            // "oui", "non", "annule": answered by the app, not the model.
+            let interception = await tools?.interception(for: text, now: now)
 
             // 2. Voice: started now, so its set-up overlaps with the language model's first words.
             DebugLog.log("turn \(turn.id): STT done (\(metrics.transcriptionMs ?? 0) ms)")
             let stream = try await synthesizer.startUtterance(language: lang)
             DebugLog.log("turn \(turn.id): TTS session ready")
             turn.stream = stream
-            let sampleRate = synthesizer.outputSampleRate
-            let silenceThreshold = config.leadingSilenceThresholdDB
-            let maxPauseSamples = config.maxVoicePauseMs.map { Int($0 / 1000 * sampleRate) }
-            turn.player = Task { [output, clock] in
-                var voiceHeard = false
-                var playing = false
-                var quietSamples = 0
-                do {
-                    for try await samples in stream.audio {
-                        let quiet = silenceThreshold.map { Self.loudnessDB(samples) < $0 } ?? false
-                        if !voiceHeard {
-                            // The voice often opens with near-silence: skip it, so the answer starts (and
-                            // the latency is measured) at the first sound the user can actually hear.
-                            if quiet { continue }
-                            voiceHeard = true
-                            self.voiceIsAudible()
-                        }
-                        // Each sentence starts again with near-silence: cap the pauses between sentences.
-                        quietSamples = quiet ? quietSamples + samples.count : 0
-                        if let maxPauseSamples, quietSamples > maxPauseSamples { continue }
-                        await turn.gate.wait()  // a speculative answer waits for the end of the turn
-                        if Task.isCancelled { break }
-                        if !playing {
-                            playing = true
-                            self.audioStarted(turn, at: clock.now)
-                        }
-                        await output.play(samples, sampleRate: sampleRate)
-                    }
-                } catch {}
-            }
+            startPlayer(turn, stream)
 
             // 3. Text answer, streamed piece by piece into the voice.
             let t1 = clock.now
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
-            let send: (String) -> Void = { piece in
-                let speakable = SpeakableText.clean(piece)
-                guard !speakable.isEmpty else { return }
-                if turn.firstPieceTime == nil {
-                    turn.firstPieceTime = self.clock.now
-                    DebugLog.log("turn \(turn.id): first piece")
-                    // Leave the GPU to the voice until it is audible (the model is far ahead of speech).
-                    (self.model as? any YieldsToVoice)?.holdGeneration(true)
-                }
-                turn.answer += (turn.answer.isEmpty ? "" : " ") + speakable
-                stream.enqueue(speakable)
-                // A speculative answer may still be thrown away: the interface only sees it once committed.
-                if turn.committed {
-                    self.emit.yield(.assistantPiece(speakable))
-                } else {
-                    turn.unannouncedPieces.append(speakable)
-                }
-            }
+            let send: (String) -> Void = { self.deliver($0, to: turn) }
             if let local = await localAnswer(to: text, language: lang) {
                 metrics.firstTokenMs = ms(clock.now - t1)
                 send(local)
+            } else if let interception, let reply = try await resolve(interception, turn: turn, now: now) {
+                metrics.firstTokenMs = ms(clock.now - t1)
+                say(reply.spoken, to: turn)
             } else {
-                let request = conversation.messages(addingUser: text, language: lang)
-                DebugLog.log("turn \(turn.id): LLM request")
-                for try await raw in model.reply(to: request) {
-                    if metrics.firstTokenMs == nil { metrics.firstTokenMs = ms(clock.now - t1) }
-                    chunker.push(filter.push(raw)).forEach(send)
+                var request = conversation.messages(adding: turn.userMessage!)
+                var secondTry = false
+                var fillerSaid = false
+                while true {
+                    var calls: [ToolCall] = []
+                    var unreadable = false
+                    DebugLog.log("turn \(turn.id): LLM request")
+                    for try await output in model.reply(to: request) {
+                        if metrics.firstTokenMs == nil { metrics.firstTokenMs = ms(clock.now - t1) }
+                        switch output {
+                        case .text(let raw): chunker.push(filter.push(raw)).forEach(send)
+                        case .toolCallStarted:
+                            DebugLog.log("turn \(turn.id): tool call started")
+                            if config.toolCallFiller, !fillerSaid, turn.answer.isEmpty {
+                                fillerSaid = true
+                                // Not in the history: the model would start saying it in its own answers.
+                                deliver(ActionPhrases.oneMoment(lang), to: turn, inHistory: false)
+                            }
+                        case .toolCall(let call): calls.append(call)
+                        case .unreadableToolCall(let raw):
+                            DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
+                            unreadable = true
+                        }
+                    }
+                    chunker.push(filter.flush()).forEach(send)
+                    guard let tools, !calls.isEmpty || unreadable else { break }
+                    // Nothing is ever carried out before the user's turn is really over.
+                    try await waitForCommit(turn)
+                    chunker.flush().forEach(send)
+                    guard let call = calls.first else {
+                        say(ActionPhrases.notUnderstood(lang), to: turn)
+                        break
+                    }
+                    DebugLog.log("turn \(turn.id): tool call \(call.name) \(call.arguments)")
+                    metrics.tool = call.name
+                    let reply = await tools.handle(call, context: toolContext(turn, now: now))
+                    turn.steps += [.call(call), .result(of: call, reply.forModel)]
+                    if reply.retryable, !secondTry {
+                        // The arguments were refused: the model sees why and gets one more try.
+                        DebugLog.log("turn \(turn.id): tool call refused, second try: \(reply.forModel)")
+                        secondTry = true
+                        request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                        continue
+                    }
+                    say(reply.spoken, to: turn)
+                    if calls.count > 1 { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
+                    break
                 }
-                chunker.push(filter.flush()).forEach(send)
-                chunker.flush().forEach(send)
             }
+            chunker.flush().forEach(send)
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
@@ -477,6 +550,135 @@ public actor VoicePipeline {
         }
     }
 
+    /// Plays the voice as it is produced. A speculative answer waits for the end of the user's turn.
+    private func startPlayer(_ turn: Turn, _ stream: any SynthesisStream) {
+        let sampleRate = synthesizer.outputSampleRate
+        let silenceThreshold = config.leadingSilenceThresholdDB
+        let maxPauseSamples = config.maxVoicePauseMs.map { Int($0 / 1000 * sampleRate) }
+        turn.player = Task { [output, clock] in
+            var voiceHeard = false
+            var playing = false
+            var quietSamples = 0
+            do {
+                for try await samples in stream.audio {
+                    let quiet = silenceThreshold.map { Self.loudnessDB(samples) < $0 } ?? false
+                    if !voiceHeard {
+                        // The voice often opens with near-silence: skip it, so the answer starts (and
+                        // the latency is measured) at the first sound the user can actually hear.
+                        if quiet { continue }
+                        voiceHeard = true
+                        self.voiceIsAudible()
+                    }
+                    // Each sentence starts again with near-silence: cap the pauses between sentences.
+                    quietSamples = quiet ? quietSamples + samples.count : 0
+                    if let maxPauseSamples, quietSamples > maxPauseSamples { continue }
+                    await turn.gate.wait()  // a speculative answer waits for the end of the turn
+                    if Task.isCancelled { break }
+                    if !playing {
+                        playing = true
+                        self.audioStarted(turn, at: clock.now)
+                    }
+                    await output.play(samples, sampleRate: sampleRate)
+                }
+            } catch {}
+        }
+    }
+
+    /// Sends a piece of the answer to the voice, and to the interface once the turn is committed. `inHistory`:
+    /// whether the model will see it as part of its answer in the next turns.
+    private func deliver(_ piece: String, to turn: Turn, inHistory: Bool = true) {
+        guard self.turn === turn, let stream = turn.stream else { return }
+        let speakable = SpeakableText.clean(piece)
+        guard !speakable.isEmpty else { return }
+        if turn.firstPieceTime == nil {
+            turn.firstPieceTime = clock.now
+            DebugLog.log("turn \(turn.id): first piece")
+            // Leave the GPU to the voice until it is audible (the model is far ahead of speech).
+            (model as? any YieldsToVoice)?.holdGeneration(true)
+        }
+        if inHistory { turn.answer += (turn.answer.isEmpty ? "" : " ") + speakable }
+        stream.enqueue(SpeakableText.forVoice(speakable, language: turn.language))
+        // A speculative answer may still be thrown away: the interface only sees it once committed.
+        if turn.committed {
+            emit.yield(.assistantPiece(speakable))
+        } else {
+            turn.unannouncedPieces.append(speakable)
+        }
+    }
+
+    /// Sends the app's own sentences (confirmations, questions) to the voice, one sentence at a time: never cut
+    /// at a colon or a comma, which could leave a few words alone (the voice renders those as silence).
+    private func say(_ text: String, to turn: Turn) {
+        var sentences = SentenceChunker()
+        sentences.firstPieceMinCharacters = .max
+        (sentences.push(text) + sentences.flush()).forEach { deliver($0, to: turn) }
+    }
+
+    /// Returns once the user's turn is really over; throws if the turn was dropped meanwhile.
+    private func waitForCommit(_ turn: Turn) async throws {
+        await turn.gate.wait()
+        try Task.checkCancellation()
+        guard self.turn === turn, turn.committed else { throw CancellationError() }
+    }
+
+    private func resolve(_ interception: ToolRunner.Interception, turn: Turn, now: Date) async throws
+        -> ToolRunner.Reply?
+    {
+        guard let tools else { return nil }
+        try await waitForCommit(turn)
+        DebugLog.log("turn \(turn.id): answered by the app (\(interception))")
+        return await tools.resolve(interception, context: toolContext(turn, now: now))
+    }
+
+    private func toolContext(_ turn: Turn, now: Date) -> ToolContext {
+        ToolContext(now: now, language: turn.language) { [weak self] sentence in
+            await self?.deliver(sentence, to: turn)
+        }
+    }
+
+    // MARK: - Announcements
+
+    private func startAnnouncementIfIdle() {
+        guard turn == nil, !utteranceOpen, !talkKeyPressed, !turnDetector.isInUtterance, !announcements.isEmpty
+        else { return }
+        let announcement = announcements.removeFirst()
+        nextTurnID += 1
+        let turn = Turn(id: nextTurnID)
+        turn.isAnnouncement = true
+        turn.language = announcement.language
+        turn.userMessage = ChatMessage(.user, announcement.note)
+        self.turn = turn
+        commit(turn)
+        turn.task = Task { await self.runAnnouncement(turn, announcement) }
+    }
+
+    private func runAnnouncement(_ turn: Turn, _ announcement: Announcement) async {
+        do {
+            let stream = try await synthesizer.startUtterance(language: announcement.language)
+            turn.stream = stream
+            if announcement.chime {
+                let sampleRate = synthesizer.outputSampleRate
+                audioStarted(turn, at: clock.now)
+                await output.play(Chime.samples(sampleRate: sampleRate), sampleRate: sampleRate)
+            }
+            startPlayer(turn, stream)
+            say(announcement.text, to: turn)
+            stream.finish()
+            await turn.player?.value
+            try Task.checkCancellation()
+            await output.waitUntilDone()
+            try Task.checkCancellation()
+            var metrics = TurnMetrics()
+            metrics.language = announcement.language
+            metrics.assistantText = turn.answer
+            finish(turn, metrics: metrics)
+        } catch is CancellationError {
+        } catch {
+            emit.yield(.failure("\(error)"))
+            if self.turn === turn { finish(turn, metrics: nil) }
+        }
+    }
+
     private func voiceIsAudible() {
         (model as? any YieldsToVoice)?.holdGeneration(false)
     }
@@ -493,10 +695,9 @@ public actor VoicePipeline {
         guard self.turn === turn else { return }
         voiceIsAudible()  // never leave the model paused
         self.turn = nil
-        if let metrics, !turn.userText.isEmpty {
-            conversation.record(user: turn.userText, language: metrics.language, assistant: turn.answer,
-                                interrupted: false)
-            language = metrics.language
+        if let metrics, let message = turn.userMessage {
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: false)
+            if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
         }
         utterance = []
@@ -512,9 +713,8 @@ public actor VoicePipeline {
         await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
         await output.stopImmediately()
         await cancelTurn(stopAudio: false)
-        if !turn.userText.isEmpty {
-            conversation.record(user: turn.userText, language: turn.language, assistant: turn.answer,
-                                interrupted: true)
+        if !turn.userText.isEmpty, let message = turn.userMessage {
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: true)
             var metrics = TurnMetrics()
             metrics.userText = turn.userText
             metrics.assistantText = turn.answer
@@ -591,6 +791,7 @@ public actor VoicePipeline {
         let quiet = newState == .listening
         Task { [model] in await model.allowBackgroundWork(quiet) }
         keepModelsWarm(quiet)
+        if quiet { startAnnouncementIfIdle() }
     }
 
     private func keepModelsWarm(_ quiet: Bool) {

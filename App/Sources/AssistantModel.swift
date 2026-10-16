@@ -54,6 +54,8 @@ final class AssistantModel {
     private(set) var inputLevel: Float = 0
     private(set) var outputLevel: Float = 0
     private(set) var lastWarning: String?
+    /// What the actions can use (access to the calendar and reminders, shortcuts); nil while they are off.
+    private(set) var actions: ActionsStatus?
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
     /// pressed once (and not yet a second time).
     private(set) var talkKeyDown = false
@@ -65,6 +67,12 @@ final class AssistantModel {
             guard settings != oldValue else { return }
             Self.save(settings)
             connection.send(.updateSettings(engineSettings))
+            if settings.actionsEnabled != oldValue.actionsEnabled {
+                // The engine starts a new conversation (the tools are part of the model's instructions).
+                transcript.removeAll()
+                answerIndex = nil
+                if !settings.actionsEnabled { actions = nil }
+            }
         }
     }
 
@@ -174,6 +182,12 @@ final class AssistantModel {
         connection.send(.newConversation)
     }
 
+    /// The app is in front again: a shortcut may have been added, an access granted in System Settings.
+    func refreshActions() {
+        guard isReady, settings.actionsEnabled else { return }
+        connection.send(.refreshActions)
+    }
+
     func downloadModels() {
         downloadFailure = nil
         isDownloading = true
@@ -255,6 +269,8 @@ final class AssistantModel {
             outputLevel = output
         case .diagnostics(let diagnostics):
             self.diagnostics = diagnostics
+        case .actions(let status):
+            actions = status
         case .warning(let message):
             lastWarning = message
         }
@@ -269,6 +285,8 @@ final class AssistantModel {
         case .listening:
             // Speech that turned out to be noise (nothing was transcribed).
             while let last = transcript.last, last.speaker == .user, last.pending { transcript.removeLast() }
+            // What Maé says next on her own (a timer that rang) is a new line, not the end of her last answer.
+            answerIndex = nil
         case .thinking, .speaking:
             break
         }

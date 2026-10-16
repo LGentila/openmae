@@ -1,0 +1,748 @@
+{
+ "_comment": "French requests for voice-cli actions-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). expected.when: the date the call must carry (to the minute, or the day when no time is given; \"none\" = no date); end: the event's end; seconds: a timer; name: a shortcut. No expected = no action.",
+ "now": "2026-10-15T18:42",
+ "shortcuts": [
+  "Allumer le salon",
+  "Mode concentration",
+  "Lancer la playlist du soir"
+ ],
+ "cases": [
+  {
+   "phrase": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T15:00",
+    "end": "2026-10-16T16:00"
+   }
+  },
+  {
+   "phrase": "Mets dans mon agenda un dîner chez Paul samedi à 20 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-17T20:00"
+   }
+  },
+  {
+   "phrase": "J'ai une réunion avec l'équipe lundi à 9 h 30, note-la dans mon calendrier",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-19T09:30"
+   }
+  },
+  {
+   "phrase": "Crée un événement cours de yoga vendredi à 18 h pendant une heure et demie",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T18:00",
+    "end": "2026-10-16T19:30"
+   }
+  },
+  {
+   "phrase": "Ajoute l'anniversaire de Léa le 3 novembre",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-11-03"
+   }
+  },
+  {
+   "phrase": "Rendez-vous chez le dentiste vendredi à 14 h, tu peux l'ajouter ?",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T14:00"
+   }
+  },
+  {
+   "phrase": "Bloque-moi le créneau de demain de 10 h à midi pour travailler sur le projet",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T10:00",
+    "end": "2026-10-16T12:00"
+   }
+  },
+  {
+   "phrase": "Note un apéro avec les voisins ce soir à 19 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-15T19:00"
+   }
+  },
+  {
+   "phrase": "Ajoute à mon calendrier le match de foot dimanche à 15 h au stade",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-18T15:00"
+   }
+  },
+  {
+   "phrase": "Planifie une visio avec maman mardi à 20 h 30",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-20T20:30"
+   }
+  },
+  {
+   "phrase": "Inscris le concert de jazz le 8 novembre à 21 h dans mon agenda",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-11-08T21:00"
+   }
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez le coiffeur dans trois semaines à 10 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-11-05T10:00"
+   }
+  },
+  {
+   "phrase": "Mets une réunion d'équipe après-demain à 11 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-17T11:00"
+   }
+  },
+  {
+   "phrase": "J'ai rendez-vous à la banque le 28 octobre à 16 h 15, ajoute-le",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-28T16:15"
+   }
+  },
+  {
+   "phrase": "Ajoute un déjeuner avec Sophie demain à midi et demi",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T12:30"
+   }
+  },
+  {
+   "phrase": "Note dans l'agenda : vacances du 20 au 24 décembre",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-12-20",
+    "end": "2026-12-25"
+   }
+  },
+  {
+   "phrase": "Ajoute une séance de sport demain à 7 h du matin",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T07:00"
+   }
+  },
+  {
+   "phrase": "Crée un événement réunion parents-profs vendredi 23 octobre à 17 h 45",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-23T17:45"
+   }
+  },
+  {
+   "phrase": "Je vais au cinéma vendredi soir à 21 h, mets-le dans mon agenda",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T21:00"
+   }
+  },
+  {
+   "phrase": "Ajoute le mariage de Julien le samedi 12 juin",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2027-06-12"
+   }
+  },
+  {
+   "phrase": "Rajoute un créneau dentiste mardi prochain à 8 h 45",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-20T08:45"
+   }
+  },
+  {
+   "phrase": "Ajoute une réunion de 30 minutes demain à 16 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-16T16:00",
+    "end": "2026-10-16T16:30"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi demain à 10 h de prendre rendez-vous chez le médecin",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16T10:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi d'appeler maman dans une heure",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T19:42"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi dans 20 minutes de sortir le linge",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T19:02"
+   }
+  },
+  {
+   "phrase": "Crée un rappel pour acheter du pain",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "none"
+   }
+  },
+  {
+   "phrase": "Ajoute un rappel : payer la facture d'électricité vendredi",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16"
+   }
+  },
+  {
+   "phrase": "N'oublie pas de me rappeler d'arroser les plantes samedi matin à 9 h",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-17T09:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi ce soir à 21 h de sortir les poubelles",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T21:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi lundi à 8 h d'envoyer le dossier à Marc",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-19T08:00"
+   }
+  },
+  {
+   "phrase": "Fais-moi penser à réserver le restaurant demain midi",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16T12:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi le 1er novembre de changer les draps",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-11-01"
+   }
+  },
+  {
+   "phrase": "Mets un rappel pour le contrôle technique de la voiture le 15 décembre à 9 h",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-12-15T09:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi dans deux jours de rendre les livres à la bibliothèque",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-17"
+   }
+  },
+  {
+   "phrase": "Ajoute à mes rappels : racheter du café",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "none"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi vendredi à 3 h de l'après-midi d'appeler le plombier",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16T15:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi demain matin à 7 h 30 de prendre mes médicaments",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16T07:30"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi à 23 h de fermer la fenêtre",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T23:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi dans une demi-heure de vérifier le four",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T19:12"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi mercredi prochain à 14 h de rappeler l'école",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-21T14:00"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que j'ai demain ?",
+   "expected": {
+    "tool": "lire_agenda",
+    "when": "2026-10-16"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que j'ai de prévu samedi ?",
+   "expected": {
+    "tool": "lire_agenda",
+    "when": "2026-10-17"
+   }
+  },
+  {
+   "phrase": "J'ai quoi dans mon agenda cette semaine ?",
+   "expected": {
+    "tool": "lire_agenda"
+   }
+  },
+  {
+   "phrase": "Est-ce que j'ai des rendez-vous vendredi ?",
+   "expected": {
+    "tool": "lire_agenda",
+    "when": "2026-10-16"
+   }
+  },
+  {
+   "phrase": "Lis-moi mon agenda d'aujourd'hui",
+   "expected": {
+    "tool": "lire_agenda",
+    "when": "2026-10-15"
+   }
+  },
+  {
+   "phrase": "Quel est mon programme lundi ?",
+   "expected": {
+    "tool": "lire_agenda",
+    "when": "2026-10-19"
+   }
+  },
+  {
+   "phrase": "Quels sont mes rappels ?",
+   "expected": {
+    "tool": "lister_rappels"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que j'ai à faire demain dans mes rappels ?",
+   "expected": {
+    "tool": "lister_rappels",
+    "when": "2026-10-16"
+   }
+  },
+  {
+   "phrase": "Lis-moi mes rappels pour aujourd'hui",
+   "expected": {
+    "tool": "lister_rappels",
+    "when": "2026-10-15"
+   }
+  },
+  {
+   "phrase": "Mets un minuteur de 10 minutes pour les pâtes",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 600
+   }
+  },
+  {
+   "phrase": "Lance un minuteur de 3 minutes",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 180
+   }
+  },
+  {
+   "phrase": "Minuteur d'une heure et quart s'il te plaît",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 4500
+   }
+  },
+  {
+   "phrase": "Compte à rebours de 45 secondes",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 45
+   }
+  },
+  {
+   "phrase": "Mets un minuteur de 25 minutes pour le gâteau",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 1500
+   }
+  },
+  {
+   "phrase": "Allume le salon",
+   "expected": {
+    "tool": "lancer_raccourci",
+    "name": "Allumer le salon"
+   }
+  },
+  {
+   "phrase": "Active le mode concentration",
+   "expected": {
+    "tool": "lancer_raccourci",
+    "name": "Mode concentration"
+   }
+  },
+  {
+   "phrase": "Lance la playlist du soir",
+   "expected": {
+    "tool": "lancer_raccourci",
+    "name": "Lancer la playlist du soir"
+   }
+  },
+  {
+   "phrase": "Tu peux allumer la lumière du salon ?",
+   "expected": {
+    "tool": "lancer_raccourci",
+    "name": "Allumer le salon"
+   }
+  },
+  {
+   "phrase": "Décale-le à 16 h",
+   "expected": {
+    "tool": "modifier_element",
+    "when": "2026-10-16T16:00"
+   },
+   "before": [
+    {
+     "user": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+     "call": {
+      "name": "creer_evenement",
+      "arguments": {
+       "titre": "Rendez-vous chez le médecin",
+       "debut": "2026-10-16T15:00"
+      }
+     },
+     "result": {
+      "id": "e1",
+      "titre": "Rendez-vous chez le médecin",
+      "debut": "2026-10-16T15:00",
+      "fin": "2026-10-16T16:00",
+      "calendrier": "Maison"
+     },
+     "answer": "C’est dans ton calendrier « Maison » : Rendez-vous chez le médecin, vendredi 16 octobre de 15 h à 16 h."
+    }
+   ]
+  },
+  {
+   "phrase": "Finalement mets-le samedi à la même heure",
+   "expected": {
+    "tool": "modifier_element",
+    "when": "2026-10-17T15:00"
+   },
+   "before": [
+    {
+     "user": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+     "call": {
+      "name": "creer_evenement",
+      "arguments": {
+       "titre": "Rendez-vous chez le médecin",
+       "debut": "2026-10-16T15:00"
+      }
+     },
+     "result": {
+      "id": "e1",
+      "titre": "Rendez-vous chez le médecin",
+      "debut": "2026-10-16T15:00",
+      "fin": "2026-10-16T16:00",
+      "calendrier": "Maison"
+     },
+     "answer": "C’est dans ton calendrier « Maison » : Rendez-vous chez le médecin, vendredi 16 octobre de 15 h à 16 h."
+    }
+   ]
+  },
+  {
+   "phrase": "Change le titre en rendez-vous chez le dermatologue",
+   "expected": {
+    "tool": "modifier_element"
+   },
+   "before": [
+    {
+     "user": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+     "call": {
+      "name": "creer_evenement",
+      "arguments": {
+       "titre": "Rendez-vous chez le médecin",
+       "debut": "2026-10-16T15:00"
+      }
+     },
+     "result": {
+      "id": "e1",
+      "titre": "Rendez-vous chez le médecin",
+      "debut": "2026-10-16T15:00",
+      "fin": "2026-10-16T16:00",
+      "calendrier": "Maison"
+     },
+     "answer": "C’est dans ton calendrier « Maison » : Rendez-vous chez le médecin, vendredi 16 octobre de 15 h à 16 h."
+    }
+   ]
+  },
+  {
+   "phrase": "Plutôt à 11 h",
+   "expected": {
+    "tool": "modifier_element",
+    "when": "2026-10-16T11:00"
+   },
+   "before": [
+    {
+     "user": "Rappelle-moi demain à 10 h d'appeler Camille",
+     "call": {
+      "name": "creer_rappel",
+      "arguments": {
+       "titre": "Appeler Camille",
+       "echeance": "2026-10-16T10:00"
+      }
+     },
+     "result": {
+      "id": "r1",
+      "titre": "Appeler Camille",
+      "echeance": "2026-10-16T10:00",
+      "liste": "Rappels"
+     },
+     "answer": "C’est noté : vendredi 16 octobre à 10 h, Appeler Camille."
+    }
+   ]
+  },
+  {
+   "phrase": "Supprime ce rendez-vous",
+   "expected": {
+    "tool": "supprimer_element"
+   },
+   "before": [
+    {
+     "user": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+     "call": {
+      "name": "creer_evenement",
+      "arguments": {
+       "titre": "Rendez-vous chez le médecin",
+       "debut": "2026-10-16T15:00"
+      }
+     },
+     "result": {
+      "id": "e1",
+      "titre": "Rendez-vous chez le médecin",
+      "debut": "2026-10-16T15:00",
+      "fin": "2026-10-16T16:00",
+      "calendrier": "Maison"
+     },
+     "answer": "C’est dans ton calendrier « Maison » : Rendez-vous chez le médecin, vendredi 16 octobre de 15 h à 16 h."
+    }
+   ]
+  },
+  {
+   "phrase": "Finalement, enlève-le de mon agenda",
+   "expected": {
+    "tool": "supprimer_element"
+   },
+   "before": [
+    {
+     "user": "Ajoute un rendez-vous demain à 15 h chez le médecin",
+     "call": {
+      "name": "creer_evenement",
+      "arguments": {
+       "titre": "Rendez-vous chez le médecin",
+       "debut": "2026-10-16T15:00"
+      }
+     },
+     "result": {
+      "id": "e1",
+      "titre": "Rendez-vous chez le médecin",
+      "debut": "2026-10-16T15:00",
+      "fin": "2026-10-16T16:00",
+      "calendrier": "Maison"
+     },
+     "answer": "C’est dans ton calendrier « Maison » : Rendez-vous chez le médecin, vendredi 16 octobre de 15 h à 16 h."
+    }
+   ]
+  },
+  {
+   "phrase": "Efface ce rappel",
+   "expected": {
+    "tool": "supprimer_element"
+   },
+   "before": [
+    {
+     "user": "Rappelle-moi demain à 10 h d'appeler Camille",
+     "call": {
+      "name": "creer_rappel",
+      "arguments": {
+       "titre": "Appeler Camille",
+       "echeance": "2026-10-16T10:00"
+      }
+     },
+     "result": {
+      "id": "r1",
+      "titre": "Appeler Camille",
+      "echeance": "2026-10-16T10:00",
+      "liste": "Rappels"
+     },
+     "answer": "C’est noté : vendredi 16 octobre à 10 h, Appeler Camille."
+    }
+   ]
+  },
+  {
+   "phrase": "Annule le rappel",
+   "expected": {
+    "tool": "supprimer_element"
+   },
+   "before": [
+    {
+     "user": "Rappelle-moi demain à 10 h d'appeler Camille",
+     "call": {
+      "name": "creer_rappel",
+      "arguments": {
+       "titre": "Appeler Camille",
+       "echeance": "2026-10-16T10:00"
+      }
+     },
+     "result": {
+      "id": "r1",
+      "titre": "Appeler Camille",
+      "echeance": "2026-10-16T10:00",
+      "liste": "Rappels"
+     },
+     "answer": "C’est noté : vendredi 16 octobre à 10 h, Appeler Camille."
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi ce que tu disais tout à l'heure"
+  },
+  {
+   "phrase": "Je dois appeler le médecin un de ces jours"
+  },
+  {
+   "phrase": "C'est quoi un calendrier lunaire ?"
+  },
+  {
+   "phrase": "J'ai un rendez-vous demain, je suis un peu stressé"
+  },
+  {
+   "phrase": "Comment on crée un rappel sur iPhone ?"
+  },
+  {
+   "phrase": "Quelle heure est-il ?"
+  },
+  {
+   "phrase": "Quel jour on est aujourd'hui ?"
+  },
+  {
+   "phrase": "Tu peux me rappeler pourquoi le ciel est bleu ?"
+  },
+  {
+   "phrase": "Combien de temps faut-il pour cuire des pâtes ?"
+  },
+  {
+   "phrase": "Raconte-moi une petite histoire"
+  },
+  {
+   "phrase": "Mon agenda est vraiment trop chargé cette semaine"
+  },
+  {
+   "phrase": "Les rappels sur mon téléphone, c'est pratique"
+  },
+  {
+   "phrase": "J'ai complètement oublié mon rendez-vous hier"
+  },
+  {
+   "phrase": "C'est quoi un raccourci clavier ?"
+  },
+  {
+   "phrase": "Comment marchait un minuteur mécanique autrefois ?"
+  },
+  {
+   "phrase": "Quel est le meilleur moment de la journée pour faire du sport ?"
+  },
+  {
+   "phrase": "Donne-moi une idée de recette pour ce soir"
+  },
+  {
+   "phrase": "Combien de jours y a-t-il en février ?"
+  },
+  {
+   "phrase": "Le calendrier grégorien a été créé quand ?"
+  },
+  {
+   "phrase": "Je me lève à 7 h tous les matins"
+  },
+  {
+   "phrase": "Demain, je vais au marché avec ma sœur"
+  },
+  {
+   "phrase": "J'aime bien organiser ma semaine le dimanche soir"
+  },
+  {
+   "phrase": "Explique-moi comment fonctionne une horloge atomique"
+  },
+  {
+   "phrase": "Merci beaucoup, c'est parfait"
+  },
+  {
+   "phrase": "Bonjour Maé, comment ça va ?"
+  },
+  {
+   "phrase": "Qu'est-ce que tu sais faire ?"
+  },
+  {
+   "phrase": "Tu connais une bonne série à regarder ?"
+  },
+  {
+   "phrase": "Comment dit-on rendez-vous en anglais ?"
+  },
+  {
+   "phrase": "Mon médecin m'a dit de faire plus de sport"
+  },
+  {
+   "phrase": "Pourquoi les semaines ont-elles sept jours ?"
+  },
+  {
+   "phrase": "J'ai raté mon train ce matin, quelle journée"
+  },
+  {
+   "phrase": "C'est quoi la différence entre un rappel et une alarme ?"
+  },
+  {
+   "phrase": "Le salon est trop sombre le soir, tu as des idées de déco ?"
+  },
+  {
+   "phrase": "J'adore la playlist que j'ai écoutée hier"
+  },
+  {
+   "phrase": "En combien de temps on court un marathon ?"
+  },
+  {
+   "phrase": "Rappelle-moi comment tu t'appelles"
+  },
+  {
+   "phrase": "Il faudrait que je pense à faire les courses un jour"
+  },
+  {
+   "phrase": "Ma réunion de ce matin s'est bien passée"
+  },
+  {
+   "phrase": "Tu peux m'expliquer ce qu'est un fuseau horaire ?"
+  },
+  {
+   "phrase": "Combien de minutes y a-t-il dans une journée ?"
+  }
+ ]
+}

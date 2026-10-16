@@ -18,7 +18,8 @@ struct AssistantApp: App {
     init() {
         Fonts.register()
         #if DEBUG
-        let model = AssistantModel(connection: Demo.isOn ? DemoConnection() : AssistantHost())
+        let model = AssistantModel(connection: Demo.isOn ? DemoConnection()
+                                   : AssistantHost(actionsTestCollection: ActionsTestCollection.name))
         #else
         let model = AssistantModel(connection: AssistantHost())
         #endif
