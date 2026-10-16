@@ -70,6 +70,10 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
     /// Times the speakers ran out of audio in the middle of an answer.
     public var underruns: Int { lock.withLock { _underruns } }
     private var _underruns = 0
+    /// Voice processing is on (speakers mode): it is what turns other apps down.
+    private var voiceProcessing = false
+    /// See `setMicrophoneMuted`.
+    private var microphoneMuted = false
 
     public init() {
         (microphone, microphoneSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(500))
@@ -98,9 +102,12 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
             // Apple's voice-processing unit.
             try input.setVoiceProcessingEnabled(true)
             input.isVoiceProcessingAGCEnabled = true
-            // By default voice processing turns other apps down a lot (like a FaceTime call).
+            // By default voice processing turns other apps down a lot (like a FaceTime call). Here: hardly at
+            // all, and further only while it hears a voice, the user's or the assistant's (see
+            // `setMicrophoneMuted`). It reads this once, when the engine starts.
             input.voiceProcessingOtherAudioDuckingConfiguration = .init(
                 enableAdvancedDucking: true, duckingLevel: .min)
+            input.isVoiceProcessingInputMuted = lock.withLock { microphoneMuted }
         }
 
         let player = AVAudioPlayerNode()
@@ -164,6 +171,7 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
             self.player = player
             self.playbackFormat = playback
             self.observer = observer
+            self.voiceProcessing = mode == .speakers
         }
         let route = Route(mode: mode, inputDevice: Self.defaultDeviceName(input: true),
                           outputDevice: Self.defaultDeviceName(input: false),
@@ -187,6 +195,22 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
         dropQueuedAudio()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+    }
+
+    // MARK: - Muting
+
+    /// Mutes the microphone while nothing it hears is used (at rest in push-to-talk): it stays open, but
+    /// hears silence. Voice processing turns other apps down whenever it hears a voice, so the singing in
+    /// the music or people talking in the room would otherwise make the music go down and up again while
+    /// nobody is using the assistant. Speakers mode only: without voice processing nothing is turned down.
+    public func setMicrophoneMuted(_ muted: Bool) {
+        let input: AVAudioInputNode? = lock.withLock {
+            guard muted != microphoneMuted else { return nil }
+            microphoneMuted = muted
+            return voiceProcessing ? engine?.inputNode : nil
+        }
+        input?.isVoiceProcessingInputMuted = muted
+        if input != nil { DebugLog.log("audio: microphone \(muted ? "muted" : "open")") }
     }
 
     // MARK: - AudioOutput (the assistant's voice)

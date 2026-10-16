@@ -25,6 +25,7 @@ public actor AssistantHost: AssistantConnection {
     private var model: MLXChatModel?
     private var audio: SystemAudio?
     private var route: SystemAudio.Route?
+    private var pipelineState = PipelineState.listening
     private var playbackSampleRate = 24_000.0
     private var tasks: [Task<Void, Never>] = []
     private var activity: NSObjectProtocol?
@@ -142,6 +143,8 @@ public actor AssistantHost: AssistantConnection {
             Task { await self?.audioConfigurationChanged() }
         }
         self.audio = audio
+        pipelineState = .listening
+        muteMicrophoneIfUnused()
 
         let model: MLXChatModel
         let pipeline: VoicePipeline
@@ -385,7 +388,10 @@ public actor AssistantHost: AssistantConnection {
             await shortcutTools.setNeedingConfirmation(Set(new.shortcutsToConfirm))
         }
         guard let pipeline else { return }
-        if new.pushToTalk != old.pushToTalk { await pipeline.setPushToTalk(new.pushToTalk) }
+        if new.pushToTalk != old.pushToTalk {
+            await pipeline.setPushToTalk(new.pushToTalk)
+            muteMicrophoneIfUnused()
+        }
         if new.audioMode != old.audioMode { await restartAudio() }
         if new.actionsEnabled != old.actionsEnabled {
             DebugLog.log("actions: \(new.actionsEnabled ? "on" : "off")")
@@ -456,6 +462,12 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
     }
 
+    /// At rest in push-to-talk nothing the microphone hears is used: muted, so that the voices it hears do
+    /// not turn the other apps down (see `SystemAudio.setMicrophoneMuted`).
+    private func muteMicrophoneIfUnused() {
+        audio?.setMicrophoneMuted(settings.pushToTalk && pipelineState == .listening)
+    }
+
     /// A device was plugged or unplugged: the system stopped the audio engine.
     private func audioConfigurationChanged() async {
         guard !restartingAudio else { return }
@@ -469,7 +481,10 @@ public actor AssistantHost: AssistantConnection {
 
     private func forward(_ event: PipelineEvent) async {
         switch event {
-        case .state(let state): emit.yield(.state(state))
+        case .state(let state):
+            pipelineState = state
+            muteMicrophoneIfUnused()
+            emit.yield(.state(state))
         case .userTranscript(let text, let language):
             DebugLog.log("user [\(language.rawValue)]: \(text)")
             emit.yield(.userTranscript(text, language))
