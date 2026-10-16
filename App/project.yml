@@ -28,6 +28,11 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     SWIFT_EMIT_LOC_STRINGS: YES
+    # Also builds the English tables (en.lproj), which the string catalogs leave out since English is their
+    # source language: French being the development region (CFBundleDevelopmentRegion, below), an English Mac
+    # would otherwise fall back to the French table. So every text of Resources/InfoPlist.xcstrings needs its
+    # English value too, or English Macs would see its key.
+    XCSTRINGS_FORCE_BUILD_ALL_STRINGS: YES
 
 targets:
   OpenMae:
@@ -56,13 +61,14 @@ targets:
         CFBundleDisplayName: OpenMae
         LSHasLocalizedDisplayName: true
         # The interface's source text is English with a French translation; French stays the language
-        # of Macs set to neither French nor English.
+        # of Macs set to neither French nor English (English ones: see XCSTRINGS_FORCE_BUILD_ALL_STRINGS).
         CFBundleDevelopmentRegion: fr
         CFBundleLocalizations: [fr, en]
         CFBundleShortVersionString: "0.3.0"
         CFBundleVersion: "3"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.productivity
+        # Shown from Resources/InfoPlist.xcstrings, in English as in French: change it there too.
         NSMicrophoneUsageDescription: >-
           The assistant listens to what you say in order to answer. Sound never leaves this Mac.
     entitlements:

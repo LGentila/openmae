@@ -8,6 +8,12 @@
             "state": "translated",
             "value": "L’assistant écoute ce que tu dis pour te répondre. Le son ne quitte jamais ce Mac."
           }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant listens to what you say in order to answer. Sound never leaves this Mac."
+          }
         }
       }
     },
