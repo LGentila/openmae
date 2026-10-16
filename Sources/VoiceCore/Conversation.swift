@@ -30,6 +30,10 @@ public struct Conversation: Sendable {
     public var systemPrompt: String
     /// Extra sentences contributed by extensions, appended to the system prompt.
     public var systemAddenda: [String] = []
+    /// Exchanges shown to the model right after the system prompt, as if they had happened (`ActionCatalog.examples`).
+    /// Constant like the system prompt, so the model keeps them pre-computed too. They are not `exchanges`: shortening
+    /// the history or starting a new conversation keeps them, and they are never the user's words.
+    public var examples: [ChatMessage] = []
     public private(set) var exchanges: [ChatMessage] = []
 
     public init(systemPrompt: String = Conversation.defaultSystemPrompt) {
@@ -56,10 +60,10 @@ public struct Conversation: Sendable {
     }
 
     public func messages(adding userMessage: ChatMessage) -> [ChatMessage] {
-        [systemMessage] + exchanges + [userMessage]
+        [systemMessage] + examples + exchanges + [userMessage]
     }
 
-    public var messages: [ChatMessage] { [systemMessage] + exchanges }
+    public var messages: [ChatMessage] { [systemMessage] + examples + exchanges }
 
     /// Records a completed (or interrupted) exchange.
     public mutating func record(user text: String, language: SpeechLanguage, assistant answer: String,

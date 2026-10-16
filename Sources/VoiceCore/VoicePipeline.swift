@@ -31,6 +31,8 @@ public struct PipelineConfig: Sendable {
     /// While the model writes a tool call (no voice until it is complete: about 1.5 s with Gemma 4 26B on the
     /// reference Mac), say "Un instant, je m'en occupe tout de suite." so the user is not left in silence.
     public var toolCallFiller = true
+    /// With actions on, every conversation starts with `ActionCatalog.examples` (see `ActionCatalog.showsExamples`).
+    public var actionExamples = false
     public init() {}
 }
 
@@ -177,18 +179,20 @@ public actor VoicePipeline {
     }
 
     /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
-    /// model itself, hence `async`).
-    private func updateAddenda() async {
+    /// model itself, hence `async`), and the example exchanges when the config asks for them. Set when the tools are,
+    /// and kept for the conversations that follow, so the model's memory of them stays valid.
+    private func updatePrompt() async {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         if tools != nil {
             addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
         }
         conversation.systemAddenda = addenda
+        conversation.examples = tools != nil && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
     }
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
     public func start() async throws {
-        await updateAddenda()
+        await updatePrompt()
         if let tools { await model.useTools(await tools.tools()) }
         try await model.prefill(conversation.messages)
         emit.yield(.state(.listening))
@@ -199,7 +203,7 @@ public actor VoicePipeline {
     public func setTools(_ runner: ToolRunner?) async throws {
         await cancelTurn(stopAudio: true)
         tools = runner
-        await updateAddenda()
+        await updatePrompt()
         conversation.clear()
         await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])
@@ -638,7 +642,8 @@ public actor VoicePipeline {
     }
 
     private func toolContext(_ turn: Turn, now: Date) -> ToolContext {
-        // The user's words, this turn's then the two before (their message without the date line).
+        // The user's words, this turn's then the two before (their message without the date line; the examples' are
+        // not theirs, and not in `exchanges`).
         let earlier = conversation.exchanges.filter { $0.role == .user }.suffix(2).reversed()
             .map { $0.content.components(separatedBy: "\n").first ?? "" }
         return ToolContext(now: now, language: turn.language, userSaid: [turn.userText] + earlier) {

@@ -142,9 +142,12 @@ public enum SpeakableText {
         // Markdown that models sometimes produce despite the "no markdown" instruction.
         s = s.replacingOccurrences(of: #"\*\*|__|\*|`|#+ "#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: #"(?m)^\s*([-•]|\d+[.)])\s+"#, with: "", options: .regularExpression)
-        // A timestamp in brackets: the model copying the date line that ends the user's messages.
+        // A timestamp in brackets: the model copying the date line that ends the user's messages, in figures or in
+        // words with the year and the time ("(jeudi 15 octobre 2026 à 18:42)", as Gemma 4 E2B writes it).
         s = s.replacingOccurrences(of: #"[(\[]\s*\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\s*[)\]]"#, with: "",
                                    options: .regularExpression)
+        s = s.replacingOccurrences(of: #"[(\[][^()\[\]]*\b20\d{2}\b[^()\[\]]*\b\d{1,2}\s?[:h]\s?\d{2}\b[^()\[\]]*[)\]]"#,
+                                   with: "", options: .regularExpression)
         // Links: say nothing rather than read an URL letter by letter.
         s = s.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
         // Emojis and pictographs.

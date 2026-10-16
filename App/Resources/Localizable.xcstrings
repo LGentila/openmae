@@ -891,22 +891,22 @@
         }
       }
     },
-    "On this Mac, Maé misses most actions: she may say she saved something without doing it.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sur ce Mac, Maé rate la plupart des actions : elle peut dire qu’elle a noté quelque chose sans l’avoir fait."
-          }
-        }
-      }
-    },
     "On this Mac, Maé sometimes gets an action wrong: listen to what she confirms.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Sur ce Mac, Maé se trompe parfois sur une action : écoute bien ce qu’elle te confirme."
+          }
+        }
+      }
+    },
+    "On this Mac, Maé sometimes misses an action: she may say she saved something without doing it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur ce Mac, Maé rate parfois une action : elle peut dire qu’elle a noté quelque chose sans l’avoir fait."
           }
         }
       }

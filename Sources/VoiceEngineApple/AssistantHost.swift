@@ -166,6 +166,7 @@ public actor AssistantHost: AssistantConnection {
 
             var config = PipelineConfig()
             config.pushToTalk = settings.pushToTalk
+            config.actionExamples = ActionCatalog.showsExamples(on: tier)
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                      synthesizer: synthesizer, output: audio, tools: await toolRunner(), config: config)
             try await pipeline.start()

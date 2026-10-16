@@ -49,6 +49,43 @@ public enum ActionCatalog {
     public static let example = (request: "Mets un minuteur de 5 minutes pour le thé",
                                  call: ToolCall(name: "minuteur", arguments: ["duree": "5 minutes", "libelle": "le thé"]))
 
+    /// Whether conversations on this tier start with `examples`. Gemma 4 E2B (minimum) needs them: on its own it
+    /// answers "Je note votre rendez-vous" without calling anything (9 to 13 requests right out of 66 in
+    /// `voice-cli actions-bench`), with them 61 to 63. E4B (standard) does better without them (65 or 66, against 60
+    /// to 62: it asks more questions), and the larger models do not need them. The price, on E2B: asked what was said
+    /// or done earlier, it tells the examples as if they had happened; no instruction tried stopped that.
+    public static func showsExamples(on tier: HardwareTier) -> Bool { tier == .minimum }
+
+    /// Three exchanges for the start of a conversation, as if they had happened: a timer, a reminder without a date
+    /// and an event, each a call made at once with the user's words, its result and what the app then said. As the
+    /// benchmark measured them: no date line in their messages. The event is on the Tuesday the app would choose at
+    /// `now`, and the ids ("t0", "r0", "e0") are ones the app never gives: a call that refers to one of these items
+    /// is refused, never taken for something of the user's.
+    public static func examples(now: Date, timeZone: TimeZone = .current) -> [ChatMessage] {
+        let context = ToolContext(now: now, timeZone: timeZone, language: .french)
+        var messages: [ChatMessage] = []
+        func add(_ request: String, _ call: ToolCall, _ result: JSONValue, _ spoken: String) {
+            messages += [Conversation.userMessage(request, language: .french), .call(call), .result(of: call, result),
+                         ChatMessage(.assistant, spoken)]
+        }
+        add(example.request, example.call, ["id": "t0", "duree_secondes": 300, "libelle": "le thé"],
+            ActionPhrases.timerStarted(seconds: 300, label: "le thé", .french))
+        let reminder = ToolCall(name: createReminder.name, arguments: ["titre": "acheter du lait"])
+        add("Rappelle-moi d'acheter du lait", reminder, ["id": "r0", "titre": "acheter du lait", "liste": "Rappels"],
+            ActionPhrases.reminderCreated(title: "acheter du lait", due: nil, hasTime: false, listName: nil, context))
+        let title = "Rendez-vous chez le kiné"
+        let when = "mardi à 18 h 15"
+        if let start = try? FrenchDates.moment(when, now: now, calendar: context.calendar).start {
+            let end = start.addingTimeInterval(3600)
+            let event = ToolCall(name: createEvent.name, arguments: ["titre": .string(title), "quand": .string(when)])
+            add("Ajoute un rendez-vous chez le kiné \(when)", event,
+                ["id": "e0", "titre": .string(title), "debut": .string(LocalDateTime.format(start, in: timeZone)),
+                 "fin": .string(LocalDateTime.format(end, in: timeZone)), "calendrier": "Maison"],
+                ActionPhrases.eventCreated(title: title, start: start, end: end, allDay: false, calendarName: nil, context))
+        }
+        return messages
+    }
+
     /// The line that ends every user message when actions are on, e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.
     public static func dateLine(_ now: Date, timeZone: TimeZone = .current) -> String {

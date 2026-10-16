@@ -150,6 +150,14 @@ struct ActionPhraseTests {
     @Test func copiedDateLineIsNotSpoken() {
         #expect(SpeakableText.clean("Il est dix-huit heures. (2026-10-15T18:42)") == "Il est dix-huit heures.")
         #expect(SpeakableText.clean("Bonne idée [2026-10-15 18:42] !") == "Bonne idée !")
+        // In words, as the smallest model writes it (a piece of its own, once the answer is cut into sentences).
+        #expect(SpeakableText.clean("(jeudi 15 octobre 2026 à 18:42)").isEmpty)
+        #expect(SpeakableText.clean("Je note ta réunion. (Jeudi 15 octobre 2026 à 18h42)") == "Je note ta réunion.")
+        #expect(SpeakableText.clean("Tu dois acheter quoi ? (jeudi 15 octobre 2026 à 18\(nb)h\(nb)42)") == "Tu dois acheter quoi ?")
+        #expect(SpeakableText.clean("Bonsoir ! (Nous sommes le jeudi 15 octobre 2026, il est 18:42.)") == "Bonsoir !")
+        // What is meant to be said stays.
+        #expect(SpeakableText.clean("Nous sommes le jeudi 15 octobre 2026.") == "Nous sommes le jeudi 15 octobre 2026.")
+        #expect(SpeakableText.clean("Le concert (le 8 novembre à 21 h) est noté.") == "Le concert (le 8 novembre à 21 h) est noté.")
     }
 
     @Test func durations() {
@@ -325,6 +333,52 @@ struct ActionCallTests {
         #expect(withExample.hasPrefix(rules))
         #expect(withExample.hasSuffix("« Mets un minuteur de 5 minutes pour le thé », ta réponse entière est <call>"))
     }
+
+    @Test func examplesAreExchangesTheAppCouldHaveHad() {
+        let examples = ActionCatalog.examples(now: now, timeZone: paris)
+        let exchange: [ChatMessage.Role] = [.user, .assistant, .tool, .assistant]
+        #expect(examples.map(\.role) == exchange + exchange + exchange)
+        #expect(examples.filter { $0.role == .user }.map(\.content)
+                == [ActionCatalog.example.request, "Rappelle-moi d'acheter du lait",
+                    "Ajoute un rendez-vous chez le kiné mardi à 18 h 15"])  // no date line
+        // Each call comes at once, with the user's words.
+        #expect(examples[1].content.isEmpty && examples[1].toolCalls == [ActionCatalog.example.call])
+        #expect(examples[9].toolCalls.first?.arguments == ["titre": "Rendez-vous chez le kiné", "quand": "mardi à 18 h 15"])
+        // The result and the sentence the app would have given (the coming Tuesday), with ids it never gives.
+        #expect(examples[10].toolResult == ["id": "e0", "titre": "Rendez-vous chez le kiné", "debut": "2026-10-20T18:15",
+                                            "fin": "2026-10-20T19:15", "calendrier": "Maison"])
+        #expect(examples.compactMap { $0.toolResult?.objectID } == ["t0", "r0", "e0"])
+        #expect(examples.filter { $0.role == .assistant && $0.toolCalls.isEmpty }.map(\.content)
+                == ["C’est parti pour 5 minutes\(nb): le thé. Je te préviens à la fin.",
+                    "C’est noté dans tes rappels\(nb): acheter du lait.",
+                    "C’est dans ton agenda\(nb): Rendez-vous chez le kiné, mardi 20 octobre de 18\(nb)h\(nb)15 à 19\(nb)h\(nb)15."])
+        #expect(ActionCatalog.showsExamples(on: .minimum) && !ActionCatalog.showsExamples(on: .comfort))
+    }
+
+    @Test func examplesStayWhenTheHistoryIsShortenedOrCleared() {
+        var c = Conversation(systemPrompt: "S")
+        c.examples = [ChatMessage(.user, "Exemple"), ChatMessage(.assistant, "Réponse.")]
+        c.record(user: "Bonjour", language: .french, assistant: "Salut.", interrupted: false)
+        c.record(user: "Merci", language: .french, assistant: "Avec plaisir.", interrupted: false)
+        #expect(c.messages.map(\.content) == ["S", "Exemple", "Réponse.", "Bonjour", "Salut.", "Merci", "Avec plaisir."])
+        #expect(c.exchanges.count == 4)  // the examples are not the user's exchanges
+        c.dropOldestExchange()
+        #expect(c.messages(adding: ChatMessage(.user, "Et toi ?")).map(\.content)
+                == ["S", "Exemple", "Réponse.", "Merci", "Avec plaisir.", "Et toi ?"])
+        c.dropOldestExchanges(5)
+        #expect(c.messages.map(\.content) == ["S", "Exemple", "Réponse."])
+        c.record(user: "Bonjour", language: .french, assistant: "Salut.", interrupted: false)
+        c.clear()
+        #expect(c.messages.map(\.content) == ["S", "Exemple", "Réponse."])
+    }
+}
+
+private extension JSONValue {
+    /// The "id" of an object.
+    var objectID: String? {
+        guard case .object(let fields) = self else { return nil }
+        return fields["id"]?.text
+    }
 }
 
 // MARK: - Runner and pipeline
@@ -333,6 +387,8 @@ struct ActionCallTests {
 actor RecordingTools: ToolProvider {
     nonisolated let identifier = "test"
     private(set) var performed: [ToolCall] = []
+    /// `ToolContext.userSaid` of each call performed.
+    private(set) var said: [[String]] = []
     private(set) var undone: [String] = []
 
     func tools() -> [ToolSpec] {
@@ -351,6 +407,7 @@ actor RecordingTools: ToolProvider {
 
     func perform(_ call: ToolCall, context: ToolContext) throws -> ToolOutcome {
         performed.append(call)
+        said.append(context.userSaid)
         return ToolOutcome(spoken: "C’est noté\(nb): \(call.text("titre") ?? "le test est lancé").",
                            forModel: ["id": .string("n\(performed.count)")],
                            undo: UndoToken(provider: identifier, id: "n\(performed.count)"))
@@ -462,6 +519,7 @@ struct PipelineActionTests {
         await waitFor { await speaker.played > 0 }
         #expect(await tools.performed.count == 1)
         let request = try #require(await model.requests.last)
+        #expect(request.count == 2)  // no example exchanges unless the config asks for them
         #expect(request.last?.content.contains("\n(Nous sommes le ") == true)  // the date line ends the message
         // The actions' part of the system prompt, with its example call written the model's way.
         #expect(request.first?.content.hasSuffix(ActionCatalog.promptAddendum(exampleCall: "[minuteur]")) == true)
@@ -486,6 +544,36 @@ struct PipelineActionTests {
         #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
         #expect(history[2].toolCalls.first?.name == "noter")
         #expect(history[3].toolResult == ["id": "n1"])
+    }
+
+    @Test func examplesOpenTheConversationButAreNotTheUsers() async throws {
+        let (model, speaker, tools) = (ScriptedModel(scripts: [[.text("Bonjour, je suis bien là.")], Self.note]),
+                                       FakeSpeaker(), RecordingTools())
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        config.actionExamples = true
+        let pipeline = VoicePipeline(detector: LoudnessDetector(),
+                                     transcriber: ScriptedTranscriber(["Bonjour", "Rappelle-moi le pain"]), model: model,
+                                     synthesizer: FakeSynthesizer(), output: speaker, tools: ToolRunner(providers: [tools]),
+                                     config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("bien là") }
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await tools.performed.count == 1 }
+        // Right after the system prompt, then the user's own exchanges.
+        let request = try #require(await model.requests.last)
+        let examples = ActionCatalog.examples(now: Date())
+        #expect(request[1...examples.count].map(\.role) == examples.map(\.role))
+        #expect(request[1].content == ActionCatalog.example.request)
+        #expect(request[examples.count + 1].content.hasPrefix("Bonjour\n(Nous sommes le "))
+        // The app reads the moment in the user's words: never in the examples'.
+        #expect(await tools.said == [["Rappelle-moi le pain", "Bonjour"]])
+        await waitFor { await log.pieces.joined().contains("Pain") }
+        #expect(await log.pieces.joined(separator: " ") == "Bonjour, je suis bien là. C’est noté\(nb): Pain.")
     }
 
     @Test func fillerCoversTheTimeTheCallIsWritten() async throws {

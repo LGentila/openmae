@@ -113,11 +113,11 @@ struct SettingsPanel: View {
     }
 
     /// The smaller models are not reliable with actions (measured with `voice-cli actions-bench`): the minimum
-    /// tier's misses nearly all of them, often saying it did what it did not do; the standard tier's gets some
-    /// wrong, which the confirmation lets the user hear.
+    /// tier's, even with its example exchanges, misses about one in fifteen, mostly saying it did what it did not do;
+    /// the standard tier's gets some wrong, which the confirmation lets the user hear.
     private var actionsWarning: LocalizedStringKey? {
         switch model.tier {
-        case .minimum: "On this Mac, Maé misses most actions: she may say she saved something without doing it."
+        case .minimum: "On this Mac, Maé sometimes misses an action: she may say she saved something without doing it."
         case .standard: "On this Mac, Maé sometimes gets an action wrong: listen to what she confirms."
         default: nil
         }

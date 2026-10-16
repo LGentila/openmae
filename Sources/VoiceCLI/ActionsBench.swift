@@ -7,14 +7,15 @@
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
-//                           [--watch-calls]
+//                           [--watch-calls] [--examples app|none|file]
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
 // included. It slows generation a little: timings of such a run are not comparable.
-// Experiments without rebuilding: --addendum <file> replaces the actions part of the system prompt, and
-// --examples <file> records exchanges (the shape of a case's "before", plus an optional "dateLine") at the
-// start of every conversation.
+// Conversations start with the example exchanges the app gives this tier's model (ActionCatalog.examples), or
+// with those --examples says: "app" (the app's, on any tier), "none", or a file of exchanges (the shape of a
+// case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
+// --addendum <file> replaces the actions part of the system prompt (experiments without rebuilding).
 
 import Foundation
 import VoiceCore
@@ -40,14 +41,16 @@ private struct Corpus: Decodable {
         var name: String?
     }
 
-    /// An earlier exchange, for corrections ("décale-le").
+    /// An earlier exchange, for corrections ("décale-le"); without a call, a plain exchange.
     struct Exchange: Decodable {
         var user: String
-        var call: ToolCall
-        var result: JSONValue
+        var call: ToolCall?
+        var result: JSONValue?
         var answer: String
         /// Only for --examples (a case's earlier exchanges get the reference time's line).
         var dateLine: String?
+
+        var steps: [ChatMessage] { call.map { [.call($0), .result(of: $0, result ?? .null)] } ?? [] }
     }
 }
 
@@ -103,15 +106,22 @@ func runActionsBench(_ o: Options) async throws {
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     conversation.systemAddenda = [try o.addendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
         ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)]
-    if let file = o.examples {
-        // Experiment: exchanges shown at the start of every conversation, as if they had happened.
-        let examples = try JSONDecoder().decode([Corpus.Exchange].self, from: Data(contentsOf: URL(fileURLWithPath: file)))
-        for example in examples {
-            conversation.record(user: Conversation.userMessage(example.user, language: .french, dateLine: example.dateLine),
-                                steps: [.call(example.call), .result(of: example.call, example.result)],
-                                assistant: example.answer, interrupted: false)
+    let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
+    switch examples {
+    case "app": conversation.examples = ActionCatalog.examples(now: now, timeZone: timeZone)
+    case "none": break
+    default:
+        // Experiment: other exchanges shown at the start of every conversation, as if they had happened, and notes
+        // from the app between them ({"system": "…"}).
+        let entries = try JSONDecoder().decode([JSONValue].self, from: Data(contentsOf: URL(fileURLWithPath: examples)))
+        conversation.examples = try entries.flatMap { entry -> [ChatMessage] in
+            if case .object(let fields) = entry, let note = fields["system"]?.text { return [ChatMessage(.system, note)] }
+            let exchange = try JSONDecoder().decode(Corpus.Exchange.self, from: JSONEncoder().encode(entry))
+            return [Conversation.userMessage(exchange.user, language: .french, dateLine: exchange.dateLine)] + exchange.steps
+                + [ChatMessage(.assistant, exchange.answer)]
         }
     }
+    print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
     let prefixStart = clock.now
     try await model.prefill(conversation.messages)
@@ -124,8 +134,7 @@ func runActionsBench(_ o: Options) async throws {
         var history = conversation
         for exchange in item.before ?? [] {
             history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                           steps: [.call(exchange.call), .result(of: exchange.call, exchange.result)],
-                           assistant: exchange.answer, interrupted: false)
+                           steps: exchange.steps, assistant: exchange.answer, interrupted: false)
         }
         let request = history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
         var text = ""
@@ -243,9 +252,13 @@ private func resolve(_ call: ToolCall, created: Corpus.Exchange?, context: ToolC
         let period = try ActionCatalog.period(call, context: context, required: call.name == ActionCatalog.readAgenda.name)
         return Resolved(start: period?.0, end: period?.1)
     case ActionCatalog.changeItem.name, ActionCatalog.deleteItem.name:
-        // As the app: only an item created in this conversation (the corpus's earlier exchange) can be changed.
-        guard case .object(let fields)? = created?.result, fields["id"] != nil else {
-            throw ToolRefusal(forModel: "Aucun élément « \(call.text("reference") ?? "dernier") » créé dans cette "
+        // As the app: only an item created in this conversation (the corpus's earlier exchange) can be changed, named
+        // "dernier" or by its id (not, say, an example's).
+        let reference = call.text("reference") ?? "dernier"
+        guard case .object(let fields)? = created?.result, let id = fields["id"]?.text,
+              reference == id || ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased())
+        else {
+            throw ToolRefusal(forModel: "Aucun élément « \(reference) » créé dans cette "
                               + "conversation : seuls ceux-là peuvent être modifiés ou supprimés.",
                               spoken: ActionPhrases.nothingToChange(context.language))
         }
@@ -315,7 +328,8 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
     print("calls the app would refuse: \(results.filter { $0.refusal != nil }.count)")
-    let copied = results.filter { $0.text.range(of: #"\(\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil }
+    // In figures or in words ("(jeudi 15 octobre 2026 à 18:42)"): a year in brackets.
+    let copied = results.filter { $0.text.range(of: #"[(\[][^()\[\]]*\b20\d{2}"#, options: .regularExpression) != nil }
     print("answers copying the date line (removed before the voice): \(copied.count) / \(results.filter { !$0.text.isEmpty }.count)")
 
     // Expected / chosen.
