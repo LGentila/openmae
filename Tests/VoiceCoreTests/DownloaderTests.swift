@@ -20,7 +20,9 @@ final class FakeHub: @unchecked Sendable {
     var status: [String: Int] = [:]
     /// Wait between two 4 KB chunks (to pause in the middle of a file).
     var chunkDelay: TimeInterval = 0
-    private(set) var requests: [(path: String, range: String?)] = []
+    private var requestLog: [(path: String, range: String?)] = []
+    /// Read under the lock: a test may look while the requests arrive (on URLSession's threads).
+    var requests: [(path: String, range: String?)] { Self.lock.withLock { requestLog } }
 
     init() {
         Self.lock.withLock { Self.hubs[repository] = self }
@@ -36,7 +38,7 @@ final class FakeHub: @unchecked Sendable {
 
     func record(_ path: String, _ range: String?) -> Int? {
         Self.lock.withLock {
-            requests.append((path, range))
+            requestLog.append((path, range))
             return status[path]
         }
     }
@@ -150,6 +152,10 @@ struct DownloaderTests {
         Data((0..<count).map { _ in UInt8.random(in: 0...255) })
     }
 
+    func waitFor(_ condition: () async -> Bool) async {
+        for _ in 0..<400 where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
     @Test func filesAreDownloadedCheckedAndPutInPlace() async throws {
         let hub = FakeHub()
         hub.files = ["config.json": Data("{}".utf8), "weights/model.bin": randomData(300_000)]
@@ -250,7 +256,7 @@ struct DownloaderTests {
         hub.status = ["model.bin": 503]
         let pack = hub.pack(["model.bin"])
         let task = Task { try await downloader().download([pack]) { _ in } }
-        try await Task.sleep(for: .milliseconds(100))
+        await waitFor { hub.requests.count >= 2 }  // refused, then refused again: it was retried
         hub.serverIsBack()
         try await task.value
         #expect(store.isComplete([pack]))

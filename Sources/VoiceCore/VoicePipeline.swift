@@ -401,7 +401,7 @@ public actor VoicePipeline {
                             // the latency is measured) at the first sound the user can actually hear.
                             if quiet { continue }
                             voiceHeard = true
-                            await self.voiceIsAudible()
+                            self.voiceIsAudible()
                         }
                         // Each sentence starts again with near-silence: cap the pauses between sentences.
                         quietSamples = quiet ? quietSamples + samples.count : 0
@@ -410,7 +410,7 @@ public actor VoicePipeline {
                         if Task.isCancelled { break }
                         if !playing {
                             playing = true
-                            await self.audioStarted(turn, at: clock.now)
+                            self.audioStarted(turn, at: clock.now)
                         }
                         await output.play(samples, sampleRate: sampleRate)
                     }
