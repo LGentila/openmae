@@ -36,8 +36,26 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var cache: [KVCache]
     private var cachedTokens: [Int] = []
     /// Copy of the cache taken just before the last request's new tokens were fed in. Copies share
-    /// the underlying memory until one side changes, so this costs almost nothing.
+    /// the underlying memory until one side changes, so this costs almost nothing. For a second pass
+    /// (after a tool call) it is taken once the tool's result is in instead: the next turn often has to
+    /// come back to it (the history keeps the answer as the voice said it, which is not always what the
+    /// model wrote) and computed that result again (a 700-token one: 3.4 s instead of 0.5 s with
+    /// Gemma 4 26B on the reference Mac; 5–6 s seen in the app after a web search).
     private var snapshot: (tokens: [Int], cache: [KVCache])?
+    /// While later requests answer the same user message (a second pass), the snapshot taken before the
+    /// first one. If the turn is dropped then (the user spoke again before any voice), the request that
+    /// replaces it differs from that message on: without this, the whole conversation was computed again
+    /// (6.5 s instead of 0.6 s for a short one with Gemma 4 26B).
+    private var turnSnapshot: (tokens: [Int], cache: [KVCache])?
+    /// The user's message the last request answered.
+    private var lastTurn: Turn?
+
+    /// A user's message: its place in the conversation, and the message.
+    private struct Turn: Equatable {
+        var index: Int
+        var message: ChatMessage
+    }
+
     /// A shortened history being computed in the background, in a second cache, chunk by chunk.
     private var rebuild: (tokens: [Int], cache: [KVCache], done: Int)?
     private var rebuildTask: Task<Void, Never>?
@@ -239,11 +257,24 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     {
         hold.set(false)  // a new answer never starts paused
         let prompt = try render(conversation, generationPrompt: true)
-        let start = try reuseCache(for: prompt)
-        snapshot = (Array(prompt[..<start]), cache.map { $0.copy() })
-        let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
+        let reused = try reuseCache(for: prompt)
         let clock = ContinuousClock()
         let t0 = clock.now
+        let start = reused > 0 ? reused : try feedEarlierTurns(of: conversation, prompt: prompt)
+        let turn = conversation.lastIndex { $0.role == .user }.map { Turn(index: $0, message: conversation[$0]) }
+        let answeringAgain = turn != nil && turn == lastTurn  // a second pass, after a tool call
+        lastTurn = turn
+        if !answeringAgain {
+            turnSnapshot = nil
+            snapshot = start > 0 ? (Array(prompt[..<start]), cache.map { $0.copy() }) : nil
+        } else if turnSnapshot == nil {
+            if let snapshot, commonPrefix(snapshot.tokens, prompt) == snapshot.tokens.count {
+                turnSnapshot = snapshot
+            } else if start > 0 {
+                turnSnapshot = (Array(prompt[..<start]), cache.map { $0.copy() })
+            }
+        }
+        let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
         let chances = ToolCallWatch.Chances()
         var components = GenerationComponents()
         if watchingToolCalls, let toolCallStart, !tools.isEmpty {
@@ -252,9 +283,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var iterator = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
                                          components: components)
         let d = clock.now - t0
-        lastPrefill = (start, prompt.count - start,
+        lastPrefill = (reused, prompt.count - reused,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
-        DebugLog.log("LLM: prefill \(prompt.count - start) tokens (reused \(start)) in \(lastPrefill.ms) ms")
+        DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms")
+        if answeringAgain {
+            // Once the tool's result is in (see `snapshot`).
+            snapshot = (Array(prompt.prefix(cachedTokenCount(upTo: prompt.count))), cache.map { $0.copy() })
+        }
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
         var produced: [Int] = []
         var callTokens: [Int]?  // inside a tool call
@@ -348,14 +383,16 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Makes the cache match the beginning of `tokens`; returns how many tokens are already in it.
     ///
     /// In order of preference: keep the cache as is (the new request extends it), rewind it, go back
-    /// to the snapshot taken before the previous request (an abandoned speculative turn, or an
-    /// interrupted answer, when Gemma's sliding-window layers can no longer rewind), rebuild it.
+    /// to a snapshot when Gemma's sliding-window layers can no longer rewind (an abandoned speculative
+    /// turn, an interrupted answer, an answer the history keeps otherwise than the model wrote it, a
+    /// turn dropped after a tool call), rebuild it.
     private func reuseCache(for tokens: [Int]) throws -> Int {
         if let r = rebuild, r.done >= r.tokens.count - 1, commonPrefix(r.tokens, tokens) >= r.done {
             cache = r.cache  // the shortened history is ready: switch to it
             cachedTokens = Array(r.tokens[..<r.done])
             rebuild = nil
             snapshot = nil
+            turnSnapshot = nil
             DebugLog.log("LLM: switched to the shortened history (\(cachedTokens.count) tokens)")
         }
         var common = commonPrefix(cachedTokens, tokens)
@@ -365,18 +402,45 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             cachedTokens.removeLast(excess)
             return common
         }
+        // A snapshot restored becomes the cache itself, hence dropped.
         if let snapshot, commonPrefix(snapshot.tokens, tokens) == snapshot.tokens.count {
-            cache = snapshot.cache
-            cachedTokens = snapshot.tokens
             self.snapshot = nil
-            DebugLog.log("LLM: restored the snapshot (\(cachedTokens.count) tokens)")
-            return cachedTokens.count
+            return restore(snapshot)
         }
+        if let turnSnapshot, commonPrefix(turnSnapshot.tokens, tokens) == turnSnapshot.tokens.count {
+            snapshot = nil
+            self.turnSnapshot = nil
+            return restore(turnSnapshot)
+        }
+        snapshot = nil  // neither can serve a request that goes on from this one
+        turnSnapshot = nil
         cache = try context.model.newCache(parameters: parameters)
         cachedTokens = []
         common = 0
         cacheRebuilds += 1
         return common
+    }
+
+    private func restore(_ snapshot: (tokens: [Int], cache: [KVCache])) -> Int {
+        cache = snapshot.cache
+        cachedTokens = snapshot.tokens
+        DebugLog.log("LLM: restored the snapshot (\(cachedTokens.count) tokens)")
+        return cachedTokens.count
+    }
+
+    /// For a request computed from scratch: the turns before its user's message go in first, so that the snapshot holds
+    /// them. Taken at 0 tokens, it served no later request: each one the cache could not serve was computed from
+    /// scratch again, until one happened to extend the cache exactly (6.9–7.3 s per request instead of 0.5–1 s for a
+    /// short conversation with Gemma 4 26B). Returns how many tokens the cache now holds.
+    private func feedEarlierTurns(of conversation: [ChatMessage], prompt: [Int]) throws -> Int {
+        guard let user = conversation.lastIndex(where: { $0.role == .user }), user > 0 else { return 0 }
+        let earlier = try render(Array(conversation[..<user]), generationPrompt: false)
+        guard !earlier.isEmpty, commonPrefix(earlier, prompt) == earlier.count else { return 0 }
+        let input = LMInput(tokens: MLXArray(earlier.map { Int32($0) }))
+        _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+        eval(cache.flatMap(\.state))
+        cachedTokens = Array(earlier.prefix(cachedTokenCount(upTo: earlier.count)))
+        return cachedTokens.count
     }
 
     private func commonPrefix(_ a: [Int], _ b: [Int]) -> Int {
