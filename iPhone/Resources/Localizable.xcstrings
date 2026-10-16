@@ -1,0 +1,1116 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    " ": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " "
+          }
+        }
+      }
+    },
+    "%lld min": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld min"
+          }
+        }
+      }
+    },
+    "A code is valid for 5 minutes and serves only once. Show a new one on your Mac: Settings › iPhone, then “Add an iPhone”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un code vaut 5 minutes et ne sert qu’une fois. Affiches-en un nouveau sur ton Mac : Réglages › iPhone, puis « Ajouter un iPhone »."
+          }
+        }
+      }
+    },
+    "Accessing the microphone…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès au micro…"
+          }
+        }
+      }
+    },
+    "After a silence, to save the battery": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Après un silence, pour ménager la batterie"
+          }
+        }
+      }
+    },
+    "Allow the camera to scan the code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorise l’appareil photo pour scanner le code."
+          }
+        }
+      }
+    },
+    "Allow the microphone.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorise le micro."
+          }
+        }
+      }
+    },
+    "At home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison"
+          }
+        }
+      }
+    },
+    "At home and away, the link happens on its own.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison comme ailleurs, la liaison se fait toute seule."
+          }
+        }
+      }
+    },
+    "At home, on the same Wi-Fi as your Mac, the link happens on its own.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison, sur le même Wi-Fi que ton Mac, la liaison se fait toute seule."
+          }
+        }
+      }
+    },
+    "Automatic end": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fin automatique"
+          }
+        }
+      }
+    },
+    "Away": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À distance"
+          }
+        }
+      }
+    },
+    "Back": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour"
+          }
+        }
+      }
+    },
+    "Camera viewfinder: put your Mac’s QR code inside the frame": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Viseur de l’appareil photo : place le code QR de ton Mac dans le cadre"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler"
+          }
+        }
+      }
+    },
+    "Check that it is on, with the code still showing, then scan it again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifie qu’il est allumé et que le code est encore affiché, puis scanne-le à nouveau."
+          }
+        }
+      }
+    },
+    "Chosen on your Mac. It only sees encrypted packets.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisi sur ton Mac. Il ne voit que des paquets chiffrés."
+          }
+        }
+      }
+    },
+    "Comfort (32 to 36 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confort (32 à 36 Go)"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion…"
+          }
+        }
+      }
+    },
+    "Contacting your Mac…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je contacte ton Mac…"
+          }
+        }
+      }
+    },
+    "Conversation": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversation"
+          }
+        }
+      }
+    },
+    "Does not answer right now": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ne répond pas pour l’instant"
+          }
+        }
+      }
+    },
+    "Done: you can talk to Maé from your iPhone.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "C’est fait : tu peux parler à Maé depuis ton iPhone."
+          }
+        }
+      }
+    },
+    "Finish": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminer"
+          }
+        }
+      }
+    },
+    "Finish the setup on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termine l’installation sur ton Mac."
+          }
+        }
+      }
+    },
+    "Forget": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oublier"
+          }
+        }
+      }
+    },
+    "Forget this Mac?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oublier ce Mac ?"
+          }
+        }
+      }
+    },
+    "Forget this Mac…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oublier ce Mac…"
+          }
+        }
+      }
+    },
+    "Hands-free": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mains libres"
+          }
+        }
+      }
+    },
+    "Have a look at OpenMaé’s window on your Mac: it says what is wrong.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jette un œil à la fenêtre d’OpenMaé sur ton Mac : elle dit ce qui ne va pas."
+          }
+        }
+      }
+    },
+    "Headphones": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Casque"
+          }
+        }
+      }
+    },
+    "Hold": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens"
+          }
+        }
+      }
+    },
+    "Hold down": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenir"
+          }
+        }
+      }
+    },
+    "Hold to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens pour parler"
+          }
+        }
+      }
+    },
+    "Hold while you talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintiens pendant que tu parles"
+          }
+        }
+      }
+    },
+    "I am taking another way. Your conversation is kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je reprends par un autre chemin. Ta conversation est gardée."
+          }
+        }
+      }
+    },
+    "Idle": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Au repos"
+          }
+        }
+      }
+    },
+    "Interrupt": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompre"
+          }
+        }
+      }
+    },
+    "It may be asleep or off. I’ll try again on my own as soon as it is back.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il est peut-être en veille ou éteint. Je réessaie toute seule dès qu’il revient."
+          }
+        }
+      }
+    },
+    "Keep your finger down while you talk.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garde le doigt appuyé pendant que tu parles."
+          }
+        }
+      }
+    },
+    "Language model": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de langage"
+          }
+        }
+      }
+    },
+    "Link interrupted": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liaison interrompue"
+          }
+        }
+      }
+    },
+    "Link with your Mac: at home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liaison avec ton Mac : à la maison"
+          }
+        }
+      }
+    },
+    "Link with your Mac: away, through the relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liaison avec ton Mac : à distance, par le relais"
+          }
+        }
+      }
+    },
+    "Link with your Mac: reconnecting": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liaison avec ton Mac : reconnexion en cours"
+          }
+        }
+      }
+    },
+    "Listening": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écoute"
+          }
+        }
+      }
+    },
+    "Loading speech recognition…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de la reconnaissance vocale…"
+          }
+        }
+      }
+    },
+    "Loading the language model…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement du modèle de langage…"
+          }
+        }
+      }
+    },
+    "Loading the voice…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de la voix…"
+          }
+        }
+      }
+    },
+    "Looking for the code…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je cherche le code…"
+          }
+        }
+      }
+    },
+    "Maximum (48 GB and more)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum (48 Go et plus)"
+          }
+        }
+      }
+    },
+    "Maé has a problem on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé a un souci sur ton Mac."
+          }
+        }
+      }
+    },
+    "Maé is back on your Mac. Tap “Talk” to take her back.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé est revenue sur ton Mac. Touche « Parler » pour la reprendre."
+          }
+        }
+      }
+    },
+    "Maé is not ready there yet. Open OpenMaé on your Mac to finish getting started.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé n’est pas encore prête là-bas. Ouvre OpenMaé sur ton Mac pour finir la mise en route."
+          }
+        }
+      }
+    },
+    "Maé is speaking": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé parle"
+          }
+        }
+      }
+    },
+    "Maé is thinking…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé réfléchit…"
+          }
+        }
+      }
+    },
+    "Minimum (8 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimum (8 Go)"
+          }
+        }
+      }
+    },
+    "Mute the microphone": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couper le micro"
+          }
+        }
+      }
+    },
+    "My Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mon Mac"
+          }
+        }
+      }
+    },
+    "Never": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jamais"
+          }
+        }
+      }
+    },
+    "New conversation": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "No relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun relais"
+          }
+        }
+      }
+    },
+    "Not supported": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non pris en charge"
+          }
+        }
+      }
+    },
+    "Off": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé"
+          }
+        }
+      }
+    },
+    "On": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activé"
+          }
+        }
+      }
+    },
+    "On your Mac, open Settings › iPhone, then “Add an iPhone”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur ton Mac, ouvre Réglages › iPhone, puis « Ajouter un iPhone »."
+          }
+        }
+      }
+    },
+    "Open Settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir Réglages"
+          }
+        }
+      }
+    },
+    "OpenMaé %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenMaé %@"
+          }
+        }
+      }
+    },
+    "OpenMaé relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais OpenMaé"
+          }
+        }
+      }
+    },
+    "Plugged in, your Mac stays awake. With the lid closed and no external display, it sleeps anyway.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Branché sur secteur, ton Mac reste éveillé. Capot fermé et sans écran externe, il s’endort quand même."
+          }
+        }
+      }
+    },
+    "Reachable, at home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable, à la maison"
+          }
+        }
+      }
+    },
+    "Reachable, away": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joignable, à distance"
+          }
+        }
+      }
+    },
+    "Reconnecting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnexion…"
+          }
+        }
+      }
+    },
+    "Relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais"
+          }
+        }
+      }
+    },
+    "Release to send": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relâche pour envoyer"
+          }
+        }
+      }
+    },
+    "Scan a new code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanner un nouveau code"
+          }
+        }
+      }
+    },
+    "Scan the code shown on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanne le code affiché sur ton Mac."
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages"
+          }
+        }
+      }
+    },
+    "Sound output": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sortie audio"
+          }
+        }
+      }
+    },
+    "Space": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace"
+          }
+        }
+      }
+    },
+    "Speak whenever you like": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux"
+          }
+        }
+      }
+    },
+    "Speak whenever you like or press": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux ou appuie sur"
+          }
+        }
+      }
+    },
+    "Speak whenever you like, I’m listening.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux, je t’écoute."
+          }
+        }
+      }
+    },
+    "Speakers": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haut-parleurs"
+          }
+        }
+      }
+    },
+    "Speech recognition": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnaissance vocale"
+          }
+        }
+      }
+    },
+    "Standard (16 to 24 GB)": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard (16 à 24 Go)"
+          }
+        }
+      }
+    },
+    "Starting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Démarrage…"
+          }
+        }
+      }
+    },
+    "Talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parler"
+          }
+        }
+      }
+    },
+    "Talk to Maé": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parler à Maé"
+          }
+        }
+      }
+    },
+    "The conversation paused after a silence. Tap “Talk” to go on.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversation s’est mise en pause après un silence. Touche « Parler » pour continuer."
+          }
+        }
+      }
+    },
+    "The first launch can take a minute or two.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le premier lancement peut prendre une à deux minutes."
+          }
+        }
+      }
+    },
+    "Thinking": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réflexion"
+          }
+        }
+      }
+    },
+    "This code is no longer valid.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce code n’est plus valable."
+          }
+        }
+      }
+    },
+    "To talk to Maé again, you will have to scan a new code shown on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour reparler à Maé, il faudra scanner un nouveau code affiché sur ton Mac."
+          }
+        }
+      }
+    },
+    "To talk to Maé, OpenMaé needs the microphone. You can allow it in the Settings app.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour parler à Maé, OpenMaé a besoin du micro. Tu peux l’autoriser dans l’app Réglages."
+          }
+        }
+      }
+    },
+    "Try again": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réessayer"
+          }
+        }
+      }
+    },
+    "Turn the microphone back on": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rallumer le micro"
+          }
+        }
+      }
+    },
+    "Voice": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voix"
+          }
+        }
+      }
+    },
+    "Way of talking": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Façon de parler"
+          }
+        }
+      }
+    },
+    "What you say goes encrypted to your Mac, and nowhere else.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que tu dis part chiffré vers ton Mac, et nulle part ailleurs."
+          }
+        }
+      }
+    },
+    "You": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toi"
+          }
+        }
+      }
+    },
+    "Your Mac does not answer.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac ne répond pas."
+          }
+        }
+      }
+    },
+    "Your Mac has turned off its microphone and speakers.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your Mac is reachable at home only": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac n’est joignable qu’à la maison"
+          }
+        }
+      }
+    },
+    "Your Mac no longer knows this iPhone. To add it again, open Settings › iPhone on your Mac, then “Add an iPhone”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac ne connaît plus cet iPhone. Pour le rajouter, ouvre Réglages › iPhone sur ton Mac, puis « Ajouter un iPhone »."
+          }
+        }
+      }
+    },
+    "Your own relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton propre relais"
+          }
+        }
+      }
+    },
+    "or press": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ou appuie sur"
+          }
+        }
+      }
+    },
+    "tested": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "testé"
+          }
+        }
+      }
+    },
+    "to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pour parler"
+          }
+        }
+      }
+    },
+    "untested / estimated": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "non testé / estimé"
+          }
+        }
+      }
+    },
+    "⌥ Space": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌥ Espace"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

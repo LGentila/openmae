@@ -1,3 +1,4 @@
+import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
@@ -8,6 +9,8 @@ struct ConversationView: View {
     /// The models are loading: the orb waits at rest and the transcript says what is loading.
     var isLoading = false
     var loadingStep: LoadingStep?
+    /// An iPhone may have the conversation (nil in the screens' still pictures).
+    @Environment(PhoneAccess.self) private var phone: PhoneAccess?
 
     var body: some View {
         let state = isLoading ? PipelineState.listening : model.state
@@ -16,13 +19,22 @@ struct ConversationView: View {
             OrbStage(model: model, state: state)
             LiveTranscript(state: state, user: exchange.user, answer: exchange.answer, invitation: invitation)
                 .frame(height: 150)
-            ConversationControls(model: model, isLoading: isLoading)
+            ConversationControls(model: model, isLoading: isLoading, phone: isLoading ? nil : phone)
                 .frame(maxHeight: .infinity)
         }
+        .overlay(alignment: .top) {
+            if let hand = phone?.hand, !isLoading {
+                OnPhoneBanner(path: hand.path)
+                    .offset(y: 4)
+                    .transition(.opacity.combined(with: .offset(y: -6)))
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: phone?.hand)
     }
 
     private var invitation: LiveTranscript.Invitation {
         if isLoading { return .loading(loadingStep) }
+        if phone?.hand != nil { return .onPhone }
         let shortcut = model.hasTalkShortcut
         return model.settings.pushToTalk ? .holdSpace(orShortcut: shortcut) : .speak(orShortcut: shortcut)
     }
@@ -68,11 +80,14 @@ private struct OrbStage: View {
 private struct ConversationControls: View {
     let model: AssistantModel
     let isLoading: Bool
+    let phone: PhoneAccess?
 
     private enum Action: Equatable {
         case talk(held: Bool)
         case cancel
         case interrupt
+        /// An iPhone has the conversation: the Mac can take it back.
+        case takeBack
     }
 
     var body: some View {
@@ -80,6 +95,15 @@ private struct ConversationControls: View {
             if let action {
                 let glow = StatePalette(model.state).glow
                 switch action {
+                case .takeBack:
+                    VStack(spacing: 12) {
+                        Button { phone?.takeBack() } label: { Text("Take over here") }
+                            .buttonStyle(PrimaryButtonStyle(icon: .laptop, disc: glow))
+                        Text("The conversation goes on on your iPhone until you take over.")
+                            .textStyle(.note)
+                            .foregroundStyle(Palette.inkMuted)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 case .talk(let held):
                     HoldToTalk(held: held, glow: glow) { model.setTalkKey($0) }
                         .transition(.opacity.combined(with: .scale(scale: 0.92)))
@@ -98,6 +122,7 @@ private struct ConversationControls: View {
 
     private var action: Action? {
         guard !isLoading, model.isReady else { return nil }
+        if phone?.hand != nil { return .takeBack }
         switch model.state {
         case .thinking: return .cancel
         case .speaking: return .interrupt
@@ -133,4 +158,41 @@ private struct HoldToTalk: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityHint(Text("Hold the space bar to talk"))
     }
+}
+
+/// "Maé is on your iPhone · At home": shown while an iPhone has the conversation.
+private struct OnPhoneBanner: View {
+    let path: LinkPath
+
+    var body: some View {
+        HStack(spacing: 10) {
+            IconView(icon: .phone, size: 20)
+            Text("Maé is on your iPhone")
+                .textStyle(.onPhoneBanner)
+            Rectangle()
+                .fill(Palette.lineStrong)
+                .frame(width: 1, height: 16)
+                .accessibilityHidden(true)
+            Group {
+                switch path {
+                case .direct: Text("At home")
+                case .relay: Text("Away")
+                }
+            }
+            .textStyle(.chip)
+            .foregroundStyle(Palette.inkMuted)
+        }
+        .foregroundStyle(Palette.ink)
+        .padding(.leading, 12)
+        .padding(.trailing, 16)
+        .frame(height: 40)
+        .background(Palette.white, in: Capsule())
+        .hairline(Capsule())
+        .shadow(color: Palette.ink.opacity(0.08).color, radius: 8, y: 6)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension TextStyle {
+    static let onPhoneBanner = TextStyle(.display, 17, weight: 600, lineHeight: 22, letterSpacing: -0.01)
 }

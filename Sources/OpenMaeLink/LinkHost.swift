@@ -1,0 +1,648 @@
+import CryptoKit
+import Foundation
+import VoiceCore
+
+/// An iPhone paired with this Mac.
+public struct PairedDevice: Codable, Sendable, Equatable, Identifiable {
+    /// Derived from its Noise key.
+    public var id: String
+    public var name: String
+    /// The model identifier, e.g. "iPhone17,3".
+    public var model: String
+    public var publicKey: Data
+    public var added: Date
+
+    public init(publicKey: Data, name: String, model: String, added: Date = Date()) {
+        id = Base32.encode(Data(SHA256.hash(data: publicKey).prefix(16)))
+        self.name = name
+        self.model = model
+        self.publicKey = publicKey
+        self.added = added
+    }
+
+    /// "iPhone 16" rather than the generic name iOS gives apps ("iPhone").
+    public var displayName: String { DeviceModels.marketingName(model) ?? name }
+}
+
+/// Which relay the Mac goes through, chosen in its settings; the iPhone follows (the relay is in the pairing link).
+public enum RelayChoice: Codable, Sendable, Equatable {
+    /// The OpenMaé relay, relay.openmae.com.
+    case official
+    /// A relay of one's own.
+    case custom(URL)
+    /// No relay: the iPhone reaches the Mac at home only.
+    case none
+
+    public var url: URL? {
+        switch self {
+        case .official: RelayClient.official
+        case .custom(let url): url
+        case .none: nil
+        }
+    }
+}
+
+/// What the Mac's iPhone settings show.
+public struct LinkStatus: Sendable, Equatable {
+    public enum Pairing: Sendable, Equatable {
+        case idle
+        /// The QR code is shown, valid until `expires`.
+        case waiting(PairingLink, expires: Date)
+        case expired
+        case added(PairedDevice)
+    }
+
+    public enum Relay: Sendable, Equatable {
+        /// No relay chosen, or nothing to relay (no iPhone).
+        case off
+        case connecting
+        case registered
+        /// Cannot be reached for now; tried again on its own.
+        case unreachable
+    }
+
+    /// The iPhone that has the conversation.
+    public struct Hand: Sendable, Equatable {
+        public var device: PairedDevice
+        public var path: LinkPath
+
+        public init(device: PairedDevice, path: LinkPath) {
+            self.device = device
+            self.path = path
+        }
+    }
+
+    public var devices: [PairedDevice] = []
+    public var pairing = Pairing.idle
+    public var relayChoice = RelayChoice.official
+    public var relay = Relay.off
+    /// Announced on the local network.
+    public var local = false
+    public var keepAwake = true
+    public var hand: Hand?
+
+    public init() {}
+}
+
+/// The Mac's side of the link: pairing, the local listener, the relay registration, the iPhones' sessions, and the
+/// bridge with the engine.
+///
+/// It sits between the Mac's interface and the engine: the interface talks to it as to the engine (it is an
+/// `AssistantConnection`), and it passes everything on, sending the engine's events to the iPhones as well and the
+/// iPhones' commands to the engine. When an iPhone takes the conversation, the engine's microphone and voice are
+/// switched to it (`RemoteAudioRouting`); the last one to speak, on the Mac or on an iPhone, has the conversation.
+public actor LinkHost: AssistantConnection {
+    public nonisolated let events: AsyncStream<AssistantEvent>
+    private nonisolated let emit: AsyncStream<AssistantEvent>.Continuation
+    public nonisolated let status: AsyncStream<LinkStatus>
+    private nonisolated let statusSink: AsyncStream<LinkStatus>.Continuation
+    private nonisolated let macCommands: AsyncStream<AssistantCommand>.Continuation
+
+    private let engine: any AssistantConnection
+    private let audio: (any RemoteAudioRouting)?
+    private let identityStore: any IdentityStore
+    private let storeURL: URL
+    private let macName: String
+    private var identity: DeviceIdentity?
+    private var state = LinkStatus()
+    private var pairingCode: PairingCode?
+    private var listener: DirectListener?
+    private var registration: RelayRegistration?
+    private var registrationTasks: [Task<Void, Never>] = []
+    private var sessions: [Data: Peer] = [:]
+    private var hand: Hand?
+    private var conversationActivity: (any NSObjectProtocol)?
+    #if os(macOS)
+    private let keepAwake = KeepAwake()
+    #endif
+
+    // What the engine runs with, and what the iPhones are told when they connect.
+    private var macSettings: AssistantSettings?
+    private var phonePushToTalk: Bool?
+    private var phase: AssistantEvent?
+    private var pipelineState = PipelineState.listening
+
+    private struct Peer {
+        var session: LinkSession
+        var device: PairedDevice
+        var tasks: [Task<Void, Never>]
+    }
+
+    /// The iPhone that has the conversation's sound.
+    private struct Hand {
+        var key: Data
+        var microphone: RemoteMicrophone
+        var output: RemoteVoiceOutput
+        var feeding: Task<Void, Never>?
+        /// The iPhone's connection dropped: it has a few seconds to come back before the Mac takes the sound back.
+        var grace: Task<Void, Never>?
+    }
+
+    /// `audio`: nil when the engine cannot switch its sound (a demonstration engine): the iPhones then see and
+    /// command the conversation without sound.
+    public init(engine: any AssistantConnection, audio: (any RemoteAudioRouting)?, identityStore: any IdentityStore,
+                storeURL: URL, macName: String)
+    {
+        self.engine = engine
+        self.audio = audio
+        self.identityStore = identityStore
+        self.storeURL = storeURL
+        self.macName = macName
+        (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
+        (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
+        macCommands = commands
+        Task { [weak self] in
+            for await command in commandStream { await self?.handleMac(command) }
+        }
+        Task { [weak self, engine] in
+            for await event in engine.events { await self?.forward(event) }
+        }
+        Task { await self.load() }
+    }
+
+    /// Where the link keeps its iPhones and settings, next to the models.
+    public static var defaultStoreURL: URL {
+        AppIdentity.modelsDirectory.deletingLastPathComponent().appending(path: "Link/link.json")
+    }
+
+    // MARK: - The Mac's interface
+
+    public nonisolated func send(_ command: AssistantCommand) {
+        macCommands.yield(command)
+    }
+
+    private func handleMac(_ command: AssistantCommand) async {
+        switch command {
+        case .start(let settings):
+            macSettings = settings
+            engine.send(.start(effective(settings)))
+        case .updateSettings(let settings):
+            macSettings = settings
+            engine.send(.updateSettings(effective(settings)))
+        case .talkKey(pressed: true) where hand != nil:
+            // Someone speaks on the Mac: the Mac takes the conversation back.
+            await releaseHand(notifyPhone: true)
+            engine.send(command)
+        default:
+            engine.send(command)
+        }
+    }
+
+    /// The settings as the engine gets them: while an iPhone has the conversation, its own way of talking
+    /// (hands-free or hold to talk).
+    private func effective(_ settings: AssistantSettings) -> AssistantSettings {
+        var settings = settings
+        if hand != nil, let phonePushToTalk { settings.pushToTalk = phonePushToTalk }
+        return settings
+    }
+
+    private func sendEngineSettings() {
+        guard let macSettings else { return }
+        engine.send(.updateSettings(effective(macSettings)))
+    }
+
+    /// "Reprendre ici": the Mac takes the conversation back.
+    public func takeBack() async {
+        await releaseHand(notifyPhone: true)
+    }
+
+    // MARK: - Pairing, devices, settings
+
+    public func startPairing() async {
+        if identity == nil {
+            // The Mac's keys are made the first time an iPhone is added.
+            do {
+                identity = try identityStore.loadOrCreate()
+            } catch {
+                DebugLog.log("link: cannot make the Mac's keys (\(error))")
+            }
+        }
+        guard let identity else { return }
+        let code = PairingCode()
+        pairingCode = code
+        let link = PairingLink(macID: identity.id, macKey: identity.publicKey, relay: state.relayChoice.url,
+                               code: code.code, macName: macName)
+        state.pairing = .waiting(link, expires: code.expires)
+        updateNetwork()
+        publish()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(PairingCode.lifetime))
+            await self?.pairingExpired(code)
+        }
+    }
+
+    public func cancelPairing() {
+        pairingCode = nil
+        state.pairing = .idle
+        updateNetwork()
+        publish()
+    }
+
+    private func pairingExpired(_ code: PairingCode) {
+        guard pairingCode?.code == code.code, case .waiting = state.pairing else { return }
+        pairingCode = nil
+        state.pairing = .expired
+        updateNetwork()
+        publish()
+    }
+
+    public func remove(_ deviceID: String) async {
+        guard let device = state.devices.first(where: { $0.id == deviceID }) else { return }
+        state.devices.removeAll { $0.id == deviceID }
+        save()
+        if hand?.key == device.publicKey { await releaseHand(notifyPhone: false) }
+        if let peer = sessions.removeValue(forKey: device.publicKey) {
+            peer.tasks.forEach { $0.cancel() }
+            // Told, so that it shows it must be paired again rather than "the Mac does not answer".
+            peer.session.send(.removed)
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                peer.session.close()
+            }
+        }
+        DebugLog.log("link: iPhone removed")
+        updateNetwork()
+        publish()
+    }
+
+    public func setRelay(_ choice: RelayChoice) {
+        guard choice != state.relayChoice else { return }
+        state.relayChoice = choice
+        save()
+        stopRegistration()
+        updateNetwork()
+        if case .waiting = state.pairing { Task { await startPairing() } }  // the QR code carries the relay
+        // The iPhones follow: those connected now, and the others when they next connect (the handshake says it).
+        for peer in sessions.values { peer.session.send(.mac(aboutThisMac)) }
+        publish()
+    }
+
+    /// What the Mac tells the iPhones about itself: its name and the relay to reach it by.
+    private var aboutThisMac: HandshakePayload.Mac {
+        HandshakePayload.Mac(name: macName, relay: state.relayChoice.url)
+    }
+
+    public func setKeepAwake(_ on: Bool) {
+        state.keepAwake = on
+        save()
+        updateKeepAwake()
+        publish()
+    }
+
+    // MARK: - Storage
+
+    private struct Stored: Codable {
+        var devices: [PairedDevice] = []
+        var relay = RelayChoice.official
+        var keepAwake = true
+    }
+
+    private func load() {
+        do {
+            identity = try identityStore.load()
+        } catch {
+            DebugLog.log("link: cannot read the Mac's keys (\(error)); iPhone access is off")
+        }
+        if let data = try? Data(contentsOf: storeURL), let stored = try? JSONDecoder().decode(Stored.self, from: data) {
+            state.devices = stored.devices
+            state.relayChoice = stored.relay
+            state.keepAwake = stored.keepAwake
+        }
+        updateNetwork()
+        updateKeepAwake()
+        publish()
+    }
+
+    private func save() {
+        let stored = Stored(devices: state.devices, relay: state.relayChoice, keepAwake: state.keepAwake)
+        do {
+            try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try JSONEncoder().encode(stored).write(to: storeURL, options: .atomic)
+        } catch {
+            DebugLog.log("link: cannot save the iPhones (\(error))")
+        }
+    }
+
+    private func publish() {
+        updateActivity()
+        statusSink.yield(state)
+    }
+
+    /// While an iPhone has the conversation, the Mac's own sound is off and its window often hidden: macOS would
+    /// then slow the app down (App Nap: its timers stretched threefold in a test) and could put the Mac to sleep in
+    /// the middle of an answer.
+    private func updateActivity() {
+        if state.hand != nil, conversationActivity == nil {
+            conversationActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .latencyCritical], reason: "An iPhone is in a conversation with OpenMaé")
+        } else if state.hand == nil, let activity = conversationActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            conversationActivity = nil
+        }
+    }
+
+    // MARK: - Network
+
+    /// Listening and registered with the relay while there is an iPhone to serve, or one being paired.
+    private func updateNetwork() {
+        let needed = identity != nil && (!state.devices.isEmpty || pairingCode != nil)
+        if needed, listener == nil, let identity {
+            let listener = DirectListener(macID: identity.id)
+            listener.onReadyChange = { [weak self] ready in Task { await self?.setLocal(ready) } }
+            self.listener = listener
+            listener.start()
+            Task { [weak self] in
+                for await transport in listener.connections {
+                    Task { await self?.handle(transport) }
+                }
+            }
+        } else if !needed, let listener {
+            listener.stop()
+            self.listener = nil
+            state.local = false
+        }
+        if needed, registration == nil, let relay = state.relayChoice.url, let identity {
+            let registration = RelayRegistration(relay: relay, identity: identity)
+            self.registration = registration
+            registrationTasks = [
+                Task { [weak self] in
+                    for await status in registration.status { await self?.setRelay(status) }
+                },
+                Task { [weak self] in
+                    for await tube in registration.tubes {
+                        Task { [weak self] in
+                            do {
+                                let transport = try await RelayClient.accept(relay: relay, tube: tube)
+                                await self?.handle(transport)
+                            } catch {
+                                DebugLog.log("link: could not accept a tube (\(error))")
+                            }
+                        }
+                    }
+                },
+            ]
+            Task { await registration.start() }
+        } else if !needed || state.relayChoice.url == nil {
+            stopRegistration()
+        }
+        updateKeepAwake()
+    }
+
+    private func stopRegistration() {
+        registrationTasks.forEach { $0.cancel() }
+        registrationTasks = []
+        if let registration { Task { await registration.stop() } }
+        registration = nil
+        state.relay = .off
+    }
+
+    private func setLocal(_ ready: Bool) {
+        state.local = ready
+        publish()
+    }
+
+    private func setRelay(_ status: RelayRegistration.Status) {
+        guard registration != nil else { return }
+        switch status {
+        case .connecting:
+            if state.relay == .off { state.relay = .connecting }
+        case .registered: state.relay = .registered
+        case .unreachable: state.relay = .unreachable
+        }
+        publish()
+    }
+
+    private func updateKeepAwake() {
+        #if os(macOS)
+        keepAwake.set(state.keepAwake && !state.devices.isEmpty)
+        #endif
+    }
+
+    // MARK: - Connections
+
+    /// A connection arrived, directly or through the relay: Noise says who it is.
+    private func handle(_ transport: any LinkTransport) async {
+        guard let identity else {
+            transport.close()
+            return
+        }
+        let inbox = FrameInbox(transport)
+        let deadline = LinkSession.closeAfter(transport, seconds: 10)
+        defer { deadline.cancel() }
+        do {
+            let outcome = try await HostHandshake.respond(
+                over: transport, inbox: inbox, identity: identity, mac: aboutThisMac,
+                pairingCode: { await self.currentPairingCode() },
+                completePairing: { key, phone in await self.completePairing(key: key, phone: phone) },
+                isPaired: { key in await self.isPaired(key) })
+            switch outcome {
+            case .paired:
+                // Let the verdict reach the iPhone before closing.
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    transport.close()
+                }
+            case .session(let keys, let key):
+                guard let device = state.devices.first(where: { $0.publicKey == key }) else {
+                    transport.close()
+                    return
+                }
+                deadline.cancel()
+                let session = LinkSession(transport: transport, inbox: inbox, keys: keys, peerKey: key, peerMac: nil)
+                open(session, device: device)
+            }
+        } catch let HandshakeFailure.refused(code) {
+            // Let the refusal reach the iPhone before closing (a closed connection drops what is still on its way).
+            DebugLog.log("link: handshake refused (\(code))")
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                transport.close()
+            }
+        } catch {
+            DebugLog.log("link: handshake ended (\(error))")
+            transport.close()
+        }
+    }
+
+    private func currentPairingCode() -> Data? {
+        guard let pairingCode, pairingCode.isValid() else { return nil }
+        return pairingCode.code
+    }
+
+    /// The pairing handshake succeeded: the iPhone is added, unless the code was used meanwhile.
+    private func completePairing(key: Data, phone: HandshakePayload.Phone) -> Bool {
+        guard var code = pairingCode, code.isValid() else { return false }
+        code.use()
+        pairingCode = nil
+        let device = PairedDevice(publicKey: key, name: phone.name, model: phone.model)
+        state.devices.removeAll { $0.publicKey == key }
+        state.devices.append(device)
+        state.pairing = .added(device)
+        save()
+        DebugLog.log("link: iPhone added")
+        updateNetwork()
+        publish()
+        return true
+    }
+
+    private func isPaired(_ key: Data) -> Bool {
+        state.devices.contains { $0.publicKey == key }
+    }
+
+    private func open(_ session: LinkSession, device: PairedDevice) {
+        let key = device.publicKey
+        if let previous = sessions.removeValue(forKey: key) {
+            // The same iPhone again (another network, another path): the new connection replaces the old one.
+            previous.tasks.forEach { $0.cancel() }
+            previous.session.close()
+        }
+        DebugLog.log("link: iPhone connected (\(session.path.rawValue))")
+        // What the iPhone needs to show the conversation at once.
+        if let phase { session.send(.event(phase)) }
+        session.send(.event(.state(pipelineState)))
+        if var hand, hand.key == key {
+            hand.grace?.cancel()
+            hand.grace = nil
+            hand.output.bind(session)
+            self.hand = hand
+            state.hand = LinkStatus.Hand(device: device, path: session.path)
+        }
+        let tasks = [
+            Task { [weak self] in
+                for await message in session.messages { await self?.received(message, from: key) }
+            },
+            Task { [weak self] in
+                for await packet in session.audio { await self?.received(packet, from: key) }
+            },
+            Task { [weak self] in
+                await session.waitUntilClosed()
+                await self?.closed(session, key: key)
+            },
+        ]
+        sessions[key] = Peer(session: session, device: device, tasks: tasks)
+        publish()
+    }
+
+    private func closed(_ session: LinkSession, key: Data) {
+        guard sessions[key]?.session === session else { return }
+        sessions.removeValue(forKey: key)?.tasks.forEach { $0.cancel() }
+        DebugLog.log("link: iPhone disconnected")
+        if var hand, hand.key == key, hand.grace == nil {
+            // Wi-Fi to 4G, a tunnel: the iPhone has a few seconds to come back by another way.
+            hand.microphone.fillSilence()
+            hand.grace = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { return }
+                await self?.graceOver(key)
+            }
+            self.hand = hand
+        }
+        publish()
+    }
+
+    private func graceOver(_ key: Data) async {
+        guard hand?.key == key, sessions[key] == nil else { return }
+        DebugLog.log("link: the iPhone did not come back, the Mac takes the sound back")
+        await releaseHand(notifyPhone: false)
+    }
+
+    // MARK: - What the iPhones say
+
+    private func received(_ message: LinkMessage, from key: Data) async {
+        switch message {
+        case .command(let command):
+            guard RemoteCommandPolicy.isAllowed(command) else {
+                DebugLog.log("link: refused a command reserved to the Mac")
+                return
+            }
+            switch command {
+            case .updateSettings(let settings):
+                // Only the way of talking is the iPhone's to choose.
+                phonePushToTalk = settings.pushToTalk
+                if hand?.key == key { sendEngineSettings() }
+            case .talkKey(pressed: true):
+                await takeHand(key)
+                engine.send(command)
+            default:
+                engine.send(command)
+            }
+        case .audio(.start):
+            await takeHand(key)
+        case .audio(.stop):
+            if hand?.key == key { await releaseHand(notifyPhone: false) }
+        case .audio(.finished(let stream)):
+            if hand?.key == key { hand?.output.markFinished(stream) }
+        case .audio, .event, .ping, .pong, .paired, .removed, .mac:
+            break
+        }
+    }
+
+    private func received(_ packet: AudioPacket, from key: Data) {
+        guard let hand, hand.key == key else { return }
+        hand.microphone.receive(packet)
+    }
+
+    /// The iPhone `key` takes the conversation: the engine's microphone and voice go to it.
+    private func takeHand(_ key: Data) async {
+        guard hand?.key != key, let peer = sessions[key] else { return }
+        if hand != nil { await releaseHand(notifyPhone: true, toLocal: false) }
+        let microphone = RemoteMicrophone()
+        let output = RemoteVoiceOutput(session: peer.session)
+        hand = Hand(key: key, microphone: microphone, output: output)
+        state.hand = LinkStatus.Hand(device: peer.device, path: peer.session.path)
+        DebugLog.log("link: the iPhone has the conversation")
+        await audio?.useRemoteAudio(microphone: microphone.samples, output: output)
+        sendEngineSettings()
+        publish()
+    }
+
+    /// The Mac takes the sound back (or another iPhone takes it: `toLocal: false`).
+    private func releaseHand(notifyPhone: Bool, toLocal: Bool = true) async {
+        guard let hand else { return }
+        self.hand = nil
+        state.hand = nil
+        hand.grace?.cancel()
+        hand.microphone.finish()
+        hand.output.detach()
+        if notifyPhone { sessions[hand.key]?.session.send(.audio(.released)) }
+        if toLocal {
+            DebugLog.log("link: the Mac has the conversation again")
+            await audio?.useLocalAudio()
+            sendEngineSettings()
+        }
+        publish()
+    }
+
+    // MARK: - The engine's events
+
+    private func forward(_ event: AssistantEvent) {
+        emit.yield(event)
+        switch event {
+        case .ready, .loading, .setupNeeded, .problem: phase = event
+        case .state(let state): pipelineState = state
+        default: break
+        }
+        guard let relayed = RemoteCommandPolicy.relayed(event), !sessions.isEmpty else { return }
+        for peer in sessions.values { peer.session.send(.event(relayed)) }
+    }
+}
+
+/// Marketing names of the recent iPhones, from their model identifiers.
+enum DeviceModels {
+    static func marketingName(_ model: String) -> String? {
+        let names: [String: String] = [
+            "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12", "iPhone13,3": "iPhone 12 Pro",
+            "iPhone13,4": "iPhone 12 Pro Max", "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13",
+            "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max", "iPhone14,6": "iPhone SE",
+            "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus", "iPhone15,2": "iPhone 14 Pro",
+            "iPhone15,3": "iPhone 14 Pro Max", "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
+            "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max", "iPhone17,3": "iPhone 16",
+            "iPhone17,4": "iPhone 16 Plus", "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max",
+            "iPhone17,5": "iPhone 16e", "iPhone18,3": "iPhone 17", "iPhone18,1": "iPhone 17 Pro",
+            "iPhone18,2": "iPhone 17 Pro Max", "iPhone18,4": "iPhone Air",
+        ]
+        return names[model]
+    }
+}

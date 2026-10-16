@@ -30,18 +30,29 @@ public actor AssistantHost: AssistantConnection {
     private var tasks: [Task<Void, Never>] = []
     private var activity: NSObjectProtocol?
     private var restartingAudio = false
+    /// The voice's output: the Mac's speakers, or an iPhone's (see `useRemoteAudio`).
+    private var router: AudioRouter?
+    /// While an iPhone has the conversation: its microphone and its voice output.
+    private var remote: (microphone: AsyncStream<[Float]>, output: any AudioOutput)?
+    private var remoteFeed: Task<Void, Never>?
 
     // Actions: reminders and calendar, timers, shortcuts. Kept for the app's whole life (a timer keeps running
     // across a change of tier); handed to the pipeline only while the setting is on.
     private let calendarTools: CalendarTools
     private let timerTools = TimerTools()
     private let shortcutTools = ShortcutTools()
+    /// Tasks handed to Claude Code: they go on across a change of tier or with the actions off, until the app quits.
+    private let agentTools: AgentTools
     private var actionsStatus: ActionsStatus?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
-    /// first use) instead of the user's own, and read only those (for trying the feature).
-    public init(actionsTestCollection: String? = nil) {
+    /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
+    /// the tasks handed to agents, and their folders, there instead of the user's own.
+    public init(actionsTestCollection: String? = nil, agentsTestFolder: URL? = nil) {
         calendarTools = CalendarTools(testCollection: actionsTestCollection)
+        agentTools = agentsTestFolder.map {
+            AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
+        } ?? AgentTools()
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
         self.commands = commands
@@ -50,7 +61,16 @@ public actor AssistantHost: AssistantConnection {
             for await command in commandStream { await self?.handle(command) }
         }
         Task { await self.observeTimers() }
+        Task { await self.observeTasks() }
     }
+
+    /// The app is quitting: the agents' runs stop with it (synchronous, from the app's last moments).
+    public static func stopAgentsNow() {
+        ClaudeCodeConnector.stopAll()
+    }
+
+    /// The `userInfo` key of the folder a task's notification opens when clicked.
+    public static let notificationFolderKey = Notifier.folderKey
 
     private func observeTimers() async {
         await timerTools.observe(
@@ -58,6 +78,18 @@ public actor AssistantHost: AssistantConnection {
                 Task { await self?.timerFinished(finished) }
             },
             onFirstTimer: { await Notifier.requestPermission() })
+    }
+
+    private func observeTasks() async {
+        let emit = emit
+        await agentTools.observe(
+            onChange: { emit.yield(.tasks($0)) },
+            onEnd: { task in
+                // Announced by a notification only, never out loud: the user may be talking about something else.
+                let notification = AgentPhrases.notification(for: task)
+                Notifier.post(title: notification.title, body: notification.body, folder: task.folder)
+            },
+            onFirstTask: { await Notifier.requestPermission() })
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
@@ -88,6 +120,9 @@ public actor AssistantHost: AssistantConnection {
             deleteUnusedModels()
         case .refreshActions:
             await refreshActions()
+        case .stopTask(let id):
+            // Not awaited: stopping can take a few seconds, and the next command must not wait for it.
+            Task { await agentTools.stop(id) }
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:
@@ -166,8 +201,10 @@ public actor AssistantHost: AssistantConnection {
 
             var config = PipelineConfig()
             config.pushToTalk = settings.pushToTalk
+            let router = AudioRouter(audio)
+            self.router = router
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
-                                     synthesizer: synthesizer, output: audio, tools: await toolRunner(), config: config)
+                                     synthesizer: synthesizer, output: router, tools: await toolRunner(), config: config)
             try await pipeline.start()
         } catch {
             audio.stop()
@@ -208,6 +245,7 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
         reportStorage()
         reportActions()
+        if remote != nil { await attachRemote() }  // an iPhone took the conversation while the models loaded
         if restartWhenLoaded {
             restartWhenLoaded = false
             await restart()
@@ -387,6 +425,14 @@ public actor AssistantHost: AssistantConnection {
         if new.shortcutsToConfirm != old.shortcutsToConfirm {
             await shortcutTools.setNeedingConfirmation(Set(new.shortcutsToConfirm))
         }
+        if new.claudeCode != old.claudeCode {
+            DebugLog.log("agents: Claude Code \(new.claudeCode.enabled ? "on" : "off")")
+            // A change the model sees (Claude Code switched on or off, a folder added) means new instructions;
+            // the conversation goes on.
+            if await configureAgents(), new.actionsEnabled, new.actionsEnabled == old.actionsEnabled {
+                do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
+            }
+        }
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk {
             await pipeline.setPushToTalk(new.pushToTalk)
@@ -407,7 +453,22 @@ public actor AssistantHost: AssistantConnection {
         guard settings.actionsEnabled else { return nil }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
-        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools])
+        await configureAgents()
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools])
+    }
+
+    /// Hands Claude Code to the delegation tools when it is switched on, with its settings. Returns true when what
+    /// the model sees changed.
+    @discardableResult
+    private func configureAgents() async -> Bool {
+        let claudeCode = settings.claudeCode
+        let agents = claudeCode.enabled
+            ? [AgentTools.Agent(connector: ClaudeCodeConnector(permissionMode: claudeCode.permissionMode),
+                                review: claudeCode.review)]
+            : []
+        let folders = claudeCode.folders.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        return await agentTools.configure(agents: agents, folders: folders)
     }
 
     /// The app is in front again: a shortcut may have been added to the folder, an access granted.
@@ -416,16 +477,20 @@ public actor AssistantHost: AssistantConnection {
         if await shortcutTools.refresh() {
             do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
         }
-        reportActions()
+        reportActions(checkingClaudeCode: true)
     }
 
-    private func reportActions() {
+    /// `checkingClaudeCode`: ask Claude Code again whether it is installed and signed in (about a second, in the
+    /// background), instead of the last answer.
+    private func reportActions(checkingClaudeCode: Bool = false) {
         guard settings.actionsEnabled else { return }
         Task {
+            var claudeCode = actionsStatus?.claudeCode
+            if checkingClaudeCode || claudeCode == nil { claudeCode = await ClaudeCodeConnector().availability() }
             let status = ActionsStatus(calendar: Self.access(CalendarTools.access(to: .event)),
                                        reminders: Self.access(CalendarTools.access(to: .reminder)),
-                                       shortcuts: await shortcutTools.names)
-            await self.send(status)
+                                       shortcuts: await shortcutTools.names, claudeCode: claudeCode)
+            self.send(status)
         }
     }
 
@@ -450,7 +515,9 @@ public actor AssistantHost: AssistantConnection {
     }
 
     private func restartAudio() async {
-        guard let pipeline, let audio else { return }
+        // While an iPhone has the conversation the Mac's microphone and speakers stay released; they restart with
+        // the current settings when it lets go.
+        guard remote == nil, let pipeline, let audio else { return }
         await pipeline.interrupt()
         do {
             route = try audio.start(mode: settings.audioMode, playbackSampleRate: playbackSampleRate)
@@ -475,6 +542,26 @@ public actor AssistantHost: AssistantConnection {
         defer { restartingAudio = false }
         try? await Task.sleep(for: .milliseconds(300))  // changes often come in bursts
         await restartAudio()
+    }
+
+    // MARK: - An iPhone's microphone and voice
+
+    private func attachRemote() async {
+        guard stage == .running, let remote, let pipeline, let router else { return }  // applied once running
+        await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
+        audio?.stop()  // the Mac's microphone and speakers are free again
+        await pipeline.resetAudioInput()
+        if remoteFeed == nil {
+            remoteFeed = Task { [weak self] in
+                for await chunk in remote.microphone { await self?.pushRemote(chunk) }
+            }
+        }
+        DebugLog.log("audio: the iPhone has the microphone and the voice")
+    }
+
+    /// Through the actor rather than holding the pipeline: the feed outlives a change of tier.
+    private func pushRemote(_ chunk: [Float]) async {
+        await pipeline?.push(chunk)
     }
 
     // MARK: - Events
@@ -520,5 +607,27 @@ public actor AssistantHost: AssistantConnection {
             diagnostics.inputChannels = route.inputChannels
         }
         emit.yield(.diagnostics(diagnostics))
+    }
+}
+
+/// An iPhone can take the conversation (OpenMaeLink): the engine then hears its microphone and speaks through it,
+/// and releases the Mac's microphone and speakers.
+extension AssistantHost: RemoteAudioRouting {
+    public func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
+        remoteFeed?.cancel()
+        remoteFeed = nil
+        remote = (microphone, output)
+        await attachRemote()
+    }
+
+    public func useLocalAudio() async {
+        guard remote != nil else { return }
+        remote = nil
+        remoteFeed?.cancel()
+        remoteFeed = nil
+        guard stage == .running, let audio, let router else { return }
+        await router.use(audio)
+        await restartAudio()  // the Mac's microphone and speakers again, with the current settings
+        DebugLog.log("audio: the Mac has the microphone and the voice again")
     }
 }

@@ -28,10 +28,12 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var actionsEnabled = false
     /// Shortcuts (of the "OpenMaé" folder) that Maé reads out and runs only after the user's "oui".
     public var shortcutsToConfirm: [String] = []
+    /// Handing long tasks to Claude Code (with the actions on).
+    public var claudeCode = AgentSettings()
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm
+        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
@@ -42,6 +44,39 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         tierOverride = try c.decodeIfPresent(HardwareTier.self, forKey: .tierOverride)
         actionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .actionsEnabled) ?? false
         shortcutsToConfirm = try c.decodeIfPresent([String].self, forKey: .shortcutsToConfirm) ?? []
+        claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
+    }
+}
+
+/// The settings of an agent Maé hands tasks to.
+public struct AgentSettings: Sendable, Codable, Equatable {
+    /// How much the agent may do on its own.
+    public enum PermissionMode: String, Sendable, Codable, CaseIterable {
+        /// It changes the files of its folder; anything else (installing, running a command) is refused and
+        /// reported at the end.
+        case acceptEdits
+        /// It decides for itself what is safe to do (Claude Code's "auto" mode).
+        case auto
+    }
+
+    /// Off by default: what is handed to an agent leaves the Mac.
+    public var enabled = false
+    /// Read the task back and wait for the user's "oui" before sending it.
+    public var review = true
+    public var permissionMode = PermissionMode.acceptEdits
+    /// Folders of the user's the agent may work in (paths), when they name one. Otherwise each task gets a new
+    /// folder in ~/OpenMae.
+    public var folders: [String] = []
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey { case enabled, review, permissionMode, folders }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        review = try c.decodeIfPresent(Bool.self, forKey: .review) ?? true
+        permissionMode = (try? c.decodeIfPresent(PermissionMode.self, forKey: .permissionMode)) ?? .acceptEdits
+        folders = try c.decodeIfPresent([String].self, forKey: .folders) ?? []
     }
 }
 
@@ -64,8 +99,10 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     /// Delete the language models of the tiers not in use.
     case deleteUnusedModels
     /// Look again at what actions can use (the app came back to the front: a shortcut may have been added
-    /// to the folder, a permission granted in System Settings).
+    /// to the folder, a permission granted in System Settings, Claude Code signed in).
     case refreshActions
+    /// Stop a task handed to an agent (the Stop button of the task list).
+    case stopTask(UUID)
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -184,11 +221,14 @@ public struct ActionsStatus: Sendable, Codable, Equatable {
     public var reminders: Access
     /// The shortcuts of the "OpenMaé" folder of the Shortcuts app.
     public var shortcuts: [String]
+    /// Whether Claude Code is installed and signed in; nil until it was checked.
+    public var claudeCode: AgentAvailability?
 
-    public init(calendar: Access, reminders: Access, shortcuts: [String]) {
+    public init(calendar: Access, reminders: Access, shortcuts: [String], claudeCode: AgentAvailability? = nil) {
         self.calendar = calendar
         self.reminders = reminders
         self.shortcuts = shortcuts
+        self.claudeCode = claudeCode
     }
 }
 
@@ -236,6 +276,8 @@ public enum AssistantEvent: Sendable, Codable {
     case diagnostics(EngineDiagnostics)
     /// What the actions can use; sent when the actions are on and whenever it changes.
     case actions(ActionsStatus)
+    /// The tasks handed to agents, the most recent last; sent at start-up and at every change.
+    case tasks([AgentTask])
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)

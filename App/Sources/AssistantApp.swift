@@ -1,4 +1,6 @@
+import OpenMaeLink
 import SwiftUI
+import UserNotifications
 import VoiceCore
 import VoiceEngineApple
 
@@ -7,24 +9,34 @@ import VoiceEngineApple
 ///
 /// This is the ONLY file of the interface that knows the engine's implementation (`AssistantHost`).
 /// Everything else talks to an `AssistantConnection` through commands and events, so the engine can be
-/// replaced (another platform, a separate process) without touching the screens.
+/// replaced (another platform, a separate process) without touching the screens. That connection is the link
+/// with the iPhone (`LinkHost`), which passes everything on to the engine.
 @main
 struct AssistantApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model: AssistantModel
     @State private var window = WindowState()
     @State private var presence: DesktopPresence
+    @State private var phone: PhoneAccess
 
     init() {
         Fonts.register()
         #if DEBUG
-        let model = AssistantModel(connection: Demo.isOn ? DemoConnection()
-                                   : AssistantHost(actionsTestCollection: ActionsTestCollection.name))
+        let engine: any AssistantConnection = Demo.isOn ? DemoConnection()
+            : AssistantHost(actionsTestCollection: ActionsTestCollection.name,
+                            agentsTestFolder: ActionsTestCollection.agentsFolder)
         #else
-        let model = AssistantModel(connection: AssistantHost())
+        let engine = AssistantHost()
         #endif
+        // The demonstration engine has no sound to hand over: an iPhone then only sees and commands it.
+        let link = LinkHost(engine: engine, audio: engine as? any RemoteAudioRouting,
+                            identityStore: KeychainIdentityStore(service: "OpenMaé link"),
+                            storeURL: LinkHost.defaultStoreURL, macName: Host.current().localizedName ?? "Mac")
+        let model = AssistantModel(connection: link)
+        let phone = PhoneAccess(link: link)
         _model = State(initialValue: model)
-        _presence = State(initialValue: DesktopPresence(model: model))
+        _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
+        _phone = State(initialValue: phone)
     }
 
     var body: some Scene {
@@ -41,6 +53,7 @@ struct AssistantApp: App {
                 #endif
             }
             .frame(minWidth: 820, minHeight: 700)
+            .environment(phone)
             // The design has no dark theme yet: the window, its menus and alerts stay light.
             .preferredColorScheme(.light)
             .followsWindowVisibility()
@@ -70,7 +83,11 @@ struct AssistantApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     /// Closing the window leaves OpenMaé in the menu bar, whose icon has Quit.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
@@ -78,6 +95,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         DesktopPresence.current?.showMainWindow()
         return false
+    }
+
+    /// Quitting stops the task Claude Code is working on: asked first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard DesktopPresence.current?.hasRunningTask == true else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "A task is still in progress")
+        alert.informativeText = String(localized: "Claude Code is working on a task. Quitting OpenMaé stops it.")
+        alert.addButton(withTitle: String(localized: "Quit"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AssistantHost.stopAgentsNow()
+    }
+
+    /// A task's notification shows even when OpenMaé is in front (the user may be reading something else in it); a
+    /// timer's only goes to the Notification Center then, since Maé says it out loud.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions
+    {
+        notification.request.content.userInfo[AssistantHost.notificationFolderKey] == nil ? [.list] : [.banner, .list]
+    }
+
+    /// A click on a task's notification opens its folder.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse)
+        async
+    {
+        guard let folder = response.notification.request.content.userInfo[AssistantHost.notificationFolderKey] as? String
+        else { return }
+        await MainActor.run { _ = NSWorkspace.shared.open(URL(fileURLWithPath: folder, isDirectory: true)) }
     }
 }
 

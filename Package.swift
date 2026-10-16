@@ -12,6 +12,10 @@
 //   voice-cli         command-line tool: measures the engine without an interface (feeds recorded speech in
 //                     real time, reports latencies per stage, interruption time and memory) and manages the
 //                     models.
+//   OpenMaeLink       the link between the iPhone app and the Mac (relay/PROTOCOL.md): device keys, pairing,
+//                     Noise encryption, direct and relayed connections, the voice's codec and jitter buffer.
+//                     Shared by both apps, so it builds for iOS too (as VoiceCore does, for the
+//                     commands/events contract).
 //
 // Build with xcodebuild, not `swift build`: MLX needs Xcode to compile its Metal shaders.
 // See README.md for the exact command.
@@ -20,10 +24,12 @@ import PackageDescription
 
 let package = Package(
     name: "VoiceEngine",
-    platforms: [.macOS(.v15)],  // macOS 15 minimum (only macOS 27 is tested)
+    // macOS 15 minimum (only macOS 27 is tested); iOS for the iPhone app, which only uses VoiceCore and OpenMaeLink.
+    platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
         .library(name: "VoiceCore", targets: ["VoiceCore"]),
         .library(name: "VoiceEngineApple", targets: ["VoiceEngineApple"]),
+        .library(name: "OpenMaeLink", targets: ["OpenMaeLink"]),
         .executable(name: "voice-cli", targets: ["VoiceCLI"]),
     ],
     dependencies: [
@@ -45,9 +51,12 @@ let package = Package(
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ]
         ),
+        .target(name: "OpenMaeLink", dependencies: ["VoiceCore"]),
         .executableTarget(
             name: "VoiceCLI",
-            dependencies: ["VoiceCore", "VoiceEngineApple", .product(name: "FluidAudio", package: "FluidAudio")]),
+            dependencies: ["VoiceCore", "VoiceEngineApple", "OpenMaeLink",
+                           .product(name: "FluidAudio", package: "FluidAudio")]),
         .testTarget(name: "VoiceCoreTests", dependencies: ["VoiceCore"]),
+        .testTarget(name: "OpenMaeLinkTests", dependencies: ["OpenMaeLink"]),
     ]
 )

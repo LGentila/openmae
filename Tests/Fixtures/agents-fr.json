@@ -1,0 +1,77 @@
+{
+  "_comment": "Delegation benchmark (voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json). The model gets every action tool plus the delegation tools (Claude Code), as in the app with Claude Code switched on. Expected: the tool, and for a delegation or a follow-up the words its instruction must contain (any accents and case). Reference time: Thursday 15 October 2026, 18:42.",
+  "now": "2026-10-15T18:42",
+  "shortcuts": [],
+  "agents": true,
+  "cases": [
+    {"phrase": "Lance le développement d'un site pour la boulangerie de ma sœur", "expected": {"tool": "deleguer_tache", "mentions": ["site", "boulangerie"]}},
+    {"phrase": "Développe-moi une petite application pour suivre mes dépenses du mois", "expected": {"tool": "deleguer_tache", "mentions": ["dépenses"]}},
+    {"phrase": "Fais un site d'une page pour annoncer le mariage de Julie et Marc le 12 juin, avec le plan d'accès", "expected": {"tool": "deleguer_tache", "mentions": ["mariage", "12 juin"]}},
+    {"phrase": "Peux-tu demander à Claude Code de corriger le bug du formulaire de contact dans mon projet ?", "expected": {"tool": "deleguer_tache", "mentions": ["formulaire"]}},
+    {"phrase": "Écris un script qui renomme toutes mes photos de vacances avec leur date", "expected": {"tool": "deleguer_tache", "mentions": ["photos", "date"]}},
+    {"phrase": "Fais une recherche approfondie sur les meilleures assurances habitation et prépare-moi un comparatif", "expected": {"tool": "deleguer_tache", "mentions": ["assurance"]}},
+    {"phrase": "Analyse le fichier des ventes de l'année et fais-moi un résumé par mois", "expected": {"tool": "deleguer_tache", "mentions": ["ventes"]}},
+    {"phrase": "Crée un petit jeu de morpion qu'on peut jouer dans le navigateur", "expected": {"tool": "deleguer_tache", "mentions": ["morpion"]}},
+    {"phrase": "Confie à Claude Code la traduction en anglais du fichier menu.txt", "expected": {"tool": "deleguer_tache", "mentions": ["menu", "anglais"]}},
+    {"phrase": "Lance Claude Code sur la refonte de la page d'accueil de mon portfolio", "expected": {"tool": "deleguer_tache", "mentions": ["portfolio"]}},
+    {"phrase": "Prépare-moi un dossier de recherche complet sur l'histoire du vélo, avec les sources", "expected": {"tool": "deleguer_tache", "mentions": ["vélo"]}},
+    {"phrase": "Trie les factures de mon dossier Documents par fournisseur", "expected": {"tool": "deleguer_tache", "mentions": ["factures"]}},
+    {"phrase": "Code-moi une extension qui bloque les pubs sur les sites de recettes", "expected": {"tool": "deleguer_tache", "mentions": ["recettes"]}},
+    {"phrase": "Fabrique un site pour mon club de randonnée avec le calendrier des sorties", "expected": {"tool": "deleguer_tache", "mentions": ["randonnée"]}},
+    {"phrase": "J'ai besoin d'un programme qui convertit mes fichiers Word en PDF, tu peux le faire faire ?", "expected": {"tool": "deleguer_tache", "mentions": ["pdf"]}},
+    {"phrase": "Rédige la documentation complète de mon projet de météo, fichier par fichier", "expected": {"tool": "deleguer_tache", "mentions": ["météo"]}},
+    {"phrase": "Monte un tableau de bord qui affiche mes séances de sport de l'année", "expected": {"tool": "deleguer_tache", "mentions": ["sport"]}},
+    {"phrase": "Ajoute des tests automatiques à mon application de recettes", "expected": {"tool": "deleguer_tache", "mentions": ["tests"]}},
+    {"phrase": "Fais faire à Claude Code une page web qui présente mon CV", "expected": {"tool": "deleguer_tache", "mentions": ["cv"]}},
+    {"phrase": "Cherche en profondeur les aides de l'État pour rénover une maison et résume-les dans un document", "expected": {"tool": "deleguer_tache", "mentions": ["aides", "rénov"]}},
+
+    {"phrase": "Comment on développe un site web ?", "expected": null},
+    {"phrase": "C'est quoi Claude Code ?", "expected": null},
+    {"phrase": "Tu peux m'expliquer ce qu'est une API, simplement ?", "expected": null},
+    {"phrase": "J'aimerais apprendre à coder, par où je commence ?", "expected": null},
+    {"phrase": "Mon fils développe un jeu vidéo, c'est chouette non ?", "expected": null},
+    {"phrase": "Il faudrait que je range mes photos un de ces jours", "expected": null},
+    {"phrase": "J'ai beaucoup trop de mails en ce moment, je suis débordé", "expected": null},
+    {"phrase": "Le site de la boulangerie de ma sœur est vraiment moche", "expected": null},
+    {"phrase": "Tu connais un bon outil pour faire un site soi-même ?", "expected": null},
+    {"phrase": "Est-ce que Claude Code est payant ?", "expected": null},
+    {"phrase": "Combien de temps faut-il pour apprendre Python ?", "expected": null},
+    {"phrase": "Explique-moi comment marche un moteur de recherche", "expected": null},
+    {"phrase": "Je dois écrire un rapport pour lundi, ça me stresse", "expected": null},
+    {"phrase": "Donne-moi trois idées de nom pour une boulangerie", "expected": null},
+    {"phrase": "Écris-moi un petit poème sur l'automne", "expected": null},
+    {"phrase": "Traduis « bonjour, comment ça va » en espagnol", "expected": null},
+    {"phrase": "Qu'est-ce que tu penses de l'intelligence artificielle ?", "expected": null},
+    {"phrase": "C'est quoi la différence entre un site et une application ?", "expected": null},
+    {"phrase": "Mon ordinateur est lent ces temps-ci, tu as une idée de pourquoi ?", "expected": null},
+    {"phrase": "Raconte-moi comment les premiers ordinateurs fonctionnaient", "expected": null},
+
+    {"phrase": "Où en est le site ?", "before": "boulangerie", "expected": {"tool": "etat_taches"}},
+    {"phrase": "Claude Code a fini ?", "before": "boulangerie", "expected": {"tool": "etat_taches"}},
+    {"phrase": "Et alors, ça avance, la boulangerie ?", "before": "boulangerie", "expected": {"tool": "etat_taches"}},
+    {"phrase": "Ajoute aussi une page avec les tarifs au site", "before": "boulangerie", "expected": {"tool": "completer_tache", "mentions": ["tarif"]}},
+    {"phrase": "Dis à Claude Code de mettre aussi le site en anglais", "before": "boulangerie", "expected": {"tool": "completer_tache", "mentions": ["anglais"]}},
+    {"phrase": "Arrête le site, finalement on n'en a plus besoin", "before": "boulangerie", "expected": {"tool": "annuler_tache"}},
+    {"phrase": "Merci beaucoup !", "before": "boulangerie", "expected": null},
+    {"phrase": "J'espère qu'il sera joli, ce site", "before": "boulangerie", "expected": null},
+
+    {"phrase": "Ajoute un rendez-vous demain à 15 h chez le médecin", "expected": {"tool": "creer_evenement", "when": "2026-10-16T15:00"}},
+    {"phrase": "Rappelle-moi demain à 10 h d'appeler Paul", "expected": {"tool": "creer_rappel", "when": "2026-10-16T10:00"}},
+    {"phrase": "Mets un minuteur de 5 minutes", "expected": {"tool": "minuteur", "seconds": 300}},
+    {"phrase": "Qu'est-ce que j'ai demain ?", "expected": {"tool": "lire_agenda", "when": "2026-10-16"}}
+  ],
+  "histories": {
+    "boulangerie": [
+      {
+        "user": "Lance le développement d'un site pour la boulangerie de ma sœur",
+        "call": {"name": "deleguer_tache", "arguments": {"titre": "site de la boulangerie", "consigne": "Crée un site vitrine pour la boulangerie de la sœur de l'utilisateur : présentation, horaires et contact."}},
+        "result": {"statut": "en attente du oui de l'utilisateur"},
+        "answer": "Je confie « site de la boulangerie » à Claude Code, on y va ?"
+      },
+      {
+        "user": "Oui",
+        "answer": "C’est parti : tu auras une notification quand ce sera fini."
+      }
+    ]
+  }
+}

@@ -7,10 +7,14 @@ struct SettingsPanel: View {
     /// Opened from "Choose another tier…": the tier row is outlined for a moment.
     var pointsAtTier = false
     let close: () -> Void
+    /// Opens Settings › iPhone.
+    var openPhone: (() -> Void)?
     /// Tier picked in the menu, waiting for confirmation: changing tier restarts the assistant.
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
+    @State private var choosingFolder = false
     @Environment(\.openURL) private var openURL
+    @Environment(PhoneAccess.self) private var phone: PhoneAccess?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -36,6 +40,10 @@ struct SettingsPanel: View {
             model.deleteModels()
             close()
         })
+        .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
+            guard case .success(let folder) = result, !model.settings.claudeCode.folders.contains(folder.path) else { return }
+            model.settings.claudeCode.folders.append(folder.path)
+        }
     }
 
     // MARK: - Sound
@@ -100,6 +108,8 @@ struct SettingsPanel: View {
             calendarAccess(actions)
             Hairline()
             shortcuts(actions.shortcuts)
+            Hairline()
+            claudeCode(actions.claudeCode)
         }
         Hairline()
         Button("New conversation") {
@@ -110,6 +120,11 @@ struct SettingsPanel: View {
         .disabled(!model.isReady)
         .padding(.top, 9)
         .padding(.bottom, 1)
+        if let openPhone, let phone {
+            Hairline()
+                .padding(.top, 8)
+            PhoneRow(phone: phone, open: openPhone)
+        }
     }
 
     /// The smaller models are not reliable with actions (measured with `voice-cli actions-bench`): the minimum
@@ -190,6 +205,91 @@ struct SettingsPanel: View {
             }
         }
         .padding(.bottom, 6)
+    }
+
+    /// Handing long tasks to Claude Code: on or off, read-back, what it may do, the folders it may work in.
+    @ViewBuilder private func claudeCode(_ availability: AgentAvailability?) -> some View {
+        Toggle(isOn: $model.settings.claudeCode.enabled) {
+            Text(verbatim: "Claude Code")
+                .textStyle(.setting)
+        }
+        .toggleStyle(SwitchStyle())
+        .frame(minHeight: 46)
+        .disabled(availability == .notInstalled && !model.settings.claudeCode.enabled)
+        Group {
+            switch availability {
+            case .notInstalled:
+                HelpText("Not installed on this Mac. Once it is, Maé can hand it long tasks: a website, code, research.")
+            case .notLoggedIn:
+                HelpText("Claude Code isn’t signed in. Open it once in Terminal to sign in.", color: Palette.danger)
+            default:
+                HelpText("Maé can hand it long tasks: a website, code, research. What you hand it leaves this Mac: Claude Code works with Anthropic’s online models. You get a notification when it is done.")
+            }
+        }
+        .padding(.bottom, 6)
+        if model.settings.claudeCode.enabled {
+            Toggle(isOn: $model.settings.claudeCode.review) {
+                Text("Read the task back first")
+                    .textStyle(.setting)
+            }
+            .toggleStyle(SwitchStyle())
+            .frame(minHeight: 40)
+            Group {
+                if model.settings.claudeCode.review {
+                    HelpText("Maé tells you what she is about to send and waits for your “yes”. The whole instruction is in the history.")
+                } else {
+                    HelpText("Maé sends the task at once. Say “cancel” right after to stop it.")
+                }
+            }
+            .padding(.bottom, 6)
+            HStack(spacing: 12) {
+                Text("What it may do")
+                    .textStyle(.setting)
+                Spacer(minLength: 0)
+                Segmented(selection: $model.settings.claudeCode.permissionMode,
+                          options: [(value: .acceptEdits, title: "Its folder"), (value: .auto, title: "Decide alone")],
+                          width: 214)
+            }
+            .frame(minHeight: 48)
+            Group {
+                if model.settings.claudeCode.permissionMode == .acceptEdits {
+                    HelpText("It changes the files of its folder. Anything else, like installing or running a program, is refused, and Maé tells you.")
+                } else {
+                    HelpText("It decides alone what is safe to do on this Mac, without asking you. Choose this only if you trust it with your files.")
+                }
+            }
+            .padding(.bottom, 6)
+            HStack(spacing: 12) {
+                Text("Folders")
+                    .textStyle(.setting)
+                Spacer(minLength: 0)
+                Button("Add…") { choosingFolder = true }
+                    .buttonStyle(PillButtonStyle(kind: .link))
+            }
+            .frame(minHeight: 46)
+            ForEach(model.settings.claudeCode.folders, id: \.self) { path in
+                HStack(spacing: 12) {
+                    Text(verbatim: URL(fileURLWithPath: path).lastPathComponent)
+                        .textStyle(.label)
+                        .foregroundStyle(Palette.ink)
+                        .help(Text(verbatim: path))
+                    Spacer(minLength: 0)
+                    Button {
+                        model.settings.claudeCode.folders.removeAll { $0 == path }
+                    } label: {
+                        IconView(icon: .cancel, size: 14)
+                            .foregroundStyle(Palette.inkMuted)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Remove \(URL(fileURLWithPath: path).lastPathComponent)"))
+                }
+                .frame(minHeight: 32)
+            }
+            HelpText("Each new task gets its own folder in “OpenMae”, in your home folder. Name one of these folders and Claude Code works there instead.")
+                .padding(.bottom, 6)
+        }
     }
 
     // MARK: - Advanced
