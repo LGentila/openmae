@@ -5,8 +5,9 @@ import VoiceCore
 /// One sentence at a time; at rest, only an invitation to talk.
 struct LiveTranscript: View {
     enum Invitation: Equatable {
-        case speak
-        case holdSpace
+        /// `orShortcut`: "… or press ⌥ Space" too (the global shortcut works).
+        case speak(orShortcut: Bool)
+        case holdSpace(orShortcut: Bool)
         case loading(LoadingStep?)
     }
 
@@ -152,13 +153,26 @@ private struct InvitationView: View {
     var body: some View {
         Group {
             switch invitation {
-            case .speak:
-                Text("Speak whenever you like")
-            case .holdSpace:
+            case .speak(let orShortcut):
+                if orShortcut {
+                    HStack(spacing: 8) {
+                        Text("Speak whenever you like or press")
+                        KeyCap(title: Text("⌥ Space"))
+                    }
+                    .accessibilityElement(children: .combine)
+                } else {
+                    Text("Speak whenever you like")
+                }
+            case .holdSpace(let orShortcut):
                 HStack(spacing: 8) {
                     Text("Hold")
                     KeyCap(title: Text("Space"))
-                    Text("to talk")
+                    if orShortcut {
+                        Text("or press")
+                        KeyCap(title: Text("⌥ Space"))
+                    } else {
+                        Text("to talk")
+                    }
                 }
                 .accessibilityElement(children: .combine)
             case .loading(let step):

@@ -881,6 +881,16 @@
         }
       }
     },
+    "Press once to talk, and again to finish. When the window is closed, Maé only listens after this shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé n’écoute qu’après ce raccourci."
+          }
+        }
+      }
+    },
     "Push to talk": {
       "localizations": {
         "fr": {
@@ -1031,6 +1041,16 @@
         }
       }
     },
+    "Speak whenever you like or press": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parle quand tu veux ou appuie sur"
+          }
+        }
+      }
+    },
     "Speakers": {
       "localizations": {
         "fr": {
@@ -1077,6 +1097,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parler"
+          }
+        }
+      }
+    },
+    "Talk from another app": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parler depuis une autre app"
           }
         }
       }
@@ -1457,6 +1487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "interrompu"
+          }
+        }
+      }
+    },
+    "or press": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ou appuie sur"
           }
         }
       }

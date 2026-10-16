@@ -128,7 +128,7 @@ enum Snapshots {
         for scenario in scenarios {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
-            if scenario.pushToTalk { model.settings.pushToTalk = true }
+            model.settings.pushToTalk = scenario.pushToTalk  // the scenario's, not the user's own setting
             let window = WindowState()
             let view = ContentView(model: model, window: window)
                 .environment(\.stillFrame, 1.7)
@@ -178,6 +178,7 @@ enum Snapshots {
     @MainActor
     private static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
         let model = AssistantModel(connection: ScriptedConnection(events))
+        model.hasTalkShortcut = true  // as on a Mac that accepts ⌥ Space (snapshots register no shortcut)
         try? await Task.sleep(for: .milliseconds(150))  // the model applies the events asynchronously
         return model
     }

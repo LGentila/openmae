@@ -71,6 +71,19 @@ struct SettingsPanel: View {
         .toggleStyle(SwitchStyle())
         .frame(minHeight: 48)
         HelpText("Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.")
+        if model.hasTalkShortcut {
+            Hairline()
+                .padding(.top, 6)
+            HStack(spacing: 12) {
+                Text("Talk from another app")
+                    .textStyle(.setting)
+                Spacer(minLength: 0)
+                KeyCap(title: Text("⌥ Space"))
+            }
+            .frame(minHeight: 48)
+            .accessibilityElement(children: .combine)
+            HelpText("Press once to talk, and again to finish. When the window is closed, Maé only listens after this shortcut.")
+        }
     }
 
     // MARK: - Advanced

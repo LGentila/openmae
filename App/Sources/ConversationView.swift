@@ -23,7 +23,8 @@ struct ConversationView: View {
 
     private var invitation: LiveTranscript.Invitation {
         if isLoading { return .loading(loadingStep) }
-        return model.settings.pushToTalk ? .holdSpace : .speak
+        let shortcut = model.hasTalkShortcut
+        return model.settings.pushToTalk ? .holdSpace(orShortcut: shortcut) : .speak(orShortcut: shortcut)
     }
 
 }

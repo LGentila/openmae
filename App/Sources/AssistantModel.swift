@@ -77,6 +77,10 @@ final class AssistantModel {
         }
     }
 
+    /// The global shortcut (⌥ Space) is registered: macOS 15.0 and 15.1 refuse it. The window and the settings only
+    /// mention it then.
+    var hasTalkShortcut = false
+
     /// The settings as the engine gets them: with the window closed, push-to-talk.
     private var engineSettings: AssistantSettings {
         var engine = settings

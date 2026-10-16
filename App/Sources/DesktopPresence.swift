@@ -41,7 +41,7 @@ final class DesktopPresence {
         icon = MenuBarIcon { [weak self] in self?.showMainWindow() }
         capsule = CapsuleController(model: model)
         talkShortcut = GlobalShortcut(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in self?.talkPressed() }
-        talkShortcut?.register()
+        model.hasTalkShortcut = talkShortcut?.register() == true
         escapeShortcut = GlobalShortcut(keyCode: kVK_Escape, modifiers: 0) { [weak self] in self?.model.stopSpeaking() }
 
         // Whether the window is in front: the app becomes active or not, is hidden, the window goes to the Dock.
