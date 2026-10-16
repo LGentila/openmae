@@ -43,6 +43,8 @@ public actor AssistantHost: AssistantConnection {
     private let shortcutTools = ShortcutTools()
     /// Tasks handed to Claude Code: they go on across a change of tier or with the actions off, until the app quits.
     private let agentTools: AgentTools
+    /// Searching the internet: with the actions, or on its own when they are off.
+    private let webSearchTools = WebSearchTools()
     private var actionsStatus: ActionsStatus?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
@@ -123,6 +125,9 @@ public actor AssistantHost: AssistantConnection {
         case .stopTask(let id):
             // Not awaited: stopping can take a few seconds, and the next command must not wait for it.
             Task { await agentTools.stop(id) }
+        case .testWebSearch:
+            // Not awaited either: a search can take up to five seconds.
+            Task { await testWebSearch() }
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:
@@ -434,6 +439,20 @@ public actor AssistantHost: AssistantConnection {
                 do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
             }
         }
+        if new.webSearch != old.webSearch, await configureWebSearch(), new.actionsEnabled == old.actionsEnabled {
+            DebugLog.log("web search: \(new.webSearch.isReady ? "on" : "off")")
+            // With the actions, its tool comes or goes and the conversation goes on. On its own, it is the only tool:
+            // the tools come or go, and a new conversation starts, as when the actions are switched on or off.
+            do {
+                if new.actionsEnabled {
+                    try await pipeline?.toolsChanged()
+                } else {
+                    try await pipeline?.setTools(await toolRunner())
+                }
+            } catch {
+                emit.yield(.warning("\(error)"))
+            }
+        }
         guard let pipeline else { return }
         if new.pushToTalk != old.pushToTalk {
             await pipeline.setPushToTalk(new.pushToTalk)
@@ -449,13 +468,54 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Actions
 
-    /// The tools for a new pipeline or conversation; nil when actions are off.
+    /// The tools for a new pipeline or conversation: the actions when they are on, the web search when it is; nil when
+    /// both are off.
     private func toolRunner() async -> ToolRunner? {
-        guard settings.actionsEnabled else { return nil }
+        await configureWebSearch()
+        guard settings.actionsEnabled else {
+            return settings.webSearch.isReady ? ToolRunner(providers: [webSearchTools], actions: false) : nil
+        }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
         await configureAgents()
-        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools])
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools])
+    }
+
+    /// Hands the user's SearXNG to the web search tool while the search is switched on, with the keychain's password.
+    /// Returns true when what the model sees changed.
+    @discardableResult
+    private func configureWebSearch() async -> Bool {
+        await webSearchTools.configure(settings.webSearch.isReady ? webSearchProvider() : nil)
+    }
+
+    /// The user's SearXNG, as the settings and the keychain describe it, switched on or not; nil without an address.
+    private func webSearchProvider() -> SearXNGProvider? {
+        let search = settings.webSearch
+        guard let address = SearXNGProvider.address(search.address) else { return nil }
+        return SearXNGProvider(address: address, username: search.username, password: WebSearchKeychain.password() ?? "")
+    }
+
+    /// The settings' "Test" button: one search, with the settings and the password as they are now.
+    private func testWebSearch() async {
+        await configureWebSearch()  // the password may have just been saved
+        guard let provider = webSearchProvider() else {
+            emit.yield(.webSearchTested(.noAddress))
+            return
+        }
+        let start = ContinuousClock.now
+        let test: WebSearchTest
+        do {
+            let found = try await provider.search("Wikipédia", language: .french)
+            let d = ContinuousClock.now - start
+            test = .works(results: found.found,
+                          seconds: Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
+        } catch let error as WebSearchError {
+            test = .failed(error)
+        } catch {
+            test = .failed(.unreachable)
+        }
+        DebugLog.log("web search test: \(test)")
+        emit.yield(.webSearchTested(test))
     }
 
     /// Hands Claude Code to the delegation tools when it is switched on, with its settings. Returns true when what
@@ -472,9 +532,12 @@ public actor AssistantHost: AssistantConnection {
         return await agentTools.configure(agents: agents, folders: folders)
     }
 
-    /// The app is in front again: a shortcut may have been added to the folder, an access granted.
+    /// The app is in front again: a shortcut may have been added to the folder, an access granted, the web search's
+    /// password saved.
     private func refreshActions() async {
-        guard settings.actionsEnabled, stage == .running else { return }
+        guard stage == .running else { return }
+        await configureWebSearch()
+        guard settings.actionsEnabled else { return }
         if await shortcutTools.refresh() {
             do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
         }

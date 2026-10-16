@@ -4,8 +4,8 @@ A voice assistant for Apple silicon Macs that runs **entirely on your Mac**. You
 French or English, in real time — like the voice mode of the big chat apps, but local: speech recognition,
 the language model and the voice all run on the Mac, and nothing you say ever leaves your own devices.
 
-The only network access is the one-time download of the models, at first launch, and — only if you pair one —
-the link with your iPhone. After that, OpenMaé works in airplane mode.
+The only network access is the one-time download of the models, at first launch, and — only if you turn them
+on — the link with your iPhone and the web search. After that, OpenMaé works in airplane mode.
 
 > **Status:** proof of concept, under active development. Distribution as a signed, notarized disk image is
 > not ready yet: for now the app is built from source (see below).
@@ -36,13 +36,21 @@ the link with your iPhone. After that, OpenMaé works in airplane mode.
   le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
   By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
   What you hand to Claude Code leaves your Mac — that is the point of handing it over.
+- **Searching the internet (optional).** Switch on Settings › Conversation › Search the internet and give the
+  address of your own [SearXNG](https://docs.searxng.org/), with its JSON format on (the password of a protection
+  in front of it goes in the keychain; "Test" checks it all). Ask something Maé cannot know — “qui a gagné le
+  match du PSG hier soir ?”, “à quelle heure ferme la piscine le dimanche ?” — and she searches, reads the first
+  results and answers in a sentence or two, naming the site; whatever the pages say, nothing is carried out
+  while she sums them up. Only the few keywords she searches for leave the Mac, to your SearXNG and from there to
+  the search engines. Public SearXNG instances are not used: they turn programs away, and OpenMaé never passes
+  for a browser.
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
   never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
   the two being end-to-end encrypted. (Claude Code, when you hand it a task, goes online on its own, with your
-  account.)
+  account; the web search, when you turn it on, sends its keywords to your SearXNG.)
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
@@ -258,6 +266,22 @@ that must not be, and questions about a task already handed over):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
+```
+
+Searching the internet: requests that need a search, requests that do not (traps included) and research for an
+agent. The model sums up the results recorded for each request in the corpus, as the app would have it do, and the
+report gives the right decisions, the searches made by mistake, the keywords and what the summaries said:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/web-fr.json
+```
+
+With `--searxng <address>`, the searches are made for real on that SearXNG, with the model's own keywords; `--web`
+offers the search tool with the other corpora too, to check that it does not change their results. One search,
+made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise
 ```
 
 Hand a task to Claude Code the way the app does, without the app or a language model (it uses the Claude Code

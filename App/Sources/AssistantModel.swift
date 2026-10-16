@@ -58,6 +58,9 @@ final class AssistantModel {
     private(set) var actions: ActionsStatus?
     /// The tasks handed to Claude Code, the most recent last.
     private(set) var tasks: [AgentTask] = []
+    /// What the web search's "Test" button found; nil before a test, or after a change of its settings.
+    private(set) var webSearchTest: WebSearchTest?
+    private(set) var isTestingWebSearch = false
     /// Quitting would stop a task.
     var hasRunningTask: Bool { tasks.contains { $0.status == .running } }
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
@@ -71,12 +74,15 @@ final class AssistantModel {
             guard settings != oldValue else { return }
             Self.save(settings)
             connection.send(.updateSettings(engineSettings))
-            if settings.actionsEnabled != oldValue.actionsEnabled {
-                // The engine starts a new conversation (the tools are part of the model's instructions).
+            // The engine starts a new conversation when the tools come or go (they are part of the model's
+            // instructions): the actions, or the web search on its own.
+            let searchAlone = !settings.actionsEnabled && settings.webSearch.isReady != oldValue.webSearch.isReady
+            if settings.actionsEnabled != oldValue.actionsEnabled || searchAlone {
                 transcript.removeAll()
                 answerIndex = nil
                 if !settings.actionsEnabled { actions = nil }
             }
+            if settings.webSearch != oldValue.webSearch { webSearchTest = nil }
         }
     }
 
@@ -186,10 +192,18 @@ final class AssistantModel {
         connection.send(.newConversation)
     }
 
-    /// The app is in front again: a shortcut may have been added, an access granted in System Settings.
+    /// The app is in front again: a shortcut may have been added, an access granted in System Settings; or the web
+    /// search's password was just saved.
     func refreshActions() {
-        guard isReady, settings.actionsEnabled else { return }
+        guard isReady, settings.actionsEnabled || settings.webSearch.enabled else { return }
         connection.send(.refreshActions)
+    }
+
+    /// The web search's "Test" button: one search with its settings, as they are now.
+    func testWebSearch() {
+        webSearchTest = nil
+        isTestingWebSearch = true
+        connection.send(.testWebSearch)
     }
 
     /// The Stop button of a task.
@@ -282,6 +296,9 @@ final class AssistantModel {
             actions = status
         case .tasks(let tasks):
             self.tasks = tasks
+        case .webSearchTested(let test):
+            webSearchTest = test
+            isTestingWebSearch = false
         case .warning(let message):
             lastWarning = message
         }

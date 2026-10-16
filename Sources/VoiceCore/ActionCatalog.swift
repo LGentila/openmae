@@ -33,8 +33,7 @@ public enum ActionCatalog {
             un goût ou une remarque n'en demandent pas. \
             Pour un moment ou une durée, ne calcule rien : recopie les mots exacts de l'utilisateur \
             (« samedi soir », « dans 10 minutes »), c'est l'app qui calcule les dates. \
-            Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre parenthèses, \
-            ajoutées par l'app : ne les recopie jamais, ni dans un outil ni dans tes réponses. \
+            \(dateLineRule) \
             S'il manque une information indispensable, pose d'abord une question courte. \
             Pour une action, ne dis rien avant l'appel, pas même la première phrase courte : ta réponse commence \
             directement par l'appel de l'outil, et c'est l'app qui confirme à voix haute. \
@@ -86,7 +85,11 @@ public enum ActionCatalog {
         return messages
     }
 
-    /// The line that ends every user message when actions are on, e.g.
+    /// What the model is told of `dateLine`: part of the actions' prompt, and on its own when only the web search is on.
+    public static let dateLineRule = "Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre "
+        + "parenthèses, ajoutées par l'app : ne les recopie jamais, ni dans un outil ni dans tes réponses."
+
+    /// The line that ends every user message when tools are on (actions or the web search), e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.
     public static func dateLine(_ now: Date, timeZone: TimeZone = .current) -> String {
         let context = ToolContext(now: now, timeZone: timeZone, language: .french)

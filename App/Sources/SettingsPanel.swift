@@ -112,6 +112,8 @@ struct SettingsPanel: View {
             claudeCode(actions.claudeCode)
         }
         Hairline()
+        WebSearchRows(model: model)
+        Hairline()
         Button("New conversation") {
             model.newConversation()
             close()

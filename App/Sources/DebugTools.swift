@@ -160,6 +160,7 @@ enum Snapshots {
             model.settings = saved
         }
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
+        await renderWebSearch(to: folder, ready: ready)
         await renderPresence(to: folder)
         await renderPhone(to: folder)
     }
@@ -215,6 +216,31 @@ enum Snapshots {
             settingsWindow.panel = .settings
         }
         model.settings = saved
+    }
+
+    /// The web search's settings, switched on with an address: after a test that worked, and one that was refused.
+    @MainActor
+    private static func renderWebSearch(to folder: URL, ready: [AssistantEvent]) async {
+        let tests: [(name: String, test: WebSearchTest)] = [
+            ("main-13-settings-web-search", .works(results: 25, seconds: 1.24)),
+            ("main-14-settings-web-search-refused", .failed(.forbidden)),
+        ]
+        for (name, test) in tests {
+            let model = AssistantModel(connection: ScriptedConnection(ready + [.webSearchTested(test)]))
+            model.hasTalkShortcut = true
+            // Before the events arrive: a change of these settings forgets the last test.
+            let saved = model.settings
+            model.settings.webSearch.enabled = true
+            model.settings.webSearch.address = "https://search.example.org"
+            try? await Task.sleep(for: .milliseconds(150))
+            let window = WindowState()
+            await save(ContentView(model: model, window: window).environment(\.stillFrame, 1.7)
+                           .preferredColorScheme(.light),
+                       size: CGSize(width: 960, height: 1100), to: folder.appending(path: name + ".png")) {
+                window.panel = .settings
+            }
+            model.settings = saved
+        }
     }
 
     /// The capsule over a pretend desktop, as in the design's Overlay screen (at rest: no capsule, the icon's

@@ -29,7 +29,8 @@ public struct PipelineConfig: Sendable {
     /// them in memory (see `KeepsWarm`). 0 = never.
     public var keepWarmSeconds: Double = 30
     /// While the model writes a tool call (no voice until it is complete: about 1.5 s with Gemma 4 26B on the
-    /// reference Mac), say "Un instant, je m'en occupe tout de suite." so the user is not left in silence.
+    /// reference Mac), say "Un instant, je m'en occupe tout de suite." so the user is not left in silence; or the
+    /// tool's own phrase ("Je regarde ça sur internet, un instant."), once its name is read.
     public var toolCallFiller = true
     /// With actions on, every conversation starts with `ActionCatalog.examples` (see `ActionCatalog.showsExamples`).
     public var actionExamples = false
@@ -179,17 +180,22 @@ public actor VoicePipeline {
     }
 
     /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
-    /// model itself, hence `async`), then what the tools' providers add (handing tasks to an agent); and the example
-    /// exchanges when the config asks for them. Set with the tools, and kept for the conversations that follow, so the
-    /// model's memory of them stays valid.
+    /// model itself, hence `async`) or, for the web search on its own, what it says of the date line; then what the
+    /// tools' providers add (handing tasks to an agent, searching the web); and the actions' example exchanges when the
+    /// config asks for them. Set with the tools, and kept for the conversations that follow, so the model's memory of
+    /// them stays valid.
     private func updatePrompt() async {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         if let tools {
-            addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
+            if tools.offersActions {
+                addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
+            } else {
+                addenda.append(ActionCatalog.dateLineRule)
+            }
             addenda += await tools.promptAddenda()
         }
         conversation.systemAddenda = addenda
-        conversation.examples = tools != nil && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
+        conversation.examples = tools?.offersActions == true && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
     }
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
@@ -493,9 +499,9 @@ public actor VoicePipeline {
                 var request = conversation.messages(adding: turn.userMessage!)
                 var secondTry = false
                 var fillerSaid = false
-                /// Summing up a text that came from outside (an agent's report, see `ToolOutcome.modelSpeaks`): what
-                /// the model writes is said, but no call it writes then is carried out, since that text could carry
-                /// instructions of its own. Holds what to say if the model says nothing.
+                /// Summing up a text that came from outside (an agent's report, search results, see
+                /// `ToolOutcome.modelSpeaks`): what the model writes is said, but no call it writes then is carried
+                /// out, since that text could carry instructions of its own. Holds what to say if the model says nothing.
                 var summing: String?
                 while true {
                     var calls: [ToolCall] = []
@@ -508,18 +514,23 @@ public actor VoicePipeline {
                         case .text(let raw): chunker.push(filter.push(raw)).forEach(send)
                         case .toolCallStarted where summing == nil:
                             DebugLog.log("turn \(turn.id): tool call started")
-                            if config.toolCallFiller, !fillerSaid, turn.answer.isEmpty {
+                            if !fillerSaid, let phrase = await waitingPhrase(for: nil, turn) {
                                 fillerSaid = true
                                 // Not in the history: the model would start saying it in its own answers.
-                                deliver(ActionPhrases.oneMoment(lang), to: turn, inHistory: false)
+                                deliver(phrase, to: turn, inHistory: false)
+                            }
+                        case .toolCallNamed(let name) where summing == nil:
+                            if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
+                                fillerSaid = true
+                                deliver(phrase, to: turn, inHistory: false)
                             }
                         case .toolCall(let call) where summing == nil: calls.append(call)
                         case .unreadableToolCall(let raw) where summing == nil:
                             DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
                             unreadable = true
-                        case .toolCallStarted: break
+                        case .toolCallStarted, .toolCallNamed: break
                         case .toolCall(let call):
-                            DebugLog.log("turn \(turn.id): call ignored while summing up a report: \(call.name)")
+                            DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
                         case .unreadableToolCall: break
                         }
                     }
@@ -648,6 +659,13 @@ public actor VoicePipeline {
         var sentences = SentenceChunker()
         sentences.firstPieceMinCharacters = .max
         (sentences.push(text) + sentences.flush()).forEach { deliver($0, to: turn) }
+    }
+
+    /// What to say while the model writes a call (`ToolRunner.waitingPhrase`): nil when the config says nothing, when
+    /// the model already said something, or when it is better to wait for the tool's name.
+    private func waitingPhrase(for tool: String?, _ turn: Turn) async -> String? {
+        guard config.toolCallFiller, turn.answer.isEmpty, let tools else { return nil }
+        return await tools.waitingPhrase(for: tool, language: turn.language)
     }
 
     /// Returns once the user's turn is really over; throws if the turn was dropped meanwhile.

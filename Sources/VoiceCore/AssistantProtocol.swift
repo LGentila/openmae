@@ -30,10 +30,12 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var shortcutsToConfirm: [String] = []
     /// Handing long tasks to Claude Code (with the actions on).
     public var claudeCode = AgentSettings()
+    /// Searching the internet through the user's SearXNG (with the actions on or off).
+    public var webSearch = WebSearchSettings()
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode
+        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode, webSearch
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
@@ -45,7 +47,40 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         actionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .actionsEnabled) ?? false
         shortcutsToConfirm = try c.decodeIfPresent([String].self, forKey: .shortcutsToConfirm) ?? []
         claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
+        webSearch = (try? c.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch)) ?? WebSearchSettings()
     }
+}
+
+/// Searching the internet. Only the keywords the model writes leave the Mac, to the user's SearXNG and from there to
+/// the search engines; the password of the protection in front of it is kept in the keychain, never here.
+public struct WebSearchSettings: Sendable, Codable, Equatable {
+    /// Off by default: what is searched leaves the Mac.
+    public var enabled = false
+    /// The user's SearXNG, as typed: "https://search.example.org".
+    public var address = ""
+    /// The user name of the password protection in front of it, if any.
+    public var username = ""
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey { case enabled, address, username }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        address = try c.decodeIfPresent(String.self, forKey: .address) ?? ""
+        username = try c.decodeIfPresent(String.self, forKey: .username) ?? ""
+    }
+
+    /// The search can be offered to the model: switched on, with an address that can be one.
+    public var isReady: Bool { enabled && SearXNGProvider.address(address) != nil }
+}
+
+/// What the settings' "Test" button found: how many results, how fast, or why it failed.
+public enum WebSearchTest: Sendable, Codable, Equatable {
+    case works(results: Int, seconds: Double)
+    case failed(WebSearchError)
+    /// The address cannot be one.
+    case noAddress
 }
 
 /// The settings of an agent Maé hands tasks to.
@@ -103,6 +138,9 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case refreshActions
     /// Stop a task handed to an agent (the Stop button of the task list).
     case stopTask(UUID)
+    /// Search once with the web search's settings and the password in the keychain (the "Test" button), switched on
+    /// or not; answered by `.webSearchTested`.
+    case testWebSearch
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -278,6 +316,8 @@ public enum AssistantEvent: Sendable, Codable {
     case actions(ActionsStatus)
     /// The tasks handed to agents, the most recent last; sent at start-up and at every change.
     case tasks([AgentTask])
+    /// What `.testWebSearch` found.
+    case webSearchTested(WebSearchTest)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)

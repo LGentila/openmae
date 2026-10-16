@@ -10,6 +10,17 @@ public enum AppIdentity {
     /// Folder used under ~/Library/Application Support and ~/Library/Caches.
     public static let directoryName = name
 
+    /// The app's version ("0.3.0"), from its bundle; "dev" outside the app (voice-cli, the tests).
+    public static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    /// How the app names itself to the servers it asks something: honestly, never as a browser. Plain letters, as
+    /// HTTP headers want them.
+    public static var userAgent: String {
+        "\(name.folding(options: .diacriticInsensitive, locale: nil))/\(version)"
+    }
+
     /// ~/Library/Application Support/<name>/Models — where downloaded models live.
     public static var modelsDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

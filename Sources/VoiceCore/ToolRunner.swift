@@ -28,31 +28,53 @@ public actor ToolRunner {
     public static let actionLifetime: TimeInterval = 120
 
     private let providers: [any ToolProvider]
+    /// The built-in actions are among the providers (reminders and calendar, timers, shortcuts): the system prompt gets
+    /// their part, and the smallest model their example exchanges. False for the web search on its own.
+    public nonisolated let offersActions: Bool
     private var byName: [String: any ToolProvider] = [:]
     /// The tools' names, in the providers' order.
     private var names: [String] = []
+    /// The tools whose provider says something of its own while the model writes a call to them.
+    private var ownPhrases: Set<String> = []
     private var pending: (call: ToolCall, provider: any ToolProvider, at: Date)?
     /// Drops the pending action once its time is up, so that its provider knows (a task read back and shown on
     /// screen disappears).
     private var expiry: Task<Void, Never>?
     private var last: (outcome: ToolOutcome, provider: any ToolProvider, at: Date)?
 
-    public init(providers: [any ToolProvider]) {
+    public init(providers: [any ToolProvider], actions: Bool = true) {
         self.providers = providers
+        offersActions = actions
     }
 
     /// Every tool, in the providers' order (asks each provider again: call it when the list may have changed).
     public func tools() async -> [ToolSpec] {
         var specs: [ToolSpec] = []
         byName = [:]
+        ownPhrases = []
         for provider in providers {
             for spec in await provider.tools() where byName[spec.name] == nil {
                 byName[spec.name] = provider
                 specs.append(spec)
+                if await provider.waitingPhrase(for: spec.name, language: .french) != nil { ownPhrases.insert(spec.name) }
             }
         }
         names = specs.map(\.name)
         return specs
+    }
+
+    /// What the app says while the model writes a call: its tool's own phrase ("Je regarde ça sur internet, un
+    /// instant."), or "Un instant, je m'en occupe tout de suite.". `tool` is nil when the call has just begun, its name
+    /// not read yet: then nil when some tool has a phrase of its own (better wait for the name, a few tokens later).
+    public func waitingPhrase(for tool: String?, language: SpeechLanguage) async -> String? {
+        guard let tool else { return ownPhrases.isEmpty ? ActionPhrases.oneMoment(language) : nil }
+        let name = ToolNames.match(tool, among: names) ?? tool
+        if ownPhrases.contains(name), let provider = byName[name],
+           let phrase = await provider.waitingPhrase(for: name, language: language)
+        {
+            return phrase
+        }
+        return ActionPhrases.oneMoment(language)
     }
 
     /// The call with the name of the tool it stands for, when the model misspelled it ("crer_rappel"); unchanged

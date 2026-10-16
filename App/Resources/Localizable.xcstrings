@@ -171,6 +171,16 @@
         }
       }
     },
+    "Address of your SearXNG": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse de ton SearXNG"
+          }
+        }
+      }
+    },
     "Add…": {
       "localizations": {
         "fr": {
@@ -801,6 +811,16 @@
         }
       }
     },
+    "I can’t reach your SearXNG.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je n’arrive pas à joindre ton SearXNG."
+          }
+        }
+      }
+    },
     "I'm listening…": {
       "localizations": {
         "fr": {
@@ -917,6 +937,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Il ne pourra plus parler à Maé, et sa conversation en cours se ferme. Pour le remettre, il faudra scanner un nouveau code."
+          }
+        }
+      }
+    },
+    "It works: %lld results in %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ça marche : %lld résultats en %@."
+          }
+        }
+      }
+    },
+    "It works: one result in %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ça marche : un résultat en %@."
           }
         }
       }
@@ -1107,6 +1147,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé réfléchit…"
+          }
+        }
+      }
+    },
+    "Maé looks up what she can’t know: the news, a score, opening hours, a price. She goes through your own SearXNG.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix. Elle passe par ton propre SearXNG."
           }
         }
       }
@@ -1461,6 +1511,26 @@
         }
       }
     },
+    "Password": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mot de passe"
+          }
+        }
+      }
+    },
+    "Password, if it asks for one": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mot de passe, s’il en demande un"
+          }
+        }
+      }
+    },
     "Pause": {
       "localizations": {
         "fr": {
@@ -1631,6 +1701,16 @@
         }
       }
     },
+    "Remove the password": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer le mot de passe"
+          }
+        }
+      }
+    },
     "Remove…": {
       "localizations": {
         "fr": {
@@ -1661,12 +1741,42 @@
         }
       }
     },
+    "Save": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer"
+          }
+        }
+      }
+    },
+    "Saved in the keychain": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rangé dans le trousseau"
+          }
+        }
+      }
+    },
     "Say hello to get started.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Dis bonjour pour commencer."
+          }
+        }
+      }
+    },
+    "Search the internet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche sur internet"
           }
         }
       }
@@ -1951,6 +2061,26 @@
         }
       }
     },
+    "Test": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tester"
+          }
+        }
+      }
+    },
+    "Testing…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test en cours…"
+          }
+        }
+      }
+    },
     "The assistant runs entirely on this Mac, without the Internet. It first needs its models: one download, and the connection is not used any more.": {
       "localizations": {
         "fr": {
@@ -2141,6 +2271,26 @@
         }
       }
     },
+    "This address doesn’t answer like a SearXNG (code %lld).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette adresse ne répond pas comme un SearXNG (code %lld)."
+          }
+        }
+      }
+    },
+    "This address doesn’t answer like a SearXNG.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette adresse ne répond pas comme un SearXNG."
+          }
+        }
+      }
+    },
     "This code expired": {
       "localizations": {
         "fr": {
@@ -2261,12 +2411,42 @@
         }
       }
     },
+    "Type the address of your SearXNG first.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tape d’abord l’adresse de ton SearXNG."
+          }
+        }
+      }
+    },
     "Untested tier: performance is estimated.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Palier non testé : performances estimées."
+          }
+        }
+      }
+    },
+    "User name": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifiant"
+          }
+        }
+      }
+    },
+    "User name, if it asks for one": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifiant, s’il en demande un"
           }
         }
       }
@@ -2361,6 +2541,16 @@
         }
       }
     },
+    "What you search for goes out on the internet: to your SearXNG, then to the search engines. The rest of the conversation stays on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que tu cherches part sur internet : vers ton SearXNG, puis vers les moteurs de recherche. Le reste de la conversation reste sur ton Mac."
+          }
+        }
+      }
+    },
     "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
       "localizations": {
         "fr": {
@@ -2427,6 +2617,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your SearXNG asks for a user name and a password.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton SearXNG demande un identifiant et un mot de passe."
+          }
+        }
+      }
+    },
+    "Your SearXNG doesn’t accept programs: turn on its JSON format.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton SearXNG n’accepte pas les programmes : active son format JSON."
+          }
+        }
+      }
+    },
+    "Your SearXNG refuses the password.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton SearXNG refuse le mot de passe."
+          }
+        }
+      }
+    },
+    "Your SearXNG takes OpenMaé for a robot: protect it with a password and turn off its bot protection.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton SearXNG prend OpenMaé pour un robot : protège-le par un mot de passe et coupe sa protection anti-robots."
           }
         }
       }

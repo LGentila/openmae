@@ -7,11 +7,12 @@
 //                                                       loops a conversation; memory after every turn
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
 //                                                       silence the voice produces before speaking
-//   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json]
-//                                                       does the model pick the right action? (text only,
-//                                                       nothing carried out; see ActionsBench.swift)
+//   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>]
+//                                                       does the model pick the right action, or search? (text
+//                                                       only, nothing carried out; see ActionsBench.swift)
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
 //                                                       see Delegate.swift)
+//   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
@@ -52,6 +53,10 @@ struct Options {
     var watchCalls = false
     var addendum: String?
     var examples: String?
+    var web = false
+    var searxng: String?
+    var searxngUser: String?
+    var record: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -80,6 +85,10 @@ struct Options {
             case "--watch-calls": o.watchCalls = true
             case "--addendum": o.addendum = it.next()
             case "--examples": o.examples = it.next()
+            case "--web": o.web = true
+            case "--searxng": o.searxng = it.next()
+            case "--searxng-user": o.searxngUser = it.next()
+            case "--record": o.record = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -360,7 +369,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog", "actions-bench", "link-client", "delegate"].contains(options.command)
+   ["voice-onset", "download", "verify", "catalog", "actions-bench", "link-client", "delegate", "web-search"]
+       .contains(options.command)
 {
     do {
         switch options.command {
@@ -370,6 +380,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "actions-bench": try await runActionsBench(options)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
+        case "web-search": try await runWebSearch(CommandLine.arguments)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -386,6 +397,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
+                                       [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
+               voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
                                   [--follow-up "…"] [--stop-after seconds]

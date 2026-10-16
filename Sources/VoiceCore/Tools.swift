@@ -255,6 +255,9 @@ public protocol ToolProvider: Sendable {
     func risk(of call: ToolCall) async -> ToolRisk
     /// Checks a call without carrying it out (dates, names). Throws a `ToolRefusal`.
     func check(_ call: ToolCall, context: ToolContext) async throws
+    /// What the app says while the model writes a call to this tool, instead of "Un instant, je m'en occupe tout de
+    /// suite." (nil).
+    func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String?
     /// What the app says before asking "On y va ?" for a sensitive call.
     func summary(of call: ToolCall, context: ToolContext) async -> String
     /// A sensitive call that waited for the user's "oui" will not be carried out: they said no, it expired, another
@@ -274,6 +277,7 @@ extension ToolProvider {
         await tools().first { $0.name == call.name }?.risk ?? .sensitive
     }
     public func check(_ call: ToolCall, context: ToolContext) async throws {}
+    public func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String? { nil }
     public func summary(of call: ToolCall, context: ToolContext) async -> String { call.name }
     public func dropped(_ call: ToolCall) async {}
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {

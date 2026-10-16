@@ -73,6 +73,8 @@ public enum ModelOutput: Sendable, Equatable {
     case text(String)
     /// A tool call has begun: no text for the voice until it is complete.
     case toolCallStarted
+    /// The call's tool, as soon as the model has written its name (a few tokens after `toolCallStarted`).
+    case toolCallNamed(String)
     case toolCall(ToolCall)
     /// A call the model wrote but that could not be read (the raw text, for the model's second try).
     case unreadableToolCall(String)

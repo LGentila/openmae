@@ -2,14 +2,21 @@
 //
 // Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created, no task
 // is handed over). Each request of the corpus (Tests/Fixtures/actions-fr.json; Tests/Fixtures/agents-fr.json for
-// handing tasks to Claude Code) is sent to the model with the same system prompt and tools as in the app, at a
-// fixed reference time, and what the app would make of the call it writes (the tool its name stands for, misspelled
-// or not; the date worked out from the words it copied, the length, the shortcut, the words of a task's instruction)
-// is compared with the expected one.
+// handing tasks to Claude Code; Tests/Fixtures/web-fr.json for searching the internet) is sent to the model with the
+// same system prompt and tools as in the app, at a fixed reference time, and what the app would make of the call it
+// writes (the tool its name stands for, misspelled or not; the date worked out from the words it copied, the length,
+// the shortcut, the words of a task's instruction or of a search) is compared with the expected one.
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
-//                           [--watch-calls] [--examples app|none|file]
+//                           [--watch-calls] [--examples app|none|file] [--web]
+//                           [--searxng http://127.0.0.1:8888 [--searxng-user name]] [--record file.json]
+//
+// A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
+// the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
+// the searches are made on that SearXNG, with the model's own words (the password, if any, in the SEARXNG_PASSWORD
+// environment variable), and --record writes what they found, by request, in the corpus's "recorded" shape. --web
+// offers the search tool with any corpus (to check that it does not change the choice of the other tools).
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -28,9 +35,13 @@ private struct Corpus: Decodable {
     var shortcuts: [String]
     /// The delegation tools are offered too (Claude Code switched on).
     var agents: Bool?
+    /// The web search tool is offered too.
+    var web: Bool?
     var cases: [Case]
     /// Earlier exchanges several cases share, by name.
     var histories: [String: [Exchange]]?
+    /// What a search found for a request (by its phrase), as the app keeps it: summed up by the model when it searches.
+    var recorded: [String: WebSearchResults]?
 
     struct Case: Decodable {
         var phrase: String
@@ -60,7 +71,8 @@ private struct Corpus: Decodable {
         var end: String?
         var seconds: Int?
         var name: String?
-        /// Words a delegation's instruction (or a follow-up's message) must contain, whatever the accents and case.
+        /// Words a delegation's instruction (or a follow-up's message, or a search's keywords) must contain, whatever
+        /// the accents and case.
         var mentions: [String]?
     }
 
@@ -106,15 +118,30 @@ private struct CaseResult: Encodable {
     var rightAfterSecondTry: Bool?
     var firstOutputMs: Double?
     var callMs: Double?
+    /// From the start of the call to its tool's name read (the app's waiting phrase waits for it when a tool has its own).
+    var nameReadMs: Double?
     /// With --watch-calls: the chance of opening a tool call at the first token, and at the most tempted one.
     var firstCallChance: Double?
     var bestCallChance: Double?
     var bestCallAt: Int?
+    /// A search: what the model said of its results, and the calls it wrote meanwhile (the app carries out none).
+    var summary: String?
+    var callsWhileSumming: [String]?
+    /// Whether the summary names one of the results' sites.
+    var namesASite: Bool?
+    /// How many tokens the results take in the model's memory.
+    var resultTokens: Int?
+    /// Results → first words of the summary, and its end; with --searxng, the search itself.
+    var summaryFirstMs: Double?
+    var summaryMs: Double?
+    var searchMs: Double?
 }
 
 func runActionsBench(_ o: Options) async throws {
     let corpusURL = URL(fileURLWithPath: o.corpus ?? "Tests/Fixtures/actions-fr.json")
-    let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: corpusURL))
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let corpus = try decoder.decode(Corpus.self, from: Data(contentsOf: corpusURL))
     let timeZone = TimeZone.current
     guard let now = LocalDateTime.parse(o.now ?? corpus.now, in: timeZone)?.date else {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
@@ -134,10 +161,23 @@ func runActionsBench(_ o: Options) async throws {
     print("loaded in \(clock.now - loadStart)")
 
     let agents = corpus.agents == true
+    let web = corpus.web == true || o.web
+    // In the app's order: the actions, the agents, the web search.
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
+        + (web ? [WebSearchCatalog.search] : [])
+    var live: SearXNGProvider?
+    if let text = o.searxng {
+        guard let address = SearXNGProvider.address(text) else {
+            throw CLIError("--searxng: expected an address like http://127.0.0.1:8888")
+        }
+        live = SearXNGProvider(address: address, username: o.searxngUser ?? "",
+                               password: ProcessInfo.processInfo.environment["SEARXNG_PASSWORD"] ?? "")
+        print("searches made on \(address.absoluteString)")
+    }
+    var found: [String: WebSearchResults] = [:]  // the live searches, for --record
     // As in the app (`ToolRunner.named`): a misspelled tool name is read as the tool's.
     func named(_ call: ToolCall) -> ToolCall {
         var named = call
@@ -150,6 +190,7 @@ func runActionsBench(_ o: Options) async throws {
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     conversation.systemAddenda = [try o.addendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
         ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (agents ? [AgentCatalog.promptAddendum] : [])
+        + (web ? [WebSearchCatalog.promptAddendum] : [])
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     switch examples {
     case "app": conversation.examples = ActionCatalog.examples(now: now, timeZone: timeZone)
@@ -187,12 +228,17 @@ func runActionsBench(_ o: Options) async throws {
         var unreadable: String?
         var firstOutput: Double?
         var callTime: Double?
+        var callStart: Double?
+        var nameRead: Double?
+        /// A second pass (a summary, a second try) took the model's memory past this request's beginning.
+        var secondPass = false
         let start = clock.now
         for try await output in model.reply(to: request) {
             if firstOutput == nil { firstOutput = milliseconds(clock.now - start) }
             switch output {
             case .text(let piece): text += piece
-            case .toolCallStarted: break
+            case .toolCallStarted: if callStart == nil { callStart = milliseconds(clock.now - start) }
+            case .toolCallNamed: if nameRead == nil { nameRead = milliseconds(clock.now - start) }
             case .toolCall(let made):
                 if call == nil {
                     call = made
@@ -211,6 +257,7 @@ func runActionsBench(_ o: Options) async throws {
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
                                 text: text, toolOK: chosen == expectedTool, firstOutputMs: firstOutput, callMs: callTime)
+        if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
         if o.watchCalls, let chances = await model.lastToolCallChances {
             result.firstCallChance = chances.first
             result.bestCallChance = chances.best
@@ -235,6 +282,32 @@ func runActionsBench(_ o: Options) async throws {
                 result.refusal = refused.forModel
                 if result.toolOK, item.expected != nil { result.argumentsOK = false }
             }
+        } else if let call, call.name == WebSearchCatalog.searchName {
+            // A search: whether its keywords keep the essentials, then the model's summary of what it would find.
+            do {
+                try WebSearchCatalog.check(call, context: context)
+                if result.toolOK, let expected = item.expected { result.argumentsOK = mentions(call, expected) }
+                let query = WebSearchCatalog.query(call) ?? ""
+                var results = corpus.recorded?[item.phrase]
+                if let live {
+                    let searchStart = clock.now
+                    do {
+                        results = try await live.search(query, language: .french)
+                        found[item.phrase] = results
+                    } catch {
+                        print("      search failed: \(error)")
+                    }
+                    result.searchMs = milliseconds(clock.now - searchStart)
+                }
+                if let results {
+                    secondPass = try await sumUp(call, query: query, results: results, after: request, context: context,
+                                                 model: model, into: &result)
+                }
+            } catch let refused as ToolRefusal {
+                refusal = refused
+                result.refusal = refused.forModel
+                if result.toolOK, item.expected != nil { result.argumentsOK = false }
+            }
         } else if let call {
             do {
                 let resolved = try resolve(call, created: created, context: context, shortcuts: corpus.shortcuts)
@@ -250,6 +323,7 @@ func runActionsBench(_ o: Options) async throws {
         }
         if let call, let refusal, refusal.retryable {
             // As in the app: the model sees why its call was refused and gets one more try.
+            secondPass = true
             var retried: ToolCall?
             for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal.forModel)])]) {
                 if case .toolCall(let made) = output, retried == nil { retried = made }
@@ -258,6 +332,11 @@ func runActionsBench(_ o: Options) async throws {
             retried = retried.map(named)
             result.secondTry = retried.map { describe($0, written: writtenAgain) } ?? "no call"
             if let retried, let expected = item.expected, retried.name == expectedTool,
+               retried.name == WebSearchCatalog.searchName
+            {
+                result.rightAfterSecondTry = (try? WebSearchCatalog.check(retried, context: context)) != nil
+                    && mentions(retried, expected)
+            } else if let retried, let expected = item.expected, retried.name == expectedTool,
                let resolved = try? resolve(retried, created: created, context: context, shortcuts: corpus.shortcuts)
             {
                 result.secondTry! += " = " + resolved.description(timeZone)
@@ -279,9 +358,79 @@ func runActionsBench(_ o: Options) async throws {
         if let second = result.secondTry {
             print("      second try → \(second)" + (result.rightAfterSecondTry == true ? "  ✓" : "  ✗"))
         }
+        if let summary = result.summary {
+            let calls = (result.callsWhileSumming ?? []).isEmpty ? ""
+                : "  [calls written while summing up, not carried out: \(result.callsWhileSumming!.joined(separator: "; "))]"
+            print("      summary → “\(summary)”  \(fmt(result.summaryFirstMs))" + calls)
+        }
         if o.watchCalls { print("      raw: \(await model.lastRawAnswer.debugDescription)") }
+        if secondPass {
+            // The next request starts again from the system prompt alone, which the model's memory, now past this
+            // request's beginning, can no longer be wound back to: it would compute that prompt again within the next
+            // request's time, and within every one after it. Back to the system prompt now, outside the timings.
+            try await model.prefill(conversation.messages)
+        }
     }
     summarize(results, tier: tier, model: folder.lastPathComponent, options: o)
+    if let record = o.record {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(found).write(to: URL(fileURLWithPath: record))
+        print("searches recorded: \(record) (\(found.count))")
+    }
+}
+
+/// The second pass of a search, as in the app: the model reads the results and answers, and nothing it writes then is
+/// carried out (the calls are only counted). No results: the app says so itself, without the model. Returns whether
+/// the model was asked.
+private func sumUp(_ call: ToolCall, query: String, results: WebSearchResults, after request: [ChatMessage],
+                   context: ToolContext, model: MLXChatModel, into result: inout CaseResult) async throws -> Bool
+{
+    guard !results.isEmpty else {
+        result.summary = WebSearchPhrases.nothingFound(query, .french)
+        return false
+    }
+    let forModel = WebSearchCatalog.forModel(query: query, results, context: context)
+    let called = request + [.call(call)]
+    result.resultTokens = try await model.tokenCount(called + [.result(of: call, forModel)]) - model.tokenCount(called)
+    let clock = ContinuousClock()
+    let start = clock.now
+    var text = ""
+    var calls: [String] = []
+    for try await output in model.reply(to: request + [.call(call), .result(of: call, forModel)]) {
+        switch output {
+        case .text(let piece):
+            if result.summaryFirstMs == nil, piece.contains(where: \.isLetter) {
+                result.summaryFirstMs = milliseconds(clock.now - start)
+            }
+            text += piece
+        case .toolCall(let made): calls.append(describe(made, written: nil))
+        case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
+        case .toolCallStarted, .toolCallNamed: break
+        }
+    }
+    result.summaryMs = milliseconds(clock.now - start)
+    var filter = ReasoningFilter()
+    let summary = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+    result.summary = summary.isEmpty ? "(nothing: the app says “\(WebSearchPhrases.couldNotSumUp(.french))”)" : summary
+    result.callsWhileSumming = calls
+    result.namesASite = namesASite(summary, results)
+    return true
+}
+
+/// Whether a text names one of the results' sites: "lequipe.fr" in "D'après L'Équipe", "fr.wikipedia.org" in
+/// "Selon Wikipédia" (letters and digits only, whatever the accents and case).
+private func namesASite(_ text: String, _ results: WebSearchResults) -> Bool {
+    func letters(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+            .filter { $0.isLetter || $0.isNumber }
+    }
+    let said = letters(text)
+    let sites = ([results.answer].compactMap { $0 } + results.results).map(\.site)
+    return sites.contains { site in
+        site.split(separator: ".").dropLast().contains { $0.count >= 3 && said.contains(letters(String($0))) }
+    }
 }
 
 /// What the app would do with a call: the moment, end, length or shortcut it would use. Throws the refusal it would
@@ -347,14 +496,14 @@ private func resolve(_ call: ToolCall, created: Corpus.Exchange?, context: ToolC
     }
 }
 
-/// Whether a delegation's instruction (or a follow-up's message) contains the expected words, whatever the accents and
-/// case.
+/// Whether a delegation's instruction (or a follow-up's message, or a search's keywords) contains the expected words,
+/// whatever the accents and case.
 private func mentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
     guard let mentions = expected.mentions else { return true }
     func folded(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
     }
-    let text = folded(call.text("consigne") ?? call.text("message") ?? "")
+    let text = folded(call.text("consigne") ?? call.text("message") ?? WebSearchCatalog.query(call) ?? "")
     return mentions.allSatisfy { text.contains(folded($0)) }
 }
 
@@ -410,11 +559,16 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     let copied = results.filter { $0.text.range(of: #"[(\[][^()\[\]]*\b20\d{2}"#, options: .regularExpression) != nil }
     print("answers copying the date line (removed before the voice): \(copied.count) / \(results.filter { !$0.text.isEmpty }.count)")
 
+    if results.contains(where: { $0.expected == WebSearchCatalog.searchName || $0.chosen == WebSearchCatalog.searchName }) {
+        summarizeSearches(results)
+    }
+
     // Expected / chosen.
+    let optional = AgentCatalog.names.union([WebSearchCatalog.searchName])
     let tools = ["creer_evenement", "creer_rappel", "lire_agenda", "lister_rappels", "modifier_element",
                  "supprimer_element", "minuteur", "lancer_raccourci", AgentCatalog.delegateName, AgentCatalog.statusName,
-                 AgentCatalog.followUpName, AgentCatalog.cancelName, "aucun"]
-        .filter { name in !AgentCatalog.names.contains(name) || results.contains { $0.expected == name || $0.chosen == name } }
+                 AgentCatalog.followUpName, AgentCatalog.cancelName, WebSearchCatalog.searchName, "aucun"]
+        .filter { name in !optional.contains(name) || results.contains { $0.expected == name || $0.chosen == name } }
     let others2 = Set(results.map(\.chosen)).subtracting(tools).sorted()
     let columns = tools + others2
     print("\nexpected ↓ / chosen →")
@@ -449,6 +603,8 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     let callTimes = actions.compactMap(\.callMs)
     let textTimes = others.filter(\.toolOK).compactMap(\.firstOutputMs)
     print("\ntime to a complete call: median \(fmt(median(callTimes))), worst \(fmt(callTimes.max()))")
+    let nameTimes = results.compactMap(\.nameReadMs)
+    print("tool's name read after the start of the call: median \(fmt(median(nameTimes))), worst \(fmt(nameTimes.max()))")
     print("time to the first word of an answer without action: median \(fmt(median(textTimes))), worst \(fmt(textTimes.max()))")
 
     let encoder = JSONEncoder()
@@ -461,6 +617,48 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
         print("report: \(url.path)")
     } catch {
         print("could not write the report: \(error)")
+    }
+}
+
+/// The web search's figures: the right decisions (to search or not), the searches by mistake and the missed ones, the
+/// keywords that keep the essentials, and what the summaries did.
+private func summarizeSearches(_ results: [CaseResult]) {
+    let search = WebSearchCatalog.searchName
+    func phrases(_ items: [CaseResult]) -> String {
+        items.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined()
+    }
+    let wanted = results.filter { $0.expected == search }
+    let others = results.filter { $0.expected != search }
+    let mistaken = others.filter { $0.chosen == search }
+    let missed = wanted.filter { $0.chosen != search }
+    let right = results.count - mistaken.count - missed.count
+    print(String(format: "\nweb search: right decisions (to search or not) %d / %d (%.0f %%)", right, results.count,
+                 percent(right, results.count)))
+    let delegations = others.filter { $0.expected == AgentCatalog.delegateName }
+    let rest = others.filter { $0.expected != AgentCatalog.delegateName }
+    print("  searches by mistake: \(mistaken.count) / \(others.count) — \(rest.filter { $0.chosen == search }.count) / "
+          + "\(rest.count) without a search, \(delegations.filter { $0.chosen == search }.count) / \(delegations.count) "
+          + "for an agent" + phrases(mistaken))
+    print("  missed searches: \(missed.count) / \(wanted.count)" + phrases(missed))
+    let made = wanted.filter { $0.chosen == search }
+    print("  keywords keeping the essentials: \(made.filter { $0.argumentsOK == true }.count) / \(made.count)"
+          + made.filter { $0.argumentsOK == false }.map { "\n    · \($0.phrase) → \(describe($0.arguments ?? [:]))" }.joined())
+    let summed = results.filter { $0.chosen == search && $0.summary != nil }
+    let calling = summed.filter { !($0.callsWhileSumming ?? []).isEmpty }
+    print("  summaries: \(summed.count); with calls written while summing up (the app carries out none): \(calling.count)"
+          + calling.map { "\n    · \($0.phrase) → \(($0.callsWhileSumming ?? []).joined(separator: "; "))" }.joined())
+    let rated = summed.filter { $0.namesASite != nil }
+    print("  summaries naming a site of the results: \(rated.filter { $0.namesASite == true }.count) / \(rated.count)")
+    let calls = results.filter { $0.chosen == search }.compactMap(\.callMs)
+    print("  time to a complete search call: median \(fmt(median(calls))), worst \(fmt(calls.max()))")
+    let firstWords = summed.compactMap(\.summaryFirstMs)
+    print("  results → first words of the summary: median \(fmt(median(firstWords))), worst \(fmt(firstWords.max()))")
+    let tokens = summed.compactMap(\.resultTokens).map(Double.init)
+    print("  the results in the model's memory: median \(median(tokens).map { String(Int($0)) } ?? "—") tokens, most "
+          + "\(tokens.max().map { String(Int($0)) } ?? "—")")
+    let searches = results.compactMap(\.searchMs)
+    if !searches.isEmpty {
+        print("  the searches themselves (--searxng): median \(fmt(median(searches))), worst \(fmt(searches.max()))")
     }
 }
 

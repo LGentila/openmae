@@ -258,6 +258,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
         var produced: [Int] = []
         var callTokens: [Int]?  // inside a tool call
+        var callNamed = false
         defer {
             // The iterator feeds each token back into the cache *before* returning it, so the cache
             // holds the prompt plus every token returned. Its offset is the ground truth.
@@ -274,6 +275,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if let maxTokens, produced.count >= maxTokens { break }
             if token == toolCallStart, !tools.isEmpty {
                 callTokens = []
+                callNamed = false
                 onOutput(.toolCallStarted)
                 continue
             }
@@ -283,6 +285,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                     onOutput(toolCall(from: tokens))
                 } else {
                     callTokens = tokens + [token]
+                    if !callNamed, let name = Self.callName(context.tokenizer.decode(tokenIds: tokens + [token])) {
+                        callNamed = true
+                        onOutput(.toolCallNamed(name))
+                    }
                 }
                 continue
             }
@@ -303,6 +309,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if let tokens = callTokens {  // cut off before its end
             onOutput(.unreadableToolCall(context.tokenizer.decode(tokenIds: tokens)))
         }
+    }
+
+    /// The tool's name once the beginning of a call has it whole: "call:chercher_web{" → "chercher_web"; nil before.
+    private static func callName(_ beginning: String) -> String? {
+        guard let open = beginning.firstIndex(of: "{"), let call = beginning[..<open].range(of: "call:") else { return nil }
+        let name = beginning[call.upperBound..<open].trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     /// Reads a call with mlx-swift-lm's Gemma 4 parser (`call:name{key:<|"|>value<|"|>,…}`).
