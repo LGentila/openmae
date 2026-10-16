@@ -34,7 +34,8 @@ public enum ActionCatalog {
             Pour un moment ou une durée, ne calcule rien : recopie les mots exacts de l'utilisateur \
             (« samedi soir », « dans 10 minutes »), c'est l'app qui calcule les dates. \
             \(dateLineRule) \
-            S'il manque une information indispensable, pose d'abord une question courte. \
+            S'il manque une information indispensable, pose d'abord une question courte ; \
+            pour lire les rappels, rien ne manque : sans période, l'app les lit tous. \
             Pour une action, ne dis rien avant l'appel, pas même la première phrase courte : ta réponse commence \
             directement par l'appel de l'outil, et c'est l'app qui confirme à voix haute. \
             Ne dis jamais qu'une action est faite sans avoir appelé l'outil.
@@ -118,10 +119,10 @@ public enum ActionCatalog {
 
     public static let listReminders = ToolSpec(
         name: "lister_rappels",
-        description: "Dit les rappels pas encore faits, pour une période ou en tout.",
+        description: "Dit les rappels pas encore faits. Sans période, l'app les lit tous : n'en demande pas.",
         parameters: [
-            ToolParameter("quand", .string, "La période, avec les mots exacts de l'utilisateur (par exemple "
-                          + "« ce week-end »). Absent pour tous les rappels."),
+            ToolParameter("quand", .string, "La période, seulement si l'utilisateur en dit une, avec ses mots exacts "
+                          + "(par exemple « ce week-end »). Absent sinon : l'app lit alors tous les rappels."),
         ],
         risk: .read)
 
