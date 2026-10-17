@@ -87,6 +87,12 @@ final class PhoneAudio: @unchecked Sendable {
         if observers.isEmpty { observe(session) }
     }
 
+    /// The station's speaker off (no longer a station): the audio session is let go, as after a conversation.
+    func stopPlayback() {
+        guard lock.withLock({ playbackOnly }) else { return }
+        stop()
+    }
+
     /// The engine with the player only.
     private func startPlayer() throws {
         stopEngine()
@@ -285,10 +291,13 @@ final class PhoneAudio: @unchecked Sendable {
         return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
     }
 
+    /// Voice that comes while nothing plays it (no conversation, and not a station: the Mac has not heard yet that it
+    /// stopped) is dropped: not said to be playing, nor counted as queued, which would wait forever.
     private func received(_ input: VoiceInput) {
         switch input {
         case .packet(let packet):
             let (outputs, starts): ([VoiceJitterBuffer.Output], Bool) = lock.withLock {
+                guard running else { return ([], false) }
                 var starts = false
                 if packet.stream != playingStream, jitter.stream.map({ packet.stream > $0 }) ?? true {
                     playingStream = packet.stream
@@ -300,7 +309,9 @@ final class PhoneAudio: @unchecked Sendable {
             if starts { onPlaying?(true) }
             schedule(outputs)
         case .end(let stream, let frames):
-            schedule(lock.withLock { jitter.end(stream: stream, frames: frames, scheduled: scheduled, now: now) })
+            schedule(lock.withLock {
+                running ? jitter.end(stream: stream, frames: frames, scheduled: scheduled, now: now) : []
+            })
         case .stop(let stream):
             let player: AVAudioPlayerNode? = lock.withLock {
                 jitter.stop(stream: stream)

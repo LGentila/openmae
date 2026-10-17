@@ -128,6 +128,9 @@ final class PhoneModel {
     @ObservationIgnored private var dimWatch: Task<Void, Never>?
     @ObservationIgnored private var brightnessBeforeDimming: CGFloat?
     @ObservationIgnored private var taps = TapToTalk()
+    /// A station at the last `updateStation`: the silence that closes the conversation is timed again only when this
+    /// changes (its delay changes with it), not each time the app comes to the front or the battery fills up.
+    @ObservationIgnored private var wasStation = false
     @ObservationIgnored private var answerIndex: Int?
     @ObservationIgnored private var batteryObserver: NSObjectProtocol?
     @ObservationIgnored private let identityStore = KeychainIdentityStore(service: "OpenMaé link")
@@ -290,7 +293,7 @@ final class PhoneModel {
                 await phoneLink.disconnect()
             }
         }
-        audio?.stop()
+        audio?.stopPlayback()  // a station's speaker
         phoneLink = nil
         audio = nil
         link = nil
@@ -343,9 +346,17 @@ final class PhoneModel {
         UIApplication.shared.isIdleTimerDisabled = station
         tellStation()
         if !isConversationOpen {
-            if station { startPlaybackOnly() } else { audio?.stop() }
+            if station {
+                startPlaybackOnly()
+            } else {
+                audio?.stopPlayback()
+                voicePlaying = false  // what was playing was stopped with it
+            }
         }
-        watchSilence()
+        if station != wasStation {
+            wasStation = station
+            watchSilence()  // the station's delay, or the iPhone's
+        }
         watchDimming()
     }
 
@@ -448,6 +459,9 @@ final class PhoneModel {
         if talkKeyDown { setTalkKey(false) }
         taps.reset()
         audio?.stop()
+        // What was playing was stopped with it, and the Mac sends no more of it (it took the sound back): otherwise
+        // the orb would go on showing the Mac's conversation.
+        voicePlaying = false
         if let phoneLink { Task { await phoneLink.setAudio(false) } }
         if isStation { startPlaybackOnly() }
         watchDimming()
