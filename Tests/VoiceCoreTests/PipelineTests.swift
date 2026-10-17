@@ -27,16 +27,26 @@ actor ScriptedModel: LanguageModel {
     private(set) var tools: [ToolSpec] = []
     /// What to answer, request after request (the last one is repeated).
     private var scripts: [[ModelOutput]]
-    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"]) {
+    /// After this many outputs the model stops writing until it is cancelled, then ends its stream without an error,
+    /// as the real one does: an answer in the middle of a sentence.
+    private let pauseAfter: Int?
+    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"], pauseAfter: Int? = nil) {
         scripts = [answer.map { .text($0) }]
+        self.pauseAfter = pauseAfter
     }
-    init(scripts: [[ModelOutput]]) { self.scripts = scripts }
+    init(scripts: [[ModelOutput]]) {
+        self.scripts = scripts
+        pauseAfter = nil
+    }
 
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 let script = await self.log(conversation)
-                for output in script {
+                for (i, output) in script.enumerated() {
+                    if i == self.pauseAfter {
+                        while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+                    }
                     try? await Task.sleep(for: .milliseconds(5))
                     if Task.isCancelled { break }
                     continuation.yield(output)
@@ -93,6 +103,10 @@ actor FakeSpeaker: AudioOutput {
     private(set) var played = 0
     private(set) var stops = 0
     private var busyUntil = ContinuousClock.now
+    /// How long a stop takes to return once the sound is cut (a device, the iPhone's link): whoever waits for the end
+    /// of the playback is released meanwhile, as with the real outputs.
+    private let stopDelay: Duration
+    init(stopDelay: Duration = .zero) { self.stopDelay = stopDelay }
     func play(_ samples: [Float], sampleRate: Double) {
         played += samples.count
         busyUntil = max(busyUntil, .now) + .milliseconds(samples.count)
@@ -100,9 +114,10 @@ actor FakeSpeaker: AudioOutput {
     func waitUntilDone() async {
         while busyUntil > .now { try? await Task.sleep(for: .milliseconds(5)) }
     }
-    func stopImmediately() {
+    func stopImmediately() async {
         stops += 1
         busyUntil = .now
+        if stopDelay > .zero { try? await Task.sleep(for: stopDelay) }
     }
     /// How long the assistant would still be talking.
     var remainingMs: Double {
@@ -247,6 +262,51 @@ struct PipelineTests {
         #expect(history.last?.role == .assistant && history.last?.content.hasSuffix("[…]") == true)
     }
 
+    /// The model has written the whole answer, the voice is still saying it, and the user talks over it. Stopping the
+    /// voice takes a moment, during which the answer's own wait for the end of the playback returns: the answer must
+    /// not be taken for one said to its end. The exchange goes into the history once, cut off, and only the
+    /// interrupted turn is reported.
+    @Test func bargeInAtTheEndOfAnAnswerRecordsTheExchangeOnce() async throws {
+        let long = (1...20).map { "Phrase numéro \($0) de la réponse. " }
+        let (model, stt, speaker) = (ScriptedModel(answer: long), CountingTranscriber(),
+                                     FakeSpeaker(stopDelay: .milliseconds(40)))
+        let pipeline = make(model, stt, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await speaker.played > 0 }
+        try await Task.sleep(for: .milliseconds(300))  // the model has written everything, the voice queued it all
+        #expect(await speaker.remainingMs > 5000)
+        await push(pipeline, "11111111" + String(repeating: "0", count: 20))  // the user talks over it, then stops
+        await waitFor { await model.requests.count == 2 }
+        let request = try #require(await model.requests.last)
+        #expect(request.map(\.role) == [.system, .user, .assistant, .user])
+        #expect(request.filter { $0.role == .assistant }.map { $0.content.hasSuffix("[…]") } == [true])
+        try await Task.sleep(for: .milliseconds(100))
+        let reported = await log.finished.map(\.interrupted)
+        #expect(reported == [true])
+    }
+
+    /// The user talks over the answer while the model is in the middle of a sentence: the model stops, and what it
+    /// had written of that sentence is neither said nor kept; the history holds what went to the voice, cut off.
+    @Test func bargeInWhileTheModelWritesKeepsWhatWentToTheVoice() async throws {
+        let answer = ["Voici la première phrase de la réponse. ", "Et voici la deuxième qui ", "ne finit jamais."]
+        let (model, stt, speaker) = (ScriptedModel(answer: answer, pauseAfter: 2), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await speaker.played > 0 }
+        try await Task.sleep(for: .milliseconds(50))  // the model is stuck in the middle of the second sentence
+        await push(pipeline, "11111111")  // the user talks over the first one
+        await waitFor { await !model.catchUps.isEmpty }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await speaker.played == 500)  // the first sentence only
+        let history = try #require(await model.catchUps.last)
+        #expect(history.last?.role == .assistant)
+        #expect(history.last?.content == "Voici la première phrase de la réponse. […]")
+    }
+
     @Test func quietEchoDoesNotInterruptTheAssistant() async throws {
         let long = (1...20).map { "Phrase numéro \($0) de la réponse. " }
         let (model, stt, speaker) = (ScriptedModel(answer: long), CountingTranscriber(), FakeSpeaker())
@@ -353,9 +413,12 @@ actor EventRecorder {
     private(set) var awake: [Bool] = []
     private(set) var wakeDecisions: [WakeDecision] = []
     private(set) var bargeIns = 0
+    /// The turns reported over, completed or interrupted.
+    private(set) var finished: [TurnMetrics] = []
 
     func record(_ event: PipelineEvent) {
         switch event {
+        case .turnFinished(let metrics): finished.append(metrics)
         case .assistantPiece(let piece):
             pieces.append(piece)
             order.append("assistant")

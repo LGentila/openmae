@@ -197,6 +197,9 @@ public actor VoicePipeline {
         var player: Task<Void, Never>?
         var committed = false
         var audioStarted = false
+        /// A barge-in is silencing it: from then on only `interruptAssistant` ends it, and what its task still does on
+        /// the way out (the model's next words, the end of the playback) is neither said nor recorded.
+        var interrupted = false
         var userText = ""
         var answer = ""
         var speechEnd: ContinuousClock.Instant?
@@ -970,7 +973,7 @@ public actor VoicePipeline {
     /// space the model wrote before it, which the history keeps (`SpeakableText.record`). `inHistory`: whether the model
     /// will see it as part of its answer in the next turns.
     private func deliver(_ piece: String, after separator: String = "", to turn: Turn, inHistory: Bool = true) {
-        guard self.turn === turn, let stream = turn.stream else { return }
+        guard self.turn === turn, !turn.interrupted, let stream = turn.stream else { return }
         let speakable = SpeakableText.clean(piece)
         guard !speakable.isEmpty else { return }
         if turn.firstPieceTime == nil {
@@ -1088,7 +1091,7 @@ public actor VoicePipeline {
     }
 
     private func finish(_ turn: Turn, metrics: TurnMetrics?) {
-        guard self.turn === turn else { return }
+        guard self.turn === turn, !turn.interrupted else { return }
         voiceIsAudible()  // never leave the model paused
         self.turn = nil
         if let metrics, let message = turn.userMessage {
@@ -1152,6 +1155,10 @@ public actor VoicePipeline {
     /// Barge-in: silence the assistant immediately, keep what it already said in the history.
     private func interruptAssistant() async {
         guard let turn else { return }
+        // Before anything that waits: once the voice stops, the turn's own wait for the end of the playback returns,
+        // and it would take the answer for one said to its end (recording the exchange a second time, as complete).
+        // Marked, it says, records and reports nothing more; the exchange is recorded once, below.
+        turn.interrupted = true
         turn.player?.cancel()
         await output.stopImmediately()  // silence at once…
         await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
