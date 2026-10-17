@@ -54,6 +54,14 @@ enum StateText {
         case .headphones: "Headphones"
         }
     }
+
+    static func listening(_ mode: ListeningMode) -> LocalizedStringKey {
+        switch mode {
+        case .handsFree: "Hands-free"
+        case .wakeWord: "After “OK Maé”"
+        case .pushToTalk: "Push to talk"
+        }
+    }
 }
 
 /// Numbers with their unit, in the user's language ("1,24 s" in French, "1.24 s" in English).

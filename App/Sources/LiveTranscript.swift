@@ -8,6 +8,10 @@ struct LiveTranscript: View {
         /// `orShortcut`: "… or press ⌥ Space" too (the global shortcut works).
         case speak(orShortcut: Bool)
         case holdSpace(orShortcut: Bool)
+        /// The wake-word mode, while Maé waits for the phrase.
+        case sayWakeWord(orShortcut: Bool)
+        /// The wake-word mode, while Maé listens to any voice (after the phrase alone, or after an answer).
+        case awake
         case loading(LoadingStep?)
         /// An iPhone has the conversation: the Mac's microphone and speakers are off.
         case onPhone
@@ -192,6 +196,18 @@ private struct InvitationView: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
+            case .sayWakeWord(let orShortcut):
+                if orShortcut {
+                    HStack(spacing: 8) {
+                        Text("Say “OK Maé” or press")
+                        KeyCap(title: Text("⌥ Space"))
+                    }
+                    .accessibilityElement(children: .combine)
+                } else {
+                    Text("Say “OK Maé”")
+                }
+            case .awake:
+                Text("I'm listening…")
             case .loading(let step):
                 VStack(spacing: 6) {
                     Text(StateText.loading(step))

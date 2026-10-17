@@ -58,7 +58,7 @@ extension Snapshots {
         for scenario in scenarios {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
-            model.settings.pushToTalk = false
+            model.settings.listening = .handsFree
             let phone = PhoneAccess(link: nil, status: scenario.status)
             if scenario.removing { phone.removing = device.id }
             let window = WindowState()

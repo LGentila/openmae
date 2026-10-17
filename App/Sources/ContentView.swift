@@ -88,7 +88,7 @@ struct ContentView: View {
 
     /// The window's background follows the conversation; every other screen is at rest.
     private var surface: RGBA {
-        StatePalette(model.isReady ? model.state : .listening).surface
+        StatePalette(model.isReady ? model.shownState : .listening).surface
     }
 
     /// First launch: settings and measurements. Conversation: its history and the settings.
@@ -265,7 +265,7 @@ struct KeyboardControls: ViewModifier {
         }
         guard model.isReady else { return false }
         switch event.keyCode {
-        case 49 where model.settings.pushToTalk || model.talkKeyDown:  // space
+        case 49 where model.settings.listening == .pushToTalk || model.talkKeyDown:  // space
             if event.type == .keyDown, !event.isARepeat { model.setTalkKey(true) }
             if event.type == .keyUp { model.setTalkKey(false) }
             return true

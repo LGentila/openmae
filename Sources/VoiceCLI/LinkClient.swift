@@ -70,7 +70,7 @@ func runLinkClient() async throws {
     Task { await microphone.run() }
     // Hands-free, whatever the Mac's own setting: the Mac hears the end of each recording.
     var settings = AssistantSettings()
-    settings.pushToTalk = false
+    settings.listening = .handsFree
     phone.send(.updateSettings(settings))
     await phone.setAudio(true)
     try await Task.sleep(for: .seconds(1))

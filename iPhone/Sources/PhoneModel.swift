@@ -323,7 +323,7 @@ final class PhoneModel {
 
     private func sendSettings() {
         var settings = AssistantSettings()
-        settings.pushToTalk = talkMode == .hold
+        settings.listening = talkMode == .hold ? .pushToTalk : .handsFree
         phoneLink?.send(.updateSettings(settings))
     }
 

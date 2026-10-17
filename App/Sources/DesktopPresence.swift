@@ -1,11 +1,13 @@
 import AppKit
 import Carbon.HIToolbox
 import Observation
+import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
 /// OpenMaé outside its window: the icon in the menu bar, the ⌥ Space shortcut, and the capsule that follows the
-/// conversation when the window is not in front. Closing the window leaves all of them running.
+/// conversation when the window is not in front. Closing the window leaves all of them running. In the wake-word mode
+/// it also keeps the Mac awake, so that Maé hears « OK Maé ».
 @MainActor
 final class DesktopPresence {
     /// The app's presence, for the app delegate (a click on the Dock icon brings the window back).
@@ -22,6 +24,9 @@ final class DesktopPresence {
     private var escapeShortcut: GlobalShortcut?
     /// The conversation window. Kept once closed: SwiftUI may show the same one again.
     private weak var mainWindow: NSWindow?
+    /// On mains power, the Mac does not go to sleep while Maé waits for « OK Maé ».
+    private let keepAwake = KeepAwake(reason: "OpenMaé: listening for “OK Maé”")
+    private var keepsAwake = false
     /// Opens the conversation window again once it was closed (SwiftUI's `openWindow`).
     var reopenWindow: (() -> Void)?
 
@@ -135,17 +140,24 @@ final class DesktopPresence {
     }
 
     private func update() {
-        let state = model.talkKeyDown ? .userSpeaking : model.state
+        let wakeWord = model.isReady && model.listensForWakeWord
+        if wakeWord != keepsAwake {
+            keepsAwake = wakeWord
+            keepAwake.set(wakeWord)
+        }
+        let state = model.talkKeyDown ? .userSpeaking : model.shownState
         let active = model.isReady && state != .listening
         icon?.show(active ? state : nil)
         guard let capsule else { return }
         // The capsule shows what the window would: from the shortcut to the end of the answer, or once Maé has
-        // understood something said hands-free (not for every noise she hears). Not while an iPhone has the
-        // conversation: the Mac's microphone and speakers are off, the words are not for whoever is at the Mac, and
-        // Escape stays with the app in front.
+        // understood something said hands-free (not for every noise she hears); in the wake-word mode, from « OK Maé »
+        // to the end of the seconds of attention after the answer. Not while an iPhone has the conversation: the
+        // Mac's microphone and speakers are off, the words are not for whoever is at the Mac, and Escape stays with the
+        // app in front.
         let understood = model.currentExchange.user.map { !$0.pending && !$0.text.isEmpty } ?? false
         let shows = active && !windowIsInFront && phone.hand == nil
-            && (model.isShortcutExchange || state == .speaking || (state == .thinking && understood))
+            && (model.isShortcutExchange || model.listensForWakeWord || state == .speaking
+                || (state == .thinking && understood))
         if shows { capsule.show(state) } else { capsule.hide() }
         if shows, state == .thinking || state == .speaking {
             escapeShortcut?.register()

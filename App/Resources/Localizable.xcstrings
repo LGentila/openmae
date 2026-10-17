@@ -211,6 +211,16 @@
         }
       }
     },
+    "After “OK Maé”": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Après « OK Maé »"
+          }
+        }
+      }
+    },
     "Allowed": {
       "localizations": {
         "fr": {
@@ -251,6 +261,16 @@
         }
       }
     },
+    "Asleep": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endormie"
+          }
+        }
+      }
+    },
     "At home": {
       "localizations": {
         "fr": {
@@ -287,6 +307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatique : %@"
+          }
+        }
+      }
+    },
+    "Awake": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attentive"
           }
         }
       }
@@ -571,6 +601,16 @@
         }
       }
     },
+    "Date and time": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date et heure"
+          }
+        }
+      }
+    },
     "Decide alone": {
       "localizations": {
         "fr": {
@@ -581,12 +621,32 @@
         }
       }
     },
+    "Decision": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Décision"
+          }
+        }
+      }
+    },
     "Delete": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Supprimer"
+          }
+        }
+      }
+    },
+    "Delete the log": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer le journal"
           }
         }
       }
@@ -771,6 +831,16 @@
         }
       }
     },
+    "For your tests of “OK Maé”: the start of each sentence Maé hears, and what she did with it, is written in a file on this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour tes essais de « OK Maé » : le début de chaque phrase que Maé entend, et ce qu’elle en a fait, est noté dans un fichier sur ce Mac."
+          }
+        }
+      }
+    },
     "Free space on this Mac": {
       "localizations": {
         "fr": {
@@ -797,6 +867,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Passer par"
+          }
+        }
+      }
+    },
+    "Hands-free": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mains libres"
           }
         }
       }
@@ -871,6 +951,16 @@
         }
       }
     },
+    "How to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour parler"
+          }
+        }
+      }
+    },
     "I can’t make sense of Brave’s answer.": {
       "localizations": {
         "fr": {
@@ -937,6 +1027,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Si le problème revient, un modèle est peut-être abîmé : les supprimer permet de les télécharger à nouveau."
+          }
+        }
+      }
+    },
+    "Ignored": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignorée"
           }
         }
       }
@@ -1181,6 +1281,16 @@
         }
       }
     },
+    "Maé answers as soon as she hears someone speak.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé répond dès qu’elle entend quelqu’un parler."
+          }
+        }
+      }
+    },
     "Maé can hand it long tasks: a website, code, research. What you hand it leaves this Mac: Claude Code works with Anthropic’s online models. You get a notification when it is done.": {
       "localizations": {
         "fr": {
@@ -1247,6 +1357,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix."
+          }
+        }
+      }
+    },
+    "Maé only answers sentences that start with “OK Maé”, and keeps listening a few seconds after each answer. With the TV on, she hears you less well. Plugged in, this Mac no longer goes to sleep.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne répond qu’aux phrases qui commencent par « OK Maé », et t’écoute encore quelques secondes après chaque réponse. Quand la télé est allumée, elle t’entend moins bien. Branché sur secteur, ce Mac ne se met plus en veille."
           }
         }
       }
@@ -1481,6 +1601,16 @@
         }
       }
     },
+    "Note what Maé hears": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noter ce que Maé entend"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "fr": {
@@ -1677,6 +1807,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé n’écoute qu’après ce raccourci."
+          }
+        }
+      }
+    },
+    "Press once to talk, and again to finish. When the window is closed, Maé still waits for “OK Maé”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé attend toujours « OK Maé »."
           }
         }
       }
@@ -1881,6 +2021,26 @@
         }
       }
     },
+    "Say “OK Maé”": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis « OK Maé »"
+          }
+        }
+      }
+    },
+    "Say “OK Maé” or press": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis « OK Maé » ou appuie sur"
+          }
+        }
+      }
+    },
     "Search the internet": {
       "localizations": {
         "fr": {
@@ -1967,6 +2127,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Afficher un nouveau code"
+          }
+        }
+      }
+    },
+    "Show the log": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voir le journal"
           }
         }
       }
@@ -2071,6 +2241,16 @@
         }
       }
     },
+    "Speaking": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parlait"
+          }
+        }
+      }
+    },
     "Speech recognition": {
       "localizations": {
         "fr": {
@@ -2127,6 +2307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Reprendre ici"
+          }
+        }
+      }
+    },
+    "Taken for you": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prise pour toi"
           }
         }
       }
@@ -2651,6 +2841,16 @@
         }
       }
     },
+    "What she heard": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce qu’elle a entendu"
+          }
+        }
+      }
+    },
     "What went wrong": {
       "localizations": {
         "fr": {
@@ -2697,6 +2897,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sans relais, ton iPhone ne te joint qu’à la maison, sur le même Wi-Fi que ce Mac."
+          }
+        }
+      }
+    },
+    "Woke up": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réveillée"
           }
         }
       }

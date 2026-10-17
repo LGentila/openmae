@@ -13,6 +13,7 @@ struct SettingsPanel: View {
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
     @State private var choosingFolder = false
+    @State private var wakeLogExists = WakeLog.exists
     @Environment(\.openURL) private var openURL
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
 
@@ -66,13 +67,23 @@ struct SettingsPanel: View {
         }
         .padding(.bottom, 6)
         Hairline()
-        Toggle(isOn: $model.settings.pushToTalk) {
-            Text("Push to talk")
+        HStack(spacing: 12) {
+            Text("How to talk")
                 .textStyle(.setting)
+            Spacer(minLength: 0)
+            listeningMenu
         }
-        .toggleStyle(SwitchStyle())
         .frame(minHeight: 48)
-        HelpText("Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.")
+        Group {
+            switch model.settings.listening {
+            case .handsFree:
+                HelpText("Maé answers as soon as she hears someone speak.")
+            case .wakeWord:
+                HelpText("Maé only answers sentences that start with “OK Maé”, and keeps listening a few seconds after each answer. With the TV on, she hears you less well. Plugged in, this Mac no longer goes to sleep.")
+            case .pushToTalk:
+                HelpText("Hold the space bar (or the button at the bottom of the window) while you speak. Useful in noisy places.")
+            }
+        }
         if model.hasTalkShortcut {
             Hairline()
                 .padding(.top, 6)
@@ -84,8 +95,33 @@ struct SettingsPanel: View {
             }
             .frame(minHeight: 48)
             .accessibilityElement(children: .combine)
-            HelpText("Press once to talk, and again to finish. When the window is closed, Maé only listens after this shortcut.")
+            if model.listensForWakeWord {
+                HelpText("Press once to talk, and again to finish. When the window is closed, Maé still waits for “OK Maé”.")
+            } else {
+                HelpText("Press once to talk, and again to finish. When the window is closed, Maé only listens after this shortcut.")
+            }
         }
+    }
+
+    /// Hands-free, after « OK Maé », or push to talk.
+    private var listeningMenu: some View {
+        Menu {
+            Picker(selection: $model.settings.listening) {
+                ForEach(ListeningMode.allCases, id: \.self) { mode in
+                    Text(StateText.listening(mode)).tag(mode)
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            MenuFieldLabel(title: Text(StateText.listening(model.settings.listening)))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     // MARK: - Conversation
@@ -353,6 +389,31 @@ struct SettingsPanel: View {
                 .disabled(model.isLoading || model.isDownloading || (model.storage?.usedBytes ?? 0) == 0)
         }
         .padding(.vertical, 9)
+        if model.listensForWakeWord { wakeLog }
+    }
+
+    /// The log of what Maé heard in the wake-word mode, for the user's tests.
+    @ViewBuilder private var wakeLog: some View {
+        Hairline()
+        Toggle(isOn: $model.settings.wakeLog) {
+            Text("Note what Maé hears")
+                .textStyle(.setting)
+        }
+        .toggleStyle(SwitchStyle())
+        .frame(minHeight: 46)
+        HelpText("For your tests of “OK Maé”: the start of each sentence Maé hears, and what she did with it, is written in a file on this Mac.")
+        HStack(spacing: 8) {
+            Button("Show the log") { WakeLog.show() }
+                .buttonStyle(PillButtonStyle(kind: .link))
+            Button("Delete the log") {
+                WakeLog.delete()
+                wakeLogExists = false
+            }
+            .buttonStyle(PillButtonStyle())
+        }
+        .disabled(!wakeLogExists)
+        .padding(.vertical, 9)
+        .onChange(of: model.settings.wakeLog) { wakeLogExists = WakeLog.exists }
     }
 
     /// The tier's pop-up menu; locked while models load or download.

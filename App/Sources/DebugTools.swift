@@ -102,33 +102,35 @@ enum Snapshots {
         let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .storage(ModelStorage(usedBytes: 0, unusedBytes: 0,
                                                                                        folder: Demo.setup.folder))]
 
-        let scenarios: [(name: String, events: [AssistantEvent], panel: WindowState.Panel?, pushToTalk: Bool)] = [
-            ("main-1-rest", ready, nil, false),
-            ("main-2-listening", heard, nil, false),
-            ("main-3-thinking", thinking, nil, false),
-            ("main-4-speaking", speaking, nil, false),
-            ("main-5-push-to-talk", ready, nil, true),
-            ("main-6-history", conversation, .history, false),
-            ("main-7-settings", ready, .settings, false),
-            ("main-8-loading", [.loading(.languageModel)], nil, false),
-            ("setup-1-welcome", setup, nil, false),
-            ("setup-2-downloading", setup + [.downloadProgress(progress)], nil, false),
-            ("setup-3-offline", setup + [.downloadProgress(offline)], nil, false),
-            ("setup-4-paused", setup + [.downloadProgress(progress), .downloadStopped(nil)], nil, false),
+        let scenarios: [(name: String, events: [AssistantEvent], panel: WindowState.Panel?, listening: ListeningMode)] = [
+            ("main-1-rest", ready, nil, .handsFree),
+            ("main-2-listening", heard, nil, .handsFree),
+            ("main-3-thinking", thinking, nil, .handsFree),
+            ("main-4-speaking", speaking, nil, .handsFree),
+            ("main-5-push-to-talk", ready, nil, .pushToTalk),
+            ("main-6-history", conversation, .history, .handsFree),
+            ("main-7-settings", ready, .settings, .handsFree),
+            ("main-8-loading", [.loading(.languageModel)], nil, .handsFree),
+            ("main-18-wake-word-asleep", ready, nil, .wakeWord),
+            ("main-19-wake-word-awake", ready + [.awake(true)], nil, .wakeWord),
+            ("setup-1-welcome", setup, nil, .handsFree),
+            ("setup-2-downloading", setup + [.downloadProgress(progress)], nil, .handsFree),
+            ("setup-3-offline", setup + [.downloadProgress(offline)], nil, .handsFree),
+            ("setup-4-paused", setup + [.downloadProgress(progress), .downloadStopped(nil)], nil, .handsFree),
             ("setup-5-failed", setup + [.downloadProgress(progress),
                                         .downloadStopped(.corrupted(file: "gemma-4-26b-a4b-it-4bit/model-00002-of-00003.safetensors"))],
-             nil, false),
-            ("setup-6-no-space", [.setupNeeded(noSpace)], nil, false),
-            ("setup-7-other-tier", [.setupNeeded(forced)], nil, false),
-            ("setup-8-settings", setup, .settings, false),
+             nil, .handsFree),
+            ("setup-6-no-space", [.setupNeeded(noSpace)], nil, .handsFree),
+            ("setup-7-other-tier", [.setupNeeded(forced)], nil, .handsFree),
+            ("setup-8-settings", setup, .settings, .handsFree),
             ("problem-1-engine", [.problem(.engine("Error Domain=com.apple.CoreML Code=0 \"model damaged\""))], nil,
-             false),
-            ("problem-2-microphone", [.problem(.microphoneDenied)], nil, false),
+             .handsFree),
+            ("problem-2-microphone", [.problem(.microphoneDenied)], nil, .handsFree),
         ]
         for scenario in scenarios {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
-            model.settings.pushToTalk = scenario.pushToTalk  // the scenario's, not the user's own setting
+            model.settings.listening = scenario.listening  // the scenario's, not the user's own setting
             let window = WindowState()
             let view = ContentView(model: model, window: window)
                 .environment(\.stillFrame, 1.7)
@@ -140,6 +142,17 @@ enum Snapshots {
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
+        // The settings in the wake-word mode, whole (its log is at the bottom, in Advanced).
+        let wakeWordSettings = await scriptedModel(ready)
+        let savedSettings = wakeWordSettings.settings
+        wakeWordSettings.settings.listening = .wakeWord
+        let wakeWordWindow = WindowState()
+        await save(ContentView(model: wakeWordSettings, window: wakeWordWindow).environment(\.stillFrame, 1.7)
+                       .preferredColorScheme(.light),
+                   size: CGSize(width: 960, height: 2000), to: folder.appending(path: "main-20-settings-wake-word.png")) {
+            wakeWordWindow.panel = .settings
+        }
+        wakeWordSettings.settings = savedSettings
         // The settings with the actions on: access not asked yet, then refused.
         let shortcuts = ["Allumer le salon", "Mode concentration"]
         for (name, access) in [("main-9-settings-actions", ActionsStatus.Access.notAsked),
@@ -259,14 +272,18 @@ enum Snapshots {
         let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
         let speaking: [AssistantEvent] = thinking
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
-        let scenes: [(name: String, events: [AssistantEvent], state: PipelineState?)] = [
-            ("overlay-0-rest", ready, nil),
-            ("overlay-1-listening", heard, .userSpeaking),
-            ("overlay-2-thinking", thinking, .thinking),
-            ("overlay-3-speaking", speaking, .speaking),
+        let scenes: [(name: String, events: [AssistantEvent], state: PipelineState?, listening: ListeningMode)] = [
+            ("overlay-0-rest", ready, nil, .handsFree),
+            ("overlay-1-listening", heard, .userSpeaking, .handsFree),
+            ("overlay-2-thinking", thinking, .thinking, .handsFree),
+            ("overlay-3-speaking", speaking, .speaking, .handsFree),
+            // Woken by « OK Maé », the window closed: no ⌥ Space to press.
+            ("overlay-4-wake-word-awake", ready + [.awake(true)], .userSpeaking, .wakeWord),
         ]
         for scene in scenes {
             let model = await scriptedModel(scene.events)
+            let saved = model.settings
+            model.settings.listening = scene.listening
             let capsule = CapsuleState()
             if let state = scene.state {
                 capsule.state = state
@@ -277,6 +294,7 @@ enum Snapshots {
                 .environment(\.stillFrame, 1.7)
                 .preferredColorScheme(.light)
             await save(view, size: CGSize(width: 1280, height: 720), to: folder.appending(path: scene.name + ".png"))
+            model.settings = saved
         }
         await save(MenuBarIconSheet().preferredColorScheme(.light), size: CGSize(width: 640, height: 300),
                    to: folder.appending(path: "menubar-icons.png"))

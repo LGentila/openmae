@@ -16,7 +16,7 @@ struct ConversationView: View {
         let state = isLoading ? PipelineState.listening : model.state
         let exchange = model.currentExchange
         VStack(spacing: 0) {
-            OrbStage(model: model, state: state)
+            OrbStage(model: model, state: isLoading ? .listening : model.shownState)
             LiveTranscript(state: state, user: exchange.user, answer: exchange.answer, invitation: invitation)
                 .frame(height: 150)
             ConversationControls(model: model, isLoading: isLoading, phone: isLoading ? nil : phone)
@@ -36,7 +36,11 @@ struct ConversationView: View {
         if isLoading { return .loading(loadingStep) }
         if phone?.hand != nil { return .onPhone }
         let shortcut = model.hasTalkShortcut
-        return model.settings.pushToTalk ? .holdSpace(orShortcut: shortcut) : .speak(orShortcut: shortcut)
+        switch model.settings.listening {
+        case .handsFree: return .speak(orShortcut: shortcut)
+        case .wakeWord: return model.isAwake ? .awake : .sayWakeWord(orShortcut: shortcut)
+        case .pushToTalk: return .holdSpace(orShortcut: shortcut)
+        }
     }
 
 }
@@ -127,7 +131,7 @@ private struct ConversationControls: View {
         case .thinking: return .cancel
         case .speaking: return .interrupt
         case .listening, .userSpeaking:
-            guard model.settings.pushToTalk || model.talkKeyDown else { return nil }
+            guard model.settings.listening == .pushToTalk || model.talkKeyDown else { return nil }
             return .talk(held: model.talkKeyDown || model.state == .userSpeaking)
         }
     }

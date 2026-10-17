@@ -19,8 +19,15 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
 - **From any app.** Press ⌥ Space to talk, and again to finish: a small capsule at the bottom of the screen
   shows that Maé listens, thinks or answers, without bringing the window forward (Escape cancels or
   interrupts). Closing the window leaves OpenMaé in the menu bar, where its icon shows when Maé is active and
-  has Quit; with the window closed, Maé only listens after ⌥ Space. While OpenMaé runs, ⌥ Space no longer
-  types a non-breaking space in other apps.
+  has Quit; with the window closed, Maé only listens after ⌥ Space (unless she waits for « OK Maé », below).
+  While OpenMaé runs, ⌥ Space no longer types a non-breaking space in other apps.
+- **« OK Maé » (optional).** In Settings › Sound, choose to talk after « OK Maé »: Maé then only answers the
+  sentences that start with it, so the TV and the conversations around no longer start her, and listens to any
+  voice for a few seconds after each answer. While she speaks, only « OK Maé, stop », ⌥ Space, a click on the orb or
+  Escape interrupt her. With the window closed she still waits for the phrase, and the capsule shows when she wakes;
+  plugged in, the Mac does not go to sleep. The phrase is read in what speech recognition writes: say it in one
+  breath with the request (« OK Maé, quelle heure est-il ? »); said alone it is often misheard (when it is heard, a
+  chime, then she listens), and it often misses you while the TV talks.
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.
@@ -256,7 +263,9 @@ Memory over time (here 10 minutes):
 
 `--actions` puts the actions in the model's instructions, as in the app when they are on (none is carried out, a call
 is declined); with `--new-conversation-every 4`, a new conversation starts every four turns, as with "New
-conversation" in the app, and the time it takes is shown.
+conversation" in the app, and the time it takes is shown. `--wake-word` only answers the recordings that start with
+« OK Maé », as the app's wake-word mode; add `--follow-up 0` so that every recording needs the phrase (no seconds of
+attention after an answer).
 
 Check that the language model picks the right action, with the right date. Text only, nothing is created: the
 French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a

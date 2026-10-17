@@ -205,7 +205,7 @@ public actor AssistantHost: AssistantConnection {
             }
 
             var config = PipelineConfig()
-            config.pushToTalk = settings.pushToTalk
+            config.listening = settings.listening
             config.actionExamples = ActionCatalog.showsExamples(on: tier)
             let router = AudioRouter(audio)
             self.router = router
@@ -454,8 +454,9 @@ public actor AssistantHost: AssistantConnection {
             }
         }
         guard let pipeline else { return }
-        if new.pushToTalk != old.pushToTalk {
-            await pipeline.setPushToTalk(new.pushToTalk)
+        if new.listening != old.listening {
+            DebugLog.log("listening: \(old.listening.rawValue) → \(new.listening.rawValue)")
+            await pipeline.setListening(new.listening)
         }
         if new.audioMode != old.audioMode { await restartAudio() }
         if new.actionsEnabled != old.actionsEnabled {
@@ -679,6 +680,8 @@ public actor AssistantHost: AssistantConnection {
             await reportDiagnostics()
             if metrics.tool != nil { reportActions() }  // an access may just have been granted
         case .bargeIn(let stopMs, let detectionMs): emit.yield(.bargeIn(stopMs: stopMs, detectionMs: detectionMs))
+        case .awake(let awake): emit.yield(.awake(awake))
+        case .wakeDecision(let decision): emit.yield(.wakeDecision(decision))
         case .failure(let message): emit.yield(.warning(message))
         }
     }

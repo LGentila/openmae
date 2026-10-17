@@ -4,17 +4,23 @@ import IOKit.ps
 import IOKit.pwr_mgt
 import VoiceCore
 
-/// Keeps the Mac from going to sleep on its own while iPhone access is on and the Mac is plugged in: an iPhone
-/// cannot wake a sleeping Mac. On battery the Mac sleeps as usual. With the lid closed and no external display it
-/// sleeps anyway: a hardware limit.
-final class KeepAwake: @unchecked Sendable {
+/// Keeps the Mac from going to sleep on its own while it is plugged in: while iPhone access is on (an iPhone cannot
+/// wake a sleeping Mac), and while Maé waits for « OK Maé ». On battery the Mac sleeps as usual. With the lid closed and
+/// no external display it sleeps anyway: a hardware limit.
+public final class KeepAwake: @unchecked Sendable {
     private let lock = NSLock()
+    /// Why, as `pmset -g assertions` shows it.
+    private let reason: String
     private var wanted = false
     private var assertion: IOPMAssertionID?
     private var watcher: Task<Void, Never>?
 
+    public init(reason: String) {
+        self.reason = reason
+    }
+
     /// On while `wanted` and on mains power; the power source is looked at again every 30 s.
-    func set(_ wanted: Bool) {
+    public func set(_ wanted: Bool) {
         lock.withLock {
             self.wanted = wanted
             watcher?.cancel()
@@ -41,15 +47,15 @@ final class KeepAwake: @unchecked Sendable {
                 var id = IOPMAssertionID(0)
                 let status = IOPMAssertionCreateWithName(
                     kIOPMAssertPreventUserIdleSystemSleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                    "OpenMaé: reachable from your iPhone" as CFString, &id)
+                    reason as CFString, &id)
                 if status == kIOReturnSuccess {
                     assertion = id
-                    DebugLog.log("link: keeping the Mac awake (on mains power)")
+                    DebugLog.log("keeping the Mac awake (on mains power): \(reason)")
                 }
             } else if !hold, let id = assertion {
                 IOPMAssertionRelease(id)
                 assertion = nil
-                DebugLog.log("link: the Mac may sleep again")
+                DebugLog.log("the Mac may sleep again: \(reason)")
             }
         }
     }

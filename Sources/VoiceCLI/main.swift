@@ -27,6 +27,8 @@
 //   --silence-ms <n>         end-of-turn silence (default 500)
 //   --history-budget <n>     history size in tokens before the oldest exchanges are dropped
 //   --actions                the actions in the model's instructions, as in the app (none is carried out)
+//   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
+//   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
 //   --out <folder>           where reports and audio go (default ./measurements)
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
@@ -50,6 +52,8 @@ struct Options {
     var newConversationEvery: Int?
     var historyBudget: Int?
     var actions = false
+    var wakeWord = false
+    var followUp: Double?
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
     var repeats = 3
@@ -83,6 +87,8 @@ struct Options {
             case "--new-conversation-every": o.newConversationEvery = Int(it.next() ?? "")
             case "--history-budget": o.historyBudget = Int(it.next() ?? "")
             case "--actions": o.actions = true
+            case "--wake-word": o.wakeWord = true
+            case "--follow-up": o.followUp = Double(it.next() ?? "")
             case "--out": o.out = URL(fileURLWithPath: it.next() ?? "measurements")
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
@@ -140,6 +146,10 @@ actor EventLog {
             bargeIns.append((stopMs, detectionMs))
             print("  ✋ interruption: voice cut \(fmt(stopMs)) after the start of speech"
                   + " (detection: \(fmt(detectionMs)))")
+        case .awake(let awake):
+            print(awake ? "  👂 awake: any voice starts a turn" : "  💤 asleep: waiting for the wake phrase")
+        case .wakeDecision(let decision):
+            print("  🔎 \(decision.moment.rawValue), \(decision.accepted ? "for Maé" : "ignored"): \(decision.heard)")
         case .failure(let message):
             failures.append(message)
             print("  ⚠️  \(message)")
@@ -202,6 +212,8 @@ func buildEngine(_ o: Options) async throws -> Engine {
         config.historyTrimTarget = budget * 2 / 3
     }
     config.actionExamples = ActionCatalog.showsExamples(on: tier)
+    if o.wakeWord { config.listening = .wakeWord }
+    if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     let speaker = SimulatedSpeaker()
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: synthesizer, output: speaker,
@@ -232,12 +244,12 @@ struct CLIError: Error, CustomStringConvertible {
 
 // MARK: - Commands
 
-func waitForAnswer(_ e: Engine, mic: SimulatedMicrophone, after count: Int) async {
+func waitForAnswer(_ e: Engine, mic: SimulatedMicrophone, after count: Int, timeout: Double = 60) async {
     await mic.silence(until: {
         let done = await e.log.completedTurns > count
         let idle = await e.log.state == .listening
         return done && idle
-    }, timeout: 60)
+    }, timeout: timeout)
 }
 
 func runConversation(_ o: Options, _ e: Engine) async throws {
@@ -247,7 +259,9 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
         print("■ turn \(i + 1) — \(file.lastPathComponent)")
         let before = await e.log.completedTurns
         await mic.say(try WAV.read16kMono(file))
-        await waitForAnswer(e, mic: mic, after: before)
+        // With the wake word, a sentence without the phrase gets no answer: no need to wait a minute for one.
+        await waitForAnswer(e, mic: mic, after: before, timeout: o.wakeWord ? 20 : 60)
+        if await e.log.completedTurns == before { print("  (no answer)") }
         await mic.silence(0.5)
         let audio = await e.speaker.takeRecording()
         try WAV.write(audio, sampleRate: await e.speaker.sampleRate,
@@ -283,7 +297,7 @@ func runInterruption(_ o: Options, _ e: Engine) async throws {
         await mic.silence(until: { await e.log.state == .speaking }, timeout: 30)
         await mic.silence(1.5)  // let the assistant talk for a moment
         await mic.say(interruption)
-        await waitForAnswer(e, mic: mic, after: before)
+        await waitForAnswer(e, mic: mic, after: before, timeout: o.wakeWord ? 20 : 60)  // « OK Maé, stop »: no answer
         await mic.silence(0.5)
         _ = await e.speaker.takeRecording()
     }

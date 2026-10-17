@@ -15,12 +15,24 @@ public enum AudioMode: String, Sendable, Codable, CaseIterable {
     case headphones
 }
 
+/// How the user starts talking to Maé.
+public enum ListeningMode: String, Sendable, Codable, CaseIterable {
+    /// Maé answers whoever speaks; the end of a sentence is detected from the silence that follows it.
+    case handsFree
+    /// Maé sleeps until a sentence starts with the wake phrase (« OK Maé »), then listens to any voice for a few
+    /// seconds after each answer.
+    case wakeWord
+    /// The user holds a key (or a button) while speaking, instead of the engine detecting the end of their sentence.
+    case pushToTalk
+}
+
 /// The few settings the interface can change.
 public struct AssistantSettings: Sendable, Codable, Equatable {
     public var audioMode = AudioMode.speakers
-    /// The user holds a key (or a button) while speaking, instead of the engine detecting the end of
-    /// their sentence.
-    public var pushToTalk = false
+    public var listening = ListeningMode.handsFree
+    /// In the wake-word mode, the interface writes what Maé heard and made of it in a file on this Mac, for the user's
+    /// tests (see `WakeDecision`).
+    public var wakeLog = false
     /// Tier forced in Settings › Advanced; nil = the tier recommended for this Mac.
     public var tierOverride: HardwareTier?
     /// Actions: reminders, calendar, timers and shortcuts. Off by default for now; the default of each tier
@@ -34,20 +46,41 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var webSearch = WebSearchSettings()
     public init() {}
 
+    /// `pushToTalk`: how earlier versions, which only knew hands-free and push-to-talk, saved the way of talking. It is
+    /// still written, so that an earlier version (on this Mac, or the iPhone app) keeps push-to-talk.
     private enum CodingKeys: String, CodingKey {
-        case audioMode, pushToTalk, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode, webSearch
+        case audioMode, listening, pushToTalk, wakeLog, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode,
+             webSearch
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         audioMode = try c.decodeIfPresent(AudioMode.self, forKey: .audioMode) ?? .speakers
-        pushToTalk = try c.decodeIfPresent(Bool.self, forKey: .pushToTalk) ?? false
+        if let listening = try? c.decodeIfPresent(ListeningMode.self, forKey: .listening) {
+            self.listening = listening
+        } else {
+            listening = try c.decodeIfPresent(Bool.self, forKey: .pushToTalk) == true ? .pushToTalk : .handsFree
+        }
+        wakeLog = try c.decodeIfPresent(Bool.self, forKey: .wakeLog) ?? false
         tierOverride = try c.decodeIfPresent(HardwareTier.self, forKey: .tierOverride)
         actionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .actionsEnabled) ?? false
         shortcutsToConfirm = try c.decodeIfPresent([String].self, forKey: .shortcutsToConfirm) ?? []
         claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
         webSearch = (try? c.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch)) ?? WebSearchSettings()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(audioMode, forKey: .audioMode)
+        try c.encode(listening, forKey: .listening)
+        try c.encode(listening == .pushToTalk, forKey: .pushToTalk)
+        try c.encode(wakeLog, forKey: .wakeLog)
+        try c.encodeIfPresent(tierOverride, forKey: .tierOverride)
+        try c.encode(actionsEnabled, forKey: .actionsEnabled)
+        try c.encode(shortcutsToConfirm, forKey: .shortcutsToConfirm)
+        try c.encode(claudeCode, forKey: .claudeCode)
+        try c.encode(webSearch, forKey: .webSearch)
     }
 }
 
@@ -292,6 +325,38 @@ public struct ActionsStatus: Sendable, Codable, Equatable {
     }
 }
 
+/// In the wake-word mode, what Maé made of a sentence she heard, for the log the user keeps while trying the mode.
+public struct WakeDecision: Sendable, Codable, Equatable {
+    public enum Moment: String, Sendable, Codable {
+        /// She was waiting for the phrase.
+        case asleep
+        /// She was thinking or speaking: only the phrase interrupts her.
+        case busy
+        /// She was listening to any voice: after the phrase alone, or after an answer.
+        case awake
+    }
+
+    public var date: Date
+    public var moment: Moment
+    /// The start of what speech recognition wrote.
+    public var heard: String
+    /// Taken as meant for Maé: it started with the phrase, or Maé was awake.
+    public var accepted: Bool
+
+    public init(date: Date = Date(), moment: Moment, heard: String, accepted: Bool) {
+        self.date = date
+        self.moment = moment
+        self.heard = Self.excerpt(heard)
+        self.accepted = accepted
+    }
+
+    /// The first twelve words: enough to tell the user's sentence from the TV's.
+    static func excerpt(_ text: String) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace)
+        return words.prefix(12).joined(separator: " ") + (words.count > 12 ? "…" : "")
+    }
+}
+
 /// Live measurements for the debug panel.
 public struct EngineDiagnostics: Sendable, Codable, Equatable {
     /// Memory used by the whole app, in GB.
@@ -331,6 +396,11 @@ public enum AssistantEvent: Sendable, Codable {
     case assistantPiece(String)
     case turnFinished(TurnMetrics)
     case bargeIn(stopMs: Double, detectionMs: Double)
+    /// Wake-word mode: Maé listens to any voice (true: after the phrase alone, and for a few seconds after each
+    /// answer), or waits for the phrase (false).
+    case awake(Bool)
+    /// Wake-word mode: what Maé made of a sentence she heard.
+    case wakeDecision(WakeDecision)
     /// Sound levels (0…1), about 20 times per second, for the animated indicator.
     case levels(input: Float, output: Float)
     case diagnostics(EngineDiagnostics)

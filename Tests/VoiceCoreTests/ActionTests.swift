@@ -306,8 +306,10 @@ struct ActionCallTests {
     @Test func olderSettingsStayReadable() throws {
         let old = #"{"audioMode":"headphones","pushToTalk":true}"#
         let settings = try JSONDecoder().decode(AssistantSettings.self, from: Data(old.utf8))
-        #expect(settings.audioMode == .headphones && settings.pushToTalk)
-        #expect(!settings.actionsEnabled && settings.shortcutsToConfirm.isEmpty)
+        #expect(settings.audioMode == .headphones && settings.listening == .pushToTalk)
+        #expect(!settings.actionsEnabled && settings.shortcutsToConfirm.isEmpty && !settings.wakeLog)
+        let handsFree = #"{"audioMode":"speakers","pushToTalk":false}"#
+        #expect(try JSONDecoder().decode(AssistantSettings.self, from: Data(handsFree.utf8)).listening == .handsFree)
     }
 
     @Test func historyDropsAnExchangeWithItsToolCall() {

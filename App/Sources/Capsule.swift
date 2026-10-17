@@ -37,7 +37,8 @@ struct CapsuleView: View {
         HStack(spacing: 14) {
             CapsuleOrb(model: model, state: state)
             CapsuleText(model: model, state: state)
-            CapsuleAction(state: state)
+            // In the wake-word mode Maé listens without the shortcut: ⌥ Space only finishes a turn it started.
+            CapsuleAction(state: state, finishes: model.talkKeyDown || !model.listensForWakeWord)
         }
         .padding(.leading, 8)
         .padding(.trailing, 22)
@@ -221,18 +222,22 @@ private struct WordArrival: ViewModifier {
 /// What the key on the right does: finish the user's turn, cancel the answer being prepared, interrupt Maé.
 private struct CapsuleAction: View {
     let state: PipelineState
+    /// While Maé listens, ⌥ Space finishes the user's turn; otherwise there is nothing to press then.
+    let finishes: Bool
 
     /// The action's label: a little darker than `ink-muted` on the glass, as in the design's capsule.
     private static let label = RGBA(0x5E584F)
 
     var body: some View {
-        HStack(spacing: 9) {
-            Text(title)
-                .textStyle(.capsuleAction)
-                .foregroundStyle(Self.label)
-            KeyCap(title: key, onGlass: true)
+        if finishes || state == .thinking || state == .speaking {
+            HStack(spacing: 9) {
+                Text(title)
+                    .textStyle(.capsuleAction)
+                    .foregroundStyle(Self.label)
+                KeyCap(title: key, onGlass: true)
+            }
+            .fixedSize()
         }
-        .fixedSize()
     }
 
     private var title: LocalizedStringKey {

@@ -13,8 +13,18 @@ public struct PipelineConfig: Sendable {
     /// done in the background.
     public var historyTokenBudget = 12_000
     public var historyTrimTarget = 8_000
-    /// Push-to-talk: the turn ends when the talk key is released instead of on silence.
-    public var pushToTalk = false
+    /// Push-to-talk: the turn ends when the talk key is released instead of on silence. Wake word: only sentences that
+    /// start with the phrase count, except for a few seconds after each answer.
+    public var listening = ListeningMode.handsFree
+    /// Wake-word mode: how long Maé listens to any voice after the phrase alone, and after each answer.
+    public var wakeFollowUpSeconds: Double = 8
+    /// Wake-word mode: a sentence not meant for Maé longer than this without a pause (the TV, music) is no longer
+    /// kept; what is said after its next pause is checked on its own.
+    public var maxUncheckedSpeechSeconds: Double = 20
+    /// Wake-word mode: what was said up to a pause, shorter than this (pre-roll and pause included), is no verdict on
+    /// the start of the sentence: speech recognition, without the rest, often mishears the phrase ("Cookie May" for
+    /// « OK Maé »). The sentence is checked again whole, with what follows.
+    public var wakeVerdictMinSeconds: Double = 2
     /// The voice often starts an answer with up to 0.7 s of near-silence (measured on Pocket TTS):
     /// audio quieter than this (dB) is skipped until the first audible sound, so the answer starts
     /// sooner and the latency measures what the user actually hears. nil = keep everything.
@@ -73,6 +83,10 @@ public enum PipelineEvent: Sendable {
     case turnFinished(TurnMetrics)
     /// The user interrupted: time from the start of their speech to the assistant falling silent.
     case bargeIn(stopMs: Double, detectionMs: Double)
+    /// Wake-word mode: Maé listens to any voice (true), or waits for the phrase (false).
+    case awake(Bool)
+    /// Wake-word mode: what Maé made of a sentence she heard.
+    case wakeDecision(WakeDecision)
     case failure(String)
 }
 
@@ -83,6 +97,11 @@ public enum PipelineEvent: Sendable {
 ///
 /// Feed microphone audio with `push(_:)` (16 kHz mono) and observe `events`. Everything is async and
 /// cancellable; one `VoicePipeline` = one conversation.
+///
+/// In the wake-word mode, speech is first a *candidate*: nothing shows while what was said up to each pause is
+/// transcribed and read by the `WakeWordDetector`. A candidate that starts with the phrase becomes the user's turn
+/// (and silences Maé if she was speaking); the others are dropped. After the phrase alone, and after each answer,
+/// Maé is *awake* for a few seconds: any voice then starts a turn, as in the hands-free mode.
 public actor VoicePipeline {
     public nonisolated let events: AsyncStream<PipelineEvent>
     private let emit: AsyncStream<PipelineEvent>.Continuation
@@ -92,6 +111,7 @@ public actor VoicePipeline {
     private let model: any LanguageModel
     private let synthesizer: any SpeechSynthesizer
     private let output: any AudioOutput
+    private let wakeWord: any WakeWordDetector
     private let extensions: [any ConversationExtension]
     /// Actions (reminders, calendar…); nil when they are off.
     private var tools: ToolRunner?
@@ -109,10 +129,44 @@ public actor VoicePipeline {
     private var utterance: [Float] = []
     private var utteranceOpen = false
     private var talkKeyPressed = false
+    /// The speaker paused (short silence), and has not resumed yet.
+    private var inPause = false
     private var lastSpeechEnd: ContinuousClock.Instant?
     private var voicedRunStart: ContinuousClock.Instant?
     /// Level (dB) of the last chunks, to tell the user's voice from an echo of the assistant's.
     private var recentLevels: [Float] = []
+
+    // Wake-word mode.
+    /// The utterance being heard is meant for Maé: always outside the wake-word mode; in it, when it began while she
+    /// was awake, or once the phrase was found at its start.
+    private var utteranceAddressed = true
+    /// The utterance began while Maé was awake (no phrase needed): its transcript goes to the wake log.
+    private var utteranceWhileAwake = false
+    private var candidate = Candidate()
+    private var wakeChecks = 0
+    /// Until when Maé listens to any voice; nil while she waits for the phrase.
+    private var awakeUntil: ContinuousClock.Instant?
+    private var awakeTimer: Task<Void, Never>?
+
+    /// Wake-word mode: an utterance not meant for Maé so far. What was said up to each pause is transcribed and read
+    /// for the phrase; nothing shows meanwhile.
+    private struct Candidate {
+        var check: Task<Void, Never>?
+        var checkID = 0
+        /// Another pause came while the check ran: check again once it is done.
+        var checkAgain = false
+        /// Where speech resumed in `utterance` after the part being checked: what is kept if the check finds nothing.
+        var resumedAt: Int?
+        /// The check found nothing and nobody spoke since (or the speech went on too long without a pause): nothing is
+        /// kept until the next words, which start a new candidate.
+        var dead = false
+        /// The end-of-turn silence came while the check ran.
+        var ended = false
+        /// Whether Maé was asleep or busy when it began, for the wake log.
+        var moment = WakeDecision.Moment.asleep
+        /// When the voice started, for the interruption's measurements.
+        var onset: ContinuousClock.Instant?
+    }
 
     private var shorteningInProgress = false
     private var warmTask: Task<Void, Never>?
@@ -155,12 +209,20 @@ public actor VoicePipeline {
         var isAnnouncement = false
         /// A turn typed instead of spoken: no transcription.
         var typedText: String?
+        /// Wake-word mode: the request, already read by the check of the whole sentence: no transcription.
+        var request: String?
+        /// Wake-word mode: the turn says nothing (the phrase alone, or "stop"): no "thinking" on screen.
+        var isSilent = false
+        /// Wake-word mode: what Maé made of the sentence, for the log once the turn is the user's for sure.
+        var wakeDecision: WakeDecision?
+        /// The sentence began while Maé was awake: its transcript goes to the wake log.
+        var whileAwake = false
         init(id: Int) { self.id = id }
     }
 
     public init(
         detector: any SpeechDetector, transcriber: any Transcriber, model: any LanguageModel,
-        synthesizer: any SpeechSynthesizer, output: any AudioOutput,
+        synthesizer: any SpeechSynthesizer, output: any AudioOutput, wakeWord: any WakeWordDetector = OKMaeWakeWord(),
         extensions: [any ConversationExtension] = [], tools: ToolRunner? = nil, config: PipelineConfig = .init(),
         systemPrompt: String = Conversation.defaultSystemPrompt
     ) {
@@ -170,6 +232,7 @@ public actor VoicePipeline {
         self.model = model
         self.synthesizer = synthesizer
         self.output = output
+        self.wakeWord = wakeWord
         self.extensions = extensions
         self.tools = tools
         self.config = config
@@ -237,11 +300,17 @@ public actor VoicePipeline {
         startAnnouncementIfIdle()
     }
 
-    public func setPushToTalk(_ enabled: Bool) async {
-        guard enabled != config.pushToTalk else { return }
-        config.pushToTalk = enabled
+    public func setListening(_ mode: ListeningMode) async {
+        guard mode != config.listening else { return }
+        let wasWakeWord = config.listening == .wakeWord
+        config.listening = mode
         // What the turn detector was following belongs to the other mode: a sentence half-heard is dropped.
         turnDetector.reset()
+        inPause = false
+        if !utteranceAddressed { dropCandidate() }
+        utteranceWhileAwake = false
+        if wasWakeWord { fallAsleep() }  // tells the interface that the wake-word mode's attention is over
+        if mode == .wakeWord { DebugLog.log("wake word: asleep, waiting for the phrase") }
         guard !talkKeyPressed else { return }
         if let turn, !turn.committed { await cancelTurn(stopAudio: false) }
         guard turn == nil else { return }
@@ -255,6 +324,8 @@ public actor VoicePipeline {
         await cancelTurn(stopAudio: true)
         warmTask?.cancel()
         warmTask = nil
+        candidate.check?.cancel()
+        awakeTimer?.cancel()
         emit.finish()
     }
 
@@ -300,7 +371,7 @@ public actor VoicePipeline {
         let preRollMax = Int(config.preRollMs / 1000 * EngineAudio.inputSampleRate)
         if preRoll.count > preRollMax { preRoll.removeFirst(preRoll.count - preRollMax) }
 
-        if config.pushToTalk || talkKeyPressed {
+        if config.listening == .pushToTalk || talkKeyPressed {
             if talkKeyPressed { utterance += chunk }
             return
         }
@@ -319,25 +390,44 @@ public actor VoicePipeline {
                 DebugLog.log("speech started (level \(Int(level)) dB\(over))")
             }
         }
-        if utteranceOpen, event != .speechStarted, turnDetector.isInUtterance || event == .endOfTurn {
+        switch event {
+        case .pause: inPause = true
+        case .speechStarted, .resumed, .endOfTurn: inPause = false
+        case nil: break
+        }
+        if utteranceOpen, event != .speechStarted, turnDetector.isInUtterance || event == .endOfTurn,
+           utteranceAddressed || !candidate.dead
+        {
             utterance += chunk
         }
-        switch event {
-        case .speechStarted: await userStartedSpeaking()
-        case .pause:
-            DebugLog.log("pause → speculative start")
-            if config.speculativeStart, turn == nil { startTurn(committed: false) }
-        case .resumed:
-            DebugLog.log("resumed → cancel speculative turn")
-            if let turn, !turn.committed { await cancelTurn(stopAudio: false) }
-        case .endOfTurn:
-            DebugLog.log("end of turn")
-            commitTurn()
-        case nil: break
+        if !utteranceAddressed {
+            await candidateHeard(event, chunk: chunk)
+        } else {
+            switch event {
+            case .speechStarted:
+                if needsWakePhrase { startCandidate() } else { await userStartedSpeaking() }
+            case .pause:
+                DebugLog.log("pause → speculative start")
+                if config.speculativeStart, turn == nil { startTurn(committed: false) }
+            case .resumed:
+                DebugLog.log("resumed → cancel speculative turn")
+                if let turn, !turn.committed { await cancelTurn(stopAudio: false) }
+            case .endOfTurn:
+                DebugLog.log("end of turn")
+                commitTurn()
+            case nil: break
+            }
+        }
+        if config.listening == .wakeWord, !(utteranceOpen && utteranceAddressed), await wakeWord.hears(chunk),
+           utteranceOpen, !utteranceAddressed
+        {
+            DebugLog.log("wake phrase heard in the sound")
+            await promoteCandidate(request: nil)
         }
     }
 
     private func userStartedSpeaking() async {
+        utteranceWhileAwake = config.listening == .wakeWord
         if let turn {
             if turn.audioStarted {
                 // Barge-in: the assistant is talking and the user speaks over it.
@@ -366,18 +456,22 @@ public actor VoicePipeline {
     public func interrupt() async {
         guard let turn else { return }
         if turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
-        utterance = []
-        utteranceOpen = turnDetector.isInUtterance
-        setState(turnDetector.isInUtterance ? .userSpeaking : .listening)
+        if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
+            utterance = []
+            utteranceOpen = turnDetector.isInUtterance
+        }
+        setState(someoneSpeaksToMae ? .userSpeaking : .listening)
     }
 
     /// The microphone was restarted (audio mode or device changed): forget any partial audio.
     public func resetAudioInput() async {
         await detector.reset()
         turnDetector.reset()
+        inPause = false
         pendingSamples = []
         preRoll = []
         voicedRunStart = nil
+        if !utteranceAddressed { dropCandidate() }
         if turn == nil {
             utterance = []
             utteranceOpen = false
@@ -406,8 +500,11 @@ public actor VoicePipeline {
         guard pressed != talkKeyPressed else { return }
         talkKeyPressed = pressed
         if pressed {
+            if !utteranceAddressed { dropCandidate() }  // the key decides: no wake phrase needed
+            utteranceWhileAwake = false
             if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
             turnDetector.reset()
+            inPause = false
             utterance = preRoll
             utteranceOpen = true
             setState(.userSpeaking)
@@ -422,13 +519,212 @@ public actor VoicePipeline {
         }
     }
 
+    // MARK: - Wake word
+
+    /// Speech starting now must begin with the wake phrase: Maé is asleep, or busy thinking or speaking.
+    private var needsWakePhrase: Bool {
+        guard config.listening == .wakeWord else { return false }
+        guard turn == nil, let awakeUntil else { return true }
+        return clock.now >= awakeUntil
+    }
+
+    private func startCandidate() {
+        DebugLog.log(turn == nil ? "asleep: checking the sentence for the wake phrase"
+            : "busy: checking the sentence for the wake phrase")
+        utterance = preRoll
+        utteranceOpen = true
+        utteranceAddressed = false
+        utteranceWhileAwake = false
+        candidate = Candidate(moment: turn == nil ? .asleep : .busy, onset: voicedRunStart ?? clock.now)
+    }
+
+    /// What the turn detector says of a candidate: checked at each pause, dropped at the end if the phrase is not at
+    /// its start. Speech that starts again while the last check runs is part of the same candidate.
+    private func candidateHeard(_ event: TurnEvent?, chunk: [Float]) async {
+        switch event {
+        case .speechStarted, .resumed:
+            if event == .speechStarted { DebugLog.log("speech again while the sentence is checked") }
+            candidate.ended = false
+            let preRollStart = utterance.count - (event == .resumed ? preRoll.count : 0)
+            if event == .speechStarted { utterance += preRoll }
+            if candidate.dead {
+                // What was said before found nothing: these words start a sentence of their own.
+                utterance = preRoll
+                candidate.dead = false
+                candidate.moment = turn == nil ? .asleep : .busy
+                candidate.onset = voicedRunStart ?? clock.now
+            } else if candidate.check != nil, candidate.resumedAt == nil {
+                candidate.resumedAt = max(0, preRollStart)
+            }
+        case .pause:
+            if !candidate.dead { checkCandidate() }
+        case .endOfTurn:
+            candidate.ended = true
+            if candidate.check == nil { dropCandidate() }
+        case nil:
+            let longest = Int(config.maxUncheckedSpeechSeconds * EngineAudio.inputSampleRate)
+            if !candidate.dead, candidate.check == nil, utterance.count > longest {
+                DebugLog.log("a long sentence without a pause: not kept")
+                candidate.dead = true
+            }
+        }
+    }
+
+    /// Transcribes what was said so far and reads it for the phrase.
+    private func checkCandidate() {
+        guard candidate.check == nil else {
+            candidate.checkAgain = true
+            return
+        }
+        wakeChecks += 1
+        let id = wakeChecks
+        let audio = utterance
+        candidate.checkID = id
+        candidate.checkAgain = false
+        candidate.check = Task { [transcriber] in
+            let heard = (try? await transcriber.transcribe(audio)) ?? ""
+            await self.candidateChecked(id, heard: heard.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        samples: audio.count)
+        }
+    }
+
+    private func candidateChecked(_ id: Int, heard: String, samples: Int) async {
+        guard candidate.checkID == id, utteranceOpen, !utteranceAddressed else { return }  // dropped meanwhile
+        candidate.check = nil
+        var request: String?
+        if heard.contains(where: \.isLetter) {
+            request = wakeWord.request(in: heard)
+            let moment = candidate.moment
+            DebugLog.log("wake phrase \(request == nil ? "absent" : "found") (\(moment.rawValue)): \(heard)")
+            emit.yield(.wakeDecision(WakeDecision(moment: moment, heard: heard, accepted: request != nil)))
+        }
+        if let request {
+            // What follows the phrase is known only if nobody spoke again after the part checked.
+            await promoteCandidate(request: candidate.resumedAt == nil ? request : nil)
+            return
+        }
+        let verdict = Double(samples) / EngineAudio.inputSampleRate >= config.wakeVerdictMinSeconds
+            && !wakeWord.mayStartWithPhrase(heard)
+        if !verdict {
+            // Maybe the phrase, misheard: the whole sentence is checked again with what follows (or dropped at its
+            // end, if nothing followed).
+            candidate.resumedAt = nil
+            if candidate.checkAgain { checkCandidate() } else if candidate.ended { dropCandidate() }
+            return
+        }
+        // Not for Maé. What was said after the part checked is a sentence of its own.
+        if let resumedAt = candidate.resumedAt {
+            utterance.removeFirst(min(resumedAt, utterance.count))
+            candidate.resumedAt = nil
+        } else {
+            candidate.dead = true
+        }
+        if candidate.dead {
+            if candidate.ended { dropCandidate() }
+        } else if candidate.checkAgain || candidate.ended {
+            checkCandidate()
+        }
+    }
+
+    /// The candidate is meant for Maé (the phrase at its start, or heard in the sound): it becomes the user's turn, as
+    /// if Maé had been awake when it began. If she was thinking or speaking, she stops. `request`: what followed the
+    /// phrase, when the check covered everything said.
+    private func promoteCandidate(request: String?) async {
+        let onset = candidate.onset ?? clock.now
+        candidate.check?.cancel()
+        candidate = Candidate()
+        utteranceAddressed = true
+        // « OK Maé, stop », unless it answers an action waiting for its "oui" (then the action is dropped, out loud).
+        var onlyStops = false
+        if let request, StopRequest.matches(request) {
+            onlyStops = await tools?.interception(for: request, now: Date()) == nil
+        }
+        if let turn {
+            if turn.audioStarted {
+                DebugLog.log("barge-in: the wake phrase while the assistant talks")
+                let detected = clock.now
+                await interruptAssistant()
+                emit.yield(.bargeIn(stopMs: ms(clock.now - onset), detectionMs: ms(detected - onset)))
+            } else {
+                await cancelTurn(stopAudio: false)
+            }
+        }
+        // Meanwhile the sentence may have ended and its turn started, or the talk key taken over.
+        guard turn == nil, !talkKeyPressed, utteranceOpen else { return }
+        if turnDetector.isInUtterance {
+            setState(.userSpeaking)
+            // The answer is prepared during the pause, from the request the check read (not transcribed again).
+            let known = request.flatMap { $0.isEmpty || StopRequest.matches($0) ? nil : $0 }
+            if inPause, config.speculativeStart { startTurn(committed: false, request: known) }
+        } else if request?.isEmpty == true || onlyStops {
+            endWithoutTurn(wakes: !onlyStops)
+        } else {
+            startTurn(committed: true, request: request)
+        }
+    }
+
+    private func dropCandidate() {
+        candidate.check?.cancel()
+        candidate = Candidate()
+        utterance = []
+        utteranceOpen = false
+        utteranceAddressed = true
+    }
+
+    /// The phrase alone, or a request to be quiet (unless it answers an action waiting for its "oui"): the turn ends
+    /// without an answer once it is the user's for sure. True when it did.
+    private func endsWithoutAnswer(_ request: String, _ turn: Turn) async throws -> Bool {
+        let wakes = request.isEmpty
+        guard wakes || StopRequest.matches(request) else { return false }
+        if !wakes, await tools?.interception(for: request, now: Date()) != nil { return false }
+        turn.isSilent = true
+        try await waitForCommit(turn)
+        endSilently(turn, wakes: wakes)
+        return true
+    }
+
+    /// Maé listens to any voice for the next few seconds.
+    private func stayAwake() {
+        let seconds = config.wakeFollowUpSeconds
+        let wasAsleep = awakeUntil == nil
+        awakeUntil = clock.now + .seconds(seconds)
+        awakeTimer?.cancel()
+        awakeTimer = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self.awakeTimeIsUp()
+        }
+        if wasAsleep {
+            DebugLog.log("awake: listening to any voice for \(seconds) s")
+            emit.yield(.awake(true))
+        }
+    }
+
+    private func awakeTimeIsUp() {
+        // A sentence meant for Maé, or her answer, is under way: she falls asleep once it is over (`setState`).
+        guard turn == nil, !someoneSpeaksToMae else { return }
+        fallAsleep()
+    }
+
+    /// Maé waits for the phrase again.
+    private func fallAsleep() {
+        awakeTimer?.cancel()
+        awakeTimer = nil
+        guard awakeUntil != nil else { return }
+        awakeUntil = nil
+        DebugLog.log("asleep: waiting for the wake phrase")
+        emit.yield(.awake(false))
+    }
+
     // MARK: - Turns
 
-    private func startTurn(committed: Bool) {
+    private func startTurn(committed: Bool, request: String? = nil) {
         guard utteranceOpen, !utterance.isEmpty else { return }
         nextTurnID += 1
         let turn = Turn(id: nextTurnID)
         turn.speechEnd = lastSpeechEnd
+        turn.whileAwake = utteranceWhileAwake
+        turn.request = request
         self.turn = turn
         let audio = utterance
         if committed { commit(turn) }
@@ -447,10 +743,21 @@ public actor VoicePipeline {
         turn.committed = true
         turn.commitTime = clock.now
         Task { await turn.gate.open() }
+        logWakeDecision(turn)
+        guard !turn.isSilent else { return }
+        if config.listening == .wakeWord { fallAsleep() }  // busy now: only the phrase interrupts her
         if !turn.userText.isEmpty { emit.yield(.userTranscript(turn.userText, turn.language)) }
         turn.unannouncedPieces.forEach { emit.yield(.assistantPiece($0)) }
         turn.unannouncedPieces = []
         if !turn.audioStarted { setState(.thinking) }
+    }
+
+    /// The wake log's entry of a sentence heard while Maé was awake, once the turn is the user's for sure (a
+    /// speculative one may still be dropped).
+    private func logWakeDecision(_ turn: Turn) {
+        guard turn.committed, let decision = turn.wakeDecision else { return }
+        turn.wakeDecision = nil
+        emit.yield(.wakeDecision(decision))
     }
 
     private func runTurn(_ turn: Turn, audio: [Float]) async {
@@ -459,13 +766,22 @@ public actor VoicePipeline {
         do {
             // 1. Speech → text.
             let t0 = clock.now
-            let heard = if let typed = turn.typedText { typed } else { try await transcriber.transcribe(audio) }
-            let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+            let heard = if let typed = turn.typedText ?? turn.request { typed } else { try await transcriber.transcribe(audio) }
+            var text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
             metrics.transcriptionMs = ms(clock.now - t0)
             try Task.checkCancellation()
             guard text.contains(where: \.isLetter) else {
                 if turn.committed { finish(turn, metrics: nil) } else { self.turn = nil }
                 return
+            }
+            if config.listening == .wakeWord, turn.typedText == nil {
+                if turn.whileAwake {
+                    turn.wakeDecision = WakeDecision(moment: .awake, heard: text, accepted: true)
+                    logWakeDecision(turn)
+                }
+                // The phrase is not part of the request.
+                text = wakeWord.request(in: text) ?? text
+                if try await endsWithoutAnswer(text, turn) { return }
             }
             let lang = LanguageGuesser.guess(text, previous: language)
             turn.userText = text
@@ -700,8 +1016,9 @@ public actor VoicePipeline {
     // MARK: - Announcements
 
     private func startAnnouncementIfIdle() {
-        guard turn == nil, !utteranceOpen, !talkKeyPressed, !turnDetector.isInUtterance, !announcements.isEmpty
-        else { return }
+        // A sentence still being checked for the wake phrase does not hold it back.
+        let userSpeaks = utteranceAddressed && (utteranceOpen || turnDetector.isInUtterance)
+        guard turn == nil, !userSpeaks, !talkKeyPressed, !announcements.isEmpty else { return }
         let announcement = announcements.removeFirst()
         nextTurnID += 1
         let turn = Turn(id: nextTurnID)
@@ -761,10 +1078,44 @@ public actor VoicePipeline {
             if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
         }
-        utterance = []
-        utteranceOpen = turnDetector.isInUtterance
-        setState(turnDetector.isInUtterance ? .userSpeaking : .listening)
+        if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
+            utterance = []
+            utteranceOpen = turnDetector.isInUtterance
+        }
+        // After an answer, Maé listens a few seconds more without the wake phrase.
+        if config.listening == .wakeWord, metrics != nil { stayAwake() }
+        setState(someoneSpeaksToMae ? .userSpeaking : .listening)
     }
+
+    /// Wake-word mode: a turn without an answer, once it is the user's for sure.
+    private func endSilently(_ turn: Turn, wakes: Bool) {
+        guard self.turn === turn else { return }
+        voiceIsAudible()
+        self.turn = nil
+        endWithoutTurn(wakes: wakes)
+    }
+
+    /// Wake-word mode: the phrase alone wakes Maé (a chime, then she listens to any voice for a few seconds); "stop"
+    /// only silences her.
+    private func endWithoutTurn(wakes: Bool) {
+        if utteranceAddressed {
+            utterance = []
+            utteranceOpen = turnDetector.isInUtterance
+        }
+        if wakes {
+            DebugLog.log("the wake phrase alone → listening")
+            let sampleRate = synthesizer.outputSampleRate
+            Task { [output] in await output.play(Chime.samples(sampleRate: sampleRate), sampleRate: sampleRate) }
+            stayAwake()
+        } else {
+            DebugLog.log("asked to be quiet")
+            fallAsleep()
+        }
+        setState(someoneSpeaksToMae ? .userSpeaking : .listening)
+    }
+
+    /// Someone is speaking, and it is meant for Maé (always, outside the wake-word mode).
+    private var someoneSpeaksToMae: Bool { turnDetector.isInUtterance && utteranceAddressed }
 
     /// Barge-in: silence the assistant immediately, keep what it already said in the history.
     private func interruptAssistant() async {
@@ -848,6 +1199,8 @@ public actor VoicePipeline {
     private func setState(_ newState: PipelineState) {
         guard newState != state else { return }
         state = newState
+        // Back at rest after the few seconds of attention: Maé waits for the phrase again.
+        if newState == .listening, let awakeUntil, clock.now >= awakeUntil { fallAsleep() }
         emit.yield(.state(newState))
         let quiet = newState == .listening
         Task { [model] in await model.allowBackgroundWork(quiet) }

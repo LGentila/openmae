@@ -113,7 +113,7 @@ public actor LinkHost: AssistantConnection {
     private var hand: Hand?
     private var conversationActivity: (any NSObjectProtocol)?
     #if os(macOS)
-    private let keepAwake = KeepAwake()
+    private let keepAwake = KeepAwake(reason: "OpenMaé: reachable from your iPhone")
     #endif
 
     // What the engine runs with, and what the iPhones are told when they connect.
@@ -190,10 +190,14 @@ public actor LinkHost: AssistantConnection {
     }
 
     /// The settings as the engine gets them: while an iPhone has the conversation, its own way of talking
-    /// (hands-free or hold to talk).
+    /// (hands-free or hold to talk; never the wake word, which the iPhone does not offer).
     private func effective(_ settings: AssistantSettings) -> AssistantSettings {
         var settings = settings
-        if hand != nil, let phonePushToTalk { settings.pushToTalk = phonePushToTalk }
+        if hand != nil, let phonePushToTalk {
+            settings.listening = phonePushToTalk ? .pushToTalk : .handsFree
+        } else if hand != nil, settings.listening == .wakeWord {
+            settings.listening = .handsFree
+        }
         return settings
     }
 
@@ -560,7 +564,7 @@ public actor LinkHost: AssistantConnection {
             switch command {
             case .updateSettings(let settings):
                 // Only the way of talking is the iPhone's to choose.
-                phonePushToTalk = settings.pushToTalk
+                phonePushToTalk = settings.listening == .pushToTalk
                 if hand?.key == key { sendEngineSettings() }
             case .talkKey(pressed: true):
                 await takeHand(key)

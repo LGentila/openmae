@@ -33,6 +33,7 @@ final class AssistantModel {
             guard phase != .ready else { return }
             talkKeyDown = false
             isShortcutExchange = false
+            isAwake = false
         }
     }
     /// The download in progress, or where it stopped (pause, failure); nil before it starts.
@@ -68,6 +69,8 @@ final class AssistantModel {
     private(set) var talkKeyDown = false
     /// The exchange in progress was started with the global shortcut: the capsule follows it to its end.
     private(set) var isShortcutExchange = false
+    /// Wake-word mode: Maé listens to any voice for a few seconds (after « OK Maé » alone, and after each answer).
+    private(set) var isAwake = false
 
     var settings: AssistantSettings {
         didSet {
@@ -83,11 +86,12 @@ final class AssistantModel {
                 if !settings.actionsEnabled { actions = nil }
             }
             if settings.webSearch != oldValue.webSearch { webSearchTest = nil }
+            if settings.listening != .wakeWord { isAwake = false }
         }
     }
 
     /// The conversation window is open. Once it is closed, OpenMaé stays in the menu bar and only listens after
-    /// the global shortcut, even in hands-free mode.
+    /// the global shortcut, even in hands-free mode; in the wake-word mode it still waits for « OK Maé ».
     var isWindowOpen = true {
         didSet {
             guard isWindowOpen != oldValue else { return }
@@ -99,11 +103,19 @@ final class AssistantModel {
     /// mention it then.
     var hasTalkShortcut = false
 
-    /// The settings as the engine gets them: with the window closed, push-to-talk.
+    /// The settings as the engine gets them: with the window closed, push-to-talk instead of hands-free.
     private var engineSettings: AssistantSettings {
         var engine = settings
-        if !isWindowOpen { engine.pushToTalk = true }
+        if !isWindowOpen, engine.listening == .handsFree { engine.listening = .pushToTalk }
         return engine
+    }
+
+    /// Maé waits for « OK Maé » (window open or closed).
+    var listensForWakeWord: Bool { settings.listening == .wakeWord }
+
+    /// The state the screens show: listening while Maé is awake in the wake-word mode, though nobody speaks yet.
+    var shownState: PipelineState {
+        state == .listening && isAwake && listensForWakeWord ? .userSpeaking : state
     }
 
     var isReady: Bool { phase == .ready }
@@ -298,6 +310,10 @@ final class AssistantModel {
             }
         case .bargeIn(let stopMs, _):
             bargeIns.append(stopMs)
+        case .awake(let awake):
+            isAwake = awake
+        case .wakeDecision(let decision):
+            if settings.wakeLog { WakeLog.append(decision) }
         case .levels(let input, let output):
             inputLevel = input
             outputLevel = output
