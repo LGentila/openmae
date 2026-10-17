@@ -170,6 +170,8 @@ public actor VoicePipeline {
 
     private var shorteningInProgress = false
     private var warmTask: Task<Void, Never>?
+    /// The model catching up with the history just recorded (`LanguageModel.catchUp`), after the one before.
+    private var catchUpTask: Task<Void, Never>?
 
     // The turn being prepared or spoken (at most one).
     private var turn: Turn?
@@ -322,6 +324,7 @@ public actor VoicePipeline {
     /// Stops for good, before the models are released (another tier chosen, or the models deleted).
     public func stop() async {
         await cancelTurn(stopAudio: true)
+        await catchUpTask?.value  // the model is not released while it still computes
         warmTask?.cancel()
         warmTask = nil
         candidate.check?.cancel()
@@ -806,10 +809,10 @@ public actor VoicePipeline {
             let t1 = clock.now
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
-            let send: (String) -> Void = { self.deliver($0, to: turn) }
+            let send: (SentenceChunker.Piece) -> Void = { self.deliver($0.text, after: $0.separator, to: turn) }
             if let local = await localAnswer(to: text, language: lang) {
                 metrics.firstTokenMs = ms(clock.now - t1)
-                send(local)
+                deliver(local, to: turn)
             } else if let interception, let reply = try await resolve(interception, turn: turn, now: now) {
                 metrics.firstTokenMs = ms(clock.now - t1)
                 say(reply.spoken, to: turn)
@@ -829,7 +832,7 @@ public actor VoicePipeline {
                     for try await output in model.reply(to: request) {
                         if metrics.firstTokenMs == nil { metrics.firstTokenMs = ms(clock.now - t1) }
                         switch output {
-                        case .text(let raw): chunker.push(filter.push(raw)).forEach(send)
+                        case .text(let raw): chunker.pieces(adding: filter.push(raw)).forEach(send)
                         case .toolCallStarted where summing == nil:
                             DebugLog.log("turn \(turn.id): tool call started")
                             if !fillerSaid, let phrase = await waitingPhrase(for: nil, turn) {
@@ -852,16 +855,16 @@ public actor VoicePipeline {
                         case .unreadableToolCall: break
                         }
                     }
-                    chunker.push(filter.flush()).forEach(send)
+                    chunker.pieces(adding: filter.flush()).forEach(send)
                     if let fallback = summing {
-                        chunker.flush().forEach(send)
+                        chunker.remainingPieces().forEach(send)
                         if turn.answer == answered { say(fallback, to: turn) }
                         break
                     }
                     guard let tools, !calls.isEmpty || unreadable else { break }
                     // Nothing is ever carried out before the user's turn is really over.
                     try await waitForCommit(turn)
-                    chunker.flush().forEach(send)
+                    chunker.remainingPieces().forEach(send)
                     guard let written = calls.first else {
                         say(ActionPhrases.notUnderstood(lang), to: turn)
                         break
@@ -889,7 +892,7 @@ public actor VoicePipeline {
                     break
                 }
             }
-            chunker.flush().forEach(send)
+            chunker.remainingPieces().forEach(send)
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
@@ -949,9 +952,10 @@ public actor VoicePipeline {
         }
     }
 
-    /// Sends a piece of the answer to the voice, and to the interface once the turn is committed. `inHistory`:
-    /// whether the model will see it as part of its answer in the next turns.
-    private func deliver(_ piece: String, to turn: Turn, inHistory: Bool = true) {
+    /// Sends a piece of the answer to the voice, and to the interface once the turn is committed. `separator`: the white
+    /// space the model wrote before it, which the history keeps (`SpeakableText.record`). `inHistory`: whether the model
+    /// will see it as part of its answer in the next turns.
+    private func deliver(_ piece: String, after separator: String = "", to turn: Turn, inHistory: Bool = true) {
         guard self.turn === turn, let stream = turn.stream else { return }
         let speakable = SpeakableText.clean(piece)
         guard !speakable.isEmpty else { return }
@@ -961,7 +965,7 @@ public actor VoicePipeline {
             // Leave the GPU to the voice until it is audible (the model is far ahead of speech).
             (model as? any YieldsToVoice)?.holdGeneration(true)
         }
-        if inHistory { turn.answer += (turn.answer.isEmpty ? "" : " ") + speakable }
+        if inHistory { SpeakableText.record(piece, after: separator, in: &turn.answer) }
         stream.enqueue(SpeakableText.forVoice(speakable, language: turn.language))
         // A speculative answer may still be thrown away: the interface only sees it once committed.
         if turn.committed {
@@ -1075,6 +1079,7 @@ public actor VoicePipeline {
         self.turn = nil
         if let metrics, let message = turn.userMessage {
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: false)
+            letModelCatchUp()
             if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
         }
@@ -1085,6 +1090,19 @@ public actor VoicePipeline {
         // After an answer, Maé listens a few seconds more without the wake phrase.
         if config.listening == .wakeWord, metrics != nil { stayAwake() }
         setState(someoneSpeaksToMae ? .userSpeaking : .listening)
+    }
+
+    /// Once an exchange is recorded, the model computes what of the history its memory no longer holds (an answer cut
+    /// off, or kept otherwise than it wrote it) right away, while the user speaks or nobody does, rather than in the
+    /// next answer's time; then a speculative answer abandoned, and the user's message heard in full after it, only cost
+    /// that message (`LanguageModel.catchUp`). One after the other, in the order the exchanges were recorded.
+    private func letModelCatchUp() {
+        let messages = conversation.messages
+        let previous = catchUpTask
+        catchUpTask = Task { [model] in
+            await previous?.value
+            await model.catchUp(with: messages)
+        }
     }
 
     /// Wake-word mode: a turn without an answer, once it is the user's for sure.
@@ -1127,6 +1145,7 @@ public actor VoicePipeline {
         await cancelTurn(stopAudio: false)
         if !turn.userText.isEmpty, let message = turn.userMessage {
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: true)
+            letModelCatchUp()  // the model's memory holds what it wrote, the history the answer cut off
             var metrics = TurnMetrics()
             metrics.userText = turn.userText
             metrics.assistantText = turn.answer

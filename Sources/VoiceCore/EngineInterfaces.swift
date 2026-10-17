@@ -96,6 +96,11 @@ public protocol LanguageModel: Sendable {
     func toolCallText(_ call: ToolCall) async -> String?
     /// Processes the conversation without answering (e.g. the conversation so far, once the tools changed).
     func prefill(_ conversation: [ChatMessage]) async throws
+    /// The history as the next request will start, once an exchange is recorded. A model that keeps its working memory
+    /// between requests computes now what of it that memory no longer matches (an answer cut off, or recorded otherwise
+    /// than the model wrote it), while nobody waits for an answer; nothing when the memory holds it (or went past it),
+    /// or when the history only goes on from what the memory holds.
+    func catchUp(with conversation: [ChatMessage]) async
     /// Processes the beginning every conversation starts with (`Conversation.beginning`: the system prompt, and the
     /// example exchanges when there are) and keeps it, so that a new conversation starts from it without computing it
     /// again. Call it again whenever that beginning changes.
@@ -113,6 +118,7 @@ public protocol LanguageModel: Sendable {
 extension LanguageModel {
     public func useTools(_ tools: [ToolSpec]) async {}
     public func toolCallText(_ call: ToolCall) async -> String? { nil }
+    public func catchUp(with conversation: [ChatMessage]) async {}
     public func prefillBeginning(_ beginning: [ChatMessage]) async throws { try await prefill(beginning) }
     public func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws { try await prefill(conversation) }
     public func allowBackgroundWork(_ allowed: Bool) async {}

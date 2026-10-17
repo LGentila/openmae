@@ -304,8 +304,8 @@ is one the model hesitates on). One search, made as the app makes it (the passwo
 
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, a refused call and its second try, a long result summed up (as after a web search), a
-turn dropped after a second try, a speculative or interrupted answer, the tools changing, the history shortened, a new
-conversation. Text only, nothing is created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it
+turn dropped after a second try, a speculative or interrupted answer, an answer in paragraphs, a speculative answer
+abandoned after an answer cut off, the tools changing, the history shortened, a new conversation. Text only, nothing is created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it
 also shows where each request stops matching that memory, and what differs:
 
 ```bash

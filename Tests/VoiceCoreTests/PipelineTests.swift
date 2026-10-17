@@ -56,6 +56,9 @@ actor ScriptedModel: LanguageModel {
     private(set) var prefills: [(beginning: Bool, messages: [ChatMessage])] = []
     func prefill(_ conversation: [ChatMessage]) async throws { prefills.append((false, conversation)) }
     func prefillBeginning(_ beginning: [ChatMessage]) async throws { prefills.append((true, beginning)) }
+    /// The histories the pipeline asked the model to catch up with, in order.
+    private(set) var catchUps: [[ChatMessage]] = []
+    func catchUp(with conversation: [ChatMessage]) async { catchUps.append(conversation) }
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
     private(set) var shortenings = 0
     func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws {
@@ -180,6 +183,30 @@ struct PipelineTests {
         #expect(prefills[3].messages == beginning)
     }
 
+    /// An answer in paragraphs goes into the history with the line breaks the model wrote between them; the interface
+    /// gets the same pieces as the voice, without them.
+    @Test func historyKeepsTheParagraphs() async throws {
+        let answer = ["Bien sûr, voici une petite histoire.", "\n\nIl était une fois un chat très curieux. ",
+                      "Il aimait regarder les étoiles."]
+        let (model, stt, speaker) = (ScriptedModel(answer: answer), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await pipeline.submit(text: "Raconte-moi une histoire.")
+        await waitFor { await speaker.played >= 1500 }
+        await waitFor { await speaker.remainingMs == 0 }
+        try await Task.sleep(for: .milliseconds(150))
+        await pipeline.submit(text: "Merci.")
+        await waitFor { await model.requests.count == 2 }
+        let request = try #require(await model.requests.last)
+        #expect(request.dropLast().last?.content == "Bien sûr, voici une petite histoire.\n\n"
+            + "Il était une fois un chat très curieux. Il aimait regarder les étoiles.")
+        #expect(await log.pieces.prefix(3) == ["Bien sûr, voici une petite histoire.",
+                                              "Il était une fois un chat très curieux.", "Il aimait regarder les étoiles."])
+        #expect(await model.catchUps.first == Array(request.dropLast()))  // once the answer was recorded
+    }
+
     @Test func speculativeAnswerIsDroppedWhenTheUserGoesOn() async throws {
         let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
         let pipeline = make(model, stt, speaker)
@@ -214,6 +241,10 @@ struct PipelineTests {
         #expect(await bargeIns.value == 1)
         #expect(await speaker.stops >= 1)
         #expect(await speaker.remainingMs < 50)  // ~10 s of answer were left: the voice was cut
+        // While the user speaks, the model catches up with the history, which keeps the answer as cut off.
+        await waitFor { await !model.catchUps.isEmpty }
+        let history = try #require(await model.catchUps.last)
+        #expect(history.last?.role == .assistant && history.last?.content.hasSuffix("[…]") == true)
     }
 
     @Test func quietEchoDoesNotInterruptTheAssistant() async throws {

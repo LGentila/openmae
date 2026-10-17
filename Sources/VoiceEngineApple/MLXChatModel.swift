@@ -88,6 +88,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var beginningRestores = 0
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, and time to compute them.
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0)
+    /// Diagnostics of the last `catchUp`: tokens computed (0: nothing to do), and time to compute them.
+    public private(set) var lastCatchUp = (computed: 0, ms: 0.0)
     /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
     private var watchingToolCalls = false
     /// With `watchToolCalls(true)`, for the last request: the chance the model gave to opening a tool call at the
@@ -203,9 +205,35 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         beginning = (tokens, cache.map { $0.copy() })
     }
 
-    private func prefill(tokens: [Int]) throws {
+    /// Once the history no longer matches the cache (an answer cut off: " […]", or kept otherwise than the model wrote
+    /// it), the next request went back to a snapshot and computed that answer again while the user waited (the turn
+    /// after an interruption: 111 tokens in 555 ms instead of 48 in 439 ms, with Gemma 4 26B on the reference Mac). And
+    /// since the snapshot it took then sat before that answer, a request that replaced it (a speculative answer
+    /// abandoned, the user's message then heard in full) computed the answer once more, although only the end of the
+    /// user's message had changed (253 tokens in 990 ms instead of 54 in 485 ms). The history is computed here instead,
+    /// as soon as it is recorded, while the user speaks (after an interruption) or nobody does: the next request extends
+    /// the cache, and its snapshot sits at its user's message. Computing that request's earlier turns in a pass of their
+    /// own would give the same snapshot, but that second pass cost 0.25–0.5 s more at every such request. Nothing is
+    /// computed when the cache holds the history or a request already went past it, nor when the history goes on from
+    /// the cache (the next request computes the rest in its own pass, as usual).
+    /// `async` like the protocol's default (see `useTools`).
+    public func catchUp(with conversation: [ChatMessage]) async {
+        lastCatchUp = (0, 0)
+        guard let tokens = try? render(conversation, generationPrompt: false) else { return }
+        let common = commonPrefix(cachedTokens, tokens, answering: false)
+        guard common < cachedTokens.count, common < tokens.count else { return }
+        let clock = ContinuousClock()
+        let t0 = clock.now
+        guard let computed = try? prefill(tokens: tokens) else { return }
+        let d = clock.now - t0
+        lastCatchUp = (computed, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+    }
+
+    /// Returns how many tokens were computed.
+    @discardableResult
+    private func prefill(tokens: [Int]) throws -> Int {
         let start = try reuseCache(for: tokens, answering: false).reused
-        guard start < tokens.count else { return }
+        guard start < tokens.count else { return 0 }
         let clock = ContinuousClock()
         let t0 = clock.now
         let input = LMInput(tokens: MLXArray(tokens[start...].map { Int32($0) }))
@@ -215,6 +243,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
+        return tokens.count - start
     }
 
     /// The conversation as the model reads it, special tokens included (for checking the prompt).

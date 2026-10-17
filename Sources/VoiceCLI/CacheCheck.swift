@@ -1,9 +1,9 @@
 // voice-cli cache-check — how much of each request the language model finds in its memory (KV cache), in the
 // sequences of requests the app sends: plain turns, an action, a refused call and its second try, a long result the
 // model sums up (as after a web search), a turn dropped after its second try (the user spoke again before any voice),
-// a speculative answer abandoned, an interrupted answer, the tools changing, the history shortened, a new
-// conversation; and answers that the history keeps otherwise than the model wrote them, after a request computed
-// from scratch or not.
+// a speculative answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer abandoned after
+// an answer cut off, the tools changing, the history shortened, a new conversation; and answers that the history keeps
+// otherwise than the model wrote them, after a request computed from scratch or not.
 //
 // Text only, as the app would send it with actions on (the same system prompt, tools and date line); no call is
 // carried out: an action "succeeds" or is refused as each scenario says.
@@ -11,8 +11,9 @@
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
 //
 // Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
-// memory in use after it. VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at token N", with the
-// text on each side; "restored the snapshot"; "prefill N tokens (reused M)").
+// memory in use after it; and after an exchange is recorded, what the model computes of the history while nobody waits,
+// as in the app ("the history caught up"). VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at
+// token N", with the text on each side; "restored the snapshot"; "prefill N tokens (reused M)").
 
 import Foundation
 import VoiceCore
@@ -36,6 +37,8 @@ private actor CacheCheck {
     let dateLine: String
     var conversation: Conversation
     var steps: [Step] = []
+    /// Time of each `catchUp` that computed something.
+    var catchUps: [Double] = []
     let clock = ContinuousClock()
 
     init(model: MLXChatModel, base: Conversation, dateLine: String) {
@@ -97,10 +100,10 @@ private actor CacheCheck {
     }
 
     /// One turn as the pipeline runs it: the answer goes into the history the way the pipeline records it (pieces cut
-    /// and cleaned for the voice); a call succeeds, after one refusal and a second try with `refuse`, and the app then
-    /// says "C'est noté."; with `summarize`, the call gets that result and the model sums it up (as after a web search
-    /// or an agent's report). `record: false`: the turn is dropped (the user spoke again before any voice);
-    /// `interrupted`: the answer is recorded as cut off.
+    /// and cleaned for the voice, `SpeakableText.record`); a call succeeds, after one refusal and a second try with
+    /// `refuse`, and the app then says "C'est noté."; with `summarize`, the call gets that result and the model sums it
+    /// up (as after a web search or an agent's report). `record: false`: the turn is dropped (the user spoke again
+    /// before any voice); `interrupted`: the answer is recorded as cut off.
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
               stopAfter: Int? = nil, interrupted: Bool = false) async throws
     {
@@ -110,19 +113,18 @@ private actor CacheCheck {
         var answer = ""
         var filter = ReasoningFilter()
         var chunker = SentenceChunker()
-        func send(_ piece: String) {
-            let speakable = SpeakableText.clean(piece)
-            if !speakable.isEmpty { answer += (answer.isEmpty ? "" : " ") + speakable }
+        func send(_ piece: SentenceChunker.Piece) {
+            SpeakableText.record(piece.text, after: piece.separator, in: &answer)
         }
         var secondTry = false
         var summing = false
         while true {
             let pass = summing ? " (summing up)" : secondTry ? " (second try)" : ""
             let output = try await self.request(label + pass, request, stopAfter: stopAfter)
-            chunker.push(filter.push(output.text)).forEach(send)
-            chunker.push(filter.flush()).forEach(send)
+            chunker.pieces(adding: filter.push(output.text)).forEach(send)
+            chunker.pieces(adding: filter.flush()).forEach(send)
             guard !summing, let call = output.calls.first else { break }  // a call written while summing up: ignored
-            chunker.flush().forEach(send)
+            chunker.remainingPieces().forEach(send)
             if refuse, !secondTry {
                 steps += [.call(call), .result(of: call, ["erreur": .string(
                     "Cette date est déjà passée. Demande à l'utilisateur de préciser, ou propose une date à venir.")])]
@@ -137,13 +139,25 @@ private actor CacheCheck {
                 continue
             }
             steps += [.call(call), .result(of: call, ["ok": .bool(true), "id": .string("r\(self.steps.count)")])]
-            send("C'est noté.")
+            SpeakableText.record("C'est noté.", in: &answer)
             break
         }
-        chunker.flush().forEach(send)
+        chunker.remainingPieces().forEach(send)
         if record {
             conversation.record(user: user, steps: steps, assistant: answer, interrupted: interrupted)
+            await catchUp()
         }
+    }
+
+    /// As the pipeline does once an exchange is recorded: the model computes what of the history its memory no longer
+    /// holds (`MLXChatModel.catchUp`), while nobody waits for an answer.
+    private func catchUp() async {
+        await model.catchUp(with: conversation.messages)
+        let done = await model.lastCatchUp
+        guard done.computed > 0 else { return }
+        catchUps.append(done.ms)
+        print(String(format: "  %-46@ %5d tokens computed while nobody waits, in %6.0f ms · GPU memory %.2f GB",
+                     "  the history caught up" as NSString, done.computed, done.ms, MLXChatModel.activeMemoryGB))
     }
 
     /// The tools changed (a shortcut added): the prompt is computed again, the conversation goes on (as the app does:
@@ -202,6 +216,8 @@ private actor CacheCheck {
                      restored.map(\.prefillMs).reduce(0, +), fromBeginning.count,
                      fromBeginning.map(\.prefillMs).reduce(0, +),
                      firstOutputs.isEmpty ? 0 : firstOutputs[firstOutputs.count / 2], firstOutputs.last ?? 0))
+        print(String(format: "the history caught up while nobody waits: %d times (%.0f ms in all)", catchUps.count,
+                     catchUps.reduce(0, +)))
     }
 }
 
@@ -283,6 +299,28 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("speculative answer, abandoned", "Raconte-moi", record: false, stopAfter: 1)
             try await check.turn("the same turn, heard in full", "Raconte-moi une blague courte.")
             try await check.turn("plain answer", "Ha ha, une autre ?")
+        }),
+        ("paragraphs", {
+            // An answer in several paragraphs, heard in full: the model separates them with "\n\n".
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("answer in paragraphs",
+                                 "Raconte-moi une très courte histoire de chat, en deux petits paragraphes.")
+            try await check.turn("plain answer after the paragraphs",
+                                 "Merci, elle est jolie. Tu as une idée de prénom pour un chat ?")
+            try await check.turn("plain answer", "Super, merci.")
+        }),
+        ("speculative-after-cut", {
+            // An answer cut off, so the next request computes it again from a snapshot; that request is speculative and
+            // abandoned (the user went on), then the same turn comes back with a longer transcript.
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("answer interrupted", "Raconte-moi une histoire de pirates.", stopAfter: 150,
+                                 interrupted: true)
+            try await check.turn("speculative answer, abandoned", "Donne-moi une idée de dessert", record: false,
+                                 stopAfter: 1)
+            try await check.turn("the same turn, heard in full", "Donne-moi une idée de dessert sans four, s'il te plaît.")
+            try await check.turn("plain answer", "Merci, c'est parfait.")
         }),
         ("interrupted", {
             try await check.newConversation()

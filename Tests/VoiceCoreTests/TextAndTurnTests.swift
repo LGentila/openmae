@@ -81,6 +81,30 @@ struct TextForSpeechTests {
         #expect(SpeakableText.clean("**Super** idée 😄 ! Voir https://exemple.fr") == "Super idée ! Voir")
         #expect(SpeakableText.clean("- des pâtes\n- du riz") == "des pâtes du riz")
     }
+
+    /// The history keeps the answer as the model wrote it, paragraphs included (its memory of the answer then still
+    /// matches the next request), while the voice and the interface get the same pieces as before.
+    @Test func historyKeepsTheWhiteSpaceTheModelWrote() {
+        let written = "C'est une très belle idée.\n\nIl était une fois un vieil horloger nommé Elias. Il vivait seul.\n"
+            + "Un jour, un enfant frappa à sa porte."
+        var chunker = SentenceChunker()
+        var pieces = chunker.pieces(adding: String(written.prefix(60)))
+        pieces += chunker.pieces(adding: String(written.dropFirst(60)))
+        pieces += chunker.remainingPieces()
+        #expect(pieces == [
+            .init("C'est une très belle idée."),
+            .init("Il était une fois un vieil horloger nommé Elias.", after: "\n\n"),
+            .init("Il vivait seul.\nUn jour, un enfant frappa à sa porte.", after: " "),
+        ])
+        var answer = ""
+        for piece in pieces { SpeakableText.record(piece.text, after: piece.separator, in: &answer) }
+        #expect(answer == written)
+        #expect(SpeakableText.clean(pieces[2].text) == "Il vivait seul. Un jour, un enfant frappa à sa porte.")
+        // What the voice never says stays out of the history too; the app's own sentences follow after a space.
+        #expect(SpeakableText.clean("**Super** idée  😄 !\n\nVoir", keepingLineBreaks: true) == "Super idée !\n\nVoir")
+        SpeakableText.record("C'est noté.", in: &answer)
+        #expect(answer.hasSuffix("porte. C'est noté."))
+    }
 }
 
 @Suite("Language")

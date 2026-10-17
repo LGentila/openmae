@@ -76,7 +76,22 @@ public struct ReasoningFilter: Sendable {
 /// No piece is shorter than `minWords`: Pocket TTS often renders a text of fewer than 5 words as
 /// silence (heard in the app: "Salut toi." and "Ça marche." inaudible, while the latency measurement
 /// counted them as the first sound). A short sentence is spoken together with the next one.
+///
+/// The white space around the pieces is cut off; `pieces(adding:)` also gives, with each piece, the white space the
+/// model wrote before it, which the history keeps (see `SpeakableText.record`).
 public struct SentenceChunker: Sendable {
+    /// A piece of the text, and the white space the model wrote before it, since the end of the previous piece ("\n\n"
+    /// between two paragraphs; `remainingPieces` ends the text, the next piece starts a new one).
+    public struct Piece: Sendable, Equatable {
+        public var text: String
+        public var separator: String
+
+        public init(_ text: String, after separator: String = "") {
+            self.text = text
+            self.separator = separator
+        }
+    }
+
     /// Minimum length of a first piece cut at a comma (shorter cuts sound choppy).
     public var firstPieceMinCharacters = 20
     /// Fewer words than this are never sent alone to the voice (except the very end of an answer).
@@ -86,16 +101,27 @@ public struct SentenceChunker: Sendable {
 
     private var buffer = ""
     private var emitted = 0
+    /// The white space cut off since the end of the last piece's text: the next piece's separator, so far.
+    private var space = ""
 
     public init() {}
 
     public mutating func push(_ text: String) -> [String] {
+        pieces(adding: text).map(\.text)
+    }
+
+    public mutating func flush() -> [String] {
+        remainingPieces().map(\.text)
+    }
+
+    /// The pieces `text` completes, each with the white space before it.
+    public mutating func pieces(adding text: String) -> [Piece] {
         buffer += text
-        var pieces: [String] = []
+        var pieces: [Piece] = []
         while let cut = nextCut() {
-            let piece = buffer[..<cut].trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw = String(buffer[..<cut])
             buffer = String(buffer[cut...])
-            if !piece.isEmpty {
+            if let piece = take(raw) {
                 pieces.append(piece)
                 emitted += 1
             }
@@ -103,11 +129,27 @@ public struct SentenceChunker: Sendable {
         return pieces
     }
 
-    public mutating func flush() -> [String] {
-        let rest = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// The rest of the text as a last piece (the end of an answer, or of what the model said before a tool call).
+    public mutating func remainingPieces() -> [Piece] {
+        let rest = take(buffer)
         buffer = ""
         emitted = 0
-        return rest.isEmpty ? [] : [rest]
+        space = ""
+        return rest.map { [$0] } ?? []
+    }
+
+    /// `raw` without the white space around it, after the white space before it; nil when it is only white space, which
+    /// then goes to the next piece's separator.
+    private mutating func take(_ raw: String) -> Piece? {
+        let scalars = raw.unicodeScalars
+        let isText: (Unicode.Scalar) -> Bool = { !CharacterSet.whitespacesAndNewlines.contains($0) }
+        guard let first = scalars.firstIndex(where: isText), let last = scalars.lastIndex(where: isText) else {
+            space += raw
+            return nil
+        }
+        let piece = Piece(String(scalars[first...last]), after: space + String(scalars[..<first]))
+        space = String(scalars[scalars.index(after: last)...])
+        return piece
     }
 
     private func nextCut() -> String.Index? {
@@ -137,7 +179,9 @@ public struct SentenceChunker: Sendable {
 
 /// Final clean-up of a piece of text before it reaches the voice.
 public enum SpeakableText {
-    public static func clean(_ text: String) -> String {
+    /// `keepingLineBreaks`: the white space that holds a line break stays as the model wrote it (the answer as the
+    /// history keeps it, see `record`); only runs of spaces become one.
+    public static func clean(_ text: String, keepingLineBreaks: Bool = false) -> String {
         var s = text
         // Markdown that models sometimes produce despite the "no markdown" instruction.
         s = s.replacingOccurrences(of: #"\*\*|__|\*|`|#+ "#, with: "", options: .regularExpression)
@@ -153,8 +197,33 @@ public enum SpeakableText {
         // Emojis and pictographs.
         s = String(String.UnicodeScalarView(s.unicodeScalars.filter { !isPictograph($0) }))
         // Runs of spaces become one; non-breaking spaces stay (French typography, shown in the transcript).
-        s = s.replacingOccurrences(of: #"[^\S\u00A0\u202F]+"#, with: " ", options: .regularExpression)
+        let spaces = #"[^\S\u00A0\u202F]+"#
+        if keepingLineBreaks {
+            var kept = ""
+            var rest = s[...]
+            while let run = rest.range(of: spaces, options: .regularExpression) {
+                kept += rest[..<run.lowerBound]
+                kept += rest[run].contains(where: \.isNewline) ? String(rest[run]) : " "
+                rest = rest[run.upperBound...]
+            }
+            s = kept + rest
+        } else {
+            s = s.replacingOccurrences(of: spaces, with: " ", options: .regularExpression)
+        }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Adds a piece of an answer to the answer as the history keeps it: cleaned as for the voice, but with the line
+    /// breaks the model wrote, after the white space it wrote before the piece (`separator`; a space when there is none:
+    /// the app's own sentences, the first piece after a tool call). The history then holds the answer as the model
+    /// wrote it, paragraphs included, which its memory of the answer (the KV cache) still matches at the next request.
+    /// Joined with spaces, an answer in paragraphs sent the next request back to a snapshot, to compute the whole answer
+    /// again (after a short story in two paragraphs: 197 tokens in 866 ms instead of 54 in 495 ms, with Gemma 4 26B on the
+    /// reference Mac).
+    public static func record(_ piece: String, after separator: String = "", in answer: inout String) {
+        let written = clean(piece, keepingLineBreaks: true)
+        guard !written.isEmpty else { return }
+        answer += (answer.isEmpty ? "" : separator.isEmpty ? " " : separator) + written
     }
 
     private static func isPictograph(_ u: Unicode.Scalar) -> Bool {
