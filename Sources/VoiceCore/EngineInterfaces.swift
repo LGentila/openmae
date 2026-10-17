@@ -89,13 +89,17 @@ public protocol LanguageModel: Sendable {
     /// Streams the answer to the conversation, piece by piece. Cancel the consuming task to stop.
     func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error>
     /// The tools the model may call. They are part of the system prompt: change them only between
-    /// conversations, then `prefill` again.
+    /// conversations, then `prefillBeginning` again.
     func useTools(_ tools: [ToolSpec]) async
     /// A tool call written the way this model writes it, to show it an example in its instructions; nil when
     /// it has no such written form.
     func toolCallText(_ call: ToolCall) async -> String?
-    /// Processes the conversation without answering (e.g. the system prompt at launch).
+    /// Processes the conversation without answering (e.g. the conversation so far, once the tools changed).
     func prefill(_ conversation: [ChatMessage]) async throws
+    /// Processes the beginning every conversation starts with (`Conversation.beginning`: the system prompt, and the
+    /// example exchanges when there are) and keeps it, so that a new conversation starts from it without computing it
+    /// again. Call it again whenever that beginning changes.
+    func prefillBeginning(_ beginning: [ChatMessage]) async throws
     /// Size of the conversation in model tokens (used to keep it inside the context window).
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int
     /// Prepares a shortened history (oldest exchanges dropped) in the background and returns once it is
@@ -109,6 +113,7 @@ public protocol LanguageModel: Sendable {
 extension LanguageModel {
     public func useTools(_ tools: [ToolSpec]) async {}
     public func toolCallText(_ call: ToolCall) async -> String? { nil }
+    public func prefillBeginning(_ beginning: [ChatMessage]) async throws { try await prefill(beginning) }
     public func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws { try await prefill(conversation) }
     public func allowBackgroundWork(_ allowed: Bool) async {}
 }

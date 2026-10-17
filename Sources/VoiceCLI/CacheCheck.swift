@@ -27,6 +27,7 @@ private struct Step {
     var firstOutputMs: Double?
     var rebuilt: Bool
     var restored: Bool
+    var fromBeginning: Bool
 }
 
 private actor CacheCheck {
@@ -44,10 +45,11 @@ private actor CacheCheck {
         conversation = base
     }
 
+    /// As "Nouvelle conversation" in the app: the model goes back to the beginning it keeps.
     func newConversation() async throws {
         conversation = base
         let start = clock.now
-        try await model.prefill(conversation.messages)
+        try await model.prefillBeginning(conversation.beginning)
         print(String(format: "  %-46@ prefill of the system prompt: %.0f ms · GPU memory %.2f GB",
                      "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
     }
@@ -62,6 +64,7 @@ private actor CacheCheck {
     {
         let rebuildsBefore = await model.cacheRebuilds
         let restoresBefore = await model.snapshotRestores
+        let beginningsBefore = await model.beginningRestores
         let promptTokens = try await model.tokenCount(messages)
         var text = ""
         var calls: [ToolCall] = []
@@ -81,10 +84,12 @@ private actor CacheCheck {
         let prefill = await model.lastPrefill
         let step = Step(label: label, promptTokens: promptTokens, reused: prefill.reused, computed: prefill.computed,
                         prefillMs: prefill.ms, firstOutputMs: first, rebuilt: await model.cacheRebuilds > rebuildsBefore,
-                        restored: await model.snapshotRestores > restoresBefore)
+                        restored: await model.snapshotRestores > restoresBefore,
+                        fromBeginning: await model.beginningRestores > beginningsBefore)
         steps.append(step)
         let note = step.rebuilt ? "  ← rebuilt from scratch"
-            : step.reused == 0 ? "  ← from scratch" : step.restored ? "  ← back to a snapshot" : ""
+            : step.reused == 0 ? "  ← from scratch" : step.fromBeginning ? "  ← back to the conversations' beginning"
+            : step.restored ? "  ← back to a snapshot" : ""
         print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@",
                      label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
                      MLXChatModel.activeMemoryGB, note))
@@ -141,12 +146,14 @@ private actor CacheCheck {
         }
     }
 
-    /// The tools changed (a shortcut added): the prompt is computed again, the conversation goes on.
-    func toolsChanged(_ tools: [ToolSpec]) async throws {
+    /// The tools changed (a shortcut added): the prompt is computed again, the conversation goes on (as the app does:
+    /// the new beginning first, which the model keeps, then the conversation on it).
+    func toolsChanged(_ tools: [ToolSpec], label: String = "tools changed") async throws {
         await model.useTools(tools)
         let start = clock.now
+        try await model.prefillBeginning(conversation.beginning)
         try await model.prefill(conversation.messages)
-        print(String(format: "  %-46@ prefill of the whole conversation: %.0f ms", "tools changed" as NSString,
+        print(String(format: "  %-46@ prefill of the whole conversation: %.0f ms", label as NSString,
                      milliseconds(clock.now - start)))
     }
 
@@ -188,10 +195,12 @@ private actor CacheCheck {
         let firstOutputs = steps.compactMap(\.firstOutputMs).sorted()
         let fromScratch = steps.filter { $0.reused == 0 }
         let restored = steps.filter(\.restored)
+        let fromBeginning = steps.filter(\.fromBeginning)
         print(String(format: "\n%d requests · computed from scratch: %d (%.0f ms in all) · back to a snapshot: %d (%.0f ms in all)"
-                     + " · first output: median %.0f ms, max %.0f ms",
+                     + " · back to the beginning: %d (%.0f ms in all) · first output: median %.0f ms, max %.0f ms",
                      steps.count, fromScratch.count, fromScratch.map(\.prefillMs).reduce(0, +), restored.count,
-                     restored.map(\.prefillMs).reduce(0, +),
+                     restored.map(\.prefillMs).reduce(0, +), fromBeginning.count,
+                     fromBeginning.map(\.prefillMs).reduce(0, +),
                      firstOutputs.isEmpty ? 0 : firstOutputs[firstOutputs.count / 2], firstOutputs.last ?? 0))
     }
 }
@@ -218,7 +227,13 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         + (agents ? [AgentCatalog.promptAddendum] : [])
     if ActionCatalog.showsExamples(on: tier) { base.examples = ActionCatalog.examples(now: now, timeZone: timeZone) }
-    print("system prompt with \(tools.count) tools: \(try await model.tokenCount(base.messages)) tokens\n")
+    // As the app does at start: the model computes the beginning of every conversation, and keeps it.
+    let computeStart = ContinuousClock.now
+    try await model.prefillBeginning(base.beginning)
+    let computeMs = milliseconds(ContinuousClock.now - computeStart)
+    let promptTokens = try await model.tokenCount(base.messages)
+    print(String(format: "system prompt with %d tools: %d tokens, computed in %.0f ms · GPU memory %.2f GB\n",
+                 tools.count, promptTokens, computeMs, MLXChatModel.activeMemoryGB))
 
     let check = CacheCheck(model: model, base: base, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone))
     let scenarios: [(String, () async throws -> Void)] = [
@@ -283,7 +298,7 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.toolsChanged(tools + [ActionCatalog.runShortcut(names: ["Mode concentration"])].compactMap { $0 })
             try await check.turn("plain answer after the tools changed", "Et sans four, qu'est-ce que je peux faire ?")
             try await check.turn("plain answer", "Merci, c'est parfait.")
-            await model.useTools(tools)
+            try await check.toolsChanged(tools, label: "tools back")
         }),
         ("shortened", {
             try await check.newConversation()

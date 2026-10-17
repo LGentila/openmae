@@ -209,7 +209,7 @@ func runActionsBench(_ o: Options) async throws {
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
     let prefixStart = clock.now
-    try await model.prefill(conversation.messages)
+    try await model.prefillBeginning(conversation.beginning)
     let prefixTokens = try await model.tokenCount(conversation.messages)
     print("system prompt with \(tools.count) tools: \(prefixTokens) tokens, computed in \(clock.now - prefixStart)\n")
     if o.showPrompt { print(try await model.promptText(conversation.messages) + "\n") }
@@ -366,9 +366,9 @@ func runActionsBench(_ o: Options) async throws {
         if o.watchCalls { print("      raw: \(await model.lastRawAnswer.debugDescription)") }
         if secondPass {
             // The next request starts again from the system prompt alone, which the model's memory, now past this
-            // request's beginning, can no longer be wound back to: it would compute that prompt again within the next
-            // request's time, and within every one after it. Back to the system prompt now, outside the timings.
-            try await model.prefill(conversation.messages)
+            // request's beginning, can no longer be wound back to. Back to the beginning the model keeps now, outside
+            // the timings, as after "Nouvelle conversation" in the app.
+            try await model.prefillBeginning(conversation.beginning)
         }
     }
     summarize(results, tier: tier, model: folder.lastPathComponent, options: o)

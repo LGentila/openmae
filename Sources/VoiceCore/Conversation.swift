@@ -60,10 +60,13 @@ public struct Conversation: Sendable {
     }
 
     public func messages(adding userMessage: ChatMessage) -> [ChatMessage] {
-        [systemMessage] + examples + exchanges + [userMessage]
+        beginning + exchanges + [userMessage]
     }
 
-    public var messages: [ChatMessage] { [systemMessage] + examples + exchanges }
+    public var messages: [ChatMessage] { beginning + exchanges }
+
+    /// What every conversation starts with, before the user's first message: the system prompt and the examples.
+    public var beginning: [ChatMessage] { [systemMessage] + examples }
 
     /// Records a completed (or interrupted) exchange.
     public mutating func record(user text: String, language: SpeechLanguage, assistant answer: String,

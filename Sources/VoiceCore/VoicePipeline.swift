@@ -202,7 +202,7 @@ public actor VoicePipeline {
     public func start() async throws {
         await updatePrompt()
         if let tools { await model.useTools(await tools.tools()) }
-        try await model.prefill(conversation.messages)
+        try await model.prefillBeginning(conversation.beginning)
         emit.yield(.state(.listening))
     }
 
@@ -216,7 +216,7 @@ public actor VoicePipeline {
         conversation.clear()
         await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])
-        try await model.prefill(conversation.messages)
+        try await model.prefillBeginning(conversation.beginning)
     }
 
     /// The list of tools changed (a shortcut was added to the folder, an agent set up): the model's prompt is
@@ -225,6 +225,8 @@ public actor VoicePipeline {
         guard let tools else { return }
         await model.useTools(await tools.tools())
         await updatePrompt()
+        // The new beginning first, which the model keeps for the next conversations, then the conversation on it.
+        try await model.prefillBeginning(conversation.beginning)
         try await model.prefill(conversation.messages)
     }
 
@@ -256,12 +258,12 @@ public actor VoicePipeline {
         emit.finish()
     }
 
-    /// Forget the conversation (new session).
+    /// Forget the conversation (new session). The model starts again from the beginning it keeps.
     public func resetConversation() async throws {
         await cancelTurn(stopAudio: true)
         conversation.clear()
         await tools?.resetConversation()
-        try await model.prefill(conversation.messages)
+        try await model.prefillBeginning(conversation.beginning)
     }
 
     // MARK: - Microphone input

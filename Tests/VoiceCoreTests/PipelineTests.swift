@@ -52,7 +52,10 @@ actor ScriptedModel: LanguageModel {
     }
     func useTools(_ tools: [ToolSpec]) { self.tools = tools }
     func toolCallText(_ call: ToolCall) async -> String? { "[\(call.name)]" }
-    func prefill(_ conversation: [ChatMessage]) async throws {}
+    /// What was computed ahead, in order: conversations (`prefill`) and beginnings to keep (`prefillBeginning`).
+    private(set) var prefills: [(beginning: Bool, messages: [ChatMessage])] = []
+    func prefill(_ conversation: [ChatMessage]) async throws { prefills.append((false, conversation)) }
+    func prefillBeginning(_ beginning: [ChatMessage]) async throws { prefills.append((true, beginning)) }
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
     private(set) var shortenings = 0
     func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws {
@@ -155,6 +158,26 @@ struct PipelineTests {
         // The near-silent opening of the voice is skipped.
         #expect(await speaker.played == 1000)
         #expect(await model.requests.last?.last?.role == .user)
+    }
+
+    /// The model keeps the beginning every conversation starts with: it gets it at start, again when the tools change
+    /// (then the conversation so far), and a new conversation asks for it again, which the model serves from memory.
+    @Test func newConversationStartsFromTheKeptBeginning() async throws {
+        let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker, tools: ToolRunner(providers: [TimerTools()]))
+        try await pipeline.start()
+        await pipeline.submit(text: "Bonjour")
+        await waitFor { await speaker.played >= 1000 }
+        await waitFor { await speaker.remainingMs == 0 }
+        try await Task.sleep(for: .milliseconds(150))
+        try await pipeline.toolsChanged()
+        try await pipeline.resetConversation()
+        let prefills = await model.prefills
+        #expect(prefills.map { $0.beginning } == [true, true, false, true])
+        let beginning = try #require(prefills.first?.messages)
+        #expect(beginning.map(\.role) == [.system])
+        #expect(prefills.map { $0.messages.count } == [1, 1, 3, 1])  // the conversation so far: + the turn, its answer
+        #expect(prefills[3].messages == beginning)
     }
 
     @Test func speculativeAnswerIsDroppedWhenTheUserGoesOn() async throws {
