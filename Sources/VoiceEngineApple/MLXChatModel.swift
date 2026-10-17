@@ -318,9 +318,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
         let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
         let chances = ToolCallWatch.Chances()
+        let upcoming = UpcomingToken.Box()
         var components = GenerationComponents()
         if watchingToolCalls, let toolCallStart, !tools.isEmpty {
             components = components.appendingLogitProcessor { ToolCallWatch(token: toolCallStart, chances: chances) }
+        }
+        if !tools.isEmpty {
+            components = components.appendingLogitProcessor { UpcomingToken(box: upcoming) }
         }
         var iterator = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
                                          components: components)
@@ -361,6 +365,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                 if token == toolCallEnd {
                     callTokens = nil
                     onOutput(toolCall(from: tokens))
+                    // The history goes on from here with the tool's result (`<|tool_response>`), while E4B and E2B
+                    // would write `<eos>` next: once in the cache, that token no longer matches the history, and the
+                    // request after the call goes back to a snapshot. So the answer ends right after the call, its
+                    // last token already in the cache, unless the model opens another call (see `VoicePipeline`).
+                    if upcoming.token != toolCallStart { break }
                 } else {
                     callTokens = tokens + [token]
                     if !callNamed, let name = Self.callName(context.tokenizer.decode(tokenIds: tokens + [token])) {
@@ -626,6 +635,23 @@ private struct ToolCallWatch: LogitProcessor {
     }
 
     mutating func didSample(token: MLXArray) {}
+}
+
+/// Keeps the token the iterator has drawn but not yet returned: it reads one token ahead, so when it returns a token,
+/// that token is in the cache and the next one is already known.
+private struct UpcomingToken: LogitProcessor {
+    final class Box: @unchecked Sendable {
+        var sampled: MLXArray?
+        var token: Int? { sampled?.item(Int.self) }
+    }
+
+    let box: Box
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray { logits }
+
+    mutating func didSample(token: MLXArray) { box.sampled = token }
 }
 
 /// Lets the pipeline pause token generation (see `YieldsToVoice`). The generation loop runs without
