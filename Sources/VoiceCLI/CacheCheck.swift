@@ -48,8 +48,8 @@ private actor CacheCheck {
         conversation = base
         let start = clock.now
         try await model.prefill(conversation.messages)
-        print(String(format: "  %-46@ prefill of the system prompt: %.0f ms", "new conversation" as NSString,
-                     milliseconds(clock.now - start)))
+        print(String(format: "  %-46@ prefill of the system prompt: %.0f ms · GPU memory %.2f GB",
+                     "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
     }
 
     private func message(_ text: String) -> ChatMessage {

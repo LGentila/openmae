@@ -254,6 +254,10 @@ Memory over time (here 10 minutes):
 .build/xcode/Build/Products/Release/voice-cli endurance --minutes 10 measurements/audio/0*.wav
 ```
 
+`--actions` puts the actions in the model's instructions, as in the app when they are on (none is carried out, a call
+is declined); with `--new-conversation-every 4`, a new conversation starts every four turns, as with "New
+conversation" in the app, and the time it takes is shown.
+
 Check that the language model picks the right action, with the right date. Text only, nothing is created: the
 French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a
 fixed reference time, and the report gives the right-tool rate, the dates, false triggers and the time to a
@@ -288,9 +292,9 @@ made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, a refused call and its second try, a long result summed up (as after a web search), a
-turn dropped after a second try, a speculative or interrupted answer, the tools changing, the history shortened. Text
-only, nothing is created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it also shows where
-each request stops matching that memory, and what differs:
+turn dropped after a second try, a speculative or interrupted answer, the tools changing, the history shortened, a new
+conversation. Text only, nothing is created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it
+also shows where each request stops matching that memory, and what differs:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli cache-check

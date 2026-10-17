@@ -3,7 +3,7 @@
 //   voice-cli conversation [options] <phrase.wav>...    one turn per recording; latency of each stage
 //   voice-cli interruption [options] <question.wav> <interruption.wav>
 //                                                       talks over the assistant; time to silence it
-//   voice-cli endurance --minutes N [options] <phrase.wav>...
+//   voice-cli endurance --minutes N [--new-conversation-every N] [options] <phrase.wav>...
 //                                                       loops a conversation; memory after every turn
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
 //                                                       silence the voice produces before speaking
@@ -26,6 +26,7 @@
 //   --no-speculative         disable speculative start (for comparison)
 //   --silence-ms <n>         end-of-turn silence (default 500)
 //   --history-budget <n>     history size in tokens before the oldest exchanges are dropped
+//   --actions                the actions in the model's instructions, as in the app (none is carried out)
 //   --out <folder>           where reports and audio go (default ./measurements)
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
@@ -46,7 +47,9 @@ struct Options {
     var speculative = true
     var silenceMs = 500.0
     var minutes = 10.0
+    var newConversationEvery: Int?
     var historyBudget: Int?
+    var actions = false
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
     var repeats = 3
@@ -77,7 +80,9 @@ struct Options {
             case "--no-speculative": o.speculative = false
             case "--silence-ms": o.silenceMs = Double(it.next() ?? "") ?? o.silenceMs
             case "--minutes": o.minutes = Double(it.next() ?? "") ?? o.minutes
+            case "--new-conversation-every": o.newConversationEvery = Int(it.next() ?? "")
             case "--history-budget": o.historyBudget = Int(it.next() ?? "")
+            case "--actions": o.actions = true
             case "--out": o.out = URL(fileURLWithPath: it.next() ?? "measurements")
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
@@ -196,15 +201,28 @@ func buildEngine(_ o: Options) async throws -> Engine {
         config.historyTokenBudget = budget
         config.historyTrimTarget = budget * 2 / 3
     }
+    config.actionExamples = ActionCatalog.showsExamples(on: tier)
     let speaker = SimulatedSpeaker()
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
-                                 synthesizer: synthesizer, output: speaker, config: config)
+                                 synthesizer: synthesizer, output: speaker,
+                                 tools: o.actions ? ToolRunner(providers: [DryActions()]) : nil, config: config)
     let log = EventLog()
     await log.attach(model)
     Task { for await event in pipeline.events { await log.record(event) } }
     try await pipeline.start()
     print(String(format: "memory after loading: %.2f GB\n", ProcessMemory.footprintGB))
     return Engine(pipeline: pipeline, speaker: speaker, log: log, model: model)
+}
+
+/// `--actions`: the app's actions as the model sees them (the same tools and instructions, the date line in the user's
+/// messages), none carried out: a call is declined.
+private struct DryActions: ToolProvider {
+    let identifier = "dry-actions"
+    func tools() async -> [ToolSpec] { ActionCatalog.calendarTools + [ActionCatalog.timer] }
+    func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
+        throw ToolRefusal(forModel: "Action non effectuée (essai).", spoken: ActionPhrases.declined(context.language),
+                          retryable: false)
+    }
 }
 
 struct CLIError: Error, CustomStringConvertible {
@@ -280,11 +298,20 @@ func runEndurance(_ o: Options, _ e: Engine) async throws {
     let phrases = try o.files.map(WAV.read16kMono)
     let clock = ContinuousClock()
     let end = clock.now + .seconds(o.minutes * 60)
-    var samples: [(minute: Double, gb: Double)] = []
+    var samples: [(minute: Double, gb: Double, gpuGB: Double)] = []
+    var newConversations: [Double] = []
     let start = clock.now
     var i = 0
-    print("turn;minute;memory_GB;latency_ms")
+    print("turn;minute;memory_GB;GPU_GB;latency_ms")
     while clock.now < end {
+        if let every = o.newConversationEvery, i > 0, i % every == 0 {
+            // As "Nouvelle conversation" in the app; the next answer would wait for it.
+            let reset = clock.now
+            try await e.pipeline.resetConversation()
+            let d = clock.now - reset
+            newConversations.append(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+            print("new conversation;\(fmt(newConversations.last))")
+        }
         let before = await e.log.completedTurns
         await mic.say(phrases[i % phrases.count])
         await waitForAnswer(e, mic: mic, after: before)
@@ -292,13 +319,19 @@ func runEndurance(_ o: Options, _ e: Engine) async throws {
         _ = await e.speaker.takeRecording()
         let minute = Double((clock.now - start).components.seconds) / 60
         let gb = ProcessMemory.footprintGB
-        samples.append((minute, gb))
-        print(String(format: "%d;%.1f;%.3f;%@", i + 1, minute, gb, fmt(await e.log.turns.last?.latencyMs)))
+        let gpuGB = MLXChatModel.activeMemoryGB
+        samples.append((minute, gb, gpuGB))
+        print(String(format: "%d;%.1f;%.3f;%.3f;%@", i + 1, minute, gb, gpuGB, fmt(await e.log.turns.last?.latencyMs)))
         i += 1
     }
     if let first = samples.first, let last = samples.last {
-        print(String(format: "\n=== %d turns in %.0f min · memory %.2f → %.2f GB ===",
-                     samples.count, last.minute, first.gb, last.gb))
+        print(String(format: "\n=== %d turns in %.0f min · memory %.2f → %.2f GB · GPU memory in use %.2f → %.2f GB"
+                     + " (max %.2f) ===", samples.count, last.minute, first.gb, last.gb, first.gpuGB, last.gpuGB,
+                     samples.map(\.gpuGB).max() ?? 0))
+    }
+    if !newConversations.isEmpty {
+        print("new conversations: \(newConversations.count), median \(fmt(median(newConversations)))"
+              + ", max \(fmt(newConversations.max()))")
     }
     try save(await e.log.turns, name: "endurance", options: o)
 }
@@ -395,8 +428,9 @@ if let options = Options.parse(CommandLine.arguments),
 }
 guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty else {
     print("""
-        usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu]
-                         [--no-speculative] [--silence-ms 500] [--minutes 10] [--out folder] files.wav…
+        usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
+                         [--no-speculative] [--silence-ms 500] [--minutes 10] [--new-conversation-every n]
+                         [--out folder] files.wav…
                voice-cli download [--tier minimum|standard|comfort|max]
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
