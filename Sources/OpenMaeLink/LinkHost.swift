@@ -103,6 +103,7 @@ public actor LinkHost: AssistantConnection {
     private let identityStore: any IdentityStore
     private let storeURL: URL
     private let macName: String
+    private let gracePeriod: Duration
     private var identity: DeviceIdentity?
     private var state = LinkStatus()
     private var pairingCode: PairingCode?
@@ -136,18 +137,32 @@ public actor LinkHost: AssistantConnection {
         var feeding: Task<Void, Never>?
         /// The iPhone's connection dropped: it has a few seconds to come back before the Mac takes the sound back.
         var grace: Task<Void, Never>?
+        /// When its microphone was last heard on its current session (nil: not since that session opened).
+        var heard: ContinuousClock.Instant?
+        /// What the engine was last told: whether the iPhone hears the voice (see `updateReach`).
+        var reachable = true
+        /// Checks a few times a second that the iPhone is still heard.
+        var watch: Task<Void, Never>?
     }
 
+    /// The iPhone sends its microphone all the time it has the conversation (silence when muted). Nothing from it for
+    /// this long: its connection is down (Wi-Fi off, a tunnel), even though its session may only be seen to close a
+    /// minute later (when the iPhone could not say so), or its sound stopped (a phone call). Either way it does not hear
+    /// the voice for now.
+    static let silenceLimit = Duration.seconds(1)
+
     /// `audio`: nil when the engine cannot switch its sound (a demonstration engine): the iPhones then see and
-    /// command the conversation without sound.
+    /// command the conversation without sound. `gracePeriod`: how long an iPhone whose connection dropped keeps the
+    /// conversation, to come back by another way, before the Mac takes the sound back.
     public init(engine: any AssistantConnection, audio: (any RemoteAudioRouting)?, identityStore: any IdentityStore,
-                storeURL: URL, macName: String)
+                storeURL: URL, macName: String, gracePeriod: Duration = .seconds(15))
     {
         self.engine = engine
         self.audio = audio
         self.identityStore = identityStore
         self.storeURL = storeURL
         self.macName = macName
+        self.gracePeriod = gracePeriod
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
@@ -455,7 +470,7 @@ public actor LinkHost: AssistantConnection {
                 }
                 deadline.cancel()
                 let session = LinkSession(transport: transport, inbox: inbox, keys: keys, peerKey: key, peerMac: nil)
-                open(session, device: device)
+                await open(session, device: device)
             }
         } catch let HandshakeFailure.refused(code) {
             // Let the refusal reach the iPhone before closing (a closed connection drops what is still on its way).
@@ -495,7 +510,8 @@ public actor LinkHost: AssistantConnection {
         state.devices.contains { $0.publicKey == key }
     }
 
-    private func open(_ session: LinkSession, device: PairedDevice) {
+    /// A paired iPhone's session is open (internal for the tests, which open sessions over memory).
+    func open(_ session: LinkSession, device: PairedDevice) async {
         let key = device.publicKey
         if let previous = sessions.removeValue(forKey: key) {
             // The same iPhone again (another network, another path): the new connection replaces the old one.
@@ -510,6 +526,8 @@ public actor LinkHost: AssistantConnection {
             hand.grace?.cancel()
             hand.grace = nil
             hand.output.bind(session)
+            // Heard again once its microphone is, on this session: then its end of it is surely up.
+            hand.heard = nil
             self.hand = hand
             state.hand = LinkStatus.Hand(device: device, path: session.path)
         }
@@ -527,23 +545,25 @@ public actor LinkHost: AssistantConnection {
         ]
         sessions[key] = Peer(session: session, device: device, tasks: tasks)
         publish()
+        await updateReach()
     }
 
-    private func closed(_ session: LinkSession, key: Data) {
+    private func closed(_ session: LinkSession, key: Data) async {
         guard sessions[key]?.session === session else { return }
         sessions.removeValue(forKey: key)?.tasks.forEach { $0.cancel() }
         DebugLog.log("link: iPhone disconnected")
         if var hand, hand.key == key, hand.grace == nil {
             // Wi-Fi to 4G, a tunnel: the iPhone has a few seconds to come back by another way.
             hand.microphone.fillSilence()
-            hand.grace = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(15))
+            hand.grace = Task { [weak self, gracePeriod] in
+                try? await Task.sleep(for: gracePeriod)
                 guard !Task.isCancelled else { return }
                 await self?.graceOver(key)
             }
             self.hand = hand
         }
         publish()
+        await updateReach()  // meanwhile its voice reaches nobody
     }
 
     private func graceOver(_ key: Data) async {
@@ -583,9 +603,11 @@ public actor LinkHost: AssistantConnection {
         }
     }
 
-    private func received(_ packet: AudioPacket, from key: Data) {
+    private func received(_ packet: AudioPacket, from key: Data) async {
         guard let hand, hand.key == key else { return }
         hand.microphone.receive(packet)
+        self.hand?.heard = .now
+        if !hand.reachable { await updateReach() }
     }
 
     /// The iPhone `key` takes the conversation: the engine's microphone and voice go to it.
@@ -594,7 +616,15 @@ public actor LinkHost: AssistantConnection {
         if hand != nil { await releaseHand(notifyPhone: true, toLocal: false) }
         let microphone = RemoteMicrophone()
         let output = RemoteVoiceOutput(session: peer.session)
-        hand = Hand(key: key, microphone: microphone, output: output)
+        let watch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, await self.hand?.key == key else { return }  // it let go
+                await self.updateReach()
+            }
+        }
+        // It just asked for the conversation: it is heard.
+        hand = Hand(key: key, microphone: microphone, output: output, heard: .now, watch: watch)
         state.hand = LinkStatus.Hand(device: peer.device, path: peer.session.path)
         DebugLog.log("link: the iPhone has the conversation")
         await audio?.useRemoteAudio(microphone: microphone.samples, output: output)
@@ -608,6 +638,7 @@ public actor LinkHost: AssistantConnection {
         self.hand = nil
         state.hand = nil
         hand.grace?.cancel()
+        hand.watch?.cancel()
         hand.microphone.finish()
         hand.output.detach()
         if notifyPhone { sessions[hand.key]?.session.send(.audio(.released)) }
@@ -617,6 +648,29 @@ public actor LinkHost: AssistantConnection {
             sendEngineSettings()
         }
         publish()
+    }
+
+    /// Whether the iPhone that has the conversation hears the voice now: its session is open and its microphone was
+    /// heard on it a moment ago.
+    private func hears(_ hand: Hand) -> Bool {
+        guard sessions[hand.key] != nil, let heard = hand.heard else { return false }
+        return ContinuousClock.now - heard < Self.silenceLimit
+    }
+
+    /// Tells the engine when the iPhone that has the conversation stops hearing the voice (its session closed, or
+    /// nothing came from it for a moment) and when it hears it again, so that what the app says on its own (a timer
+    /// that rings) waits for it rather than being said to nobody. If it does not come back, its session ends (at once,
+    /// or after a minute of silence when the iPhone could not say so), then the grace period, and the Mac takes the
+    /// sound back and says it.
+    private func updateReach() async {
+        // Again after telling: the iPhone may have come and gone meanwhile.
+        while let hand, hand.reachable != hears(hand) {
+            let reachable = !hand.reachable
+            self.hand?.reachable = reachable
+            DebugLog.log(reachable ? "link: the iPhone hears the voice again"
+                : "link: the iPhone is out of reach, what Maé says on her own waits")
+            await audio?.setRemoteAudioReachable(reachable)
+        }
     }
 
     // MARK: - The engine's events

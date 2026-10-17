@@ -34,6 +34,8 @@ public actor AssistantHost: AssistantConnection {
     private var router: AudioRouter?
     /// While an iPhone has the conversation: its microphone and its voice output.
     private var remote: (microphone: AsyncStream<[Float]>, output: any AudioOutput)?
+    /// Whether that iPhone hears the voice right now (see `setRemoteAudioReachable`).
+    private var remoteReachable = true
     private var remoteFeed: Task<Void, Never>?
 
     // Actions: reminders and calendar, timers, shortcuts. Kept for the app's whole life (a timer keeps running
@@ -647,6 +649,7 @@ public actor AssistantHost: AssistantConnection {
         await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
         audio?.stop()  // the Mac's microphone and speakers are free again
         await pipeline.resetAudioInput()
+        await pipeline.setOutputReachable(remoteReachable)  // a pipeline loaded while the iPhone was out of reach
         if remoteFeed == nil {
             remoteFeed = Task { [weak self] in
                 for await chunk in remote.microphone { await self?.pushRemote(chunk) }
@@ -715,17 +718,29 @@ extension AssistantHost: RemoteAudioRouting {
         remoteFeed?.cancel()
         remoteFeed = nil
         remote = (microphone, output)
+        remoteReachable = true
         await attachRemote()
+    }
+
+    public func setRemoteAudioReachable(_ reachable: Bool) async {
+        guard remote != nil, reachable != remoteReachable else { return }
+        remoteReachable = reachable
+        guard stage == .running else { return }  // a pipeline still loading gets it from `attachRemote`
+        await pipeline?.setOutputReachable(reachable)
     }
 
     public func useLocalAudio() async {
         guard remote != nil else { return }
         remote = nil
+        remoteReachable = true
         remoteFeed?.cancel()
         remoteFeed = nil
         guard stage == .running, let audio, let router else { return }
         await router.use(audio)
         await restartAudio()  // the Mac's microphone and speakers again, with the current settings
+        // What waited for the iPhone (a timer that rang while it was out of reach) is said here, now that the speakers
+        // are back; unless another iPhone took the conversation meanwhile (`attachRemote` told the pipeline then).
+        if remote == nil { await pipeline?.setOutputReachable(true) }
         DebugLog.log("audio: the Mac has the microphone and the voice again")
     }
 }

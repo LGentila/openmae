@@ -735,4 +735,25 @@ struct PipelineActionTests {
         await waitFor { await log.pieces.contains("Ton minuteur de 10 minutes est terminé.") }  // …then the timer
         #expect(await log.pieces.last == "Ton minuteur de 10 minutes est terminé.")
     }
+
+    /// The iPhone that has the conversation lost its connection: the timer waits for it to be back.
+    @Test func timerAnnouncementWaitsForTheVoiceToBeHeard() async throws {
+        let (model, speaker) = (ScriptedModel(), FakeSpeaker())
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await pipeline.setOutputReachable(false)
+        await pipeline.announce("Ton minuteur de 10 minutes est terminé.", note: "(Le minuteur a sonné.)",
+                                language: .french)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await speaker.played == 0)
+        #expect(await log.pieces.isEmpty)
+        #expect(await log.states == [.listening])
+        await pipeline.setOutputReachable(true)  // it is back: the chime, then the sentence
+        await waitFor { await log.pieces.contains("Ton minuteur de 10 minutes est terminé.") }
+        await waitFor { await speaker.played >= Chime.samples(sampleRate: 1000).count + 500 }
+        #expect(await speaker.played == Chime.samples(sampleRate: 1000).count + 500)
+    }
 }

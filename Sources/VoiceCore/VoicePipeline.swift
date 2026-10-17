@@ -185,6 +185,8 @@ public actor VoicePipeline {
         var chime: Bool
     }
     private var announcements: [Announcement] = []
+    /// The voice's output can be out of reach for a moment (see `setOutputReachable`): announcements wait meanwhile.
+    private var outputReachable = true
 
     private final class Turn: @unchecked Sendable {
         // Mutated only from the pipeline actor.
@@ -299,7 +301,19 @@ public actor VoicePipeline {
     /// speaks. `note` tells the model what happened; it stays in the history with what was said.
     public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool = true) {
         announcements.append(Announcement(text: text, note: note, language: language, chime: chime))
+        if !outputReachable { DebugLog.log("announcement: waits for the voice's output to be back") }
         startAnnouncementIfIdle()
+    }
+
+    /// Whether the voice's output reaches the user right now. The device that has the conversation (an iPhone) can be
+    /// out of reach for a moment: its connection dropped (Wi-Fi to 4G, a tunnel) and it may come back by another way.
+    /// Meanwhile nothing is announced, since nobody would hear it; the announcements are said once the output is back,
+    /// or once the voice is on the Mac's speakers again (`RemoteAudioRouting.setRemoteAudioReachable`).
+    public func setOutputReachable(_ reachable: Bool) {
+        guard reachable != outputReachable else { return }
+        outputReachable = reachable
+        DebugLog.log(reachable ? "voice output: reachable again" : "voice output: out of reach, announcements wait")
+        if reachable { startAnnouncementIfIdle() }
     }
 
     public func setListening(_ mode: ListeningMode) async {
@@ -1022,7 +1036,7 @@ public actor VoicePipeline {
     private func startAnnouncementIfIdle() {
         // A sentence still being checked for the wake phrase does not hold it back.
         let userSpeaks = utteranceAddressed && (utteranceOpen || turnDetector.isInUtterance)
-        guard turn == nil, !userSpeaks, !talkKeyPressed, !announcements.isEmpty else { return }
+        guard turn == nil, !userSpeaks, !talkKeyPressed, outputReachable, !announcements.isEmpty else { return }
         let announcement = announcements.removeFirst()
         nextTurnID += 1
         let turn = Turn(id: nextTurnID)
