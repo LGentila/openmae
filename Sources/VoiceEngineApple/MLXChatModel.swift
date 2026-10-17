@@ -20,13 +20,13 @@ import VoiceCore
 /// Measured effect on the reference Mac (M1 Pro): 0.3–0.5 s to first token on later turns instead of
 /// 0.6–0.9 s.
 public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
-    private let context: ModelContext
-    private let tokenizer: any Tokenizers.Tokenizer
+    let context: ModelContext
+    let tokenizer: any Tokenizers.Tokenizer
     private let chatTemplate: String?
-    private let parameters: GenerateParameters
+    let parameters: GenerateParameters
     private let stopTokens: Set<Int>
     /// Gemma 4 writes a tool call between these two tokens: `<|tool_call>call:name{…}<tool_call|>`.
-    private let toolCallStart: Int?
+    let toolCallStart: Int?
     private let toolCallEnd: Int?
     /// The tools, as the chat template wants them (in the system turn).
     private var tools: [VoiceCore.ToolSpec] = []
@@ -60,7 +60,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// 26B, 3 s with E4B). It is restored instead (10 ms), and so is it for a request that nothing else in memory can
     /// serve, and to prepare a shortened history. It shares the cache's memory until the cache moves on, then holds its
     /// own, for good: 0.24 GB with Gemma 4 26B and the actions, 0.04 GB with E4B.
-    private var beginning: (tokens: [Int], cache: [KVCache])?
+    private(set) var beginning: (tokens: [Int], cache: [KVCache])?
     /// The user's message the last request answered.
     private var lastTurn: Turn?
 
@@ -534,7 +534,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         min(cache.first?.offset ?? maximum, maximum)
     }
 
-    private func render(_ conversation: [ChatMessage], generationPrompt: Bool) throws -> [Int] {
+    func render(_ conversation: [ChatMessage], generationPrompt: Bool) throws -> [Int] {
         try tokenizer.applyChatTemplate(
             messages: templateMessages(conversation), chatTemplate: chatTemplate.map { .literal($0) },
             addGenerationPrompt: generationPrompt, truncation: false, maxLength: nil, tools: toolSchemas,

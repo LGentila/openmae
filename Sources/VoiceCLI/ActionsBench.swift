@@ -11,6 +11,7 @@
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
 //                           [--watch-calls] [--examples app|none|file] [--web]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]] [--record file.json]
+//                           [--compare-beginnings]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -25,6 +26,9 @@
 // with those --examples says: "app" (the app's, on any tier), "none", or a file of exchanges (the shape of a
 // case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
 // --addendum <file> replaces the actions part of the system prompt (experiments without rebuilding).
+// --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
+// as computed at load and computed again from scratch (as when the tools change), and other ways of computing it,
+// with a float32 reference: the model's memory layer by layer, and each request's chance of a call at its first token.
 
 import Foundation
 import VoiceCore
@@ -213,16 +217,16 @@ func runActionsBench(_ o: Options) async throws {
     let prefixTokens = try await model.tokenCount(conversation.messages)
     print("system prompt with \(tools.count) tools: \(prefixTokens) tokens, computed in \(clock.now - prefixStart)\n")
     if o.showPrompt { print(try await model.promptText(conversation.messages) + "\n") }
+    if o.compareBeginnings {
+        try await compareBeginnings(corpus, conversation: conversation, tools: tools, dateLine: dateLine, model: model,
+                                    options: o)
+        return
+    }
 
     var results: [CaseResult] = []
     for (index, item) in corpus.cases.enumerated() {
-        var history = conversation
         let before = corpus.exchanges(before: item)
-        for exchange in before {
-            history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                           steps: exchange.steps, assistant: exchange.answer, interrupted: false)
-        }
-        let request = history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
+        let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine)
         var text = ""
         var call: ToolCall?
         var unreadable: String?
@@ -379,6 +383,152 @@ func runActionsBench(_ o: Options) async throws {
         try encoder.encode(found).write(to: URL(fileURLWithPath: record))
         print("searches recorded: \(record) (\(found.count))")
     }
+}
+
+/// A case's request as the app would send it: the conversation, the case's earlier exchanges, then its phrase.
+private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String)
+    -> [ChatMessage]
+{
+    var history = conversation
+    for exchange in corpus.exchanges(before: item) {
+        history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
+                       steps: exchange.steps, assistant: exchange.answer, interrupted: false)
+    }
+    return history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
+}
+
+/// --compare-beginnings: the beginning computed at load (after the warm-up's rewind) and again from scratch (the tools
+/// changed and changed back, as in the app), other ways of computing it and a float32 reference (see
+/// `MLXChatModel.compareBeginnings`): every pair of caches, then each request's chance of a call at its first token from
+/// each, and the requests whose first-token decision (a call or not, the more likely of the two) changes.
+private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
+                               model: MLXChatModel, options o: Options) async throws
+{
+    guard let atLoad = await model.beginningState(named: "at load") else { throw CLIError("no beginning kept") }
+    let clock = ContinuousClock()
+    var start = clock.now
+    await model.useTools(Array(tools.dropLast()))
+    try await model.prefillBeginning(conversation.beginning)
+    await model.useTools(tools)
+    try await model.prefillBeginning(conversation.beginning)
+    guard let toolsChanged = await model.beginningState(named: "tools changed") else { throw CLIError("no beginning kept") }
+    print("the tools changed and changed back: the beginning computed again in \(clock.now - start)")
+    let requests = corpus.cases.map { caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine) }
+    start = clock.now
+    let comparison = try await model.compareBeginnings([atLoad, toolsChanged], requests: requests)
+    print("compared in \(clock.now - start)\n")
+    let names = comparison.names
+    let reference = names.count - 1
+    for (index, name) in names.enumerated() { print("  [\(index)] \(name)") }
+
+    print("\nthe model's memory, pair by pair (‖a − b‖ / ‖b‖, largest over the layers; first position that differs):")
+    for pair in comparison.pairs {
+        let sliding = pair.layers.filter(\.sliding)
+        let full = pair.layers.filter { !$0.sliding }
+        let first = pair.layers.compactMap(\.firstDifference).min()
+        print("  [\(pair.a)] ↔ [\(pair.b)]  sliding " + scientific(sliding.map(\.relative).max()) + " (\(span(sliding)))"
+              + "  full " + scientific(full.map(\.relative).max()) + " (\(span(full)))  "
+              + (first.map { "first difference at position \($0)" } ?? "identical"))
+    }
+    if let pair = comparison.pairs.first(where: { $0.a == 0 && $0.b == 1 }) {
+        print("\n[0] ↔ [1] layer by layer (over all positions; median position; positions over 0.5):")
+        for layer in pair.layers {
+            print("  layer \(layer.layer) \(layer.sliding ? "sliding" : "full")  " + scientific(layer.relative) + "; "
+                  + scientific(layer.typical) + String(format: "; %.1f %%  ", layer.far * 100)
+                  + (layer.firstDifference.map { "from position \($0)" } ?? "identical"))
+        }
+    }
+    print("\nlast layer against the reference [\(reference)] (over all positions; median position; positions over 0.5):")
+    for pair in comparison.pairs where pair.b == reference {
+        guard let last = pair.layers.last else { continue }
+        print("  [\(pair.a)] " + scientific(last.relative) + "; " + scientific(last.typical)
+              + String(format: "; %.1f %%", last.far * 100))
+    }
+
+    print("\nchance of a call at the first token (%), from beginnings [0] … [\(reference)]:")
+    let calls = comparison.firstTokens.map { $0.map(\.callChance) }
+    func decides(_ chance: Double) -> Bool { chance >= 0.5 }
+    for (item, row) in zip(corpus.cases, calls) {
+        let chances = row.map { String(format: "%3.0f", $0 * 100) }.joined(separator: " ")
+        print("  \(chances)  \(Set(row.map(decides)).count > 1 ? "≠" : " ") \(item.phrase)")
+    }
+
+    print("\nagainst the reference [\(reference)], over \(requests.count) requests:")
+    for index in names.indices where index != reference {
+        let flips = calls.filter { decides($0[index]) != decides($0[reference]) }.count
+        let far = calls.filter { abs($0[index] - $0[reference]) >= 0.2 }.count
+        let tops = comparison.firstTokens.filter { $0[index].top != $0[reference].top }.count
+        let divergences = comparison.firstTokens.map { $0[index].divergence }
+        print("  [\(index)] decision changed: \(flips) · call chance 20 points or more away: \(far) · other first token: "
+              + "\(tops) · divergence median " + scientific(median(divergences)) + ", max "
+              + scientific(divergences.max()) + " nats")
+    }
+    let moved = zip(corpus.cases, calls).filter { abs($0.1[0] - $0.1[1]) >= 0.2 }
+    let flipped = calls.filter { decides($0[0]) != decides($0[1]) }.count
+    print("\n[0] ↔ [1]: decision changed for \(flipped) / \(requests.count) requests, call chance moved by 20 points or "
+          + "more for \(moved.count)"
+          + moved.map { item, row in
+              String(format: "\n    · %.0f %% → %.0f %% (reference %.0f %%)  ", row[0] * 100, row[1] * 100,
+                     row[reference] * 100) + item.phrase
+          }.joined())
+
+    struct Layer: Encodable {
+        var layer: Int
+        var sliding: Bool
+        var positions: [Int]
+        var relative: Double
+        var typical: Double
+        var far: Double
+        var firstDifference: Int?
+    }
+    struct Pair: Encodable {
+        var a: Int
+        var b: Int
+        var layers: [Layer]
+    }
+    struct Request: Encodable {
+        var phrase: String
+        var expected: String
+        var callChances: [Double]
+        var tops: [String]
+        var divergences: [Double]
+    }
+    struct Report: Encodable {
+        var model: String
+        var corpus: String
+        var states: [String]
+        var pairs: [Pair]
+        var requests: [Request]
+    }
+    let report = Report(
+        model: o.llm ?? "", corpus: o.corpus ?? "", states: names,
+        pairs: comparison.pairs.map { pair in
+            Pair(a: pair.a, b: pair.b, layers: pair.layers.map {
+                Layer(layer: $0.layer, sliding: $0.sliding, positions: [$0.positions.lowerBound, $0.positions.upperBound],
+                      relative: $0.relative, typical: $0.typical, far: $0.far, firstDifference: $0.firstDifference)
+            })
+        },
+        requests: zip(corpus.cases, comparison.firstTokens).map { item, row in
+            Request(phrase: item.phrase, expected: item.expected?.tool ?? "aucun", callChances: row.map(\.callChance),
+                    tops: row.map(\.top), divergences: row.map(\.divergence))
+        })
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+    let url = o.out.appendingPathComponent("compare-beginnings-\(stamp).json")
+    try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
+    try encoder.encode(report).write(to: url)
+    print("report: \(url.path)")
+}
+
+/// The positions the layers compared: "0-1584", or "561-1584" for a sliding window.
+private func span(_ layers: [MLXChatModel.LayerDifference]) -> String {
+    guard let positions = layers.first?.positions else { return "—" }
+    return "positions \(positions.lowerBound)-\(positions.upperBound - 1)"
+}
+
+private func scientific(_ value: Double?) -> String {
+    value.map { $0 == 0 ? "0" : String(format: "%.1e", $0) } ?? "—"
 }
 
 /// The second pass of a search, as in the app: the model reads the results and answers, and nothing it writes then is

@@ -292,8 +292,11 @@ report gives the right decisions, the searches made by mistake, the keywords and
 ```
 
 With `--searxng <address>`, the searches are made for real on that SearXNG, with the model's own keywords; `--web`
-offers the search tool with the other corpora too, to check that it does not change their results. One search,
-made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
+offers the search tool with the other corpora too, to check that it does not change their results.
+`--compare-beginnings` generates nothing: it computes the beginning of the conversations (the system prompt with its
+tools) as the app does, then in other ways and in float32 as a reference, compares the model's memory after each, and
+gives every request's chance of a call at its first token from each (a request whose decision moves with mere rounding
+is one the model hesitates on). One search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise

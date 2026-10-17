@@ -61,6 +61,7 @@ struct Options {
     var corpus: String?
     var showPrompt = false
     var watchCalls = false
+    var compareBeginnings = false
     var addendum: String?
     var examples: String?
     var web = false
@@ -97,6 +98,7 @@ struct Options {
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
             case "--watch-calls": o.watchCalls = true
+            case "--compare-beginnings": o.compareBeginnings = true
             case "--addendum": o.addendum = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
@@ -450,6 +452,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
+                                       [--compare-beginnings]
                voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
