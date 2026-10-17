@@ -409,6 +409,55 @@ struct PipelineTests {
         #expect(await stt.calls.isEmpty)
         #expect(await speaker.played == 0)
     }
+
+    /// The models are kept warm as soon as the pipeline starts, not only once a first turn is over: until then, the
+    /// first request after loading found them pushed out of memory.
+    @Test func modelsAreKeptWarmFromTheStart() async throws {
+        var config = PipelineConfig()
+        config.keepWarmSeconds = 0.05
+        let model = WarmCountingModel()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: FakeSpeaker(), config: config)
+        try await pipeline.start()
+        await waitFor { await model.warmPasses >= 2 }
+        #expect(await model.warmPasses >= 2)
+        await pipeline.stop()
+    }
+
+    /// The models are woken up (`KeepsWarm.wakeUp`) when the pipeline starts, then as soon as someone starts to speak,
+    /// before any request: what macOS pushed out of memory comes back while they speak.
+    @Test func modelsWakeUpWhenSpeechStarts() async throws {
+        let model = WarmCountingModel()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: FakeSpeaker())
+        try await pipeline.start()
+        await waitFor { await model.wakeUps >= 1 }
+        await push(pipeline, "0000")
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await model.wakeUps == 1)
+        await push(pipeline, "1111111111")
+        await waitFor { await model.wakeUps >= 2 }
+        #expect(await model.wakeUps == 2)
+        #expect(await model.requests == 0)  // still speaking: no request yet
+        await pipeline.stop()
+    }
+}
+
+/// A model that only counts the pipeline's keep-warm passes, wake-ups and requests.
+actor WarmCountingModel: LanguageModel, KeepsWarm {
+    private(set) var warmPasses = 0
+    private(set) var wakeUps = 0
+    private(set) var requests = 0
+    nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
+        Task { await self.countRequest() }
+        return AsyncThrowingStream { $0.finish() }
+    }
+    func prefill(_ conversation: [ChatMessage]) async throws {}
+    func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { 0 }
+    func keepWarm() async { warmPasses += 1 }
+    nonisolated func wakeUp() { Task { await self.countWakeUp() } }
+    private func countWakeUp() { wakeUps += 1 }
+    private func countRequest() { requests += 1 }
 }
 
 actor EventRecorder {

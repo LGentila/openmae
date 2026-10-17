@@ -134,6 +134,14 @@ extension LanguageModel {
 /// model briefly so that it stays in memory; the pipeline calls it regularly while nobody speaks.
 public protocol KeepsWarm: Sendable {
     func keepWarm() async
+    /// Someone started to speak (a request may follow within a second or two), or the conversation is about to start:
+    /// brings back now what macOS pushed out of memory since the last `keepWarm()`, so that the request does not wait
+    /// for it. Returns at once; cheap when nothing was pushed out.
+    func wakeUp()
+}
+
+extension KeepsWarm {
+    public func wakeUp() {}
 }
 
 /// A language model that can pause its generation while the voice starts. Both share the GPU: while

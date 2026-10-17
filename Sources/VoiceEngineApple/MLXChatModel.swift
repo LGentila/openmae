@@ -79,7 +79,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private nonisolated let hold = GenerationHold()
     // Note: "wiring" the weights in memory (MLX WiredMemoryTicket) was tried against a
     // one-off 2.6 s slowdown; it made every turn SLOWER on the reference Mac (0.5–0.65 s instead of
-    // 0.28 s to process a new turn), so it is not used.
+    // 0.28 s to process a new turn), so it is not used. Tried again against memory pressure: the weights were
+    // compressed all the same. Locking them in RAM (`mlock`) froze the whole Mac in a test where another program held
+    // 9 GB: macOS had nothing left to take. So they are only brought back and kept in use (`keepWarm`, `wakeUp`).
+    /// The weights' memory (see `MemoryResidency`).
+    private nonisolated let weightPages: [Range<UInt>]
+    /// When `wakeUp` last brought the weights back.
+    private nonisolated let lastWakeUp = WakeUpTimes()
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
@@ -121,6 +127,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         toolCallStart = tokenizer.convertTokenToId("<|tool_call>")
         toolCallEnd = tokenizer.convertTokenToId("<tool_call|>")
         cache = try context.model.newCache(parameters: parameters)
+        weightPages = MemoryResidency.ranges(context.model.parameters().flattened().map(\.1))
     }
 
     /// Loads an MLX model folder (config.json, *.safetensors, tokenizer files, chat template).
@@ -144,8 +151,21 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let model = try MLXChatModel(context: context, tokenizer: tokenizer,
                                      chatTemplate: template.map { GemmaTemplateFix.patched($0) ?? $0 },
                                      parameters: parameters)
+        await model.bringWeightsBack()
         try await model.warmUp()
         return model
+    }
+
+    /// Loading takes the Mac's free memory down for a moment, and macOS compresses the weights loaded first: by the end
+    /// of the load, 61 to 97% of Gemma 4 26B's weights were out of RAM on the reference Mac, and the first passes waited
+    /// for them (the warm-up's 14 tokens: 1.9 s; then the conversation's beginning, 124 tokens: 5.3 s). Read back from
+    /// 8 threads, they come back in 0.57 to 1.3 s, and the warm-up then takes 0.24 to 0.71 s (see `MemoryResidency`).
+    private func bringWeightsBack() {
+        logResidency("after loading")
+        let start = ContinuousClock.now
+        MemoryResidency.touch(weightPages, threads: 8)
+        DebugLog.log("LLM: weights brought back into memory in \(ContinuousClock.now - start)")
+        logResidency("after bringing them back")
     }
 
     // MARK: - VoiceCore.LanguageModel
@@ -210,6 +230,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `async` like the protocol's default (see `useTools`): called on the model itself (voice-cli), a synchronous
     /// version lost to that default, which keeps nothing.
     public func prefillBeginning(_ conversation: [ChatMessage]) async throws {
+        logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
         if beginning?.tokens != tokens { beginning = nil }  // another beginning: the old one's memory goes first
         try prefill(tokens: tokens)
@@ -295,14 +316,48 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         backgroundAllowed = allowed
     }
 
-    /// Reads every weight once (a sum per tensor: ≈ 0.1 s of GPU for 15 GB) so that macOS sees the
-    /// model in use and keeps it in memory. Running a few tokens through the model would not do: a
-    /// mixture-of-experts model only touches the experts those tokens are routed to.
+    /// Reads one byte of every page of the weights and of the conversation's memory from the CPU: what macOS compressed
+    /// since the last pass comes back, and the pages count as used again (see `MemoryResidency`). Then reads every
+    /// weight once on the GPU (a sum per tensor: ≈ 0.35 s of GPU for 15 GB); running a few tokens through the model
+    /// would not do: a mixture-of-experts model only touches the experts those tokens are routed to.
     public func keepWarm() {
         guard backgroundAllowed else { return }
-        let start = ContinuousClock.now
+        logResidency("before keep-warm")
+        let clock = ContinuousClock()
+        let start = clock.now
+        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversationMemory), threads: 4)
+        let touched = clock.now
         eval(context.model.parameters().flattened().map { $0.1.sum() })
-        DebugLog.log("LLM: kept warm in \(ContinuousClock.now - start)")
+        DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
+    }
+
+    /// Someone started to speak (see `KeepsWarm`): the weights macOS compressed or wrote to swap since the last keep-warm
+    /// pass come back while they speak, several pages at a time, rather than during the request. Off the actor, so that
+    /// a request that comes meanwhile does not wait for it; at most once every 5 s.
+    public nonisolated func wakeUp() {
+        guard lastWakeUp.claim(spacing: .seconds(5)) else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let start = ContinuousClock.now
+            MemoryResidency.touch(weightPages, threads: 4)
+            DebugLog.log("LLM: weights woken up in \(ContinuousClock.now - start)")
+        }
+    }
+
+    /// The cache, its copies and a shortened history in preparation.
+    private var conversationMemory: [MLXArray] {
+        ([cache, snapshot?.cache, turnSnapshot?.cache, beginning?.cache, rebuild?.cache].compactMap { $0 })
+            .flatMap { $0.flatMap(\.state) }
+    }
+
+    /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): how much of the weights and of the conversation's memory is in RAM.
+    private func logResidency(_ moment: String) {
+        guard MemoryResidency.enabled else { return }
+        let clock = ContinuousClock()
+        let t0 = clock.now
+        let weights = MemoryResidency.count(weightPages)
+        let conversation = MemoryResidency.count(MemoryResidency.ranges(conversationMemory))
+        DebugLog.log("LLM memory \(moment): weights \(weights.text), conversation \(conversation.text); "
+            + String(format: "MLX free buffers %.2f GB", Double(Memory.cacheMemory) / 1e9) + " (read in \(clock.now - t0))")
     }
 
     /// Shortening the history changes its beginning, so the whole rest must be recomputed (seconds
@@ -357,6 +412,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                           onOutput: @Sendable (ModelOutput) -> Void) throws
     {
         hold.set(false)  // a new answer never starts paused
+        logResidency("before the request")
         let prompt = try render(conversation, generationPrompt: true)
         let (reused, from) = try reuseCache(for: prompt)
         let wentBack = from != .cache
@@ -733,6 +789,22 @@ private struct UpcomingToken: LogitProcessor {
     func process(logits: MLXArray) -> MLXArray { logits }
 
     mutating func didSample(token: MLXArray) { box.sampled = token }
+}
+
+/// When `MLXChatModel.wakeUp` last ran, from any thread.
+final class WakeUpTimes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: ContinuousClock.Instant?  // guarded by `lock`
+
+    /// True, and now becomes the last time, unless the last time was less than `spacing` ago.
+    func claim(spacing: Duration) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = ContinuousClock.now
+        if let last, now - last < spacing { return false }
+        last = now
+        return true
+    }
 }
 
 /// Lets the pipeline pause token generation (see `YieldsToVoice`). The generation loop runs without

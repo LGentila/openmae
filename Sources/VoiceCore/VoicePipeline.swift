@@ -287,10 +287,12 @@ public actor VoicePipeline {
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
     public func start() async throws {
+        wakeModelsUp()  // what loading the other models pushed out of memory comes back meanwhile
         await updatePrompt()
         if let tools { await model.useTools(await tools.tools()) }
         try await model.prefillBeginning(conversation.beginning)
         emit.yield(.state(.listening))
+        keepModelsWarm(true)  // from now on, not only after the first turn
     }
 
     /// Turns actions on (a runner) or off (nil). The tools are part of the system prompt, so a new
@@ -431,6 +433,7 @@ public actor VoicePipeline {
             } else {
                 let over = assistantSpeaking ? ", over the assistant" : ""
                 DebugLog.log("speech started (level \(Int(level)) dB\(over))")
+                wakeModelsUp()
             }
         }
         switch event {
@@ -547,6 +550,7 @@ public actor VoicePipeline {
         guard pressed != talkKeyPressed else { return }
         talkKeyPressed = pressed
         if pressed {
+            wakeModelsUp()
             if !utteranceAddressed { dropCandidate() }  // the key decides: no wake phrase needed
             utteranceWhileAwake = false
             if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
@@ -1340,7 +1344,7 @@ public actor VoicePipeline {
         warmTask = nil
         let interval = config.keepWarmSeconds
         guard quiet, interval > 0 else { return }
-        let stages = ([model, synthesizer, transcriber] as [Any]).compactMap { $0 as? any KeepsWarm }
+        let stages = warmStages
         guard !stages.isEmpty else { return }
         warmTask = Task {
             while true {
@@ -1351,6 +1355,17 @@ public actor VoicePipeline {
                 }
             }
         }
+    }
+
+    private var warmStages: [any KeepsWarm] {
+        ([model, synthesizer, transcriber] as [Any]).compactMap { $0 as? any KeepsWarm }
+    }
+
+    /// Someone speaks, or the conversation starts: what macOS pushed out of memory comes back meanwhile (see
+    /// `KeepsWarm.wakeUp`).
+    private func wakeModelsUp() {
+        guard config.keepWarmSeconds > 0 else { return }
+        for stage in warmStages { stage.wakeUp() }
     }
 
     /// Root-mean-square level in dB (0 dB = full scale).
