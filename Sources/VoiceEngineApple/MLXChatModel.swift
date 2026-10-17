@@ -393,12 +393,25 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if let tokens = callTokens {
                 if token == toolCallEnd {
                     callTokens = nil
-                    onOutput(toolCall(from: tokens))
+                    DebugLog.log("LLM: call closed, next token drawn: \(upcoming.token.map { tokenTrace([$0]) } ?? "none")")
+                    let call = toolCall(from: tokens)
+                    onOutput(call)
                     // The history goes on from here with the tool's result (`<|tool_response>`), while E4B and E2B
                     // would write `<eos>` next: once in the cache, that token no longer matches the history, and the
                     // request after the call goes back to a snapshot. So the answer ends right after the call, its
-                    // last token already in the cache, unless the model opens another call (see `VoicePipeline`).
-                    if upcoming.token != toolCallStart { break }
+                    // last token already in the cache.
+                    guard upcoming.token == toolCallStart else { break }
+                    // Another call follows: the user asked for two things at once. The app carries out one action per
+                    // request, so that call was written for nothing (0.6 to 1.2 s before the first action could start,
+                    // with E4B and Gemma 4 26B in voice-cli conversation on the reference Mac), and since the history
+                    // keeps only the first call and its result, the cache no longer matched it from there: the model
+                    // went back to a snapshot to compute the history again (110 to 140 tokens, 0.5 to 1 s). It is
+                    // not written: the pipeline says the app does one thing at a time. After a call that could not be
+                    // read, the next one is written, as it can be carried out instead.
+                    if case .toolCall = call {
+                        onOutput(.moreToolCalls)
+                        break
+                    }
                 } else {
                     callTokens = tokens + [token]
                     if !callNamed, let name = Self.callName(context.tokenizer.decode(tokenIds: tokens + [token])) {
@@ -423,8 +436,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             lastRawAnswer = context.tokenizer.decode(tokenIds: produced, skipSpecialTokens: false)
         }
         if let tokens = callTokens {  // cut off before its end
+            DebugLog.log("LLM: call cut off before its end: \(tokenTrace(tokens))")
             onOutput(.unreadableToolCall(context.tokenizer.decode(tokenIds: tokens)))
         }
+    }
+
+    /// Diagnostics: tokens with their ids, `48 "<|tool_call>" · 6639 "call"`.
+    private func tokenTrace(_ tokens: some Sequence<Int>) -> String {
+        tokens.map { "\($0) " + context.tokenizer.decode(tokenIds: [$0], skipSpecialTokens: false).debugDescription }
+            .joined(separator: " · ")
     }
 
     /// The tool's name once the beginning of a call has it whole: "call:chercher_web{" → "chercher_web"; nil before.
@@ -439,7 +459,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let body = context.tokenizer.decode(tokenIds: tokens)  // special tokens kept: <|"|> delimits strings
         guard let parsed = ToolCallFormat.gemma4.createParser()
             .parse(content: "<|tool_call>" + body + "<tool_call|>", tools: toolSchemas)
-        else { return .unreadableToolCall(body) }
+        else {
+            DebugLog.log("LLM: unreadable call: \(tokenTrace(tokens))")
+            return .unreadableToolCall(body)
+        }
         let call = VoiceCore.ToolCall(name: parsed.function.name,
                                       arguments: parsed.function.arguments.mapValues(Self.value))
         if let open = body.firstIndex(of: "{"), let close = body.lastIndex(of: "}"), open < close {

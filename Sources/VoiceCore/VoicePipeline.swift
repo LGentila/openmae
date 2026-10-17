@@ -843,6 +843,8 @@ public actor VoicePipeline {
                 var summing: String?
                 while true {
                     var calls: [ToolCall] = []
+                    /// The model went on to another call after the first (`ModelOutput.moreToolCalls`).
+                    var moreCalls = false
                     var unreadable = false
                     let answered = turn.answer
                     DebugLog.log("turn \(turn.id): LLM request")
@@ -863,10 +865,13 @@ public actor VoicePipeline {
                                 deliver(phrase, to: turn, inHistory: false)
                             }
                         case .toolCall(let call) where summing == nil: calls.append(call)
+                        case .moreToolCalls where summing == nil:
+                            DebugLog.log("turn \(turn.id): the model went on to another call")
+                            moreCalls = true
                         case .unreadableToolCall(let raw) where summing == nil:
                             DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
                             unreadable = true
-                        case .toolCallStarted, .toolCallNamed: break
+                        case .toolCallStarted, .toolCallNamed, .moreToolCalls: break
                         case .toolCall(let call):
                             DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
                         case .unreadableToolCall: break
@@ -905,7 +910,7 @@ public actor VoicePipeline {
                         continue
                     }
                     say(reply.spoken, to: turn)
-                    if calls.count > 1 { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
+                    if calls.count > 1 || moreCalls { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
                     break
                 }
             }

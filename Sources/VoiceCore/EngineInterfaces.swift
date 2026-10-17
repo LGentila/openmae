@@ -78,6 +78,10 @@ public enum ModelOutput: Sendable, Equatable {
     case toolCall(ToolCall)
     /// A call the model wrote but that could not be read (the raw text, for the model's second try).
     case unreadableToolCall(String)
+    /// After the call just reported, the model went on to another one (the user asked for two things at once). The app
+    /// carries out one action per request, so the answer ends there, without that call: the app says it does one thing
+    /// at a time.
+    case moreToolCalls
 }
 
 /// The conversational model.

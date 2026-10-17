@@ -110,6 +110,8 @@ private struct CaseResult: Encodable {
     /// The tool name as the model wrote it, when the app reads it as another tool's (`ToolNames`).
     var writtenName: String?
     var arguments: [String: JSONValue]?
+    /// The model went on to another call after this one (the app carries out one action per request).
+    var moreCalls: Bool?
     var text: String
     var toolOK: Bool
     var argumentsOK: Bool?
@@ -229,6 +231,7 @@ func runActionsBench(_ o: Options) async throws {
         let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine)
         var text = ""
         var call: ToolCall?
+        var moreCalls = false
         var unreadable: String?
         var firstOutput: Double?
         var callTime: Double?
@@ -247,7 +250,10 @@ func runActionsBench(_ o: Options) async throws {
                 if call == nil {
                     call = made
                     callTime = milliseconds(clock.now - start)
+                } else {
+                    moreCalls = true
                 }
+            case .moreToolCalls: moreCalls = true
             case .unreadableToolCall(let raw): unreadable = raw
             }
         }
@@ -260,7 +266,8 @@ func runActionsBench(_ o: Options) async throws {
         let chosen = call?.name ?? (unreadable != nil ? "illisible" : "aucun")
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
-                                text: text, toolOK: chosen == expectedTool, firstOutputMs: firstOutput, callMs: callTime)
+                                moreCalls: moreCalls ? true : nil, text: text, toolOK: chosen == expectedTool,
+                                firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
         if o.watchCalls, let chances = await model.lastToolCallChances {
             result.firstCallChance = chances.first
@@ -358,6 +365,7 @@ func runActionsBench(_ o: Options) async throws {
                    $0 * 100, result.bestCallAt ?? 0)
         } ?? ""
         print("      → \(detail)" + (result.resolved.map { " = \($0)" } ?? "") + (result.refusal.map { "  [refused: \($0)]" } ?? "")
+              + (moreCalls ? "  [then another call, not carried out]" : "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
         if let second = result.secondTry {
             print("      second try → \(second)" + (result.rightAfterSecondTry == true ? "  ✓" : "  ✗"))
@@ -556,6 +564,7 @@ private func sumUp(_ call: ToolCall, query: String, results: WebSearchResults, a
             }
             text += piece
         case .toolCall(let made): calls.append(describe(made, written: nil))
+        case .moreToolCalls: calls.append("another call, not written")
         case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
         case .toolCallStarted, .toolCallNamed: break
         }

@@ -1,9 +1,10 @@
 // voice-cli cache-check — how much of each request the language model finds in its memory (KV cache), in the
-// sequences of requests the app sends: plain turns, an action, a refused call and its second try, a long result the
-// model sums up (as after a web search), a turn dropped after its second try (the user spoke again before any voice),
-// a speculative answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer abandoned after
-// an answer cut off, the tools changing, the history shortened, a new conversation; and answers that the history keeps
-// otherwise than the model wrote them, after a request computed from scratch or not.
+// sequences of requests the app sends: plain turns, an action, two actions in one request (the app carries out the
+// first and says it does one thing at a time), a refused call and its second try, a long result the model sums up (as
+// after a web search), a turn dropped after its second try (the user spoke again before any voice), a speculative
+// answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer abandoned after an answer cut
+// off, the tools changing, the history shortened, a new conversation; and answers that the history keeps otherwise
+// than the model wrote them, after a request computed from scratch or not.
 //
 // Text only, as the app would send it with actions on (the same system prompt, tools and date line); no call is
 // carried out: an action "succeeds" or is refused as each scenario says.
@@ -62,8 +63,9 @@ private actor CacheCheck {
     }
 
     /// Sends a request; `stopAfter`: stop reading (cancel) after this many pieces of output.
+    /// `moreCalls`: the model wrote more than one call, or went on to another (`ModelOutput.moreToolCalls`).
     private func request(_ label: String, _ messages: [ChatMessage], stopAfter: Int? = nil) async throws
-        -> (text: String, calls: [ToolCall])
+        -> (text: String, calls: [ToolCall], moreCalls: Bool)
     {
         let rebuildsBefore = await model.cacheRebuilds
         let restoresBefore = await model.snapshotRestores
@@ -71,6 +73,7 @@ private actor CacheCheck {
         let promptTokens = try await model.tokenCount(messages)
         var text = ""
         var calls: [ToolCall] = []
+        var moreCalls = false
         var first: Double?
         var pieces = 0
         let start = clock.now
@@ -79,6 +82,7 @@ private actor CacheCheck {
             switch output {
             case .text(let piece): text += piece
             case .toolCall(let call): calls.append(call)
+            case .moreToolCalls: moreCalls = true
             default: break
             }
             pieces += 1
@@ -96,14 +100,15 @@ private actor CacheCheck {
         print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@",
                      label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
                      MLXChatModel.activeMemoryGB, note))
-        return (text, calls)
+        return (text, calls, moreCalls || calls.count > 1)
     }
 
     /// One turn as the pipeline runs it: the answer goes into the history the way the pipeline records it (pieces cut
     /// and cleaned for the voice, `SpeakableText.record`); a call succeeds, after one refusal and a second try with
-    /// `refuse`, and the app then says "C'est noté."; with `summarize`, the call gets that result and the model sums it
-    /// up (as after a web search or an agent's report). `record: false`: the turn is dropped (the user spoke again
-    /// before any voice); `interrupted`: the answer is recorded as cut off.
+    /// `refuse`, and the app then says "C'est noté." (and that it does one thing at a time, when the model asked for
+    /// more than one); with `summarize`, the call gets that result and the model sums it up (as after a web search or an
+    /// agent's report). `record: false`: the turn is dropped (the user spoke again before any voice); `interrupted`: the
+    /// answer is recorded as cut off.
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
               stopAfter: Int? = nil, interrupted: Bool = false) async throws
     {
@@ -140,6 +145,7 @@ private actor CacheCheck {
             }
             steps += [.call(call), .result(of: call, ["ok": .bool(true), "id": .string("r\(self.steps.count)")])]
             SpeakableText.record("C'est noté.", in: &answer)
+            if output.moreCalls { SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer) }
             break
         }
         chunker.remainingPieces().forEach(send)
@@ -274,6 +280,18 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("plain answer after the second try", "Merci, et qu'est-ce que je dois apporter chez le dentiste ?")
             try await check.turn("plain answer", "D'accord, merci.")
             try await check.turn("plain answer", "Tu as une idée de dîner rapide pour ce soir ?")
+        }),
+        ("two-actions", {
+            // Two actions in one request: the app carries out the first one and says it does one thing at a time.
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("two actions in one request", "Mets un minuteur de deux minutes et un autre de cinq minutes.")
+            try await check.turn("plain answer after the two actions", "Merci. Tu as une idée de dessert rapide ?")
+            try await check.turn("two actions in one request",
+                                 "Mets un minuteur de dix minutes et rappelle-moi d'appeler Paul demain à 9 h.")
+            try await check.turn("two actions after the two actions",
+                                 "Rappelle-moi d'acheter du pain demain matin et d'appeler ma mère ce soir.")
+            try await check.turn("plain answer after the two actions", "Merci beaucoup.")
         }),
         ("summary", {
             try await check.newConversation()

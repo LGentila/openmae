@@ -598,8 +598,14 @@ struct PipelineActionTests {
         #expect(request.first?.content.hasSuffix(ActionCatalog.promptAddendum(exampleCall: "[minuteur]")) == true)
     }
 
-    @Test func oneActionPerTurnAndHistoryKeepsTheCall() async throws {
-        let two = Self.note + [.toolCall(ToolCall(name: "noter", arguments: ["titre": "Lait"]))]
+    /// Two actions asked at once: the model writes the first call, then goes on to another one, which `MLXChatModel` does
+    /// not write (`moreToolCalls`); another model may write both calls. The first is carried out, the app says it does
+    /// one thing at a time, and the history keeps the first call and its result.
+    @Test(arguments: [false, true])
+    func oneActionPerTurnAndHistoryKeepsTheCall(bothCallsWritten: Bool) async throws {
+        let then: ModelOutput = bothCallsWritten ? .toolCall(ToolCall(name: "noter", arguments: ["titre": "Lait"]))
+            : .moreToolCalls
+        let two = Self.note + [then]
         let (model, speaker, tools) = (ScriptedModel(scripts: [two, [.text("Avec plaisir, à ton service.")]]),
                                        FakeSpeaker(), RecordingTools())
         let pipeline = make(model, ScriptedTranscriber(["Rappelle-moi le pain et le lait", "Merci beaucoup"]), speaker, tools)
