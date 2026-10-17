@@ -2,12 +2,12 @@ import CryptoKit
 import Foundation
 import VoiceCore
 
-/// An iPhone paired with this Mac.
+/// An iPhone or an iPad paired with this Mac.
 public struct PairedDevice: Codable, Sendable, Equatable, Identifiable {
     /// Derived from its Noise key.
     public var id: String
     public var name: String
-    /// The model identifier, e.g. "iPhone17,3".
+    /// The model identifier, e.g. "iPhone17,3" or "iPad14,1".
     public var model: String
     public var publicKey: Data
     public var added: Date
@@ -22,6 +22,8 @@ public struct PairedDevice: Codable, Sendable, Equatable, Identifiable {
 
     /// "iPhone 16" rather than the generic name iOS gives apps ("iPhone").
     public var displayName: String { DeviceModels.marketingName(model) ?? name }
+
+    public var kind: DeviceKind { DeviceKind(model: model) }
 }
 
 /// Which relay the Mac goes through, chosen in its settings; the iPhone follows (the relay is in the pairing link).
@@ -61,7 +63,7 @@ public struct LinkStatus: Sendable, Equatable {
         case unreachable
     }
 
-    /// The iPhone that has the conversation.
+    /// The iPhone or iPad that has the conversation.
     public struct Hand: Sendable, Equatable {
         public var device: PairedDevice
         public var path: LinkPath
@@ -80,6 +82,8 @@ public struct LinkStatus: Sendable, Equatable {
     public var local = false
     public var keepAwake = true
     public var hand: Hand?
+    /// The iPads connected now as home stations (`LinkMessage.device`).
+    public var stations: Set<PairedDevice.ID> = []
 
     public init() {}
 }
@@ -91,6 +95,10 @@ public struct LinkStatus: Sendable, Equatable {
 /// `AssistantConnection`), and it passes everything on, sending the engine's events to the iPhones as well and the
 /// iPhones' commands to the engine. When an iPhone takes the conversation, the engine's microphone and voice are
 /// switched to it (`RemoteAudioRouting`); the last one to speak, on the Mac or on an iPhone, has the conversation.
+///
+/// An iPad left at home can be a *station* (`LinkMessage.device`): linked without having the conversation. What Maé
+/// says on her own (a timer that rings) is then spoken on it rather than where the conversation is
+/// (`RemoteAudioRouting.announceThrough`, see `updateAnnouncements`).
 public actor LinkHost: AssistantConnection {
     public nonisolated let events: AsyncStream<AssistantEvent>
     private nonisolated let emit: AsyncStream<AssistantEvent>.Continuation
@@ -119,7 +127,8 @@ public actor LinkHost: AssistantConnection {
 
     // What the engine runs with, and what the iPhones are told when they connect.
     private var macSettings: AssistantSettings?
-    private var phonePushToTalk: Bool?
+    /// Each device's way of talking (push-to-talk or not), applied while it has the conversation.
+    private var phonePushToTalk: [Data: Bool] = [:]
     private var phase: AssistantEvent?
     private var pipelineState = PipelineState.listening
 
@@ -127,7 +136,25 @@ public actor LinkHost: AssistantConnection {
         var session: LinkSession
         var device: PairedDevice
         var tasks: [Task<Void, Never>]
+        /// It said it is a home station, on this session.
+        var station = false
     }
+
+    /// A home station, for what Maé says on her own while it does not have the conversation.
+    private struct Station {
+        /// Its voice, kept across its sessions: it follows the station when it comes back by another way.
+        let output: RemoteVoiceOutput
+        /// Its session closed: it has the grace period to come back, and announcements wait for it meanwhile.
+        var grace: Task<Void, Never>?
+    }
+
+    private var stations: [Data: Station] = [:]
+    /// When each device last took the conversation or sent a command: with several stations, the most recently used
+    /// one speaks.
+    private var lastUsed: [Data: ContinuousClock.Instant] = [:]
+    /// What the engine was last told about announcements (see `updateAnnouncements`): the station they go to (nil:
+    /// where the conversation is), and whether it hears them now.
+    private var announcementsTold: (station: Data?, reachable: Bool) = (nil, true)
 
     /// The iPhone that has the conversation's sound.
     private struct Hand {
@@ -208,7 +235,7 @@ public actor LinkHost: AssistantConnection {
     /// (hands-free or hold to talk; never the wake word, which the iPhone does not offer).
     private func effective(_ settings: AssistantSettings) -> AssistantSettings {
         var settings = settings
-        if hand != nil, let phonePushToTalk {
+        if let hand, let phonePushToTalk = phonePushToTalk[hand.key] {
             settings.listening = phonePushToTalk ? .pushToTalk : .handsFree
         } else if hand != nil, settings.listening == .wakeWord {
             settings.listening = .handsFree
@@ -271,6 +298,12 @@ public actor LinkHost: AssistantConnection {
         state.devices.removeAll { $0.id == deviceID }
         save()
         if hand?.key == device.publicKey { await releaseHand(notifyPhone: false) }
+        if let station = stations.removeValue(forKey: device.publicKey) {
+            station.grace?.cancel()
+            station.output.detach()
+        }
+        lastUsed[device.publicKey] = nil
+        phonePushToTalk[device.publicKey] = nil
         if let peer = sessions.removeValue(forKey: device.publicKey) {
             peer.tasks.forEach { $0.cancel() }
             // Told, so that it shows it must be paired again rather than "the Mac does not answer".
@@ -283,6 +316,7 @@ public actor LinkHost: AssistantConnection {
         DebugLog.log("link: iPhone removed")
         updateNetwork()
         publish()
+        await updateAnnouncements()
     }
 
     public func setRelay(_ choice: RelayChoice) {
@@ -297,9 +331,10 @@ public actor LinkHost: AssistantConnection {
         publish()
     }
 
-    /// What the Mac tells the iPhones about itself: its name and the relay to reach it by.
+    /// What the Mac tells the iPhones about itself: its name, the relay to reach it by, and the optional messages it
+    /// understands.
     private var aboutThisMac: HandshakePayload.Mac {
-        HandshakePayload.Mac(name: macName, relay: state.relayChoice.url)
+        HandshakePayload.Mac(name: macName, relay: state.relayChoice.url, features: [LinkMessage.deviceFeature])
     }
 
     public func setKeepAwake(_ on: Bool) {
@@ -345,6 +380,7 @@ public actor LinkHost: AssistantConnection {
     }
 
     private func publish() {
+        state.stations = Set(sessions.values.filter(\.station).map(\.device.id))
         updateActivity()
         statusSink.yield(state)
     }
@@ -513,10 +549,20 @@ public actor LinkHost: AssistantConnection {
     /// A paired iPhone's session is open (internal for the tests, which open sessions over memory).
     func open(_ session: LinkSession, device: PairedDevice) async {
         let key = device.publicKey
-        if let previous = sessions.removeValue(forKey: key) {
+        let previous = sessions.removeValue(forKey: key)
+        if let previous {
             // The same iPhone again (another network, another path): the new connection replaces the old one.
             previous.tasks.forEach { $0.cancel() }
             previous.session.close()
+        }
+        // A station back on a new connection, or within its grace period, is one until it says otherwise (it says it
+        // right away, `LinkMessage.device`): its voice follows it at once.
+        let station = stations[key] != nil && (previous?.station == true || stations[key]?.grace != nil)
+        if station, var known = stations[key] {
+            known.grace?.cancel()
+            known.grace = nil
+            known.output.bind(session)
+            stations[key] = known
         }
         DebugLog.log("link: iPhone connected (\(session.path.rawValue))")
         // What the iPhone needs to show the conversation at once.
@@ -543,15 +589,30 @@ public actor LinkHost: AssistantConnection {
                 await self?.closed(session, key: key)
             },
         ]
-        sessions[key] = Peer(session: session, device: device, tasks: tasks)
+        sessions[key] = Peer(session: session, device: device, tasks: tasks, station: station)
         publish()
         await updateReach()
+        await updateAnnouncements()
     }
 
     private func closed(_ session: LinkSession, key: Data) async {
-        guard sessions[key]?.session === session else { return }
-        sessions.removeValue(forKey: key)?.tasks.forEach { $0.cancel() }
+        guard let peer = sessions[key], peer.session === session else { return }
+        sessions.removeValue(forKey: key)
+        peer.tasks.forEach { $0.cancel() }
         DebugLog.log("link: iPhone disconnected")
+        if peer.station, hand?.key != key, var station = stations[key] {
+            // A station's Wi-Fi drops, or the Mac's: it has the grace period to come back; what Maé says on her own
+            // waits for it meanwhile, rather than being said to nobody. (One that has the conversation is waited for
+            // as the conversation's device is, below.)
+            station.output.bind(nil)
+            station.grace?.cancel()
+            station.grace = Task { [weak self, gracePeriod] in
+                try? await Task.sleep(for: gracePeriod)
+                guard !Task.isCancelled else { return }
+                await self?.stationGraceOver(key)
+            }
+            stations[key] = station
+        }
         if var hand, hand.key == key, hand.grace == nil {
             // Wi-Fi to 4G, a tunnel: the iPhone has a few seconds to come back by another way.
             hand.microphone.fillSilence()
@@ -564,6 +625,7 @@ public actor LinkHost: AssistantConnection {
         }
         publish()
         await updateReach()  // meanwhile its voice reaches nobody
+        await updateAnnouncements()
     }
 
     private func graceOver(_ key: Data) async {
@@ -584,12 +646,14 @@ public actor LinkHost: AssistantConnection {
             switch command {
             case .updateSettings(let settings):
                 // Only the way of talking is the iPhone's to choose.
-                phonePushToTalk = settings.listening == .pushToTalk
+                phonePushToTalk[key] = settings.listening == .pushToTalk
                 if hand?.key == key { sendEngineSettings() }
             case .talkKey(pressed: true):
+                lastUsed[key] = .now
                 await takeHand(key)
                 engine.send(command)
             default:
+                lastUsed[key] = .now
                 engine.send(command)
             }
         case .audio(.start):
@@ -598,9 +662,82 @@ public actor LinkHost: AssistantConnection {
             if hand?.key == key { await releaseHand(notifyPhone: false) }
         case .audio(.finished(let stream)):
             if hand?.key == key { hand?.output.markFinished(stream) }
+            stations[key]?.output.markFinished(stream)  // an announcement it played without the conversation
+        case .device(let station):
+            await deviceSaid(station: station, key: key)
         case .audio, .event, .ping, .pong, .paired, .removed, .mac:
             break
         }
+    }
+
+    /// An iPad says whether it is a home station now: station mode on, plugged in, the app in the foreground.
+    private func deviceSaid(station: Bool, key: Data) async {
+        guard var peer = sessions[key], peer.station != station else { return }
+        peer.station = station
+        sessions[key] = peer
+        if station {
+            if var known = stations[key] {
+                known.grace?.cancel()
+                known.grace = nil
+                known.output.bind(peer.session)
+                stations[key] = known
+            } else {
+                stations[key] = Station(output: RemoteVoiceOutput(session: peer.session))
+            }
+            if lastUsed[key] == nil { lastUsed[key] = .now }
+            DebugLog.log("link: an iPad is a home station")
+        } else if let known = stations.removeValue(forKey: key) {
+            known.grace?.cancel()
+            known.output.detach()
+            DebugLog.log("link: the iPad is no longer a home station")
+        }
+        publish()
+        await updateAnnouncements()
+    }
+
+    private func stationGraceOver(_ key: Data) async {
+        guard let station = stations[key], station.grace != nil, sessions[key]?.station != true else { return }
+        DebugLog.log("link: the station did not come back, announcements go where the conversation is")
+        stations[key] = nil
+        station.output.detach()
+        await updateAnnouncements()
+    }
+
+    /// Where what Maé says on her own goes, following the rule "the last one who speaks has the conversation":
+    ///
+    /// - a home station connected (with several, the most recently used one): on it, through its own voice
+    ///   output, wherever the conversation is (the Mac keeps its microphone, an iPhone away keeps the conversation);
+    ///   unless that station has the conversation: then like an answer, through the conversation's output;
+    /// - a station whose session just closed, within its grace period, and no other connected: nowhere yet, the
+    ///   announcements wait for it to come back (as for the device that has the conversation, `updateReach`);
+    /// - otherwise, as without stations: on the device that has the conversation, or on the Mac.
+    private func updateAnnouncements() async {
+        // Again after telling: a station may have come or gone meanwhile.
+        while true {
+            let wanted = announcementsWanted
+            guard wanted != announcementsTold else { return }
+            announcementsTold = wanted
+            let output = wanted.station.flatMap { stations[$0]?.output }
+            switch (output, wanted.reachable) {
+            case (nil, _): DebugLog.log("link: announcements go where the conversation is")
+            case (_?, true): DebugLog.log("link: announcements go to the home station")
+            case (_?, false): DebugLog.log("link: announcements wait for the home station to come back")
+            }
+            await audio?.announceThrough(output, reachable: wanted.reachable)
+        }
+    }
+
+    private var announcementsWanted: (station: Data?, reachable: Bool) {
+        func mostRecent(_ keys: [Data]) -> Data? {
+            keys.max { (lastUsed[$0] ?? .now) < (lastUsed[$1] ?? .now) }
+        }
+        let connected = sessions.filter { $0.value.station && stations[$0.key] != nil }.map(\.key)
+        let waiting = stations.filter { $0.value.grace != nil && $0.key != hand?.key }.map(\.key)
+        if let station = mostRecent(connected) {
+            return station == hand?.key ? (nil, true) : (station, true)
+        }
+        if let station = mostRecent(waiting) { return (station, false) }
+        return (nil, true)
     }
 
     private func received(_ packet: AudioPacket, from key: Data) async {
@@ -625,11 +762,13 @@ public actor LinkHost: AssistantConnection {
         }
         // It just asked for the conversation: it is heard.
         hand = Hand(key: key, microphone: microphone, output: output, heard: .now, watch: watch)
+        lastUsed[key] = .now
         state.hand = LinkStatus.Hand(device: peer.device, path: peer.session.path)
         DebugLog.log("link: the iPhone has the conversation")
         await audio?.useRemoteAudio(microphone: microphone.samples, output: output)
         sendEngineSettings()
         publish()
+        await updateAnnouncements()
     }
 
     /// The Mac takes the sound back (or another iPhone takes it: `toLocal: false`).
@@ -651,6 +790,7 @@ public actor LinkHost: AssistantConnection {
             sendEngineSettings()
         }
         publish()
+        if toLocal { await updateAnnouncements() }  // otherwise the next device's `takeHand` does
     }
 
     /// Whether the iPhone that has the conversation hears the voice now: its session is open and its microphone was
@@ -690,7 +830,7 @@ public actor LinkHost: AssistantConnection {
     }
 }
 
-/// Marketing names of the recent iPhones, from their model identifiers.
+/// Marketing names of the recent iPhones and iPads, from their model identifiers.
 enum DeviceModels {
     static func marketingName(_ model: String) -> String? {
         let names: [String: String] = [
@@ -703,6 +843,22 @@ enum DeviceModels {
             "iPhone17,4": "iPhone 16 Plus", "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max",
             "iPhone17,5": "iPhone 16e", "iPhone18,3": "iPhone 17", "iPhone18,1": "iPhone 17 Pro",
             "iPhone18,2": "iPhone 17 Pro Max", "iPhone18,4": "iPhone Air",
+            // iPads, Wi-Fi and cellular.
+            "iPad11,1": "iPad mini 5", "iPad11,2": "iPad mini 5", "iPad14,1": "iPad mini 6", "iPad14,2": "iPad mini 6",
+            "iPad16,1": "iPad mini (A17 Pro)", "iPad16,2": "iPad mini (A17 Pro)",
+            "iPad11,6": "iPad 8", "iPad11,7": "iPad 8", "iPad12,1": "iPad 9", "iPad12,2": "iPad 9",
+            "iPad13,18": "iPad 10", "iPad13,19": "iPad 10", "iPad15,7": "iPad (A16)", "iPad15,8": "iPad (A16)",
+            "iPad11,3": "iPad Air 3", "iPad11,4": "iPad Air 3", "iPad13,1": "iPad Air 4", "iPad13,2": "iPad Air 4",
+            "iPad13,16": "iPad Air 5", "iPad13,17": "iPad Air 5",
+            "iPad14,8": "iPad Air (M2)", "iPad14,9": "iPad Air (M2)", "iPad14,10": "iPad Air (M2)",
+            "iPad14,11": "iPad Air (M2)", "iPad15,3": "iPad Air (M3)", "iPad15,4": "iPad Air (M3)",
+            "iPad15,5": "iPad Air (M3)", "iPad15,6": "iPad Air (M3)",
+            "iPad13,4": "iPad Pro (M1)", "iPad13,5": "iPad Pro (M1)", "iPad13,6": "iPad Pro (M1)",
+            "iPad13,7": "iPad Pro (M1)", "iPad13,8": "iPad Pro (M1)", "iPad13,9": "iPad Pro (M1)",
+            "iPad13,10": "iPad Pro (M1)", "iPad13,11": "iPad Pro (M1)",
+            "iPad14,3": "iPad Pro (M2)", "iPad14,4": "iPad Pro (M2)", "iPad14,5": "iPad Pro (M2)",
+            "iPad14,6": "iPad Pro (M2)", "iPad16,3": "iPad Pro (M4)", "iPad16,4": "iPad Pro (M4)",
+            "iPad16,5": "iPad Pro (M4)", "iPad16,6": "iPad Pro (M4)",
         ]
         return names[model]
     }

@@ -64,6 +64,8 @@ public actor PhoneLink: AssistantConnection {
     private var upgrade: Task<Void, Never>?
     private var wakeUp: AsyncStream<Void>.Continuation?
     private var audioWanted = false
+    /// An iPad: whether it is a home station now (nil: it never said, as on an iPhone).
+    private var station: Bool?
     private var settings: AssistantSettings?
     private var pipelineState = PipelineState.listening
     private var currentStatus = Status.connecting
@@ -100,6 +102,23 @@ public actor PhoneLink: AssistantConnection {
         guard on != audioWanted else { return }
         audioWanted = on
         current.session?.send(.audio(on ? .start : .stop))
+    }
+
+    /// An iPad: whether it is a home station now (station mode on, plugged in, the app in the foreground). Told to the
+    /// Mac at once, and again on each new session.
+    public func setStation(_ on: Bool) {
+        guard on != station else { return }
+        station = on
+        if let session = current.session, let message = Self.deviceMessage(station: on, to: session.peerMac) {
+            session.send(message)
+        }
+    }
+
+    /// The `device` message for a Mac: only to one that understands it, since a Mac from before closes the session on
+    /// a message it does not know (and the device would reconnect again and again).
+    public static func deviceMessage(station: Bool?, to mac: HandshakePayload.Mac?) -> LinkMessage? {
+        guard let station, mac?.understands(LinkMessage.deviceFeature) == true else { return nil }
+        return .device(station: station)
     }
 
     /// The microphone's frames, sent as they come (no hop through the actor).
@@ -263,6 +282,7 @@ public actor PhoneLink: AssistantConnection {
         if let about = session.peerMac { learn(about) }
         setStatus(.connected(session.path))
         if let settings { session.send(.command(.updateSettings(settings))) }
+        if let message = Self.deviceMessage(station: station, to: session.peerMac) { session.send(message) }
         if audioWanted { session.send(.audio(.start)) }
         if session.path == .relay, ways.contains(.direct) { watchForDirectWay() }
         await withTaskGroup(of: Void.self) { tasks in

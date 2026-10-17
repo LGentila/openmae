@@ -54,9 +54,9 @@ private struct ScanView: View {
                 .padding(.top, 8)
             Group {
                 if model.forgotten {
-                    Text("Your Mac no longer knows this iPhone. To add it again, open Settings › iPhone on your Mac, then “Add an iPhone”.")
+                    Text("Your Mac no longer knows this device. To add it again, open Settings › iPhone and iPad on your Mac, then “Add a device”.")
                 } else {
-                    Text("On your Mac, open Settings › iPhone, then “Add an iPhone”.")
+                    Text("On your Mac, open Settings › iPhone and iPad, then “Add a device”.")
                 }
             }
             .textStyle(.phoneParagraph)
@@ -167,10 +167,16 @@ private struct DoneView: View {
                 .scaleEffect(300 / 380)
                 .frame(width: 300, height: 300)
                 .padding(.top, 4)
-            Text("Done: you can talk to Maé from your iPhone.")
-                .textStyle(.phoneDoneHeadline)
-                .foregroundStyle(Palette.ink)
-                .padding(.top, 4)
+            Group {
+                if model.isPad {
+                    Text("Done: you can talk to Maé from your iPad.")
+                } else {
+                    Text("Done: you can talk to Maé from your iPhone.")
+                }
+            }
+            .textStyle(.phoneDoneHeadline)
+            .foregroundStyle(Palette.ink)
+            .padding(.top, 4)
             HStack(spacing: 8) {
                 IconView(icon: .laptop, size: 20)
                 Text(verbatim: macName)
@@ -232,7 +238,7 @@ private struct ExpiredView: View {
                 if unreachable {
                     Text("Check that it is on, with the code still showing, then scan it again.")
                 } else {
-                    Text("A code is valid for 5 minutes and serves only once. Show a new one on your Mac: Settings › iPhone, then “Add an iPhone”.")
+                    Text("A code is valid for 5 minutes and serves only once. Show a new one on your Mac: Settings › iPhone and iPad, then “Add a device”.")
                 }
             }
             .textStyle(.phoneParagraph)

@@ -37,6 +37,8 @@ public actor AssistantHost: AssistantConnection {
     /// Whether that iPhone hears the voice right now (see `setRemoteAudioReachable`).
     private var remoteReachable = true
     private var remoteFeed: Task<Void, Never>?
+    /// Where what Maé says on her own goes, when not where the conversation is: a home station (`announceThrough`).
+    private var announcements: (output: (any AudioOutput)?, reachable: Bool) = (nil, true)
 
     // Actions: reminders and calendar, timers, shortcuts. Kept for the app's whole life (a timer keeps running
     // across a change of tier); handed to the pipeline only while the setting is on.
@@ -254,6 +256,9 @@ public actor AssistantHost: AssistantConnection {
         reportStorage()
         reportActions()
         if remote != nil { await attachRemote() }  // an iPhone took the conversation while the models loaded
+        if announcements.output != nil {  // a home station connected while the models loaded
+            await pipeline.announceThrough(announcements.output, reachable: announcements.reachable)
+        }
         if restartWhenLoaded {
             restartWhenLoaded = false
             await restart()
@@ -742,5 +747,11 @@ extension AssistantHost: RemoteAudioRouting {
         // are back; unless another iPhone took the conversation meanwhile (`attachRemote` told the pipeline then).
         if remote == nil { await pipeline?.setOutputReachable(true) }
         DebugLog.log("audio: the Mac has the microphone and the voice again")
+    }
+
+    public func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {
+        announcements = (output, reachable)
+        guard stage == .running else { return }  // a pipeline still loading gets it once running
+        await pipeline?.announceThrough(output, reachable: reachable)
     }
 }

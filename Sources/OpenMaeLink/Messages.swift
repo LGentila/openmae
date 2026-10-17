@@ -1,8 +1,8 @@
 import Foundation
 import VoiceCore
 
-/// The end-to-end messages between the iPhone and the Mac, once a session is open (relay/PROTOCOL.md): one JSON
-/// object per Noise transport message, told apart by `"type"`.
+/// The end-to-end messages between the iPhone (or iPad) and the Mac, once a session is open (relay/PROTOCOL.md): one
+/// JSON object per Noise transport message, told apart by `"type"`.
 public enum LinkMessage: Sendable {
     /// iPhone → Mac: an assistant command (only a few are accepted, see `RemoteCommandPolicy`).
     case command(AssistantCommand)
@@ -17,9 +17,16 @@ public enum LinkMessage: Sendable {
     case removed
     /// Mac → iPhone: the Mac's name or relay changed; the iPhone follows its relay.
     case mac(HandshakePayload.Mac)
+    /// iPad → Mac: whether it is a home station right now (station mode on, plugged in, app in the foreground). Sent
+    /// when the session opens and on every change, only to a Mac that lists it in its features
+    /// (`HandshakePayload.Mac.features`): a Mac from before closes the session on a message it does not know.
+    case device(station: Bool)
 
-    private enum Kind: String, Codable { case command, event, audio, ping, pong, paired, removed, mac }
-    private enum Keys: String, CodingKey { case type, command, event, op, stream, frames, name, relay }
+    /// The optional messages, as a Mac lists those it understands (`HandshakePayload.Mac.features`).
+    public static let deviceFeature = "device"
+
+    private enum Kind: String, Codable { case command, event, audio, ping, pong, paired, removed, mac, device }
+    private enum Keys: String, CodingKey { case type, command, event, op, stream, frames, name, relay, station }
 }
 
 /// Who has the conversation's sound, and the voice streams' ends.
@@ -51,6 +58,8 @@ extension LinkMessage: Codable {
         case .mac:
             self = .mac(HandshakePayload.Mac(name: try c.decode(String.self, forKey: .name),
                                              relay: try c.decodeIfPresent(URL.self, forKey: .relay)))
+        case .device:
+            self = .device(station: try c.decode(Bool.self, forKey: .station))
         case .audio:
             let stream = try c.decodeIfPresent(UInt32.self, forKey: .stream)
             switch try c.decode(String.self, forKey: .op) {
@@ -86,6 +95,9 @@ extension LinkMessage: Codable {
             try c.encode(Kind.mac, forKey: .type)
             try c.encode(mac.name, forKey: .name)
             try c.encodeIfPresent(mac.relay, forKey: .relay)
+        case .device(let station):
+            try c.encode(Kind.device, forKey: .type)
+            try c.encode(station, forKey: .station)
         case .audio(let control):
             try c.encode(Kind.audio, forKey: .type)
             switch control {
@@ -123,16 +135,22 @@ public enum HandshakePayload {
         public var name: String
         /// The relay the Mac is registered with, none when it has none (reachable at home only).
         public var relay: URL?
-        public init(name: String, relay: URL? = nil) {
+        /// The optional messages this Mac understands (`LinkMessage.deviceFeature`); nil from a Mac from before them,
+        /// which must not be sent any.
+        public var features: [String]?
+        public init(name: String, relay: URL? = nil, features: [String]? = nil) {
             self.name = name
             self.relay = relay
+            self.features = features
         }
+
+        public func understands(_ feature: String) -> Bool { features?.contains(feature) == true }
     }
 
-    /// The iPhone, in the third message of a pairing.
+    /// The iPhone or iPad, in the third message of a pairing.
     public struct Phone: Codable, Sendable, Equatable {
         public var name: String
-        /// The model identifier, e.g. "iPhone17,3".
+        /// The model identifier, e.g. "iPhone17,3" or "iPad14,1".
         public var model: String
         public init(name: String, model: String) {
             self.name = name

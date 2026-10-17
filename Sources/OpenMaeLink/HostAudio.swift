@@ -1,8 +1,8 @@
 import Foundation
 import VoiceCore
 
-/// The Mac's side of the iPhone's speaker: the assistant's voice, encoded and sent as it is produced (usually ahead
-/// of real time; the iPhone's jitter buffer plays it at its pace). One voice stream per utterance.
+/// The Mac's side of the iPhone's (or iPad's) speaker: the assistant's voice, encoded and sent as it is produced
+/// (usually ahead of real time; the device's jitter buffer plays it at its pace). One voice stream per utterance.
 ///
 /// - `play` encodes and sends;
 /// - `waitUntilDone` sends the stream's end and returns when the iPhone says it has played everything (or once it
@@ -49,9 +49,12 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         if sampleRate != LinkAudio.voiceRate { DebugLog.log("link: voice at \(sampleRate) Hz, expected 24 kHz") }
         lock.withLock {
             if stream == nil {
-                stream = nextStream
+                // From the clock too: this output may be older than another one that spoke to the same device since
+                // (a station's announcements and its conversation), and the device only plays a newer stream.
+                let number = max(nextStream, StreamNumber.now)
+                stream = number
                 endedStream = nil  // the iPhone's buffer moves on to the new stream
-                nextStream += 1
+                nextStream = number &+ 1
                 sequence = 0
                 streamStart = .now
                 streamCut = false

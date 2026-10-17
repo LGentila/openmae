@@ -197,8 +197,10 @@ struct HeldAnnouncementTests {
 
 // MARK: - The Mac and the iPhone
 
+// Shared with the home station's tests (StationTests).
+
 /// The Mac (a LinkHost in front of the engine), and an iPhone that connects to it over memory.
-private final class Rig: @unchecked Sendable {
+final class Rig: @unchecked Sendable {
     /// The chime, then the sentence (one piece of `ToneVoice`), as played.
     static let announcementSamples = Chime.samples(sampleRate: LinkAudio.voiceRate).count + ToneStream.pieceSamples
     /// The same in the voice's frames of 20 ms, the last one completed with silence.
@@ -225,9 +227,12 @@ private final class Rig: @unchecked Sendable {
                         storeURL: folder.appending(path: "link.json"), macName: "Mac de test", gracePeriod: gracePeriod)
     }
 
-    /// A new session with the iPhone, as after a handshake; its microphone and its player move to it.
+    /// A new session with the iPhone (or `device`), as after a handshake; its microphone and its player move to it.
     /// `playsInRealTime`: its player says it played a stream once it would have, rather than as soon as it has it all.
-    func connect(path: LinkPath = .direct, playsInRealTime: Bool = false) async -> Connection {
+    func connect(_ device: FakePhone? = nil, path: LinkPath = .direct, playsInRealTime: Bool = false) async
+        -> Connection
+    {
+        let phone = device ?? self.phone
         let wire = MemoryWire(path: path)
         let (mac, phoneEnd) = wire.sessions(phoneKey: phone.key, macKey: Self.macKey)
         let connection = Connection(wire: wire, phone: PhoneSession(phoneEnd, playsInRealTime: playsInRealTime))
@@ -249,22 +254,23 @@ private final class Rig: @unchecked Sendable {
                                        note: "(Le minuteur t1 de 20 secondes vient de sonner.)", language: .french)
     }
 
-    func end() async {
+    func end(_ others: FakePhone...) async {
         await host.takeBack()
         phone.end()
+        others.forEach { $0.end() }
         lock.withLock { connections }.forEach { $0.phone.close() }
         await engine.pipeline.stop()
         try? FileManager.default.removeItem(at: folder)
     }
 }
 
-private struct Connection {
+struct Connection {
     let wire: MemoryWire
     let phone: PhoneSession
 }
 
 /// No keys: the Mac's link stays off the network (no listener, no relay); the tests open the sessions themselves.
-private struct NoIdentity: IdentityStore {
+struct NoIdentity: IdentityStore {
     func load() throws -> DeviceIdentity? { nil }
     func save(_ identity: DeviceIdentity) throws {}
     func delete() throws {}
@@ -272,21 +278,56 @@ private struct NoIdentity: IdentityStore {
 
 /// The iPhone app as the Mac sees it, across its sessions. Once it has the conversation, its microphone sends silence
 /// every 20 ms on its current session, as the app does all the time (muted or not); its player is `PhoneSession`.
-private final class FakePhone: @unchecked Sendable {
-    let key = Data(repeating: 9, count: 32)
-    var device: PairedDevice { PairedDevice(publicKey: key, name: "iPhone", model: "iPhone17,3") }
+final class FakePhone: @unchecked Sendable {
+    let key: Data
+    let model: String
+    var device: PairedDevice { PairedDevice(publicKey: key, name: model.hasPrefix("iPad") ? "iPad" : "iPhone",
+                                            model: model) }
     private let lock = NSLock()
     private var session: PhoneSession?
     private var wantsTheConversation = false
+    /// What it said with `device` (nil: nothing, as an iPhone).
+    private var station: Bool?
     private var microphone: Task<Void, Never>?
 
-    /// A new session: as `PhoneLink` does, it asks for the conversation again on it, if it had it.
+    init(key: Data = Data(repeating: 9, count: 32), model: String = "iPhone17,3") {
+        self.key = key
+        self.model = model
+    }
+
+    /// The user's iPad mini, left at home.
+    static func iPad() -> FakePhone { FakePhone(key: Data(repeating: 11, count: 32), model: "iPad14,1") }
+
+    /// A new session: as `PhoneLink` does, it says again whether it is a station, and asks for the conversation
+    /// again on it, if it had it.
     func use(_ session: PhoneSession) {
-        let asks = lock.withLock {
+        let (asks, station) = lock.withLock {
             self.session = session
-            return wantsTheConversation
+            return (wantsTheConversation, self.station)
         }
+        if let station { session.session.send(.device(station: station)) }
         if asks { session.session.send(.audio(.start)) }
+    }
+
+    /// `device`: whether it is a home station now.
+    func say(station: Bool) {
+        let session: PhoneSession? = lock.withLock {
+            self.station = station
+            return self.session
+        }
+        session?.session.send(.device(station: station))
+    }
+
+    /// It lets go of the conversation (`audio stop`), its link staying open: what a station does a minute after an
+    /// exchange in "Tap to talk".
+    func giveTheConversationBack() {
+        let session: PhoneSession? = lock.withLock {
+            wantsTheConversation = false
+            microphone?.cancel()
+            microphone = nil
+            return self.session
+        }
+        session?.session.send(.audio(.stop))
     }
 
     func takeTheConversation() {
@@ -332,7 +373,7 @@ private final class FakePhone: @unchecked Sendable {
 /// once a stream was played (`finished`), as the app does: as soon as it has all of it, or once it would have played it
 /// (`playsInRealTime`). A stream whose end came but some of whose frames never did is played all the same, the gaps
 /// filled in as the app's jitter buffer does, and said played a moment later.
-private final class PhoneSession: @unchecked Sendable {
+final class PhoneSession: @unchecked Sendable {
     struct Stream: Equatable {
         var number: UInt32
         var frames = 0
@@ -349,6 +390,10 @@ private final class PhoneSession: @unchecked Sendable {
     private let lock = NSLock()
     private var streams: [UInt32: Stream] = [:]
     private var tasks: [Task<Void, Never>] = []
+    /// While set, a stream played is not reported (`finished`) yet: the voice is still heard.
+    private var holding = false
+    private var held: [UInt32] = []
+    private var stopsHeard: [UInt32] = []
 
     init(_ session: LinkSession, playsInRealTime: Bool = false) {
         self.session = session
@@ -359,7 +404,11 @@ private final class PhoneSession: @unchecked Sendable {
             },
             Task { [weak self] in
                 for await message in session.messages {
-                    if case .audio(.end(let stream, let frames)) = message { self?.ends(stream, frames: frames) }
+                    switch message {
+                    case .audio(.end(let stream, let frames)): self?.ends(stream, frames: frames)
+                    case .audio(.stopPlayback(let stream)): self?.stopped(stream)
+                    default: break
+                    }
                 }
             },
         ]
@@ -371,6 +420,34 @@ private final class PhoneSession: @unchecked Sendable {
     }
 
     var framesHeard: Int { lock.withLock { streams.values.reduce(0) { $0 + $1.frames } } }
+
+    /// The streams heard whole, reported or not.
+    var heardWhole: [Stream] {
+        lock.withLock { streams.values.filter(\.finished).sorted { $0.number < $1.number } }
+    }
+
+    /// The streams the Mac told it to stop.
+    var stops: [UInt32] { lock.withLock { stopsHeard } }
+
+    /// The voice lasts until `release()`: what is played is reported then.
+    func hold() { lock.withLock { holding = true } }
+
+    func release() {
+        let streams: [UInt32] = lock.withLock {
+            holding = false
+            defer { held = [] }
+            return held
+        }
+        for stream in streams { session.send(.audio(.finished(stream: stream))) }
+    }
+
+    private func stopped(_ stream: UInt32) {
+        lock.withLock {
+            stopsHeard.append(stream)
+            held.removeAll { $0 == stream }
+        }
+        session.send(.audio(.finished(stream: stream)))
+    }
 
     func close() {
         tasks.forEach { $0.cancel() }
@@ -431,8 +508,13 @@ private final class PhoneSession: @unchecked Sendable {
     }
 
     private func said(_ number: UInt32) {
-        lock.withLock { streams[number]?.finished = true }
-        session.send(.audio(.finished(stream: number)))
+        let report: Bool = lock.withLock {
+            streams[number]?.finished = true
+            guard holding else { return true }
+            held.append(number)
+            return false
+        }
+        if report { session.send(.audio(.finished(stream: number))) }
     }
 }
 
@@ -440,22 +522,26 @@ private final class PhoneSession: @unchecked Sendable {
 
 /// The engine as the link sees it, with the real conversation logic inside: a `VoicePipeline` whose voice goes to the
 /// Mac's speakers, or to the iPhone while it has the conversation, switched as `AssistantHost` switches them.
-private final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked Sendable {
+final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked Sendable {
     let events: AsyncStream<AssistantEvent>
     let pipeline: VoicePipeline
     private let emit: AsyncStream<AssistantEvent>.Continuation
-    private let speakers = CountingSpeaker()
+    let speakers = CountingSpeaker()
+    private let detector = Silence()
     private let router: AudioRouter
     private let lock = NSLock()
-    private var counts = (remoteRoutes: 0, localRoutes: 0, remotePlayed: 0)
+    private var counts = (remoteRoutes: 0, localRoutes: 0, remotePlayed: 0, stationPlayed: 0)
     private var reachabilityTold: [Bool] = []
+    private var announcementsTold: [Bool?] = []
     private var finished: [String] = []
     private var interrupted: [String] = []
+    private var bargeIns = 0
+    private var received: [AssistantCommand] = []
     private var feed: Task<Void, Never>?
 
     init(transcriber: any Transcriber, model: any LanguageModel, voice: any SpeechSynthesizer) async throws {
         router = AudioRouter(speakers)
-        pipeline = VoicePipeline(detector: Silence(), transcriber: transcriber, model: model, synthesizer: voice,
+        pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model, synthesizer: voice,
                                  output: router)
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         try await pipeline.start()
@@ -472,6 +558,7 @@ private final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @un
                         }
                     }
                     emit.yield(.turnFinished(metrics))
+                case .bargeIn: self?.lock.withLock { self?.bargeIns += 1 }
                 default: break
                 }
             }
@@ -490,6 +577,15 @@ private final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @un
     var said: [String] { lock.withLock { finished } }
     /// What was cut off, in order: stopped on the way, or not heard.
     var cutOff: [String] { lock.withLock { interrupted } }
+    /// Samples sent to a home station's voice, for announcements (`announceThrough`).
+    var stationPlayed: Int { lock.withLock { counts.stationPlayed } }
+    /// What the link said about announcements, in order: nil where the conversation is, true on a station that hears
+    /// them, false waiting for one.
+    var announcements: [Bool?] { lock.withLock { announcementsTold } }
+    /// Times the user's voice interrupted Maé.
+    var interruptions: Int { lock.withLock { bargeIns } }
+    /// The commands it got, in order.
+    var commands: [AssistantCommand] { lock.withLock { received } }
 
     /// The user speaks into the Mac's microphone, for `seconds`.
     func speakIntoTheMac(seconds: Double) async {
@@ -497,9 +593,22 @@ private final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @un
         for _ in 0..<Int(seconds * 16_000 / 512) { await pipeline.push(chunk) }
     }
 
+    /// The Mac's own microphone hears someone talk for `seconds` (loud enough not to be taken for an echo).
+    func macMicrophoneHearsSpeech(seconds: Double) async {
+        detector.hearsSpeech = true
+        let chunk = (0..<512).map { Float(0.3 * sin(2 * .pi * 220 * Double($0) / 16_000)) }
+        for _ in 0..<Int(seconds * 16_000 / 512) { await pipeline.push(chunk) }
+        detector.hearsSpeech = false
+        for _ in 0..<20 { await pipeline.push([Float](repeating: 0, count: 512)) }
+    }
+
     func send(_ command: AssistantCommand) {
-        guard case .talkKey(let pressed) = command else { return }
-        Task { [pipeline] in await pipeline.setTalkKey(pressed: pressed) }
+        lock.withLock { received.append(command) }
+        switch command {
+        case .talkKey(let pressed): Task { [pipeline] in await pipeline.setTalkKey(pressed: pressed) }
+        case .stopSpeaking: Task { [pipeline] in await pipeline.interrupt() }
+        default: break
+        }
     }
 
     func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
@@ -520,6 +629,16 @@ private final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @un
     func setRemoteAudioReachable(_ reachable: Bool) async {
         lock.withLock { reachabilityTold.append(reachable) }
         await pipeline.setOutputReachable(reachable)
+    }
+
+    func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {
+        lock.withLock { announcementsTold.append(output.map { _ in reachable }) }
+        let counted = output.map { output in
+            CountingOutput(output: output) { [weak self] samples in
+                self?.lock.withLock { self?.counts.stationPlayed += samples }
+            }
+        }
+        await pipeline.announceThrough(counted, reachable: reachable)
     }
 
     /// As `AssistantHost` does: the Mac's speakers again, what was playing stopped while its audio restarts, then what
@@ -663,7 +782,7 @@ private final class Door: @unchecked Sendable {
 }
 
 /// An output that counts what goes through it.
-private struct CountingOutput: AudioOutput {
+struct CountingOutput: AudioOutput {
     let output: any AudioOutput
     let counted: @Sendable (Int) -> Void
 
@@ -676,13 +795,20 @@ private struct CountingOutput: AudioOutput {
     func stopImmediately() async { await output.stopImmediately() }
 }
 
-/// The Mac's speakers: they count what they are given, and play it in real time.
-private final class CountingSpeaker: AudioOutput, @unchecked Sendable {
+/// The Mac's speakers: they count what they are given, and play it in real time; held (`hold()`), what they play
+/// lasts until `release()`, or until stopped.
+final class CountingSpeaker: AudioOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var samples = 0
     private var busyUntil = ContinuousClock.now
+    private var holding = false
+    private var stopsCount = 0
 
     var played: Int { lock.withLock { samples } }
+    var stops: Int { lock.withLock { stopsCount } }
+
+    func hold() { lock.withLock { holding = true } }
+    func release() { lock.withLock { holding = false } }
 
     func play(_ samples: [Float], sampleRate: Double) async {
         lock.withLock {
@@ -692,9 +818,17 @@ private final class CountingSpeaker: AudioOutput, @unchecked Sendable {
     }
 
     func waitUntilDone() async -> PlaybackEnd {
-        while !Task.isCancelled, lock.withLock({ busyUntil > .now }) { try? await Task.sleep(for: .milliseconds(5)) }
+        while !Task.isCancelled, lock.withLock({ holding || busyUntil > .now }) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
         return .confirmed
     }
 
-    func stopImmediately() async { lock.withLock { busyUntil = .now } }
+    func stopImmediately() async {
+        lock.withLock {
+            stopsCount += 1
+            holding = false
+            busyUntil = .now
+        }
+    }
 }

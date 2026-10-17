@@ -1,6 +1,7 @@
 # OpenMaé link protocol
 
-How the iPhone app talks to OpenMaé on the Mac, directly on the local network or through an OpenMaé relay.
+How the iPhone and iPad app talks to OpenMaé on the Mac, directly on the local network or through an OpenMaé relay
+(below, "iPhone" stands for either).
 Everything the user says or hears, and every text, is encrypted end to end between the iPhone and the Mac: a
 relay only passes opaque bytes along.
 
@@ -163,8 +164,13 @@ paired), `busy`.
 (iPhone → Mac) `{"name":"<iPhone name>","model":"<model identifier>"}`. The iPhone checks that the Mac's static key
 is the one of the pairing link. The Mac then sends a transport message `{"type":"paired"}` and closes.
 
-**Session payloads**: first message `{"v":1}`; second message `{"name":"<Mac name>","relay":"<relay URL>"}`. The
-Mac accepts only iPhone static keys of its paired list.
+**Session payloads**: first message `{"v":1}`; second message
+`{"name":"<Mac name>","relay":"<relay URL>","features":["device"]}`. The Mac accepts only iPhone static keys of its
+paired list.
+
+`features` lists the optional messages the Mac understands (today `device`, below); it is left out by Macs from
+before it. The iPhone sends an optional message only to a Mac that lists it: a Mac from before closed the session on a
+message of a type it did not know. From this version on, both sides skip such a message and keep the session.
 
 `relay` is the relay the Mac is registered with, left out when it has none (reachable at home only). The iPhone
 keeps it for its next connections: it follows the relay its Mac chose, whatever the pairing link said.
@@ -180,6 +186,7 @@ Each transport message is one JSON object with a `"type"`:
 | `audio` | both | audio control, see below |
 | `removed` | Mac → iPhone | this iPhone was removed from the Mac's settings; the session closes |
 | `mac` | Mac → iPhone | `{"type":"mac","name":…,"relay":…}`: the Mac's name or relay changed (as in the handshake) |
+| `device` | iPad → Mac | `{"type":"device","station":true}` or `false`: whether the iPad is a home station now (station mode on, plugged in, app in the foreground). Sent when the session opens and on every change, only to a Mac whose `features` list it. |
 | `ping`, `pong` | both | keep-alive, every 25 seconds without other traffic |
 
 Audio control (`{"type":"audio","op":…}`):
@@ -190,6 +197,9 @@ Audio control (`{"type":"audio","op":…}`):
 - Mac → iPhone `end` (`stream`, `frames`): the voice stream `stream` has `frames` frames in all.
 - Mac → iPhone `stop` (`stream`): stop playing the voice stream `stream` at once (the user interrupted).
 - iPhone → Mac `finished` (`stream`): everything of that stream has been played, or stopped.
+
+A home station gets the voice of what Maé says on her own (a timer that rings) while it does not have the conversation:
+the same voice streams, `end`, `stop` and `finished`, without `start`. It plays a voice stream whenever one comes.
 
 ### Datagrams
 

@@ -1,8 +1,9 @@
 import SwiftUI
 import VoiceCore
 
-/// OpenMaé on the iPhone: the microphone, the speaker and the screen of OpenMaé on the Mac, which does the work.
-/// Paired once with a QR code; then directly on the home Wi-Fi, through the relay elsewhere, encrypted end to end.
+/// OpenMaé on the iPhone and the iPad: the microphone, the speaker and the screen of OpenMaé on the Mac, which does
+/// the work. Paired once with a QR code; then directly on the home Wi-Fi, through the relay elsewhere, encrypted end to
+/// end. An iPad can also be a home station (`PhoneModel.stationMode`).
 @main
 struct PhoneApp: App {
     @State private var model = PhoneModel()
@@ -14,7 +15,7 @@ struct PhoneApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            content
                 // The design has no dark theme yet.
                 .preferredColorScheme(.light)
                 .followsWindowVisibility()
@@ -36,6 +37,21 @@ struct PhoneApp: App {
             }
         }
     }
+
+    @ViewBuilder private var content: some View {
+        #if DEBUG
+        if let screen = PhoneScreenshots.requested {
+            // Still pictures: the settings drawn on their own (a full-screen cover would not turn with the frame).
+            ScreenshotFrame {
+                if screen == "settings" { SettingsScreen(model: model) } else { RootView(model: model) }
+            }
+        } else {
+            RootView(model: model)
+        }
+        #else
+        RootView(model: model)
+        #endif
+    }
 }
 
 /// Pairing until there is a Mac; then the conversation, or why it cannot happen; the settings over them.
@@ -54,6 +70,8 @@ struct RootView: View {
                 AlertScreen(model: model, kind: .setup)
             } else if model.phase == .problem {
                 AlertScreen(model: model, kind: .problem)
+            } else if model.isStation, !model.isConversationOpen {
+                StationScreen(model: model)
             } else {
                 ConversationScreen(model: model)
             }
@@ -74,5 +92,6 @@ struct RootView: View {
 
     private var screenKey: String {
         "\(model.mac == nil)-\(isPairing)-\(model.microphoneDenied)-\(String(describing: model.link))-\(model.phase)"
+            + "-\(model.isStation && !model.isConversationOpen)"
     }
 }

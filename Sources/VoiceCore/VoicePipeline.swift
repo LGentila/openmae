@@ -207,6 +207,10 @@ public actor VoicePipeline {
     private var announcements: [Announcement] = []
     /// The voice's output can be out of reach for a moment (see `setOutputReachable`): announcements wait meanwhile.
     private var outputReachable = true
+    /// Where announcements are spoken when it is not where the conversation is: a home station's speaker (see
+    /// `announceThrough`), and whether it hears them now.
+    private var announcementOutput: (any AudioOutput)?
+    private var announcementOutputReachable = true
 
     private final class Turn: @unchecked Sendable {
         // Mutated only from the pipeline actor.
@@ -243,6 +247,10 @@ public actor VoicePipeline {
         /// The voice's output went out of reach while the announcement was said (`setOutputReachable`): stopped, it is
         /// said again.
         var outputLost = false
+        /// Where the turn's voice goes: the pipeline's output, or the announcements' own (`announceThrough`).
+        var output: any AudioOutput
+        /// Spoken through the announcements' own output: somewhere else than where the microphone is.
+        var elsewhere = false
         /// A turn typed instead of spoken: no transcription.
         var typedText: String?
         /// Wake-word mode: the request, already read by the check of the whole sentence: no transcription.
@@ -253,7 +261,10 @@ public actor VoicePipeline {
         var wakeDecision: WakeDecision?
         /// The sentence began while Maé was awake: its transcript goes to the wake log.
         var whileAwake = false
-        init(id: Int) { self.id = id }
+        init(id: Int, output: any AudioOutput) {
+            self.id = id
+            self.output = output
+        }
     }
 
     public init(
@@ -351,7 +362,24 @@ public actor VoicePipeline {
         DebugLog.log(reachable ? "voice output: reachable again" : "voice output: out of reach, announcements wait")
         if reachable {
             startAnnouncementIfIdle()
-        } else if let turn, turn.isAnnouncement {
+        } else if let turn, turn.isAnnouncement, !turn.elsewhere {
+            turn.outputLost = true
+        }
+    }
+
+    /// Where announcements are spoken: `output` (a home station's speaker, through the link), or nil for the
+    /// pipeline's own output, where the conversation is. The microphone does not change: while an announcement plays
+    /// elsewhere, what it hears does not interrupt it (the station may be in the same room, and Maé's voice would be
+    /// taken for the user's); the talk key and `interrupt` still do. `reachable` false: that output is gone for a
+    /// moment, the announcements wait for it. An announcement already playing goes on where it started; stopped while
+    /// its station is out of reach, it is said again, as one where the conversation is (`setOutputReachable`).
+    public func announceThrough(_ output: (any AudioOutput)?, reachable: Bool = true) {
+        let wasReachable = announcementOutput == nil || announcementOutputReachable
+        announcementOutput = output
+        announcementOutputReachable = output == nil || reachable
+        if announcementOutputReachable {
+            startAnnouncementIfIdle()
+        } else if wasReachable, let turn, turn.isAnnouncement, turn.elsewhere {
             turn.outputLost = true
         }
     }
@@ -438,7 +466,12 @@ public actor VoicePipeline {
         if event == .speechStarted {
             let chunks = Int(config.turn.bargeInMinSpeechMs / config.turn.chunkMs)
             let level = recentLevels.suffix(chunks).reduce(0, +) / Float(min(chunks, recentLevels.count))
-            if assistantSpeaking, let floor = config.bargeInMinLevelDB, level < floor {
+            if turn?.elsewhere == true {
+                // An announcement plays on a home station, maybe in this very room: its voice is not the user's.
+                DebugLog.log("ignored while an announcement plays on the home station (level \(Int(level)) dB)")
+                turnDetector.reset()
+                event = nil
+            } else if assistantSpeaking, let floor = config.bargeInMinLevelDB, level < floor {
                 DebugLog.log("ignored while the assistant talks: probably its echo (level \(Int(level)) dB)")
                 turnDetector.reset()
                 event = nil
@@ -545,7 +578,7 @@ public actor VoicePipeline {
     public func submit(text: String) async {
         if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
         nextTurnID += 1
-        let turn = Turn(id: nextTurnID)
+        let turn = Turn(id: nextTurnID, output: output)
         turn.typedText = text
         turn.speechEnd = clock.now
         self.turn = turn
@@ -784,7 +817,7 @@ public actor VoicePipeline {
     private func startTurn(committed: Bool, request: String? = nil) {
         guard utteranceOpen, !utterance.isEmpty else { return }
         nextTurnID += 1
-        let turn = Turn(id: nextTurnID)
+        let turn = Turn(id: nextTurnID, output: output)
         turn.speechEnd = lastSpeechEnd
         turn.whileAwake = utteranceWhileAwake
         turn.request = request
@@ -961,7 +994,7 @@ public actor VoicePipeline {
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
-            await output.waitUntilDone()
+            await turn.output.waitUntilDone()
             try Task.checkCancellation()
 
             // 4. Done: record the exchange and the measurements.
@@ -1018,7 +1051,7 @@ public actor VoicePipeline {
         let sampleRate = synthesizer.outputSampleRate
         let silenceThreshold = config.leadingSilenceThresholdDB
         let maxPauseSamples = config.maxVoicePauseMs.map { Int($0 / 1000 * sampleRate) }
-        turn.player = Task { [output, clock] in
+        turn.player = Task { [output = turn.output, clock] in
             var voiceHeard = false
             var playing = false
             var quietSamples = 0
@@ -1117,10 +1150,14 @@ public actor VoicePipeline {
     private func startAnnouncementIfIdle() {
         // A sentence still being checked for the wake phrase does not hold it back.
         let userSpeaks = utteranceAddressed && (utteranceOpen || turnDetector.isInUtterance)
-        guard turn == nil, !userSpeaks, !talkKeyPressed, outputReachable, !announcements.isEmpty else { return }
+        // On a home station when there is one (`announceThrough`), otherwise where the conversation is; each waits while
+        // its output is out of reach.
+        let reachable = announcementOutput == nil ? outputReachable : announcementOutputReachable
+        guard turn == nil, !userSpeaks, !talkKeyPressed, reachable, !announcements.isEmpty else { return }
         let announcement = announcements.removeFirst()
         nextTurnID += 1
-        let turn = Turn(id: nextTurnID)
+        let turn = Turn(id: nextTurnID, output: announcementOutput ?? output)
+        turn.elsewhere = announcementOutput != nil
         turn.announcement = announcement
         turn.language = announcement.language
         turn.userMessage = ChatMessage(.user, announcement.note)
@@ -1137,18 +1174,19 @@ public actor VoicePipeline {
                 await stream.cancel()  // stopped while the voice got ready: it has nothing to stop yet
                 return
             }
+            if turn.elsewhere { DebugLog.log("announcement: on the home station") }
             if announcement.chime {
                 let sampleRate = synthesizer.outputSampleRate
                 let chime = Chime.samples(sampleRate: sampleRate)
                 audioStarted(turn, at: clock.now, chime: .seconds(Double(chime.count) / sampleRate))
-                await output.play(chime, sampleRate: sampleRate)
+                await turn.output.play(chime, sampleRate: sampleRate)
             }
             startPlayer(turn, stream)
             say(announcement.text, to: turn)
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
-            let end = await output.waitUntilDone()
+            let end = await turn.output.waitUntilDone()
             try Task.checkCancellation()
             guard self.turn === turn, !turn.interrupted else { return }  // stopped meanwhile: up to whoever stopped it
             if end == .unconfirmed {
@@ -1285,9 +1323,9 @@ public actor VoicePipeline {
         // Marked, it says, records and reports nothing more; the exchange is recorded once, below.
         turn.interrupted = true
         turn.player?.cancel()
-        await output.stopImmediately()  // silence at once…
+        await turn.output.stopImmediately()  // silence at once…
         await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
-        await output.stopImmediately()
+        await turn.output.stopImmediately()
         await cancelTurn(stopAudio: false)
         if let announcement = turn.announcement {
             if turn.outputLost, !announcement.retried {
@@ -1320,7 +1358,7 @@ public actor VoicePipeline {
         DebugLog.log("turn \(turn.id): cancelled")
         if stopAudio, turn.audioStarted {
             await turn.player?.value  // no frame can reach the speakers after the stop
-            await output.stopImmediately()
+            await turn.output.stopImmediately()
         }
     }
 

@@ -151,22 +151,12 @@
         }
       }
     },
-    "Add an iPhone": {
+    "Add a device": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ajouter un iPhone"
-          }
-        }
-      }
-    },
-    "Added on %@": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouté le %@"
+            "value": "Ajouter un appareil"
           }
         }
       }
@@ -951,6 +941,16 @@
         }
       }
     },
+    "Home station, connected": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Station de la maison, connectée"
+          }
+        }
+      }
+    },
     "How to talk": {
       "localizations": {
         "fr": {
@@ -1321,6 +1321,16 @@
         }
       }
     },
+    "Maé is on your iPad": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé est sur ton iPad"
+          }
+        }
+      }
+    },
     "Maé is on your iPhone": {
       "localizations": {
         "fr": {
@@ -1531,12 +1541,12 @@
         }
       }
     },
-    "No iPhone": {
+    "No device": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucun iPhone"
+            "value": "Aucun appareil"
           }
         }
       }
@@ -1671,12 +1681,12 @@
         }
       }
     },
-    "Open OpenMaé on your iPhone and scan this code.": {
+    "Open OpenMaé on your iPhone or iPad and scan this code.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvre OpenMaé sur ton iPhone et scanne ce code."
+            "value": "Ouvre OpenMaé sur ton iPhone ou ton iPad et scanne ce code."
           }
         }
       }
@@ -2281,6 +2291,16 @@
         }
       }
     },
+    "Station": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Station"
+          }
+        }
+      }
+    },
     "Stop": {
       "localizations": {
         "fr": {
@@ -2341,12 +2361,12 @@
         }
       }
     },
-    "Talk to Maé from your iPhone": {
+    "Talk to Maé from your iPhone or iPad": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Parle à Maé depuis ton iPhone"
+            "value": "Parle à Maé depuis ton iPhone ou ton iPad"
           }
         }
       }
@@ -2421,12 +2441,22 @@
         }
       }
     },
-    "The code stays between this Mac and your iPhone: the relay cannot read it.": {
+    "The code stays between this Mac and your device: the relay cannot read it.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le code reste entre ce Mac et ton iPhone : le relais ne peut pas le lire."
+            "value": "Le code reste entre ce Mac et ton appareil : le relais ne peut pas le lire."
+          }
+        }
+      }
+    },
+    "The conversation goes on on your iPad until you take over.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversation continue sur ton iPad tant que tu ne reprends pas la main."
           }
         }
       }
@@ -2531,12 +2561,12 @@
         }
       }
     },
-    "The relay does not answer. Your iPhone can reach you at home only. I keep trying.": {
+    "The relay does not answer. Your devices can reach you at home only. I keep trying.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le relais ne répond pas. Ton iPhone ne peut te joindre qu’à la maison. Je réessaie toute seule."
+            "value": "Le relais ne répond pas. Tes appareils ne peuvent te joindre qu’à la maison. Je réessaie toute seule."
           }
         }
       }
@@ -2801,12 +2831,12 @@
         }
       }
     },
-    "Waiting for your iPhone…": {
+    "Waiting for your device…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "En attente de ton iPhone…"
+            "value": "En attente de ton appareil…"
           }
         }
       }
@@ -2891,12 +2921,12 @@
         }
       }
     },
-    "Without a relay, your iPhone reaches you at home only, on the same Wi-Fi as this Mac.": {
+    "Without a relay, your devices reach you at home only, on the same Wi-Fi as this Mac.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sans relais, ton iPhone ne te joint qu’à la maison, sur le même Wi-Fi que ce Mac."
+            "value": "Sans relais, tes appareils ne te joignent qu’à la maison, sur le même Wi-Fi que ce Mac."
           }
         }
       }
@@ -2917,6 +2947,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Toi"
+          }
+        }
+      }
+    },
+    "You can now talk to Maé from your iPad, at home and away. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPad, à la maison comme ailleurs. Garde ce Mac allumé et branché pour qu’il reste joignable."
+          }
+        }
+      }
+    },
+    "You can now talk to Maé from your iPad, at home. Keep this Mac on and plugged in so that it stays reachable.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu peux maintenant parler à Maé depuis ton iPad, à la maison. Garde ce Mac allumé et branché pour qu’il reste joignable."
           }
         }
       }
@@ -3021,22 +3071,22 @@
         }
       }
     },
-    "Your iPhone cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.": {
+    "Your iPhone or iPad cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ton iPhone ne peut pas réveiller un Mac en veille. Capot fermé et sans écran externe, le Mac s’endort quand même."
+            "value": "Ton iPhone ou ton iPad ne peut pas réveiller un Mac en veille. Capot fermé et sans écran externe, le Mac s’endort quand même."
           }
         }
       }
     },
-    "Your iPhone is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.": {
+    "Your iPhone or iPad is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ton iPhone sert de micro et de haut-parleur. Le travail reste sur ce Mac, avec ses modèles. Tout est chiffré de bout en bout."
+            "value": "Ton iPhone ou ton iPad sert de micro et de haut-parleur. Le travail reste sur ce Mac, avec ses modèles. Tout est chiffré de bout en bout."
           }
         }
       }
@@ -3061,12 +3111,22 @@
         }
       }
     },
-    "iPhone": {
+    "iPad added": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "iPhone"
+            "value": "iPad ajouté"
+          }
+        }
+      }
+    },
+    "iPad · added on %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPad · ajouté le %@"
           }
         }
       }
@@ -3077,6 +3137,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "iPhone ajouté"
+          }
+        }
+      }
+    },
+    "iPhone and iPad": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone et iPad"
+          }
+        }
+      }
+    },
+    "iPhone · added on %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone · ajouté le %@"
           }
         }
       }

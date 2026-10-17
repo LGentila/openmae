@@ -127,7 +127,7 @@ struct MessageTests {
             .audio(.end(stream: 4, frames: 120)), .audio(.stopPlayback(stream: 4)), .audio(.finished(stream: 4)),
             .ping, .pong, .paired, .removed,
             .mac(HandshakePayload.Mac(name: "Mac de Camille", relay: URL(string: "https://relay.example.com"))),
-            .mac(HandshakePayload.Mac(name: "Mac de Camille")),
+            .mac(HandshakePayload.Mac(name: "Mac de Camille")), .device(station: true), .device(station: false),
         ]
         for message in messages {
             let decoded = try LinkMessage(decoding: message.encoded)

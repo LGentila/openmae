@@ -112,10 +112,18 @@ final class MemoryEnd: LinkTransport, @unchecked Sendable {
 
 // MARK: - Engine stages without models
 
-/// Nobody speaks.
-struct Silence: SpeechDetector {
+/// Nobody speaks, unless told (`hearsSpeech`): then every chunk is speech.
+final class Silence: SpeechDetector, @unchecked Sendable {
     let chunkSize = 512
-    func speechProbability(_ chunk: [Float]) async throws -> Float { 0 }
+    private let lock = NSLock()
+    private var speech = false
+
+    var hearsSpeech: Bool {
+        get { lock.withLock { speech } }
+        set { lock.withLock { speech = newValue } }
+    }
+
+    func speechProbability(_ chunk: [Float]) async throws -> Float { hearsSpeech ? 1 : 0 }
     func reset() async {}
 }
 

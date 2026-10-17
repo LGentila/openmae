@@ -10,11 +10,14 @@ import VoiceCore
 ///   microphone is sent all the time the conversation is open (silence when muted).
 /// - Voice: Maé's frames go through the jitter buffer (OpenMaeLink.VoiceJitterBuffer) and are played at 24 kHz.
 /// - Keeps running with the screen locked or in another app (background audio).
+/// - A home station without the conversation plays the voice only (`startPlayback`): what Maé says on her own.
 final class PhoneAudio: @unchecked Sendable {
     /// The Mac took the conversation back.
     var onReleased: (@Sendable () -> Void)?
     /// Sound levels (0…1) of the microphone and of the voice, about 20 times a second.
     var onLevels: (@Sendable (Float, Float) -> Void)?
+    /// A voice stream starts playing here (true), or is over (false).
+    var onPlaying: (@Sendable (Bool) -> Void)?
 
     private let link: PhoneLink
     private let lock = NSLock()
@@ -35,6 +38,8 @@ final class PhoneAudio: @unchecked Sendable {
     private var muted = false
     /// Between `start` and `stop`: the engine is started again after the system stopped it.
     private var running = false
+    /// The speaker only, without the microphone (`startPlayback`).
+    private var playbackOnly = false
     private var pendingResume: DispatchWorkItem?
     /// For the debug log (VOICE_DEBUG=1): what the microphone gave and what was sent.
     private var captured = (buffers: 0, packets: 0, peak: Float(0))
@@ -64,9 +69,42 @@ final class PhoneAudio: @unchecked Sendable {
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setPreferredIOBufferDuration(0.01)
         try session.setActive(true)
+        lock.withLock { playbackOnly = false }
         try startEngine()
         lock.withLock { running = true }
         if observers.isEmpty { observe(session) }
+    }
+
+    /// A home station without the conversation: Maé's voice only, no microphone, mixed with the other apps' sound.
+    func startPlayback() throws {
+        guard !lock.withLock({ running && playbackOnly }) else { return }
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+        try session.setActive(true)
+        lock.withLock { playbackOnly = true }
+        try startPlayer()
+        lock.withLock { running = true }
+        if observers.isEmpty { observe(session) }
+    }
+
+    /// The engine with the player only.
+    private func startPlayer() throws {
+        stopEngine()
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: voiceFormat)
+        let decoder = try OpusDecoder(sampleRate: LinkAudio.voiceRate)
+        engine.prepare()
+        try engine.start()
+        player.play()
+        lock.withLock {
+            self.engine = engine
+            self.player = player
+            self.encoder = nil
+            self.decoder = decoder
+        }
+        DebugLog.log("audio: the station's speaker is ready")
     }
 
     private func startEngine() throws {
@@ -126,6 +164,7 @@ final class PhoneAudio: @unchecked Sendable {
     func stop() {
         lock.withLock {
             running = false
+            playbackOnly = false
             pendingResume?.cancel()
             pendingResume = nil
         }
@@ -187,11 +226,15 @@ final class PhoneAudio: @unchecked Sendable {
     }
 
     private func resume(attempt: Int) {
-        let (running, engine, player) = lock.withLock { (self.running, self.engine, self.player) }
+        let (running, engine, player, playbackOnly) = lock.withLock {
+            (self.running, self.engine, self.player, self.playbackOnly)
+        }
         guard running else { return }
         try? AVAudioSession.sharedInstance().setActive(true)
         do {
-            if let engine, let player {
+            if playbackOnly {
+                try startPlayer()
+            } else if let engine, let player {
                 player.stop()  // its buffers were dropped with the engine's stop
                 try tapAndStart(engine, player: player)
                 newMicrophoneStream()
@@ -245,13 +288,16 @@ final class PhoneAudio: @unchecked Sendable {
     private func received(_ input: VoiceInput) {
         switch input {
         case .packet(let packet):
-            let outputs: [VoiceJitterBuffer.Output] = lock.withLock {
+            let (outputs, starts): ([VoiceJitterBuffer.Output], Bool) = lock.withLock {
+                var starts = false
                 if packet.stream != playingStream, jitter.stream.map({ packet.stream > $0 }) ?? true {
                     playingStream = packet.stream
                     decoder?.reset()
+                    starts = true
                 }
-                return jitter.insert(packet, scheduled: scheduled, now: now)
+                return (jitter.insert(packet, scheduled: scheduled, now: now), starts)
             }
+            if starts { onPlaying?(true) }
             schedule(outputs)
         case .end(let stream, let frames):
             schedule(lock.withLock { jitter.end(stream: stream, frames: frames, scheduled: scheduled, now: now) })
@@ -320,7 +366,10 @@ final class PhoneAudio: @unchecked Sendable {
             reportedFinished = stream
             return stream
         }
-        if let stream { link.finished(stream: stream) }
+        if let stream {
+            link.finished(stream: stream)
+            onPlaying?(false)
+        }
     }
 
     // MARK: - Levels

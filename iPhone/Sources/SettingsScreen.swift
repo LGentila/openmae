@@ -2,7 +2,8 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// The iPhone's settings: its Mac, how to talk, when a conversation ends on its own, and the relay (chosen on the Mac).
+/// The iPhone's (and iPad's) settings: its Mac, how to talk, when a conversation ends on its own, station mode on an
+/// iPad, and the relay (chosen on the Mac).
 struct SettingsScreen: View {
     @Bindable var model: PhoneModel
     @State private var confirmForget = false
@@ -29,6 +30,7 @@ struct SettingsScreen: View {
                     VStack(alignment: .leading, spacing: 20) {
                         if let mac = model.mac { macSection(mac) }
                         conversationSection
+                        if model.isPad { stationSection }
                         if let mac = model.mac { relaySection(mac) }
                         Text("OpenMaé \(Self.version)")
                             .textStyle(.phoneVersion)
@@ -36,6 +38,9 @@ struct SettingsScreen: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 12)
                     }
+                    // On an iPad, a column of the iPhone's width or a bit more, in the middle.
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
                     .padding(EdgeInsets(top: 8, leading: 20, bottom: 46, trailing: 20))
                 }
             }
@@ -94,8 +99,15 @@ struct SettingsScreen: View {
 
     private var conversationSection: some View {
         SettingsSection(title: "Conversation") {
-            TalkModePicker(selection: $model.talkMode)
-                .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+            VStack(alignment: .leading, spacing: 10) {
+                TalkModePicker(selection: $model.talkMode)
+                talkModeHelp
+                    .textStyle(.phoneRowDetail)
+                    .foregroundStyle(Palette.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
             Hairline()
             Menu {
                 Picker(selection: $model.autoEndMinutes) {
@@ -133,6 +145,43 @@ struct SettingsScreen: View {
 
     private func autoEndText(_ minutes: Int) -> Text {
         minutes == 0 ? Text("Never") : Text("\(minutes) min")
+    }
+
+    private var talkModeHelp: Text {
+        switch model.talkMode {
+        case .handsFree:
+            model.stationMode ? Text("At the station, Maé hears everything in the room: she also answers the TV.")
+                : Text("Maé hears you whenever you speak.")
+        case .hold: Text("Keep your finger on the button while you talk.")
+        case .tap: Text("Tap the orb to talk, and again when you are done.")
+        }
+    }
+
+    /// iPad: a home station while plugged in.
+    private var stationSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSection(title: "Station") {
+                Toggle(isOn: $model.stationMode) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Station mode")
+                            .textStyle(.phoneRowTitle)
+                            .foregroundStyle(Palette.ink)
+                        Text("When plugged in, this iPad stays on and linked to your Mac")
+                            .textStyle(.phoneRowDetail)
+                            .foregroundStyle(Palette.inkMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(SwitchStyle())
+                .padding(.horizontal, 16)
+                .frame(minHeight: 72)
+            }
+            Text("Maé’s announcements, like a timer that rings, are spoken here while it is connected. A minute after you talk, your Mac hears you again.")
+                .textStyle(.phoneSmall)
+                .foregroundStyle(Palette.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(EdgeInsets(top: 8, leading: 6, bottom: 0, trailing: 6))
+        }
     }
 
     private func relaySection(_ mac: PairedMac) -> some View {
@@ -210,7 +259,7 @@ private struct RowDisc: View {
     }
 }
 
-/// "Hands-free" or "Hold": two big segments, the chosen one ink on cream.
+/// "Hands-free", "Hold" or "Tap": three big segments, the chosen one ink on cream.
 private struct TalkModePicker: View {
     @Binding var selection: PhoneModel.TalkMode
 
@@ -218,6 +267,7 @@ private struct TalkModePicker: View {
         HStack(spacing: 4) {
             segment(.handsFree, Text("Hands-free"))
             segment(.hold, Text("Hold down"))
+            segment(.tap, Text("Tap"))
         }
         .padding(4)
         .background(StatePalette(.listening).surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))

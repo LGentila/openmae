@@ -38,13 +38,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The camera reads the code shown on your Mac, once, to pair this iPhone."
+            "value" : "The camera reads the code shown on your Mac, once, to pair this device."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L’appareil photo lit le code affiché sur ton Mac, une fois, pour associer cet iPhone."
+            "value" : "L’appareil photo lit le code affiché sur ton Mac, une fois, pour associer cet appareil."
           }
         }
       }

@@ -23,6 +23,13 @@ public struct SessionKeys: Sendable {
     mutating func open(_ frame: Data) throws -> LinkMessage {
         try LinkMessage(decoding: try receive.decrypt(frame))
     }
+
+    /// A frame of the session: nil when it does not decrypt (the channel is then broken); otherwise the message, or
+    /// the decoding's failure for a message of a kind this version does not know (sent by a newer peer).
+    mutating func read(_ frame: Data) -> Result<LinkMessage, Error>? {
+        guard let plaintext = try? receive.decrypt(frame) else { return nil }
+        return Result { try LinkMessage(decoding: plaintext) }
+    }
 }
 
 /// Why a handshake did not end with an open session.

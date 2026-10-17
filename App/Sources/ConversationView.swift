@@ -24,7 +24,7 @@ struct ConversationView: View {
         }
         .overlay(alignment: .top) {
             if let hand = phone?.hand, !isLoading {
-                OnPhoneBanner(path: hand.path)
+                OnPhoneBanner(path: hand.path, kind: hand.device.kind)
                     .offset(y: 4)
                     .transition(.opacity.combined(with: .offset(y: -6)))
             }
@@ -103,9 +103,15 @@ private struct ConversationControls: View {
                     VStack(spacing: 12) {
                         Button { phone?.takeBack() } label: { Text("Take over here") }
                             .buttonStyle(PrimaryButtonStyle(icon: .laptop, disc: glow))
-                        Text("The conversation goes on on your iPhone until you take over.")
-                            .textStyle(.note)
-                            .foregroundStyle(Palette.inkMuted)
+                        Group {
+                            if phone?.hand?.device.kind == .iPad {
+                                Text("The conversation goes on on your iPad until you take over.")
+                            } else {
+                                Text("The conversation goes on on your iPhone until you take over.")
+                            }
+                        }
+                        .textStyle(.note)
+                        .foregroundStyle(Palette.inkMuted)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 case .talk(let held):
@@ -164,15 +170,21 @@ private struct HoldToTalk: View {
     }
 }
 
-/// "Maé is on your iPhone · At home": shown while an iPhone has the conversation.
+/// "Maé is on your iPhone · At home" (or iPad): shown while an iPhone or an iPad has the conversation.
 private struct OnPhoneBanner: View {
     let path: LinkPath
+    let kind: DeviceKind
 
     var body: some View {
         HStack(spacing: 10) {
-            IconView(icon: .phone, size: 20)
-            Text("Maé is on your iPhone")
-                .textStyle(.onPhoneBanner)
+            IconView(icon: kind.icon, size: 20)
+            Group {
+                switch kind {
+                case .iPhone: Text("Maé is on your iPhone")
+                case .iPad: Text("Maé is on your iPad")
+                }
+            }
+            .textStyle(.onPhoneBanner)
             Rectangle()
                 .fill(Palette.lineStrong)
                 .frame(width: 1, height: 16)

@@ -4,7 +4,8 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// Still pictures of Settings › iPhone and of the window while an iPhone has the conversation (see `Snapshots`).
+/// Still pictures of Settings › iPhone and iPad and of the window while an iPhone or an iPad has the conversation (see
+/// `Snapshots`).
 extension Snapshots {
     @MainActor
     static func renderPhone(to folder: URL) async {
@@ -15,6 +16,8 @@ extension Snapshots {
         let added = ISO8601DateFormatter().date(from: "2026-10-15T10:00:00Z") ?? Date()
         let device = PairedDevice(publicKey: Data(repeating: 7, count: 32), name: "iPhone", model: "iPhone17,3",
                                   added: added)
+        let iPad = PairedDevice(publicKey: Data(repeating: 8, count: 32), name: "iPad", model: "iPad14,1",
+                                added: added)
         let link = PairingLink(macID: String(repeating: "a", count: 26), macKey: Data(repeating: 1, count: 32),
                                relay: RelayClient.official, code: Data(repeating: 2, count: 32),
                                macName: "MacBook Pro")
@@ -40,6 +43,13 @@ extension Snapshots {
         onPhone.hand = LinkStatus.Hand(device: device, path: .relay)
         var onPhoneHome = everywhere
         onPhoneHome.hand = LinkStatus.Hand(device: device, path: .direct)
+        var withStation = everywhere
+        withStation.devices = [device, iPad]
+        withStation.stations = [iPad.id]
+        var onIPad = withStation
+        onIPad.hand = LinkStatus.Hand(device: iPad, path: .direct)
+        var iPadAdded = everywhere
+        iPadAdded.pairing = .added(iPad)
 
         let scenarios: [(name: String, status: LinkStatus, panel: WindowState.Panel?, events: [AssistantEvent],
                          removing: Bool)] = [
@@ -54,6 +64,9 @@ extension Snapshots {
             ("phone-9-remove", everywhere, .phone, ready, true),
             ("phone-10-on-iphone", onPhone, nil, ready, false),
             ("phone-11-on-iphone-speaking", onPhoneHome, nil, speaking, false),
+            ("phone-12-list-with-station", withStation, .phone, ready, false),
+            ("phone-13-on-ipad", onIPad, nil, speaking, false),
+            ("phone-14-ipad-added", iPadAdded, .phone, ready, false),
         ]
         for scenario in scenarios {
             let model = await scriptedModel(scenario.events)

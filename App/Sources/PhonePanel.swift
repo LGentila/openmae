@@ -4,8 +4,9 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// Settings › iPhone: no iPhone yet, the pairing QR code (and its expiry), "iPhone added", the paired iPhones with
-/// how reachable this Mac is, and below them the relay and the sleep settings.
+/// Settings › iPhone and iPad: no device yet, the pairing QR code (and its expiry), "iPhone added" (or "iPad added"),
+/// the paired devices with how reachable this Mac is (and which iPad is a home station now), and below them the relay
+/// and the sleep settings.
 struct PhonePanel: View {
     let phone: PhoneAccess
     /// Back to the settings.
@@ -31,20 +32,20 @@ struct PhonePanel: View {
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: 6) {
-            PanelHeader(title: "iPhone", badge: badge, back: back)
+            PanelHeader(title: "iPhone and iPad", badge: badge, back: back)
             VStack(spacing: 10) {
                 Circle()
                     .fill(Palette.turquoiseSoft)
                     .frame(width: 60, height: 60)
                     .overlay { IconView(icon: .phone, size: 28).foregroundStyle(Palette.ink) }
-                Text("Talk to Maé from your iPhone")
+                Text("Talk to Maé from your iPhone or iPad")
                     .textStyle(.panelHeading)
                     .foregroundStyle(Palette.ink)
-                Text("Your iPhone is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.")
+                Text("Your iPhone or iPad is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.")
                     .textStyle(.panelText)
                     .foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(action: phone.startPairing) { Label { Text("Add an iPhone") } icon: { IconView(icon: .plus, size: 18) } }
+                Button(action: phone.startPairing) { Label { Text("Add a device") } icon: { IconView(icon: .plus, size: 18) } }
                     .buttonStyle(LinkPillStyle())
                     .padding(.top, 4)
             }
@@ -60,7 +61,7 @@ struct PhonePanel: View {
 
     private var devices: some View {
         VStack(alignment: .leading, spacing: 6) {
-            PanelHeader(title: "iPhone", badge: badge, back: back)
+            PanelHeader(title: "iPhone and iPad", badge: badge, back: back)
             if let banner { banner }
             SectionTitle("Devices", isFirst: true)
             PanelBlock(padding: EdgeInsets(top: 2, leading: 16, bottom: 12, trailing: 16)) {
@@ -72,7 +73,7 @@ struct PhonePanel: View {
                     }
                     Hairline()
                 }
-                Button(action: phone.startPairing) { Label { Text("Add an iPhone") } icon: { IconView(icon: .plus, size: 18) } }
+                Button(action: phone.startPairing) { Label { Text("Add a device") } icon: { IconView(icon: .plus, size: 18) } }
                     .buttonStyle(LinkPillStyle())
                     .padding(.top, 9)
             }
@@ -85,14 +86,26 @@ struct PhonePanel: View {
             Circle()
                 .fill(Palette.turquoiseSoft)
                 .frame(width: 44, height: 44)
-                .overlay { IconView(icon: .phone, size: 22).foregroundStyle(Palette.ink) }
+                .overlay { IconView(icon: device.kind.icon, size: 22).foregroundStyle(Palette.ink) }
             VStack(alignment: .leading, spacing: 0) {
-                Text(verbatim: device.displayName)
-                    .textStyle(.rowTitle)
-                    .foregroundStyle(Palette.ink)
-                Text("Added on \(device.added.formatted(date: .abbreviated, time: .omitted))")
-                    .textStyle(.rowDetail)
-                    .foregroundStyle(Palette.inkMuted)
+                HStack(spacing: 8) {
+                    Text(verbatim: device.displayName)
+                        .textStyle(.rowTitle)
+                        .foregroundStyle(Palette.ink)
+                    if phone.status.stations.contains(device.id) {
+                        PanelBadge(text: Text("Station"), tone: .ok)
+                            .accessibilityLabel(Text("Home station, connected"))
+                    }
+                }
+                let added = device.added.formatted(date: .abbreviated, time: .omitted)
+                Group {
+                    switch device.kind {
+                    case .iPhone: Text("iPhone · added on \(added)")
+                    case .iPad: Text("iPad · added on \(added)")
+                    }
+                }
+                .textStyle(.rowDetail)
+                .foregroundStyle(Palette.inkMuted)
             }
             Spacer(minLength: 0)
             Button("Remove…") { phone.removing = device.id }
@@ -132,10 +145,10 @@ struct PhonePanel: View {
     private var banner: Banner? {
         switch phone.reach {
         case .homeOnly:
-            Banner(text: Text("Without a relay, your iPhone reaches you at home only, on the same Wi-Fi as this Mac."),
+            Banner(text: Text("Without a relay, your devices reach you at home only, on the same Wi-Fi as this Mac."),
                    warning: false)
         case .relayUnreachable:
-            Banner(text: Text("The relay does not answer. Your iPhone can reach you at home only. I keep trying."),
+            Banner(text: Text("The relay does not answer. Your devices can reach you at home only. I keep trying."),
                    warning: true)
         default:
             nil
@@ -155,7 +168,7 @@ struct PhonePanel: View {
 
     static func reachText(_ reach: PhoneAccess.Reach) -> Text {
         switch reach {
-        case .noPhone: Text("No iPhone")
+        case .noPhone: Text("No device")
         case .everywhere: Text("Reachable from anywhere")
         case .homeOnly: Text("Reachable at home only")
         case .relayUnreachable: Text("Relay unreachable")
@@ -163,19 +176,24 @@ struct PhonePanel: View {
         }
     }
 
-    // MARK: - iPhone added
+    // MARK: - iPhone or iPad added
 
     private func added(_ device: PairedDevice) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            PanelHeader(title: "Add an iPhone", badge: nil, back: phone.cancelPairing)
+            PanelHeader(title: "Add a device", badge: nil, back: phone.cancelPairing)
             VStack(spacing: 12) {
                 DoneCheck()
-                Text("iPhone added")
-                    .textStyle(.addedTitle)
-                    .foregroundStyle(Palette.ink)
-                    .padding(.top, 4)
+                Group {
+                    switch device.kind {
+                    case .iPhone: Text("iPhone added")
+                    case .iPad: Text("iPad added")
+                    }
+                }
+                .textStyle(.addedTitle)
+                .foregroundStyle(Palette.ink)
+                .padding(.top, 4)
                 HStack(spacing: 8) {
-                    IconView(icon: .phone, size: 16)
+                    IconView(icon: device.kind.icon, size: 16)
                     Text(verbatim: device.displayName)
                         .textStyle(.panelChip)
                 }
@@ -185,10 +203,15 @@ struct PhonePanel: View {
                 .frame(height: 30)
                 .background(Palette.field, in: Capsule())
                 Group {
-                    if phone.status.relayChoice.url == nil {
+                    switch (device.kind, phone.status.relayChoice.url == nil) {
+                    case (.iPhone, true):
                         Text("You can now talk to Maé from your iPhone, at home. Keep this Mac on and plugged in so that it stays reachable.")
-                    } else {
+                    case (.iPhone, false):
                         Text("You can now talk to Maé from your iPhone, at home and away. Keep this Mac on and plugged in so that it stays reachable.")
+                    case (.iPad, true):
+                        Text("You can now talk to Maé from your iPad, at home. Keep this Mac on and plugged in so that it stays reachable.")
+                    case (.iPad, false):
+                        Text("You can now talk to Maé from your iPad, at home and away. Keep this Mac on and plugged in so that it stays reachable.")
                     }
                 }
                 .textStyle(.panelText)
@@ -223,7 +246,7 @@ struct PhonePanel: View {
                 }
                 .toggleStyle(SwitchStyle())
                 .frame(minHeight: 48)
-                HelpText("Your iPhone cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.")
+                HelpText("Your iPhone or iPad cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.")
             }
         }
     }
@@ -322,9 +345,9 @@ private struct PairingCodeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            PanelHeader(title: "Add an iPhone",
+            PanelHeader(title: "Add a device",
                         badge: link == nil ? PanelBadge(text: Text("Code expired"), tone: .warn)
-                            : PanelBadge(text: Text("Waiting for your iPhone…"), tone: .wait,
+                            : PanelBadge(text: Text("Waiting for your device…"), tone: .wait,
                                          short: Text("Waiting…")),
                         back: phone.cancelPairing)
             VStack(spacing: 14) {
@@ -352,7 +375,7 @@ private struct PairingCodeView: View {
                             .foregroundStyle(Palette.onInk)
                             .frame(width: 22, height: 22)
                             .background(Palette.ink, in: Circle())
-                        Text("Open OpenMaé on your iPhone and scan this code.")
+                        Text("Open OpenMaé on your iPhone or iPad and scan this code.")
                             .textStyle(.label)
                             .foregroundStyle(Palette.ink)
                             .fixedSize(horizontal: false, vertical: true)
@@ -364,7 +387,7 @@ private struct PairingCodeView: View {
             .background(Palette.cardStrong, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Radius.section, style: .continuous).strokeBorder(Palette.line))
             HStack(spacing: 12) {
-                Text("The code stays between this Mac and your iPhone: the relay cannot read it.")
+                Text("The code stays between this Mac and your device: the relay cannot read it.")
                     .textStyle(.rowDetail)
                     .foregroundStyle(Palette.inkMuted)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -507,7 +530,7 @@ private struct DoneCheck: View {
 
 // MARK: - Pieces of the panel
 
-/// The "iPhone" row of the settings, with how reachable this Mac is; opens Settings › iPhone.
+/// The "iPhone and iPad" row of the settings, with how reachable this Mac is; opens Settings › iPhone and iPad.
 struct PhoneRow: View {
     let phone: PhoneAccess
     let open: () -> Void
@@ -516,7 +539,7 @@ struct PhoneRow: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                Text(verbatim: "iPhone")
+                Text("iPhone and iPad")
                     .textStyle(.setting)
                     .underline(isHovered, color: Palette.ink.opacity(0.25).color)
                     .foregroundStyle(Palette.ink)
@@ -692,8 +715,17 @@ private struct PillLabelStyle: LabelStyle {
     }
 }
 
+extension DeviceKind {
+    var icon: Icon {
+        switch self {
+        case .iPhone: .phone
+        case .iPad: .tablet
+        }
+    }
+}
+
 extension TextStyle {
-    // The iPhone settings of the Mac.
+    // The iPhone and iPad settings of the Mac.
     static let panelTitle = TextStyle(.display, 20, weight: 600, lineHeight: 26, letterSpacing: -0.01)
     static let panelHeading = TextStyle(.display, 20, weight: 600, lineHeight: 24, letterSpacing: -0.01)
     static let addedTitle = TextStyle(.display, 24, weight: 600, lineHeight: 29, letterSpacing: -0.01)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VoiceCore
 
 // The iPhone's own pieces of the design system: sizes made for the thumb (44-point round buttons, 64-point main
@@ -22,6 +23,11 @@ extension TextStyle {
     static let phoneVersion = TextStyle(.sans, 13, weight: 400, lineHeight: 18)
     static let phoneButton = TextStyle(.sans, 17, weight: 600, lineHeight: 22)
     static let phoneBigButton = TextStyle(.sans, 18, weight: 600, lineHeight: 22)
+
+    // The iPad's: the transcript for close reading, and the station's words, read from across the room.
+    static let padTranscript = TextStyle(.display, 26, weight: 500, lineHeight: 34, letterSpacing: -0.01)
+    static let stationWord = TextStyle(.display, 52, weight: 600, lineHeight: 58, letterSpacing: -0.02)
+    static let stationMac = TextStyle(.sans, 20, weight: 600, lineHeight: 24)
 }
 
 extension PillMetrics {
@@ -34,10 +40,47 @@ extension PillMetrics {
 extension TranscriptLayout {
     static let phone = TranscriptLayout(horizontalPadding: 26, previousLineWidth: 340, wordsWidth: 340,
                                         words: .phoneTranscript, invitationTop: 30)
+
+    /// An iPad's, `width` wide at most.
+    static func pad(width: CGFloat) -> TranscriptLayout {
+        TranscriptLayout(horizontalPadding: 26, previousLineWidth: width, wordsWidth: width, words: .padTranscript,
+                         invitationTop: 30)
+    }
+}
+
+/// Where the white discs behind the orb (or the disc that stands in for it) go: centred on the view marked with
+/// `haloAnchor()`, at the orb's proportions (380 and 600 points around an orb of 342), whatever the window's size.
+struct HaloAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
+extension View {
+    /// The halos are centred on this view.
+    func haloAnchor() -> some View {
+        anchorPreference(key: HaloAnchorKey.self, value: .bounds) { $0 }
+    }
+
+    /// Draws the halos behind this content, around its `haloAnchor()`.
+    func halosBehindAnchor() -> some View {
+        backgroundPreferenceValue(HaloAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor {
+                    let bounds = proxy[anchor]
+                    PhoneHalos(inner: bounds.width * 380 / 342, outer: bounds.width * 600 / 342)
+                        .position(x: bounds.midX, y: bounds.midY)
+                }
+            }
+        }
+    }
 }
 
 /// The screens' background: the state's surface, with the two flat white discs behind the orb (or the disc that
-/// stands in for it), centred `haloY` points from the top of the screen.
+/// stands in for it), centred `haloY` points from the top of the screen of an iPhone (the design's, whose status bar
+/// is 59 points high); on an iPad, whose status bar is lower, they move up with the content. (The conversation and
+/// the station centre them on the orb instead: `halosBehindAnchor`.)
 struct PhoneBackground: View {
     let surface: RGBA
     var haloY: CGFloat = 286
@@ -50,11 +93,20 @@ struct PhoneBackground: View {
                     .animation(Easing.animation(Easing.ease, Timing.surface), value: surface)
                 if halos {
                     PhoneHalos()
-                        .position(x: proxy.size.width / 2, y: haloY)
+                        .position(x: proxy.size.width / 2, y: haloY + Self.padShift)
                 }
             }
         }
         .ignoresSafeArea()
+    }
+
+    @MainActor
+    private static var padShift: CGFloat {
+        guard UIDevice.current.userInterfaceIdiom == .pad,
+              let window = (UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene)?
+                  .windows.first
+        else { return 0 }
+        return window.safeAreaInsets.top - 59
     }
 }
 

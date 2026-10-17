@@ -88,14 +88,17 @@ public final class LinkSession: @unchecked Sendable {
         while true {
             switch await inbox.next() {
             case .frame(let frame):
-                let message: LinkMessage? = lock.withLock {
+                let message: Result<LinkMessage, Error>? = lock.withLock {
                     lastHeard = .now
-                    return try? keys.open(frame)
+                    return keys.read(frame)
                 }
                 switch message {
-                case .ping?: send(.pong)
-                case .pong?: break
-                case let message?: messageSink.yield(message)
+                case .success(.ping)?: send(.pong)
+                case .success(.pong)?: break
+                case .success(let message)?: messageSink.yield(message)
+                case .failure?:
+                    // A newer peer's message of a kind this version does not know: the channel is fine, it is skipped.
+                    DebugLog.log("link: a message of an unknown kind, ignored")
                 case nil:
                     // A frame that does not decrypt breaks the channel (its nonces are now out of step).
                     DebugLog.log("link: undecryptable message, closing the session")

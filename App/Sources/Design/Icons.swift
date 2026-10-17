@@ -6,7 +6,7 @@ enum Icon {
     case microphone, speaker, sparkles, settings, history, performance, download, downloadArrow, downloadBase
     case check, smallCheck, cancel, pause, stop, chevrons
     // The iPhone and its link with the Mac.
-    case home, globe, refresh, compose, back, forward, plus, phone, laptop, lock, camera, moon, info
+    case home, globe, refresh, compose, back, forward, plus, phone, tablet, laptop, lock, camera, moon, info
 
     fileprivate var elements: [IconElement] {
         switch self {
@@ -22,6 +22,8 @@ enum Icon {
         case .forward: [.path("M9.5 5.5 16 12l-6.5 6.5")]
         case .plus: [.path("M12 5v14M5 12h14")]
         case .phone: [.roundedRect(CGRect(x: 7, y: 3, width: 10, height: 18), radius: 2.5), .path("M11 17.5h2")]
+        // The phone's outline, wider: an iPad.
+        case .tablet: [.roundedRect(CGRect(x: 4.5, y: 3, width: 15, height: 18), radius: 2.5), .path("M11 17.5h2")]
         case .laptop: [.roundedRect(CGRect(x: 5, y: 5, width: 14, height: 10), radius: 2), .path("M3 19h18")]
         case .lock:
             [.roundedRect(CGRect(x: 5, y: 10.5, width: 14, height: 9.5), radius: 2.5),

@@ -13,6 +13,11 @@ public protocol RemoteAudioRouting: Sendable {
     func setRemoteAudioReachable(_ reachable: Bool) async
     /// Back to the Mac's microphone and speakers.
     func useLocalAudio() async
+    /// Where what the app says on its own (`VoicePipeline.announce`) is spoken: `output`, a home station's speaker,
+    /// wherever the conversation is; nil, where the conversation is (the device that has it, or the Mac). The
+    /// microphone stays where it is. `reachable` false: the station is gone for a moment and may come back, the
+    /// announcements wait for it.
+    func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async
 }
 
 /// The voice's output, switchable while the pipeline runs (the pipeline keeps one output for its whole life). What

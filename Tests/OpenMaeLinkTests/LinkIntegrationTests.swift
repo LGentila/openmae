@@ -181,6 +181,8 @@ private final class ScriptedEngine: AssistantConnection, RemoteAudioRouting, @un
 
     func setRemoteAudioReachable(_ reachable: Bool) async {}
 
+    func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {}
+
     func useLocalAudio() async {
         lock.withLock {
             _localRoutes += 1

@@ -1,12 +1,12 @@
-# The iPhone app. The Xcode project is generated from this file, never edited by hand:
+# The iPhone and iPad app. The Xcode project is generated from this file, never edited by hand:
 #
 #   xcodegen generate --spec iPhone/project.yml
 #
-# (or simply: zsh scripts/build-iphone.sh, which generates, builds and installs it on a connected iPhone).
+# (or simply: zsh scripts/build-iphone.sh, which generates, builds and installs it on a connected iPhone or iPad).
 #
-# The iPhone is the microphone, the speaker and the screen; the work is done by OpenMaé on the Mac, through the link
-# (OpenMaeLink, relay/PROTOCOL.md). The interface uses the same design files as the Mac app (App/Sources/Design, the
-# live transcript); its own screens are in Sources.
+# The iPhone (or iPad) is the microphone, the speaker and the screen; the work is done by OpenMaé on the Mac, through
+# the link (OpenMaeLink, relay/PROTOCOL.md). The interface uses the same design files as the Mac app
+# (App/Sources/Design, the live transcript); its own screens are in Sources.
 
 name: OpenMaeiPhone
 
@@ -24,7 +24,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     IPHONEOS_DEPLOYMENT_TARGET: "18.0"
-    TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+    TARGETED_DEVICE_FAMILY: "1,2"  # one app for the iPhone and the iPad
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     SWIFT_EMIT_LOC_STRINGS: YES
     # As in the Mac app: builds the English tables too, French being the development region.
@@ -68,11 +68,17 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # On an iPad every way round, and any window size (no UIRequiresFullScreen): Split View, iPadOS windows.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # A conversation goes on with the screen locked or in another app.
         UIBackgroundModes: [audio]
         # Shown from Resources/InfoPlist.xcstrings, in English as in French: change them there too.
         NSMicrophoneUsageDescription: What you say goes encrypted to your Mac, and nowhere else.
-        NSCameraUsageDescription: The camera reads the code shown on your Mac, once, to pair this iPhone.
+        NSCameraUsageDescription: The camera reads the code shown on your Mac, once, to pair this device.
         NSLocalNetworkUsageDescription: OpenMaé finds your Mac on your Wi-Fi to talk to it directly.
         NSBonjourServices: [_openmae._udp]
         # A relay of one's own on the local network may answer in plain HTTP (its traffic is encrypted end to end

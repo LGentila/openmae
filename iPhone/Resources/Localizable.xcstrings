@@ -21,12 +21,12 @@
         }
       }
     },
-    "A code is valid for 5 minutes and serves only once. Show a new one on your Mac: Settings › iPhone, then “Add an iPhone”.": {
+    "A code is valid for 5 minutes and serves only once. Show a new one on your Mac: Settings › iPhone and iPad, then “Add a device”.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Un code vaut 5 minutes et ne sert qu’une fois. Affiches-en un nouveau sur ton Mac : Réglages › iPhone, puis « Ajouter un iPhone »."
+            "value": "Un code vaut 5 minutes et ne sert qu’une fois. Affiches-en un nouveau sur ton Mac : Réglages › iPhone et iPad, puis « Ajouter un appareil »."
           }
         }
       }
@@ -97,6 +97,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "À la maison, sur le même Wi-Fi que ton Mac, la liaison se fait toute seule."
+          }
+        }
+      }
+    },
+    "At the station, Maé hears everything in the room: she also answers the TV.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la station, Maé entend tout ce qui se dit dans la pièce : elle répond aussi à la télé."
           }
         }
       }
@@ -217,6 +227,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ne répond pas pour l’instant"
+          }
+        }
+      }
+    },
+    "Done: you can talk to Maé from your iPad.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "C’est fait : tu peux parler à Maé depuis ton iPad."
           }
         }
       }
@@ -361,6 +381,16 @@
         }
       }
     },
+    "I'm listening…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je t’écoute…"
+          }
+        }
+      }
+    },
     "Idle": {
       "localizations": {
         "fr": {
@@ -397,6 +427,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Garde le doigt appuyé pendant que tu parles."
+          }
+        }
+      }
+    },
+    "Keep your finger on the button while you talk.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garde le doigt sur le bouton pendant que tu parles."
           }
         }
       }
@@ -447,6 +487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Liaison avec ton Mac : reconnexion en cours"
+          }
+        }
+      }
+    },
+    "Linked to %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relié à %@"
           }
         }
       }
@@ -521,12 +571,32 @@
         }
       }
     },
+    "Maé hears you whenever you speak.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé t’entend dès que tu parles."
+          }
+        }
+      }
+    },
     "Maé is back on your Mac. Tap “Talk” to take her back.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Maé est revenue sur ton Mac. Touche « Parler » pour la reprendre."
+          }
+        }
+      }
+    },
+    "Maé is getting ready…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé se prépare…"
           }
         }
       }
@@ -557,6 +627,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé réfléchit…"
+          }
+        }
+      }
+    },
+    "Maé’s announcements, like a timer that rings, are spoken here while it is connected. A minute after you talk, your Mac hears you again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les annonces de Maé, comme un minuteur qui sonne, sont dites ici tant qu’il est connecté. Une minute après que tu as parlé, ton Mac t’entend de nouveau."
           }
         }
       }
@@ -651,12 +731,12 @@
         }
       }
     },
-    "On your Mac, open Settings › iPhone, then “Add an iPhone”.": {
+    "On your Mac, open Settings › iPhone and iPad, then “Add a device”.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sur ton Mac, ouvre Réglages › iPhone, puis « Ajouter un iPhone »."
+            "value": "Sur ton Mac, ouvre Réglages › iPhone et iPad, puis « Ajouter un appareil »."
           }
         }
       }
@@ -871,6 +951,26 @@
         }
       }
     },
+    "Station": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Station"
+          }
+        }
+      }
+    },
+    "Station mode": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode station"
+          }
+        }
+      }
+    },
     "Talk": {
       "localizations": {
         "fr": {
@@ -887,6 +987,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parler à Maé"
+          }
+        }
+      }
+    },
+    "Tap": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toucher"
+          }
+        }
+      }
+    },
+    "Tap the orb to start": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touche l’orbe pour commencer"
+          }
+        }
+      }
+    },
+    "Tap the orb to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touche l’orbe pour parler"
+          }
+        }
+      }
+    },
+    "Tap the orb to talk, and again when you are done.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touche l’orbe pour parler, puis encore une fois quand tu as fini."
+          }
+        }
+      }
+    },
+    "Tap to stop Maé": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touche pour arrêter Maé"
+          }
+        }
+      }
+    },
+    "Tap to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touche pour parler"
           }
         }
       }
@@ -1001,6 +1161,16 @@
         }
       }
     },
+    "When plugged in, this iPad stays on and linked to your Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Branché, cet iPad reste allumé et relié à ton Mac"
+          }
+        }
+      }
+    },
     "You": {
       "localizations": {
         "fr": {
@@ -1041,12 +1211,12 @@
         }
       }
     },
-    "Your Mac no longer knows this iPhone. To add it again, open Settings › iPhone on your Mac, then “Add an iPhone”.": {
+    "Your Mac no longer knows this device. To add it again, open Settings › iPhone and iPad on your Mac, then “Add a device”.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ton Mac ne connaît plus cet iPhone. Pour le rajouter, ouvre Réglages › iPhone sur ton Mac, puis « Ajouter un iPhone »."
+            "value": "Ton Mac ne connaît plus cet appareil. Pour le rajouter, ouvre Réglages › iPhone et iPad sur ton Mac, puis « Ajouter un appareil »."
           }
         }
       }
