@@ -715,23 +715,40 @@ final class GenerationHold: @unchecked Sendable {
 /// layers cannot be rewound, the whole conversation was recomputed each time (+0.3–0.5 s).
 /// The fix renders past answers exactly as they were generated. Model files are not modified.
 ///
+/// After a tool's result, the template opens nothing: the model goes on with its turn, and Gemma 4 26B opened that
+/// answer with the same empty block itself (in all 28 such answers seen), which the history left out too. After each
+/// second pass (a refused call tried again, a result summed up), the cache no longer matched the history from that
+/// answer on, and the answer was computed again from a snapshot: at the next request, and since `catchUp` while nobody
+/// waits (31 and 39 tokens, 0.34 and 0.47 s with Gemma 4 26B on the reference Mac). So the generation prompt after a
+/// tool's result opens the answer with the block too, as for a new turn, and the history renders it there: the model
+/// no longer writes those four tokens one by one, and what it writes after them is what the history renders.
+///
 /// Only the larger models' template opens answers that way: the E2B and E4B ones answer right after
-/// `<|turn>model`, so theirs already matches and is left alone (patching it would add to past answers a block
-/// the model never wrote, and break the cache the same way).
+/// `<|turn>model` and after a tool's result, so theirs already matches and is left alone (patching it would add to
+/// past answers a block the model never wrote, and break the cache the same way).
 enum GemmaTemplateFix {
     private static let anchor = "        {{- '<|turn>' + role + '\\n' }}\n    {%- endif -%}\n"
     private static let emptyThought = "{{- '<|channel>thought\\n<channel|>' -}}"
+    /// Every model message opens with the block: a new turn, and an answer that goes on with it after a tool's result
+    /// (`continue_same_model_turn`).
     private static let insertion = """
-            {%- if role == 'model' and not continue_same_model_turn and not (enable_thinking | default(false)) -%}
+            {%- if role == 'model' and not (enable_thinking | default(false)) -%}
                 \(emptyThought)
             {%- endif -%}
 
+        """
+    /// The generation prompt after a tool's result, which the template leaves empty.
+    private static let afterToolResult = """
+
+        {%- if add_generation_prompt and ns.prev_message_type == 'tool_response' and not (enable_thinking | default(false)) -%}
+            \(emptyThought)
+        {%- endif -%}
         """
 
     /// The patched template, or nil when it needs no fix (not Gemma 4's, or answers open without a thought block).
     static func patched(_ template: String) -> String? {
         guard template.contains(anchor), template.contains(emptyThought), !template.contains(insertion) else { return nil }
-        return template.replacingOccurrences(of: anchor, with: anchor + insertion)
+        return template.replacingOccurrences(of: anchor, with: anchor + insertion) + afterToolResult
     }
 }
 
