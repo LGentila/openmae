@@ -153,3 +153,84 @@ func addrKey(ip netip.Addr) netip.Prefix {
 	}
 	return p
 }
+
+// deliveries bounds the deliveries to each inbound name in home mode: so
+// many over a sliding minute, so many in progress at once. Like attempts,
+// refused deliveries are not recorded.
+type deliveries struct {
+	mu        sync.Mutex
+	perMinute int
+	atOnce    int
+	maxNames  int // bounds memory; past it, new names are refused
+	names     map[string]*deliveryCount
+	lastSweep time.Time
+	now       func() time.Time
+}
+
+type deliveryCount struct {
+	recent []time.Time // deliveries started in the last minute
+	active int         // deliveries in progress
+}
+
+func newDeliveries(perMinute, atOnce, maxNames int, now func() time.Time) *deliveries {
+	if now == nil {
+		now = time.Now
+	}
+	return &deliveries{
+		perMinute: perMinute,
+		atOnce:    atOnce,
+		maxNames:  maxNames,
+		names:     make(map[string]*deliveryCount),
+		lastSweep: now(),
+		now:       now,
+	}
+}
+
+// start records a delivery to name and reports whether it is within the
+// limits. If it is, the caller calls done once the delivery is over.
+func (d *deliveries) start(name string) bool {
+	now := d.now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if now.Sub(d.lastSweep) >= time.Minute {
+		d.sweep(now)
+	}
+	n := d.names[name]
+	if n == nil {
+		if len(d.names) >= d.maxNames {
+			return false
+		}
+		n = &deliveryCount{}
+		d.names[name] = n
+	}
+	cut := 0
+	for cut < len(n.recent) && now.Sub(n.recent[cut]) >= time.Minute {
+		cut++
+	}
+	n.recent = append(n.recent[:0], n.recent[cut:]...)
+	if len(n.recent) >= d.perMinute || n.active >= d.atOnce {
+		return false
+	}
+	n.recent = append(n.recent, now)
+	n.active++
+	return true
+}
+
+func (d *deliveries) done(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if n := d.names[name]; n != nil && n.active > 0 {
+		n.active--
+	}
+}
+
+// sweep forgets names with no delivery in progress and none in the last
+// minute.
+func (d *deliveries) sweep(now time.Time) {
+	for k, n := range d.names {
+		if n.active == 0 && (len(n.recent) == 0 || now.Sub(n.recent[len(n.recent)-1]) >= time.Minute) {
+			delete(d.names, k)
+		}
+	}
+	d.lastSweep = now
+}

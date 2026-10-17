@@ -2,7 +2,9 @@
 // PROTOCOL.md: Macs stay registered on a control connection, iPhones ask for
 // a Mac, and the relay pipes opaque bytes and datagrams between the two over
 // QUIC or WebSocket. It never sees anything in clear: the end-to-end layer
-// encrypts everything before it reaches a tube.
+// encrypts everything before it reaches a tube. The one exception is home
+// mode, off by default, for a relay on the home network: systems there post
+// deliveries to a Mac over plain HTTP, and the relay passes them in clear.
 package relay
 
 import (
@@ -32,6 +34,12 @@ type Limits struct {
 	ControlIdle       time.Duration // a control connection silent for this long is closed
 	TubeIdle          time.Duration // a tube that carries nothing either way for this long is closed
 	Linger            time.Duration // to let a last message reach the peer before closing
+
+	// Home mode only, per inbound name.
+	InboundPerMinute int           // deliveries in the last minute
+	InboundAtOnce    int           // deliveries in progress at once
+	InboundBodyBytes int           // the largest delivery body
+	InboundTimeout   time.Duration // to receive a delivery, then for the Mac to accept its tube, then to answer
 }
 
 func (l Limits) withDefaults() Limits {
@@ -58,6 +66,10 @@ func (l Limits) withDefaults() Limits {
 	// live tube is never silent this long.
 	setD(&l.TubeIdle, 75*time.Second)
 	setD(&l.Linger, 2*time.Second)
+	set(&l.InboundPerMinute, 30)
+	set(&l.InboundAtOnce, 5)
+	set(&l.InboundBodyBytes, 64<<10)
+	setD(&l.InboundTimeout, 10*time.Second)
 	return l
 }
 
@@ -87,8 +99,14 @@ type Config struct {
 	HTTPSAddr string
 	// MaxConnections caps QUIC and WebSocket connections at once (default 4096).
 	MaxConnections int
-	Limits         Limits
-	Logger         *slog.Logger
+	// HomeInbound turns on home mode: systems on the local network can post
+	// deliveries to Macs registered for them, on the HTTP listener. The relay
+	// reads deliveries in clear, so this is only for a relay on the home
+	// network: a public relay must never turn it on. It cannot be combined
+	// with TLSDomain.
+	HomeInbound bool
+	Limits      Limits
+	Logger      *slog.Logger
 	// Pusher sends push notifications; nil on every relay without an APNs key.
 	Pusher Pusher
 }

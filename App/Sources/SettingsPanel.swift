@@ -9,6 +9,8 @@ struct SettingsPanel: View {
     let close: () -> Void
     /// Opens Settings › iPhone.
     var openPhone: (() -> Void)?
+    /// Opens Settings › Received information.
+    var openInbound: (() -> Void)?
     /// Tier picked in the menu, waiting for confirmation: changing tier restarts the assistant.
     @State private var pendingTier: TierChoice?
     @State private var confirmDeletion = false
@@ -16,6 +18,7 @@ struct SettingsPanel: View {
     @State private var wakeLogExists = WakeLog.exists
     @Environment(\.openURL) private var openURL
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
+    @Environment(InboundAccess.self) private var inbound: InboundAccess?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -162,6 +165,11 @@ struct SettingsPanel: View {
             Hairline()
                 .padding(.top, 8)
             PhoneRow(phone: phone, open: openPhone)
+        }
+        if let openInbound, let inbound {
+            Hairline()
+                .padding(.top, openPhone != nil && phone != nil ? 0 : 8)
+            InboundRow(inbound: inbound, open: openInbound)
         }
     }
 

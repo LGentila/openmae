@@ -103,7 +103,7 @@ func (c *wsConn) writeRecord(kind byte, p []byte) error {
 	return err
 }
 
-func (c *wsConn) forward(ctx context.Context, dst conn, f *flow) error {
+func (c *wsConn) forward(ctx context.Context, dst sink, f *flow) error {
 	buf := make([]byte, readChunk)
 	for {
 		typ, r, err := c.ws.NextReader()

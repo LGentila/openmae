@@ -7,21 +7,24 @@ import "sync"
 type hub struct {
 	mu          sync.Mutex
 	macs        map[string]*registration // by device id
-	tubes       map[string]int           // open and pending tubes, by Mac device id
+	inbound     map[string]*registration // registrations for deliveries (home mode), by inbound name
+	tubes       map[string]int           // iPhones' open and pending tubes, by Mac device id
 	pending     map[token]*pendingTube
 	tubesPerMac int
 	maxPending  int
 }
 
 type registration struct {
-	id string
-	c  conn
+	id      string // device id, or inbound name for an inbound registration
+	inbound bool   // gets deliveries instead of iPhones
+	c       conn
 }
 
-// pendingTube is an iPhone waiting for its Mac's accept.
+// pendingTube is an iPhone, or a delivery, waiting for its Mac's accept.
 type pendingTube struct {
 	token    token
-	mac      string
+	mac      string        // device id, or inbound name for a delivery
+	delivery bool          // not counted against tubesPerMac, which is for iPhones
 	accepted chan conn     // receives the Mac's tube connection; buffered, written once
 	done     chan struct{} // closed when the tube is over
 }
@@ -29,6 +32,7 @@ type pendingTube struct {
 func newHub(tubesPerMac, maxPending int) *hub {
 	return &hub{
 		macs:        make(map[string]*registration),
+		inbound:     make(map[string]*registration),
 		tubes:       make(map[string]int),
 		pending:     make(map[token]*pendingTube),
 		tubesPerMac: tubesPerMac,
@@ -36,21 +40,31 @@ func newHub(tubesPerMac, maxPending int) *hub {
 	}
 }
 
-// register makes r the Mac's registration and returns the one it replaces,
-// whose connection the caller closes.
+// registrations is where r belongs: a Mac's ordinary registration and its
+// inbound one are kept apart, and neither replaces the other.
+func (h *hub) registrations(r *registration) map[string]*registration {
+	if r.inbound {
+		return h.inbound
+	}
+	return h.macs
+}
+
+// register makes r the Mac's registration (of its kind) and returns the one
+// it replaces, whose connection the caller closes.
 func (h *hub) register(r *registration) *registration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	old := h.macs[r.id]
-	h.macs[r.id] = r
+	m := h.registrations(r)
+	old := m[r.id]
+	m[r.id] = r
 	return old
 }
 
 func (h *hub) unregister(r *registration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.macs[r.id] == r {
-		delete(h.macs, r.id)
+	if m := h.registrations(r); m[r.id] == r {
+		delete(m, r.id)
 	}
 }
 
@@ -67,6 +81,31 @@ func (h *hub) open(mac string) (*pendingTube, *registration, string) {
 		return nil, nil, codeBusy
 	}
 	p := &pendingTube{mac: mac, accepted: make(chan conn, 1), done: make(chan struct{})}
+	h.addPending(p)
+	h.tubes[mac]++
+	return p, r, ""
+}
+
+// openInbound starts a delivery's tube to the Mac registered for deliveries
+// under name. It counts against the pending tubes only. On success the
+// caller must call release once the delivery is over, whatever happens.
+func (h *hub) openInbound(name string) (*pendingTube, *registration, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r := h.inbound[name]
+	switch {
+	case r == nil:
+		return nil, nil, codeMacOffline
+	case len(h.pending) >= h.maxPending:
+		return nil, nil, codeBusy
+	}
+	p := &pendingTube{mac: name, delivery: true, accepted: make(chan conn, 1), done: make(chan struct{})}
+	h.addPending(p)
+	return p, r, ""
+}
+
+// addPending gives p a fresh token and lets the Mac claim it. h.mu is held.
+func (h *hub) addPending(p *pendingTube) {
 	for {
 		p.token = newToken()
 		if _, taken := h.pending[p.token]; !taken {
@@ -74,11 +113,18 @@ func (h *hub) open(mac string) (*pendingTube, *registration, string) {
 		}
 	}
 	h.pending[p.token] = p
-	h.tubes[mac]++
-	return p, r, ""
 }
 
-// claim hands the Mac's tube connection c to the iPhone waiting on t.
+// inboundRegistered reports whether a Mac is registered for deliveries
+// under name.
+func (h *hub) inboundRegistered(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.inbound[name] != nil
+}
+
+// claim hands the Mac's tube connection c to the iPhone, or the delivery,
+// waiting on t.
 func (h *hub) claim(t token, c conn) *pendingTube {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -108,13 +154,16 @@ func (h *hub) release(p *pendingTube) {
 	if h.pending[p.token] == p {
 		delete(h.pending, p.token)
 	}
+	if p.delivery {
+		return
+	}
 	if h.tubes[p.mac]--; h.tubes[p.mac] <= 0 {
 		delete(h.tubes, p.mac)
 	}
 }
 
-func (h *hub) counts() (macs, pending int) {
+func (h *hub) counts() (macs, inbound, pending int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.macs), len(h.pending)
+	return len(h.macs), len(h.inbound), len(h.pending)
 }

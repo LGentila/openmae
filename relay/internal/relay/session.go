@@ -61,7 +61,9 @@ func (s *Server) refuse(c conn, code string) {
 	fail(c, code, s.lim.Linger)
 }
 
-// serveMac registers a Mac, then keeps its control connection.
+// serveMac registers a Mac, then keeps its control connection. A hello with
+// "inbound" registers it for deliveries instead (home mode): that control
+// connection then gets inbound messages, never incoming ones.
 func (s *Server) serveMac(c conn, hello message) {
 	if !s.attempts.allow(c.ip()) {
 		s.refuse(c, codeRateLimited)
@@ -69,6 +71,10 @@ func (s *Server) serveMac(c conn, hello message) {
 	}
 	if code := versionCode(hello.V); code != "" {
 		s.refuse(c, code)
+		return
+	}
+	if hello.Inbound && !s.cfg.HomeInbound {
+		s.refuse(c, codeInboundOff)
 		return
 	}
 	key, ok := decodeFixed(hello.Key, ed25519.PublicKeySize)
@@ -108,17 +114,24 @@ func (s *Server) serveMac(c conn, hello message) {
 		return
 	}
 
-	// Answered before the Mac is findable, so that no incoming can come
-	// before registered.
-	if c.writeControl(msgRegistered) != nil {
+	reg := &registration{id: hello.ID, c: c}
+	answer, event := msgRegistered, "mac registered"
+	if hello.Inbound {
+		// Named after the key the Mac has just proved it holds: no Mac can
+		// take another's name.
+		reg.id, reg.inbound = inboundName(key), true
+		answer, event = registeredInboundMessage(reg.id), "mac registered for deliveries"
+	}
+	// Answered before the Mac is findable, so that no incoming (or inbound)
+	// can come before registered.
+	if c.writeControl(answer) != nil {
 		return
 	}
-	reg := &registration{id: hello.ID, c: c}
 	if old := s.hub.register(reg); old != nil {
 		old.c.closeNow()
-		s.log.Debug("mac registered again", "transport", c.transport())
+		s.log.Debug(event+" again", "transport", c.transport())
 	} else {
-		s.log.Debug("mac registered", "transport", c.transport())
+		s.log.Debug(event, "transport", c.transport())
 	}
 	defer func() {
 		s.hub.unregister(reg)
@@ -207,25 +220,36 @@ func (s *Server) connectTube(c conn, p *pendingTube, reg *registration) string {
 }
 
 func (s *Server) awaitAccept(c conn, p *pendingTube) (conn, string) {
-	timer := time.NewTimer(s.lim.Accept)
+	mac, timedOut := s.waitForAccept(p, s.lim.Accept, c.gone())
+	if mac == nil && timedOut {
+		return nil, codeMacTimeout
+	}
+	return mac, ""
+}
+
+// waitForAccept waits for the Mac's tube connection for p, for at most
+// timeout, and until gone is closed or shutdown. Coming back without one, it
+// says whether the time ran out.
+func (s *Server) waitForAccept(p *pendingTube, timeout time.Duration, gone <-chan struct{}) (conn, bool) {
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	code := ""
+	timedOut := false
 	select {
 	case mac := <-p.accepted:
-		return mac, ""
+		return mac, false
 	case <-timer.C:
-		code = codeMacTimeout
-	case <-c.gone():
+		timedOut = true
+	case <-gone:
 	case <-s.ctx.Done():
 	}
 	if s.hub.withdraw(p) {
-		return nil, code
+		return nil, timedOut
 	}
-	return <-p.accepted, "" // the Mac accepted at the last moment
+	return <-p.accepted, false // the Mac accepted at the last moment
 }
 
-// serveAccept hands a Mac's tube connection to the iPhone waiting for it,
-// then keeps it until the tube is over.
+// serveAccept hands a Mac's tube connection to the iPhone, or the delivery,
+// waiting for it, then keeps it until the tube is over.
 func (s *Server) serveAccept(c conn, m message) {
 	if code := versionCode(m.V); code != "" {
 		s.refuse(c, code)

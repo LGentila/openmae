@@ -34,16 +34,17 @@ const (
 // Server is a relay: an HTTP listener (discovery, WebSocket, health), a
 // QUIC listener and, in standalone mode, an HTTPS listener.
 type Server struct {
-	cfg      Config
-	lim      Limits
-	log      *slog.Logger
-	hub      *hub
-	attempts *attempts
-	slots    slots
-	handlers tracker
-	stats    counters
-	pin      string
-	info     []byte // the /v1/info document, fixed at start
+	cfg        Config
+	lim        Limits
+	log        *slog.Logger
+	hub        *hub
+	attempts   *attempts
+	deliveries *deliveries // home mode
+	slots      slots
+	handlers   tracker
+	stats      counters
+	pin        string
+	info       []byte // the /v1/info document, fixed at start
 
 	tubesOpen   atomic.Int64
 	handshaking atomic.Int64 // QUIC handshakes in progress
@@ -65,14 +66,20 @@ type Server struct {
 // listeners. Run serves them.
 func New(cfg Config) (*Server, error) {
 	cfg = cfg.withDefaults()
+	if cfg.HomeInbound && cfg.TLSDomain != "" {
+		// A relay with a public domain is reached from the internet, and
+		// would read deliveries from there in clear.
+		return nil, errors.New("home mode is for a relay on the home network: it cannot be combined with standalone mode")
+	}
 	s := &Server{
-		cfg:      cfg,
-		lim:      cfg.Limits,
-		log:      cfg.Logger,
-		hub:      newHub(cfg.Limits.TubesPerMac, cfg.Limits.MaxPendingTubes),
-		attempts: newAttempts(cfg.Limits.AttemptsPerMinute, time.Minute, maxTrackedAddrs, nil),
-		slots:    slots{max: int64(cfg.MaxConnections)},
-		upgrader: newUpgrader(),
+		cfg:        cfg,
+		lim:        cfg.Limits,
+		log:        cfg.Logger,
+		hub:        newHub(cfg.Limits.TubesPerMac, cfg.Limits.MaxPendingTubes),
+		attempts:   newAttempts(cfg.Limits.AttemptsPerMinute, time.Minute, maxTrackedAddrs, nil),
+		deliveries: newDeliveries(cfg.Limits.InboundPerMinute, cfg.Limits.InboundAtOnce, maxTrackedNames, nil),
+		slots:      slots{max: int64(cfg.MaxConnections)},
+		upgrader:   newUpgrader(),
 	}
 	key, cert, err := loadQUICIdentity(cfg.DataDir, time.Now(), s.log)
 	if err != nil {
@@ -122,7 +129,7 @@ func (s *Server) listen(key *ecdsa.PrivateKey, cert tls.Certificate) error {
 	if s.httpLn, err = net.Listen("tcp", s.cfg.HTTPAddr); err != nil {
 		return err
 	}
-	s.httpSrv = newHTTPServer(s.routes(), errorLog)
+	s.httpSrv = newHTTPServer(s.routes(s.cfg.HomeInbound), errorLog)
 	if s.cfg.TLSDomain == "" {
 		return nil
 	}
@@ -142,7 +149,7 @@ func (s *Server) listen(key *ecdsa.PrivateKey, cert tls.Certificate) error {
 	if s.httpsLn, err = net.Listen("tcp", s.cfg.HTTPSAddr); err != nil {
 		return err
 	}
-	s.httpsSrv = newHTTPServer(s.routes(), errorLog)
+	s.httpsSrv = newHTTPServer(s.routes(false), errorLog)
 	s.httpsSrv.TLSConfig = tlsConf
 	var http1 http.Protocols
 	http1.SetHTTP1(true)
@@ -193,6 +200,9 @@ func (s *Server) Run(ctx context.Context) error {
 	attrs := []any{"http_port", portOf(s.httpLn.Addr()), "quic_port", portOf(s.udp.LocalAddr()), "pin", s.pin}
 	if s.httpsLn != nil {
 		attrs = append(attrs, "https_port", portOf(s.httpsLn.Addr()), "domain", s.cfg.TLSDomain)
+	}
+	if s.cfg.HomeInbound {
+		attrs = append(attrs, "home_mode", true)
 	}
 	s.log.Info("relay started", attrs...)
 	go s.logStats()
@@ -325,9 +335,14 @@ func (s *Server) logStats() {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
-			macs, pending := s.hub.counts()
-			s.log.Info("stats", "macs", macs, "tubes", s.tubesOpen.Load(), "pending", pending,
+			macs, inbound, pending := s.hub.counts()
+			attrs := []any{"macs", macs}
+			if s.cfg.HomeInbound {
+				attrs = append(attrs, "macs_for_deliveries", inbound)
+			}
+			attrs = append(attrs, "tubes", s.tubesOpen.Load(), "pending", pending,
 				"connections", s.slots.n.Load(), "refused", s.stats.take())
+			s.log.Info("stats", attrs...)
 		}
 	}
 }

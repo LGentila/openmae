@@ -7,8 +7,13 @@ import VoiceCore
 @MainActor
 @Observable
 final class WindowState {
-    /// `phone`: Settings › iPhone, in the settings' place.
-    enum Panel: Hashable { case settings, history, phone }
+    /// `phone`: Settings › iPhone, `inbound`: Settings › Received information, both in the settings' place.
+    enum Panel: Hashable {
+        case settings, history, phone, inbound
+
+        /// The settings or one of their pages: the settings button is lit, and closes it.
+        var isSettings: Bool { self == .settings || self == .phone || self == .inbound }
+    }
 
     var panel: Panel?
     /// The settings were opened from "Choose another tier…": the tier row is pointed at.
@@ -112,13 +117,15 @@ struct ContentView: View {
     }
 
     private func settingsButton(diameter: CGFloat) -> some View {
-        Button { window.panel == .phone ? window.toggle(.phone) : window.toggle(.settings) } label: {
+        Button {
+            if let panel = window.panel, panel.isSettings { window.toggle(panel) } else { window.toggle(.settings) }
+        } label: {
             IconView(icon: .settings, size: 20)
         }
-        .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel == .settings || window.panel == .phone))
+        .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel?.isSettings == true))
         .accessibilityLabel(Text("Settings"))
         .help(Text("Settings"))
-        .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0, .phone: $0] }
+        .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0, .phone: $0, .inbound: $0] }
     }
 }
 
@@ -178,6 +185,7 @@ private struct PanelLayer: View {
     let window: WindowState
     let buttons: [WindowState.Panel: Anchor<CGRect>]
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
+    @Environment(InboundAccess.self) private var inbound: InboundAccess?
 
     var body: some View {
         GeometryReader { proxy in
@@ -191,16 +199,22 @@ private struct PanelLayer: View {
                         .onTapGesture { window.panel = nil }
                         .accessibilityHidden(true)
                     PanelChrome(pointerX: button.midX - leading, maxHeight: proxy.size.height - top - 14,
-                                startsAtBottom: panel == .history)
+                                startsAtBottom: panel == .history, page: page(of: panel))
                     {
                         switch panel {
                         case .settings:
                             SettingsPanel(model: model, pointsAtTier: window.pointsAtTier, close: { window.panel = nil },
-                                          openPhone: phone == nil ? nil : { window.panel = .phone })
+                                          openPhone: phone == nil ? nil : { window.panel = .phone },
+                                          openInbound: inbound == nil ? nil : {
+                                              inbound?.show(.list)
+                                              window.panel = .inbound
+                                          })
                         case .history:
                             HistoryPanel(entries: model.transcript, tasks: model.tasks, stopTask: model.stopTask)
                         case .phone:
                             if let phone { PhonePanel(phone: phone) { window.panel = .settings } }
+                        case .inbound:
+                            if let inbound { InboundPanel(inbound: inbound) { window.panel = .settings } }
                         }
                     }
                     .padding(.top, top)
@@ -214,6 +228,15 @@ private struct PanelLayer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .animation(Easing.animation(CubicBezier(0.2, 1.2, 0.4, 1), 0.35), value: window.panel)
+        }
+    }
+
+    /// What the panel shows, so that a new page starts at its top (the conversation stays at its end).
+    private func page(of panel: WindowState.Panel) -> AnyHashable? {
+        switch panel {
+        case .history: nil
+        case .inbound: AnyHashable(inbound?.page)
+        case .settings, .phone: AnyHashable(panel)
         }
     }
 }
@@ -234,8 +257,8 @@ private struct PanelOpening: ViewModifier {
 
 // MARK: - Keyboard
 
-/// Space bar = push-to-talk (when enabled, or to finish a turn started with the global shortcut), Escape = close a
-/// panel, or silence the assistant.
+/// Space bar = push-to-talk (when enabled, or to finish a turn started with the global shortcut; not while typing in a
+/// text field), Escape = close a panel, or silence the assistant.
 struct KeyboardControls: ViewModifier {
     let model: AssistantModel
     let window: WindowState
@@ -264,6 +287,8 @@ struct KeyboardControls: ViewModifier {
             return true
         }
         guard model.isReady else { return false }
+        // Typing in a field of a panel (a source's name): the space bar types a space, unless it is held to talk.
+        if event.keyCode == 49, !model.talkKeyDown, event.window?.firstResponder is NSTextView { return false }
         switch event.keyCode {
         case 49 where model.settings.listening == .pushToTalk || model.talkKeyDown:  // space
             if event.type == .keyDown, !event.isARepeat { model.setTalkKey(true) }

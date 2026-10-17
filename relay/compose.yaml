@@ -25,6 +25,8 @@ services:
       RELAY_QUIC_PUBLIC_PORT: "443"
       # During a key change, the previous pin, for a month:
       # RELAY_PREVIOUS_PINS: "<old pin>"
+      # Never RELAY_HOME_INBOUND here: home mode is for a relay on the home
+      # network only (see "Home relay" in README.md).
     ports:
       # "443:4433/udp", in long form for "mode: host": deployed as a Swarm
       # stack, the default ingress mode would hide the clients' addresses and

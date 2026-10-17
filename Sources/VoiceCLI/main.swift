@@ -22,6 +22,9 @@
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
+//   voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
+//                                                       received information through a home relay, printed instead
+//                                                       of said (no model; see InboundListen.swift)
 // Options:
 //   --tier <name>            minimum, standard, comfort or max (default: this Mac's tier)
 //   --llm <folder>           another language model folder (default: the tier's)
@@ -527,7 +530,7 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "link-client",
-    "delegate", "web-search"].contains(options.command)
+    "delegate", "web-search", "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -540,6 +543,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)
+        case "inbound": try await runInbound(CommandLine.arguments)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -568,6 +572,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
                                   [--follow-up "…"] [--stop-after seconds]
+               voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
         """)
     exit(2)
 }

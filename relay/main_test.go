@@ -19,7 +19,7 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.HTTPAddr != ":8080" || cfg.QUICAddr != ":4433" || cfg.QUICPublicPort != 0 || cfg.DataDir != "/data" ||
 		cfg.BehindProxy || cfg.TLSDomain != "" || cfg.HTTPSAddr != ":443" || cfg.MaxConnections != 0 ||
-		len(cfg.PreviousPins) != 0 || level != slog.LevelInfo {
+		cfg.HomeInbound || len(cfg.PreviousPins) != 0 || level != slog.LevelInfo {
 		t.Errorf("defaults: %+v %v", cfg, level)
 	}
 }
@@ -35,6 +35,7 @@ func TestConfigFromEnv(t *testing.T) {
 		"RELAY_TLS_DOMAIN":       "relay.example.com",
 		"RELAY_HTTPS_ADDR":       ":8443",
 		"RELAY_MAX_CONNECTIONS":  "100",
+		"RELAY_HOME_INBOUND":     "true",
 		"RELAY_LOG_LEVEL":        "debug",
 	}))
 	if err != nil {
@@ -43,13 +44,14 @@ func TestConfigFromEnv(t *testing.T) {
 	if cfg.HTTPAddr != "127.0.0.1:9000" || cfg.QUICAddr != ":9443" || cfg.QUICPublicPort != 443 ||
 		cfg.DataDir != "/var/lib/relay" || len(cfg.PreviousPins) != 2 || !cfg.BehindProxy ||
 		cfg.TLSDomain != "relay.example.com" || cfg.HTTPSAddr != ":8443" || cfg.MaxConnections != 100 ||
-		level != slog.LevelDebug {
+		!cfg.HomeInbound || level != slog.LevelDebug {
 		t.Errorf("parsed: %+v %v", cfg, level)
 	}
 	for _, bad := range []map[string]string{
 		{"RELAY_QUIC_PUBLIC_PORT": "70000"},
 		{"RELAY_QUIC_PUBLIC_PORT": "https"},
 		{"RELAY_BEHIND_PROXY": "maybe"},
+		{"RELAY_HOME_INBOUND": "perhaps"},
 		{"RELAY_MAX_CONNECTIONS": "0"},
 		{"RELAY_LOG_LEVEL": "loud"},
 	} {

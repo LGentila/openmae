@@ -179,7 +179,7 @@ func (c *quicConn) policeDatagrams(ctx context.Context, violation func()) {
 	}()
 }
 
-func (c *quicConn) forward(ctx context.Context, dst conn, f *flow) error {
+func (c *quicConn) forward(ctx context.Context, dst sink, f *flow) error {
 	c.piping.Store(true)
 	dctx, stop := context.WithCancel(ctx)
 	defer stop()

@@ -20,6 +20,29 @@ public protocol RemoteAudioRouting: Sendable {
     func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async
 }
 
+/// An engine that can say something on the app's own initiative, as it does when a timer rings: information received
+/// from another system (Home Assistant, a script…, see ReceivedInformation.swift). Deliberately not an
+/// `AssistantCommand`: a paired iPhone must not be able to make Maé announce anything.
+public protocol Announcing: Sendable {
+    /// Whether Maé can speak now: her models are loaded and the setup is done. Otherwise what comes in becomes a
+    /// notification.
+    func canAnnounce() async -> Bool
+    /// Says `text` after the chime (when `chime`), as soon as nobody speaks (`VoicePipeline.announce`). `note` tells the
+    /// model what happened; it stays in the history with what was said. `urgent`: it may cut Maé's sentence, never the
+    /// user's. `id` lets `withdrawAnnouncement` take it back while it waits. Returns false when Maé cannot speak (then
+    /// nothing was queued).
+    func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID) async
+        -> Bool
+    /// Takes back an announcement that has not started yet. False when it has started, or is over.
+    func withdrawAnnouncement(_ id: UUID) async -> Bool
+    /// Whether an announcement is still waiting to be said (false once it has started).
+    func announcementWaits(_ id: UUID) async -> Bool
+    /// A notification on the Mac.
+    func notify(title: String, body: String) async
+    /// Asks for the permission to show notifications (when the first source that needs them is added).
+    func requestNotificationPermission() async
+}
+
 /// The voice's output, switchable while the pipeline runs (the pipeline keeps one output for its whole life). What
 /// was queued on the previous output is dropped when switching.
 public final class AudioRouter: AudioOutput, @unchecked Sendable {

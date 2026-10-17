@@ -203,6 +203,8 @@ public actor VoicePipeline {
         var chime: Bool
         /// Said once already without reaching the user for sure: the next time is the last.
         var retried = false
+        /// Lets `withdrawAnnouncement` take it back while it waits.
+        var id: UUID?
     }
     private var announcements: [Announcement] = []
     /// The voice's output can be out of reach for a moment (see `setOutputReachable`): announcements wait meanwhile.
@@ -344,10 +346,23 @@ public actor VoicePipeline {
 
     /// Says something on the app's own initiative (a timer rang), after a short chime, as soon as nobody
     /// speaks. `note` tells the model what happened; it stays in the history with what was said.
-    public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool = true) {
-        announcements.append(Announcement(text: text, note: note, language: language, chime: chime))
+    /// `id` lets `withdrawAnnouncement` take it back while it waits (received information that must never be said late).
+    public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool = true, id: UUID? = nil) {
+        announcements.append(Announcement(text: text, note: note, language: language, chime: chime, id: id))
         if !outputReachable { DebugLog.log("announcement: waits for the voice's output to be back") }
         startAnnouncementIfIdle()
+    }
+
+    /// Takes back an announcement that is still waiting. False when it has started, or is over.
+    public func withdrawAnnouncement(_ id: UUID) -> Bool {
+        guard let index = announcements.firstIndex(where: { $0.id == id }) else { return false }
+        announcements.remove(at: index)
+        return true
+    }
+
+    /// Whether an announcement is still waiting to be said (false once it has started).
+    public func announcementWaits(_ id: UUID) -> Bool {
+        announcements.contains { $0.id == id }
     }
 
     /// Whether the voice's output reaches the user right now. The device that has the conversation (an iPhone) can be

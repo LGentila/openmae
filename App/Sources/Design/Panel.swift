@@ -8,6 +8,8 @@ struct PanelChrome<Content: View>: View {
     var maxHeight: CGFloat
     /// Opens scrolled to the end (the conversation: the latest exchange).
     var startsAtBottom = false
+    /// The page it shows: when another one replaces it, the panel goes back to its top. Nil: left where it is.
+    var page: AnyHashable?
     @ViewBuilder let content: Content
     @State private var contentHeight: CGFloat = 0
 
@@ -15,10 +17,16 @@ struct PanelChrome<Content: View>: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.window, style: .continuous)
-        ScrollView {
-            content
-                .padding(14)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        ScrollViewReader { scroll in
+            ScrollView {
+                content
+                    .padding(14)
+                    .background(alignment: .top) { Color.clear.frame(height: 1).id(PanelTop.id) }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            }
+            .onChange(of: page) { _, page in
+                if page != nil { scroll.scrollTo(PanelTop.id, anchor: .top) }
+            }
         }
         .defaultScrollAnchor(startsAtBottom ? .bottom : .top)
         .scrollBounceBehavior(.basedOnSize)
@@ -39,6 +47,11 @@ struct PanelChrome<Content: View>: View {
         .shadow(color: Palette.ink.opacity(0.28).color, radius: 35, y: 30)
         .shadow(color: Palette.ink.opacity(0.12).color, radius: 10, y: 8)
     }
+}
+
+/// The top of a panel's content, which it scrolls back to on a new page.
+private enum PanelTop {
+    static let id = "panel-top"
 }
 
 /// Title of a section of a panel: "Sound", "Conversation", "Advanced".

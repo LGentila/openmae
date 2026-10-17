@@ -291,12 +291,24 @@ final class WebSocketTransport: LinkTransport, @unchecked Sendable {
 
 /// The Mac's control connection to its relay: registered with its Ed25519 key, it hears of the iPhones asking for
 /// it. Reconnects on its own, waiting longer each time (1 s up to 30 s).
+///
+/// An inbound registration (`inbound: true`) is the Mac's second one, with a relay in home mode on the home network:
+/// it hears only of deliveries of received information (`deliveries`), never of iPhones, and does not replace the
+/// Mac's ordinary registration, even on the same relay.
 public actor RelayRegistration {
     public enum Status: Sendable, Equatable {
         case connecting
         case registered
         /// The relay cannot be reached, or refused; it is tried again.
         case unreachable
+        /// An inbound registration on a relay that is not in home mode: tried again now and then.
+        case inboundOff
+    }
+
+    /// A delivery waiting for the Mac on a relay in home mode: the tube to accept, and the caller's address.
+    public struct Delivery: Sendable, Equatable {
+        public var tube: String
+        public var from: String
     }
 
     /// Tube tokens of the iPhones asking for this Mac.
@@ -304,15 +316,21 @@ public actor RelayRegistration {
     private nonisolated let tubeSink: AsyncStream<String>.Continuation
     public nonisolated let status: AsyncStream<Status>
     private nonisolated let statusSink: AsyncStream<Status>.Continuation
+    /// Inbound registration only: the deliveries waiting for this Mac.
+    public nonisolated let deliveries: AsyncStream<Delivery>
+    private nonisolated let deliverySink: AsyncStream<Delivery>.Continuation
     public nonisolated let relay: URL
+    public nonisolated let inbound: Bool
     private let identity: DeviceIdentity
     private var loop: Task<Void, Never>?
 
-    public init(relay: URL, identity: DeviceIdentity) {
+    public init(relay: URL, identity: DeviceIdentity, inbound: Bool = false) {
         self.relay = relay
         self.identity = identity
+        self.inbound = inbound
         (tubes, tubeSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(8))
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        (deliveries, deliverySink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(8))
     }
 
     public func start() {
@@ -325,6 +343,7 @@ public actor RelayRegistration {
         loop = nil
         tubeSink.finish()
         statusSink.finish()
+        deliverySink.finish()
     }
 
     private func run() async {
@@ -339,6 +358,12 @@ public actor RelayRegistration {
                 try await listen(channel)
             } catch is CancellationError {
                 return
+            } catch RelayError.refused("inbound_off") {
+                // A relay that is not in home mode will not be one in a few seconds.
+                DebugLog.log("link: the home relay is not in home mode")
+                statusSink.yield(.inboundOff)
+                try? await Task.sleep(for: .seconds(60))
+                continue
             } catch {
                 DebugLog.log("link: relay registration lost (\(error))")
             }
@@ -364,16 +389,23 @@ public actor RelayRegistration {
             throw RelayError.unsupported
         }
         do {
-            channel.send(["op": "hello", "v": 1, "role": "mac", "id": identity.id,
-                          "key": Base64URL.encode(identity.signingKey.publicKey.rawRepresentation)])
+            var hello: [String: Any] = ["op": "hello", "v": 1, "role": "mac", "id": identity.id,
+                                        "key": Base64URL.encode(identity.signingKey.publicKey.rawRepresentation)]
+            if inbound { hello["inbound"] = true }
+            channel.send(hello)
             let challenge = try await channel.receive(timeout: .seconds(8))
             guard challenge["op"] as? String == "challenge",
                   let nonce = (challenge["nonce"] as? String).flatMap(Base64URL.decode), nonce.count == 32
             else { throw RelayError.unsupported }
             let signature = try identity.signingKey.signature(for: Data("openmae-relay/1 register:".utf8) + nonce)
             channel.send(["op": "register", "sig": Base64URL.encode(signature)])
-            guard try await channel.receive(timeout: .seconds(8))["op"] as? String == "registered" else {
-                throw RelayError.unsupported
+            let registered = try await channel.receive(timeout: .seconds(8))
+            guard registered["op"] as? String == "registered" else { throw RelayError.unsupported }
+            // A relay in home mode answers with the Mac's inbound name; an older one, or one not in home mode, without.
+            if inbound, registered["inbound"] as? String != InboundName.make(
+                signingKey: identity.signingKey.publicKey.rawRepresentation)
+            {
+                throw RelayError.refused("inbound_off")
             }
             return channel
         } catch {
@@ -387,14 +419,23 @@ public actor RelayRegistration {
     private func listen(_ channel: ControlChannel) async throws {
         defer { channel.close() }
         let tubeSink = tubeSink
+        let deliverySink = deliverySink
+        let inbound = inbound
         try await withThrowingTaskGroup(of: Void.self) { tasks in
             let lastHeard = Clock()
             tasks.addTask {
                 while true {
                     let message = try await channel.receive(timeout: nil)
                     lastHeard.touch()
-                    if message["op"] as? String == "incoming", let tube = message["tube"] as? String {
-                        tubeSink.yield(tube)
+                    switch message["op"] as? String {
+                    case "incoming" where !inbound:
+                        if let tube = message["tube"] as? String { tubeSink.yield(tube) }
+                    case "inbound" where inbound:
+                        if let tube = message["tube"] as? String {
+                            deliverySink.yield(Delivery(tube: tube, from: message["from"] as? String ?? ""))
+                        }
+                    default:
+                        break
                     }
                 }
             }

@@ -464,7 +464,7 @@ public actor LinkHost: AssistantConnection {
         case .connecting:
             if state.relay == .off { state.relay = .connecting }
         case .registered: state.relay = .registered
-        case .unreachable: state.relay = .unreachable
+        case .unreachable, .inboundOff: state.relay = .unreachable  // the second only for an inbound registration
         }
         publish()
     }

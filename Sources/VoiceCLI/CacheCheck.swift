@@ -1,11 +1,11 @@
 // voice-cli cache-check — how much of each request the language model finds in its memory (KV cache), in the
 // sequences of requests the app sends: plain turns, an action, two actions in one request (the app carries out the
-// first and says it does one thing at a time), a refused call and its second try, a long result the model sums up (as
-// after a web search), that summing up cancelled while the model reads the result (the user spoke over the waiting
-// phrase), a turn dropped after its second try (the user spoke again before any voice), a speculative
-// answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer abandoned after an answer cut
-// off, the tools changing, the history shortened, a new conversation; and answers that the history keeps otherwise
-// than the model wrote them, after a request computed from scratch or not.
+// first and says it does one thing at a time), what the app says on its own (an announcement), a refused call and its
+// second try, a long result the model sums up (as after a web search), that summing up cancelled while the model reads
+// the result (the user spoke over the waiting phrase), a turn dropped after its second try (the user spoke again before
+// any voice), a speculative answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer
+// abandoned after an answer cut off, the tools changing, the history shortened, a new conversation; and answers that
+// the history keeps otherwise than the model wrote them, after a request computed from scratch or not.
 //
 // Text only, as the app would send it with actions on (the same system prompt, tools and date line); no call is
 // carried out: an action "succeeds" or is refused as each scenario says.
@@ -208,6 +208,16 @@ private actor CacheCheck {
         }
     }
 
+    /// What the app says on its own (a timer that rang, received information), recorded as the pipeline does: the note
+    /// as the user's message, what was said as the answer, without asking the model anything.
+    func announcement(note: String, said: String) async {
+        var answer = ""
+        SpeakableText.record(said, in: &answer)
+        conversation.record(user: ChatMessage(.user, note), steps: [], assistant: answer, interrupted: false)
+        print(String(format: "  %-46@ recorded, no request", "announcement" as NSString))
+        await catchUp()
+    }
+
     /// As the pipeline does once an exchange is recorded: the model computes what of the history its memory no longer
     /// holds (`MLXChatModel.catchUp`), while nobody waits for an answer.
     private func catchUp() async {
@@ -347,6 +357,17 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("action", "Rappelle-moi d'appeler maman demain à dix heures.")
             try await check.turn("plain answer after the action", "Qu'est-ce que je pourrais lui offrir pour son anniversaire ?")
             try await check.turn("plain answer", "Merci beaucoup.")
+        }),
+        ("announcement", {
+            // Received information said at rest between two turns (as a timer that rings).
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            await check.announcement(note: InboundPhrases.note(source: "Home Assistant", receivedAt: now),
+                                     said: "Le lave-linge a fini son cycle.")
+            try await check.turn("plain answer after the announcement", "Merci. Je l'étends maintenant ou j'attends ?")
+            await check.announcement(note: InboundPhrases.note(source: "Home Assistant", receivedAt: now),
+                                     said: "Sonnette\u{00A0}: quelqu'un est à la porte.")
+            try await check.turn("plain answer after the second", "Qui ça peut bien être à cette heure-ci ?")
         }),
         ("second-try", {
             try await check.newConversation()

@@ -755,3 +755,38 @@ extension AssistantHost: RemoteAudioRouting {
         await pipeline?.announceThrough(output, reachable: reachable)
     }
 }
+
+/// Information received from other systems (OpenMaeLink's received information) is said like a timer that rings, or
+/// shown in a notification. Not an `AssistantCommand`: a paired iPhone cannot trigger it.
+extension AssistantHost: Announcing {
+    public func canAnnounce() async -> Bool {
+        stage == .running && pipeline != nil
+    }
+
+    public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID)
+        async -> Bool
+    {
+        guard stage == .running, let pipeline else { return false }
+        DebugLog.log("received information: announced\(urgent ? " (urgent)" : "")")
+        // Urgent: Maé's own sentence (or her thinking) is cut; the user is never cut, the announcement waits for them.
+        if urgent, pipelineState == .thinking || pipelineState == .speaking { await pipeline.interrupt() }
+        await pipeline.announce(text, note: note, language: language, chime: chime, id: id)
+        return true
+    }
+
+    public func withdrawAnnouncement(_ id: UUID) async -> Bool {
+        await pipeline?.withdrawAnnouncement(id) ?? false
+    }
+
+    public func announcementWaits(_ id: UUID) async -> Bool {
+        await pipeline?.announcementWaits(id) ?? false
+    }
+
+    public func notify(title: String, body: String) async {
+        Notifier.post(title: title, body: body)
+    }
+
+    public func requestNotificationPermission() async {
+        await Notifier.requestPermission()
+    }
+}

@@ -88,6 +88,11 @@ func configFromEnv(getenv func(string) string) (relay.Config, slog.Level, error)
 			return cfg, 0, fmt.Errorf("RELAY_BEHIND_PROXY: %w", err)
 		}
 	}
+	if v := get("RELAY_HOME_INBOUND", ""); v != "" {
+		if cfg.HomeInbound, err = parseBool(v); err != nil {
+			return cfg, 0, fmt.Errorf("RELAY_HOME_INBOUND: %w", err)
+		}
+	}
 	if v := get("RELAY_MAX_CONNECTIONS", ""); v != "" {
 		if cfg.MaxConnections, err = strconv.Atoi(v); err != nil || cfg.MaxConnections < 1 {
 			return cfg, 0, fmt.Errorf("RELAY_MAX_CONNECTIONS: %q is not a positive number", v)

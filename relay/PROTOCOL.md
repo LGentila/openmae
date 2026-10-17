@@ -3,7 +3,8 @@
 How the iPhone and iPad app talks to OpenMaé on the Mac, directly on the local network or through an OpenMaé relay
 (below, "iPhone" stands for either).
 Everything the user says or hears, and every text, is encrypted end to end between the iPhone and the Mac: a
-relay only passes opaque bytes along.
+relay only passes opaque bytes along. The one exception is a relay's [home mode](#home-mode-deliveries), off by
+default: systems on the home network post short texts to the Mac through a relay on that network, which reads them.
 
 There are two layers:
 
@@ -90,6 +91,9 @@ The signed bytes are the ASCII string `openmae-relay/1 register:` followed by th
 checks that `id` matches `key` and that the signature is valid. A new registration for the same id replaces the
 previous one, whose connection is closed.
 
+`hello` may also carry `"inbound": true`, which registers the Mac for deliveries instead (see
+[Home mode](#home-mode-deliveries)). Without it, or with `false`, the registration is the one above.
+
 Then, while the control connection lasts:
 
 - relay → Mac `{"op":"incoming","tube":"<16 random bytes, b64url>"}`: an iPhone asks for this Mac.
@@ -115,7 +119,8 @@ bytes and datagrams of each side to the other, unchanged, until one side closes;
 
 **Errors**: `{"op":"error","code":"<code>"}`, then the relay closes the connection. Codes: `bad_request`,
 `bad_signature`, `mac_offline` (no Mac registered with that id), `mac_timeout` (the Mac did not accept in time),
-`busy` (the Mac already has its maximum of tubes), `unknown_tube`, `rate_limited`, `unsupported_version`.
+`busy` (the Mac already has its maximum of tubes), `unknown_tube`, `rate_limited`, `unsupported_version`,
+`inbound_off` (a `hello` with `"inbound": true` to a relay not in home mode).
 
 ### Limits
 
@@ -123,13 +128,99 @@ bytes and datagrams of each side to the other, unchanged, until one side closes;
 - 256 kbit/s per tube and per direction: beyond, datagrams are dropped and tube bytes are slowed down.
 - 10 `hello` or `connect` attempts per minute per IP address.
 - No other traffic: a connection that does not follow this protocol is closed.
+- In home mode, per inbound name: 30 deliveries per minute and 5 at once, bodies of 64 KB at most, and 10 seconds
+  each to receive a delivery, for the Mac to accept its tube, and for the Mac to answer.
 
 The relay keeps everything in memory (no database). After a restart, Macs register again within 30 seconds.
+
+### Home mode: deliveries
+
+A relay run on the home network can also pass **deliveries** to a Mac: short texts that systems on that network
+(Home Assistant, scripts) post over plain HTTP, without any port open on the Mac. Deliveries are not encrypted end
+to end: the relay reads them in clear. That is why home mode is off by default (`RELAY_HOME_INBOUND`), and only for
+a relay on the home network: a public relay never turns it on.
+
+**Inbound name.** A Mac gets deliveries under its *inbound name*: the first 16 bytes of SHA-256 of the ASCII string
+`openmae-relay/1 inbound:` followed by the raw 32-byte Ed25519 public key, in base32 as a device id (lowercase, no
+padding: 26 characters). For the public key whose bytes are 0x00, 0x01, …, 0x1f, the inbound name is
+`4zvomamapw57cf63xyx4cjb3qe` (and the device id `mmg42klgyqzwneiskrelxms3j4`).
+
+**Inbound registration.** The Mac opens one more control connection and registers on it as usual, with
+`"inbound": true` in its `hello`:
+
+| From | Message |
+|---|---|
+| Mac | `{"op":"hello","v":1,"role":"mac","id":"<device id>","key":"<Ed25519 public key, b64url>","inbound":true}` |
+| relay | `{"op":"challenge","nonce":"<32 random bytes, b64url>"}` |
+| Mac | `{"op":"register","sig":"<b64url Ed25519 signature>"}` |
+| relay | `{"op":"registered","inbound":"<inbound name>"}` |
+
+- A relay not in home mode answers `{"op":"error","code":"inbound_off"}` instead of the challenge, and closes.
+- The relay takes the inbound name from the key the Mac has just proved it holds: no Mac can take another's.
+- An inbound registration is kept apart from the Mac's ordinary registration (same device id), even on the same
+  relay: neither replaces the other. A new inbound registration of the same Mac replaces the previous inbound one,
+  whose connection is closed.
+- It never gets `incoming`. Pings, pongs and the 75-second idle rule are as for an ordinary registration.
+
+**A delivery.** The relay sends on the inbound control connection:
+
+`{"op":"inbound","tube":"<16 random bytes, b64url>","from":"<the caller's IP address>"}`
+
+`from` is the caller's address as text, without zone: for example `192.168.1.20` or `fe80::1` (behind a reverse
+proxy, with `RELAY_BEHIND_PROXY`, the last `X-Forwarded-For` entry). The Mac accepts within 10 seconds with a tube
+connection, as for an iPhone: `{"op":"accept","v":1,"tube":"<tube token>"}`, answered `{"op":"accepted"}`. Over QUIC
+that connection needs datagrams enabled, as every tube connection, although they have no use here: the relay drops
+the datagrams a Mac sends in a delivery's tube.
+
+The relay then writes the delivery into the tube's bytes, as an HTTP/1.1 request:
+
+```
+<method> <path and query, as the caller sent them> HTTP/1.1
+Host: <the caller's Host header>
+<the caller's other headers>
+Content-Length: <length of the body>
+Connection: close
+
+<the body>
+```
+
+- The caller's other headers come sorted by name, without the hop-by-hop ones (`Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`,
+  and any header that `Connection` names), `Content-Length` and `Expect`: the relay already has the whole body.
+- The body is whole, and plain even when the caller sent it chunked.
+- The relay sends nothing more in the tube, and does not end its side before the answer (over WebSocket, that would
+  end the connection).
+
+The Mac answers with an HTTP/1.1 response, with a `Content-Length` and a body of 4 KB at most, within 10 seconds; it
+may close the tube after it. The relay passes the status code, the `Content-Type` and the body on to the caller,
+then closes the tube. Interim `1xx` answers are skipped.
+
+**The delivery route.** In home mode only, on the relay's plain HTTP listener (never on HTTPS):
+`/<inbound name>/in/<secret>`, any method (the Mac answers `405` itself to those it refuses). The secret means
+nothing to the relay: the Mac checks it, and everything else in the request. The relay checks, in this order:
+
+| Status | When |
+|---|---|
+| `403` | the caller's address is not local: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8, fc00::/7, fe80::/10 or ::1 |
+| `404` | not an inbound name (26 characters `a–z`, `2–7`), or an empty secret: as for any unknown path, and as for every such path when home mode is off |
+| `429` | more than 30 deliveries in the last minute, or 5 in progress, for that inbound name |
+| `503` | no Mac registered for deliveries under that name (`Mac not connected`): nothing is kept, the caller may try again later |
+| `413` | a body over 64 KB |
+| `408` | the body not received within 10 seconds of the request's header section (which has 10 seconds of its own) |
+| `400` | a body that cannot be read (broken chunked encoding, connection cut) |
+| `503` | the Mac did not accept the tube within 10 seconds (`Mac not answering`), or too many tubes are waiting on the relay (`relay busy`) |
+| `502` | the Mac's answer is missing, broken, larger than 4 KB or later than 10 seconds |
+| the Mac's | otherwise: its status code, `Content-Type` and body |
+
+The relay's own answers have a short `text/plain` body.
 
 ### What a relay sees
 
 IP addresses, device ids, when and how much traffic passes. Never sound, text or notification contents: those
 are encrypted by the end-to-end layer. The relay logs errors without device ids, tube tokens or addresses.
+
+In home mode, it also sees each delivery in clear: its path (with the source's secret), headers and body, and the
+caller's address. It logs deliveries without any of them: only their status, size and duration.
 
 ## 2. End-to-end layer (`openmae/1`)
 

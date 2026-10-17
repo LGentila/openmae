@@ -1,6 +1,8 @@
 #if DEBUG
+import AVFoundation
 import AppKit
 import SwiftUI
+import UserNotifications
 import VoiceCore
 
 // Development aids, compiled into debug builds only (CONFIGURATION=Debug zsh scripts/build-app.sh).
@@ -176,6 +178,7 @@ enum Snapshots {
         await renderWebSearch(to: folder, ready: ready)
         await renderPresence(to: folder)
         await renderPhone(to: folder)
+        await renderInbound(to: folder)
     }
 
     /// Claude Code: its settings (a tall window, to see the whole panel), and the history with three tasks: one
@@ -695,4 +698,105 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
         return !Task.isCancelled
     }
 }
+/// The demonstration engine announces too, so that received information can be tried end to end without loading the
+/// models (`-demo-idle` keeps it at rest): the chime, then the system's voice says the text, and it shows in the
+/// conversation. Announcements are never queued: the demo is always at rest.
+extension DemoConnection: Announcing {
+    func canAnnounce() async -> Bool { true }
+
+    func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID) async
+        -> Bool
+    {
+        DebugLog.log("demo engine: announcement\(urgent ? " (urgent)" : ""): \(text)")
+        play { sink in
+            sink.yield(.state(.speaking))
+            sink.yield(.assistantPiece(text))
+            await DemoVoice.shared.say(text, language: language, chime: chime)
+            sink.yield(.levels(input: 0, output: 0))
+            sink.yield(.state(.listening))
+        }
+        return true
+    }
+
+    func withdrawAnnouncement(_ id: UUID) async -> Bool { false }
+
+    func announcementWaits(_ id: UUID) async -> Bool { false }
+
+    func notify(title: String, body: String) async {
+        DebugLog.log("demo engine: notification \(title): \(body)")
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+
+    func requestNotificationPermission() async {
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])
+    }
+}
+
+/// The system's voice, for the demonstration engine's announcements.
+@MainActor
+private final class DemoVoice: NSObject, AVSpeechSynthesizerDelegate {
+    static let shared = DemoVoice()
+    private let synthesizer = AVSpeechSynthesizer()
+    private var finished: CheckedContinuation<Void, Never>?
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func say(_ text: String, language: SpeechLanguage, chime: Bool) async {
+        if chime {
+            let sampleRate = 24_000.0
+            let samples = Chime.samples(sampleRate: sampleRate)
+            DebugLog.log("demo engine: chime")
+            DemoChime.play(samples, sampleRate: sampleRate)
+            try? await Task.sleep(for: .seconds(Double(samples.count) / sampleRate))
+        }
+        let utterance = AVSpeechUtterance(string: SpeakableText.forVoice(text, language: language))
+        utterance.voice = AVSpeechSynthesisVoice(language: language == .french ? "fr-FR" : "en-US")
+        await withCheckedContinuation { continuation in
+            finished?.resume()
+            finished = continuation
+            synthesizer.speak(utterance)
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        DebugLog.log("demo engine: voice started")
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.finished?.resume()
+            self.finished = nil
+        }
+    }
+}
+
+/// The app's own chime, played once through a short-lived audio engine.
+private enum DemoChime {
+    nonisolated(unsafe) private static var engine: AVAudioEngine?
+
+    @MainActor
+    static func play(_ samples: [Float], sampleRate: Double) {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
+        else { return }
+        buffer.frameLength = buffer.frameCapacity
+        samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        do { try engine.start() } catch { return }
+        player.scheduleBuffer(buffer)
+        player.play()
+        self.engine = engine  // kept until the next chime
+    }
+}
+
 #endif

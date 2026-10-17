@@ -91,6 +91,46 @@
         }
       }
     },
+    "%lld sources": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld sources"
+          }
+        }
+      }
+    },
+    "1 source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 source"
+          }
+        }
+      }
+    },
+    "<the source’s address>": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "<l’adresse de la source>"
+          }
+        }
+      }
+    },
+    "A JSON object without a text field.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un objet JSON sans champ de texte."
+          }
+        }
+      }
+    },
     "A code is valid for 5 minutes and serves only once.": {
       "localizations": {
         "fr": {
@@ -107,6 +147,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un fichier est arrivé abîmé deux fois de suite. Vérifie ta connexion, puis réessaie."
+          }
+        }
+      }
+    },
+    "A name to recognize it. Its page then gives its address.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un nom pour la reconnaître. Sa page te donne ensuite son adresse."
+          }
+        }
+      }
+    },
+    "A notification on this Mac, with the name of the source. Maé says nothing.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une notification sur ce Mac, avec le nom de la source. Maé ne dit rien."
+          }
+        }
+      }
+    },
+    "A source gets its address once the home relay is set.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source reçoit son adresse une fois le relais maison réglé."
           }
         }
       }
@@ -151,12 +221,62 @@
         }
       }
     },
+    "Add": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter"
+          }
+        }
+      }
+    },
     "Add a device": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Ajouter un appareil"
+          }
+        }
+      }
+    },
+    "Add a source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter une source"
+          }
+        }
+      }
+    },
+    "Add one, then paste its address in the other system.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajoutes-en une, puis colle son adresse dans l’autre système."
+          }
+        }
+      }
+    },
+    "Address": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse"
+          }
+        }
+      }
+    },
+    "Address of the home relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse du relais maison"
           }
         }
       }
@@ -197,6 +317,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Avancé"
+          }
+        }
+      }
+    },
+    "After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it becomes a notification.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Après un carillon, Maé la dit dès que personne ne parle. Pas dite dans la minute, elle devient une notification."
           }
         }
       }
@@ -391,6 +521,26 @@
         }
       }
     },
+    "Change the address?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer l’adresse ?"
+          }
+        }
+      }
+    },
+    "Change the address…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer l’adresse…"
+          }
+        }
+      }
+    },
     "Change tier?": {
       "localizations": {
         "fr": {
@@ -511,12 +661,32 @@
         }
       }
     },
+    "Connected": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecté"
+          }
+        }
+      }
+    },
     "Connecting to the relay…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Connexion au relais…"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion…"
           }
         }
       }
@@ -551,6 +721,16 @@
         }
       }
     },
+    "Copied": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "C’est copié"
+          }
+        }
+      }
+    },
     "Copies all measurements of this session (JSON)": {
       "localizations": {
         "fr": {
@@ -561,12 +741,32 @@
         }
       }
     },
+    "Copy": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copier"
+          }
+        }
+      }
+    },
     "Copy measurements": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Copier les mesures"
+          }
+        }
+      }
+    },
+    "Copy the address from the source’s page.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copie l’adresse depuis la page de la source."
           }
         }
       }
@@ -727,6 +927,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Téléchargement… %@"
+          }
+        }
+      }
+    },
+    "Duplicate: ignored": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En double : ignorée"
           }
         }
       }
@@ -941,6 +1151,46 @@
         }
       }
     },
+    "Home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maison"
+          }
+        }
+      }
+    },
+    "Home Assistant sends Maé a sentence with a REST command. Add it to its configuration, then restart Home Assistant.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home Assistant envoie une phrase à Maé avec une commande REST. Ajoute-la à sa configuration, puis redémarre Home Assistant."
+          }
+        }
+      }
+    },
+    "Home path": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la maison"
+          }
+        }
+      }
+    },
+    "Home relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais maison"
+          }
+        }
+      }
+    },
     "Home station, connected": {
       "localizations": {
         "fr": {
@@ -1041,6 +1291,26 @@
         }
       }
     },
+    "In Developer tools › Actions, switch to YAML mode and run:": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dans Outils de développement › Actions, passe en mode YAML et lance :"
+          }
+        }
+      }
+    },
+    "In configuration.yaml": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dans configuration.yaml"
+          }
+        }
+      }
+    },
     "In progress": {
       "localizations": {
         "fr": {
@@ -1051,12 +1321,42 @@
         }
       }
     },
+    "In secrets.yaml": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dans secrets.yaml"
+          }
+        }
+      }
+    },
     "Instruction": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Consigne"
+          }
+        }
+      }
+    },
+    "Internal door": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte interne"
+          }
+        }
+      }
+    },
+    "Internet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Internet"
           }
         }
       }
@@ -1091,6 +1391,16 @@
         }
       }
     },
+    "It came by a path this source does not accept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elle est arrivée par un chemin que cette source n’accepte pas."
+          }
+        }
+      }
+    },
     "It changes the files of its folder. Anything else, like installing or running a program, is refused, and Maé tells you.": {
       "localizations": {
         "fr": {
@@ -1107,6 +1417,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Il décide seul de ce qu’il peut faire sans risque sur ce Mac, sans te demander. Ne choisis ce mode que si tu lui confies tes fichiers en toute confiance."
+          }
+        }
+      }
+    },
+    "It took over 10 seconds to arrive.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elle a mis plus de 10 secondes à arriver."
           }
         }
       }
@@ -1141,6 +1461,16 @@
         }
       }
     },
+    "Its address stops working at once, and its last deliveries are erased.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son adresse cesse aussitôt de marcher, et ses dernières informations sont effacées."
+          }
+        }
+      }
+    },
     "Its folder": {
       "localizations": {
         "fr": {
@@ -1151,12 +1481,32 @@
         }
       }
     },
+    "Keep for later": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder pour plus tard"
+          }
+        }
+      }
+    },
     "Keep this Mac awake when plugged in": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Garder ce Mac éveillé sur secteur"
+          }
+        }
+      }
+    },
+    "Kept for later": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gardée pour plus tard"
           }
         }
       }
@@ -1177,6 +1527,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Modèle de langage"
+          }
+        }
+      }
+    },
+    "Last deliveries": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernières informations"
+          }
+        }
+      }
+    },
+    "Last delivery: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernier envoi : %@"
           }
         }
       }
@@ -1267,6 +1637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maximum (48 Go et plus)"
+          }
+        }
+      }
+    },
+    "May ask for an urgent announcement": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peut demander une annonce urgente"
           }
         }
       }
@@ -1377,6 +1757,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé ne répond qu’aux phrases qui commencent par « OK Maé », et t’écoute encore quelques secondes après chaque réponse. Quand la télé est allumée, elle t’entend moins bien. Branché sur secteur, ce Mac ne se met plus en veille."
+          }
+        }
+      }
+    },
+    "Maé says it right away. Then call the same action from any automation.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé la dit tout de suite. Ensuite, appelle la même action depuis n’importe quelle automatisation."
+          }
+        }
+      }
+    },
+    "Maé says “%@”": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé dit « %@ »"
           }
         }
       }
@@ -1531,6 +1931,26 @@
         }
       }
     },
+    "Name of the new source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nom de la nouvelle source"
+          }
+        }
+      }
+    },
+    "Never": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jamais"
+          }
+        }
+      }
+    },
     "New conversation": {
       "localizations": {
         "fr": {
@@ -1547,6 +1967,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Aucun appareil"
+          }
+        }
+      }
+    },
+    "No home relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas de relais maison"
+          }
+        }
+      }
+    },
+    "No relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas de relais"
+          }
+        }
+      }
+    },
+    "No source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune source"
+          }
+        }
+      }
+    },
+    "No source yet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune source pour l’instant"
           }
         }
       }
@@ -1591,6 +2051,16 @@
         }
       }
     },
+    "Not in home mode": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas en mode maison"
+          }
+        }
+      }
+    },
     "Not installed on this Mac. Once it is, Maé can hand it long tasks: a website, code, research.": {
       "localizations": {
         "fr": {
@@ -1617,6 +2087,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Noter ce que Maé entend"
+          }
+        }
+      }
+    },
+    "Nothing readable: an empty text, or broken JSON.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien de lisible : un texte vide, ou un JSON cassé."
+          }
+        }
+      }
+    },
+    "Nothing received yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien reçu pour l’instant."
+          }
+        }
+      }
+    },
+    "Notification only": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notification seulement"
+          }
+        }
+      }
+    },
+    "Notified": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifiée"
           }
         }
       }
@@ -1721,12 +2231,32 @@
         }
       }
     },
+    "Other systems at home, like Home Assistant or a script, can send Maé a sentence to say. It only informs her: it never triggers an action.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "D’autres systèmes de la maison, comme Home Assistant ou un script, peuvent envoyer à Maé une phrase à dire. Ça l’informe seulement : ça ne déclenche jamais d’action."
+          }
+        }
+      }
+    },
     "Output": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Sortie"
+          }
+        }
+      }
+    },
+    "Over 64 KB.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plus de 64 Ko."
           }
         }
       }
@@ -1761,6 +2291,16 @@
         }
       }
     },
+    "Paste it in the other system. Anyone who knows it can send Maé information: keep it to yourself.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colle-la dans l’autre système. Qui la connaît peut envoyer des informations à Maé : garde-la pour toi."
+          }
+        }
+      }
+    },
     "Paste your Brave key first.": {
       "localizations": {
         "fr": {
@@ -1777,6 +2317,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mettre en pause"
+          }
+        }
+      }
+    },
+    "Pause this source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mettre cette source en pause"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En pause"
           }
         }
       }
@@ -1827,6 +2387,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé attend toujours « OK Maé »."
+          }
+        }
+      }
+    },
+    "Public relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais public"
           }
         }
       }
@@ -1901,12 +2471,42 @@
         }
       }
     },
+    "Received information": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informations reçues"
+          }
+        }
+      }
+    },
+    "Refused": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusée"
+          }
+        }
+      }
+    },
     "Relay": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Relais"
+          }
+        }
+      }
+    },
+    "Relay not in home mode": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais pas en mode maison"
           }
         }
       }
@@ -1971,6 +2571,16 @@
         }
       }
     },
+    "Remove this source…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer cette source…"
+          }
+        }
+      }
+    },
     "Remove…": {
       "localizations": {
         "fr": {
@@ -1997,6 +2607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Reprendre"
+          }
+        }
+      }
+    },
+    "Said": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dite"
           }
         }
       }
@@ -2031,6 +2651,16 @@
         }
       }
     },
+    "Say right away": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dire tout de suite"
+          }
+        }
+      }
+    },
     "Say “OK Maé”": {
       "localizations": {
         "fr": {
@@ -2061,12 +2691,52 @@
         }
       }
     },
+    "Send a test": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyer un essai"
+          }
+        }
+      }
+    },
+    "Send from Home Assistant": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyer depuis Home Assistant"
+          }
+        }
+      }
+    },
+    "Sent from %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyée depuis %@"
+          }
+        }
+      }
+    },
     "Session": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Session"
+          }
+        }
+      }
+    },
+    "Set the home relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Régler le relais maison"
           }
         }
       }
@@ -2207,6 +2877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Source"
+          }
+        }
+      }
+    },
+    "Sources": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sources"
           }
         }
       }
@@ -2411,6 +3091,46 @@
         }
       }
     },
+    "The OpenMaé relay, run in home mode on a machine at home (a NAS, a Raspberry Pi…). It passes on what your systems send: this Mac opens no port.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais OpenMaé, lancé en mode maison sur une machine de la maison (un NAS, un Raspberry Pi…). Il transmet ce que tes systèmes envoient : ce Mac n’ouvre aucun port."
+          }
+        }
+      }
+    },
+    "The address appears once the home relay is set.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’adresse apparaît une fois le relais maison réglé."
+          }
+        }
+      }
+    },
+    "The address is not ready yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’adresse n’est pas encore prête."
+          }
+        }
+      }
+    },
+    "The address of the source is secret: it stays in secrets.yaml.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’adresse de la source est secrète : elle reste dans secrets.yaml."
+          }
+        }
+      }
+    },
     "The assistant runs entirely on this Mac, without the Internet. It first needs its models: one download, and the connection is not used any more.": {
       "localizations": {
         "fr": {
@@ -2501,6 +3221,16 @@
         }
       }
     },
+    "The home relay does not answer: what your systems send cannot reach Maé. I keep trying.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais maison ne répond pas : ce que tes systèmes envoient ne peut pas arriver jusqu’à Maé. Je réessaie toute seule."
+          }
+        }
+      }
+    },
     "The microphone is blocked": {
       "localizations": {
         "fr": {
@@ -2561,12 +3291,32 @@
         }
       }
     },
+    "The old address stops working at once: you will have to paste the new one in the other system.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’ancienne adresse cesse aussitôt de marcher : il faudra coller la nouvelle dans l’autre système."
+          }
+        }
+      }
+    },
     "The relay does not answer. Your devices can reach you at home only. I keep trying.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Le relais ne répond pas. Tes appareils ne peuvent te joindre qu’à la maison. Je réessaie toute seule."
+          }
+        }
+      }
+    },
+    "The source was paused: its address answered as if it did not exist.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La source était en pause : son adresse a répondu comme si elle n’existait pas."
           }
         }
       }
@@ -2651,6 +3401,26 @@
         }
       }
     },
+    "This is not an address. Type it like 192.168.1.10:8080.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce n’est pas une adresse. Écris-la sous la forme 192.168.1.10:8080."
+          }
+        }
+      }
+    },
+    "This relay is not in home mode, so it passes nothing on to Maé. Start it with RELAY_HOME_INBOUND=true.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce relais n’est pas en mode maison, il ne transmet donc rien à Maé. Lance-le avec RELAY_HOME_INBOUND=true."
+          }
+        }
+      }
+    },
     "This tier could not be tested: performance is estimated.": {
       "localizations": {
         "fr": {
@@ -2721,6 +3491,26 @@
         }
       }
     },
+    "Too late: notified": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trop tard : notifiée"
+          }
+        }
+      }
+    },
+    "Too many deliveries: at most 6 a minute and 60 an hour.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trop d’envois : 6 par minute et 60 par heure au plus."
+          }
+        }
+      }
+    },
     "Transcription": {
       "localizations": {
         "fr": {
@@ -2741,6 +3531,16 @@
         }
       }
     },
+    "Try it": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essaie"
+          }
+        }
+      }
+    },
     "Turns": {
       "localizations": {
         "fr": {
@@ -2757,6 +3557,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tape d’abord l’adresse de ton SearXNG."
+          }
+        }
+      }
+    },
+    "Unreachable": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Injoignable"
           }
         }
       }
@@ -2831,6 +3641,16 @@
         }
       }
     },
+    "Waiting": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente"
+          }
+        }
+      }
+    },
     "Waiting for your device…": {
       "localizations": {
         "fr": {
@@ -2857,6 +3677,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "En attente…"
+          }
+        }
+      }
+    },
+    "What Maé does": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que fait Maé"
           }
         }
       }
@@ -2911,6 +3741,36 @@
         }
       }
     },
+    "What your systems send goes through it to this Mac, which opens no port. Never make it reachable from the internet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que tes systèmes envoient passe par lui jusqu’à ce Mac, qui n’ouvre aucun port. Ne le rends jamais joignable depuis Internet."
+          }
+        }
+      }
+    },
+    "When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand elle marque une information comme urgente, Maé la dit tout de suite, quel que soit le mode : elle peut couper sa propre phrase, jamais la tienne."
+          }
+        }
+      }
+    },
+    "While it is paused, its address answers as if it did not exist.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tant qu’elle est en pause, son adresse répond comme si elle n’existait pas."
+          }
+        }
+      }
+    },
     "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
       "localizations": {
         "fr": {
@@ -2937,6 +3797,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réveillée"
+          }
+        }
+      }
+    },
+    "Wrong method: send with POST, or GET with ?text=.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mauvaise méthode : envoie avec POST, ou GET avec ?text=."
+          }
+        }
+      }
+    },
+    "Wrong mode": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mauvais mode"
           }
         }
       }
@@ -3091,6 +3971,26 @@
         }
       }
     },
+    "Your test": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton essai"
+          }
+        }
+      }
+    },
+    "action: rest_command.notify_mae\ndata:\n  message: \"Test from Home Assistant\"": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "action: rest_command.prevenir_mae\ndata:\n  texte: \"Essai depuis Home Assistant\""
+          }
+        }
+      }
+    },
     "already here": {
       "localizations": {
         "fr": {
@@ -3181,12 +4081,32 @@
         }
       }
     },
+    "mae_address: \"%@\"": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "adresse_mae: \"%@\""
+          }
+        }
+      }
+    },
     "or press": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "ou appuie sur"
+          }
+        }
+      }
+    },
+    "rest_command:\n  notify_mae:\n    # the address copied from OpenMaé\n    url: !secret mae_address\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': message} | to_json }}\"": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "rest_command:\n  prevenir_mae:\n    # l’adresse copiée depuis OpenMaé\n    url: !secret adresse_mae\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': texte} | to_json }}\""
           }
         }
       }

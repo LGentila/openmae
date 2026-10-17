@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"unicode/utf8"
 )
 
@@ -25,6 +26,7 @@ const (
 	codeUnknownTube        = "unknown_tube"
 	codeRateLimited        = "rate_limited"
 	codeUnsupportedVersion = "unsupported_version"
+	codeInboundOff         = "inbound_off" // a hello with "inbound" to a relay not in home mode
 )
 
 // errProtocol marks everything a client sends that openmae-relay/1 does not
@@ -39,14 +41,15 @@ var (
 // message has the fields of every control message a client may send;
 // encoding/json ignores the others, as the protocol asks.
 type message struct {
-	Op   string `json:"op"`
-	V    *int   `json:"v"`
-	Role string `json:"role"`
-	ID   string `json:"id"`
-	Key  string `json:"key"`
-	Sig  string `json:"sig"`
-	To   string `json:"to"`
-	Tube string `json:"tube"`
+	Op      string `json:"op"`
+	V       *int   `json:"v"`
+	Role    string `json:"role"`
+	ID      string `json:"id"`
+	Key     string `json:"key"`
+	Inbound bool   `json:"inbound"` // hello: a registration for deliveries, in home mode
+	Sig     string `json:"sig"`
+	To      string `json:"to"`
+	Tube    string `json:"tube"`
 }
 
 func parseMessage(b []byte) (message, error) {
@@ -86,6 +89,18 @@ func challengeMessage(nonce []byte) []byte {
 
 func incomingMessage(t token) []byte {
 	return []byte(`{"op":"incoming","tube":"` + b64url.EncodeToString(t[:]) + `"}`)
+}
+
+func registeredInboundMessage(name string) []byte {
+	return []byte(`{"op":"registered","inbound":"` + name + `"}`)
+}
+
+// inboundMessage asks a Mac to accept a delivery's tube. from is the
+// caller's address, without the zone, which only means something on the
+// relay's host.
+func inboundMessage(t token, from netip.Addr) []byte {
+	return []byte(`{"op":"inbound","tube":"` + b64url.EncodeToString(t[:]) +
+		`","from":"` + from.Unmap().WithZone("").String() + `"}`)
 }
 
 func errorMessage(code string) []byte {
@@ -157,6 +172,20 @@ func deviceID(pub ed25519.PublicKey) string {
 	return deviceIDEncoding.EncodeToString(sum[:16])
 }
 
+const inboundContext = "openmae-relay/1 inbound:"
+
+// inboundName is the name a Mac gets deliveries under in home mode: the
+// first 16 bytes of SHA-256 of inboundContext and the raw Ed25519 public
+// key, encoded like a device id. Unlike the device id, it is given out to
+// the systems that post deliveries, and does not tell them the device id.
+func inboundName(pub ed25519.PublicKey) string {
+	h := sha256.New()
+	h.Write([]byte(inboundContext))
+	h.Write(pub)
+	return deviceIDEncoding.EncodeToString(h.Sum(nil)[:16])
+}
+
+// validDeviceID also checks inbound names, which have the same form.
 func validDeviceID(s string) bool {
 	if len(s) != deviceIDLen {
 		return false

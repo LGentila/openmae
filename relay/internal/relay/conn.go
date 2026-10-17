@@ -39,7 +39,7 @@ type conn interface {
 
 	// forward copies what the client sends into dst until the client stops,
 	// an error occurs, or a write to dst fails.
-	forward(ctx context.Context, dst conn, f *flow) error
+	forward(ctx context.Context, dst sink, f *flow) error
 	writeBytes(p []byte) error
 	writeDatagram(p []byte) error
 
@@ -50,6 +50,13 @@ type conn interface {
 	// nothing else reads the connection.
 	drain(deadline time.Time)
 	closeNow()
+}
+
+// sink is where forward copies a client's bytes and datagrams: the other
+// end of a tube, or the relay itself for a delivery's tube.
+type sink interface {
+	writeBytes(p []byte) error
+	writeDatagram(p []byte) error
 }
 
 // fail sends an error to the client, then closes the connection once the
@@ -84,7 +91,7 @@ func newActivity() *activity { return &activity{start: time.Now()} }
 func (a *activity) touch()                 { a.last.Store(int64(time.Since(a.start))) }
 func (a *activity) idleFor() time.Duration { return time.Since(a.start) - time.Duration(a.last.Load()) }
 
-func (f *flow) forwardBytes(ctx context.Context, p []byte, dst conn) error {
+func (f *flow) forwardBytes(ctx context.Context, p []byte, dst sink) error {
 	if err := f.budget.wait(ctx, len(p)); err != nil {
 		return err
 	}
@@ -96,7 +103,7 @@ func (f *flow) forwardBytes(ctx context.Context, p []byte, dst conn) error {
 	return nil
 }
 
-func (f *flow) forwardDatagram(p []byte, dst conn) {
+func (f *flow) forwardDatagram(p []byte, dst sink) {
 	if len(p) > maxDatagramSize || !f.budget.allow(len(p)) || dst.writeDatagram(p) != nil {
 		f.dropped.Add(1)
 		return
@@ -106,7 +113,7 @@ func (f *flow) forwardDatagram(p []byte, dst conn) {
 }
 
 // forwardStream copies r to dst until r ends.
-func (f *flow) forwardStream(ctx context.Context, r io.Reader, buf []byte, dst conn) error {
+func (f *flow) forwardStream(ctx context.Context, r io.Reader, buf []byte, dst sink) error {
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {

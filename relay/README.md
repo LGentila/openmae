@@ -27,6 +27,9 @@ certificate). There is no database: after a restart, Macs register again within 
 
 Its logs hold no device id, tube token or IP address (see [Logs](#logs)).
 
+One exception, off by default: a relay run on the home network in **home mode** also passes short texts that
+systems on that network post to the Mac, and reads them in clear (see [Home relay](#home-relay)).
+
 ## How it is reached
 
 | What | Transport | Where |
@@ -35,6 +38,7 @@ Its logs hold no device id, tube token or IP address (see [Logs](#logs)).
 | Tubes, preferred | QUIC over UDP, ALPN `openmae-relay/1` | a UDP port published straight to the container (4433 inside) |
 | Tubes, fallback when UDP is blocked | WebSocket, `GET /v1/ws` | HTTPS, through the reverse proxy |
 | Health: `GET /healthz` | HTTP | answers `200 ok` |
+| Deliveries, home mode only: `/<inbound name>/in/<secret>` | plain HTTP | the HTTP listener, on the home network (see [Home relay](#home-relay)) |
 
 Inside the container the relay speaks plain HTTP on port 8080 and QUIC on UDP port 4433. QUIC cannot go
 through an HTTP reverse proxy, so its UDP port is published on the host directly. `/v1/info` tells the apps
@@ -109,19 +113,84 @@ Environment variables only. All are optional.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RELAY_HTTP_ADDR` | `:8080` | Plain HTTP listener: `/v1/info`, `/v1/ws`, `/healthz`. Normally behind a TLS reverse proxy. In standalone mode, it answers the HTTP-01 challenge and `/healthz`, and redirects the rest to HTTPS. |
+| `RELAY_HTTP_ADDR` | `:8080` | Plain HTTP listener: `/v1/info`, `/v1/ws`, `/healthz`, and deliveries in home mode. Normally behind a TLS reverse proxy. In standalone mode, it answers the HTTP-01 challenge and `/healthz`, and redirects the rest to HTTPS. |
 | `RELAY_QUIC_ADDR` | `:4433` | UDP listener for QUIC. |
 | `RELAY_QUIC_PUBLIC_PORT` | the port of `RELAY_QUIC_ADDR` | The UDP port announced in `/v1/info`, as clients reach it: set it when the listener is published on another port, for example `443` with `-p 443:4433/udp`. |
 | `RELAY_DATA_DIR` | `/data` | Where the QUIC key (`quic-key.pem`) and certificate (`quic-cert.pem`) are kept, and the Let's Encrypt cache (`acme/`) in standalone mode. Created if missing. |
 | `RELAY_PREVIOUS_PINS` | none | Comma-separated pins of earlier QUIC keys, still listed in `/v1/info` after a key change (see [Key rotation](#quic-certificate-and-key-rotation)). |
-| `RELAY_BEHIND_PROXY` | `false` | When true, the client address used to rate-limit WebSocket clients is the last entry of `X-Forwarded-For` (the one your proxy adds) instead of the TCP peer, which is then the proxy. Set it behind a proxy, and only there: without a proxy, clients could write that header themselves. |
+| `RELAY_BEHIND_PROXY` | `false` | When true, the client address used to rate-limit WebSocket clients (and, in home mode, to take deliveries from the local network only) is the last entry of `X-Forwarded-For` (the one your proxy adds) instead of the TCP peer, which is then the proxy. Set it behind a proxy, and only there: without a proxy, clients could write that header themselves. |
 | `RELAY_TLS_DOMAIN` | none | Turns on standalone mode for this domain. |
 | `RELAY_HTTPS_ADDR` | `:443` | HTTPS listener in standalone mode. |
 | `RELAY_MAX_CONNECTIONS` | `4096` | QUIC and WebSocket connections at once. Past it, new QUIC connections are refused during their handshake and WebSocket upgrades get `503`. |
+| `RELAY_HOME_INBOUND` | `false` | Home mode: systems on the local network can post deliveries to the Macs registered for them, on the HTTP listener (see [Home relay](#home-relay)). Only for a relay on the home network: the relay reads deliveries in clear, so a public relay must never turn it on. Refused with `RELAY_TLS_DOMAIN`. |
 | `RELAY_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. `debug` adds registrations and refusals. |
 
 Booleans accept `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`. A malformed value stops the relay at start,
 with a message saying which variable is wrong.
+
+## Home relay
+
+The same program, run on a machine of the home network (a NAS, a home server, a Raspberry Pi with Docker), can also
+pass **deliveries** to OpenMaé on the Mac: short texts that systems on that network post over plain HTTP, for
+example Home Assistant telling Maé that someone rang at the door. No port opens on the Mac: it keeps a connection
+to the home relay, which hands it each delivery through that connection and returns its answer (see "Home mode" in
+[PROTOCOL.md](PROTOCOL.md)). The Mac keeps using its usual relay for the iPhone.
+
+This is **home mode**, off by default, turned on with `RELAY_HOME_INBOUND=true`. Unlike what goes through tubes,
+deliveries are not encrypted end to end: the home relay reads them in clear. Hence two rules:
+
+- **Never forward the home relay's port 8080 from the internet**, nor expose it through a reverse proxy reachable
+  from the internet. The relay only takes deliveries from local addresses, but that is a safety net, not a
+  protection: behind Docker Desktop (macOS, Windows), a userland proxy or a router's NAT loopback, callers from the
+  internet can show up with a local address.
+- **A public relay must never turn home mode on**: it would receive deliveries in clear. The relay refuses to start
+  in home mode together with standalone mode (`RELAY_TLS_DOMAIN`).
+
+With Docker Compose on the home machine, from the repository's `relay` folder:
+
+```yaml
+# A home relay: on the home network only.
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      RELAY_HOME_INBOUND: "true"
+      # The UDP port published below, as the Mac reaches it.
+      RELAY_QUIC_PUBLIC_PORT: "4433"
+    ports:
+      # Published on the home network, never forwarded from the internet.
+      - "8080:8080/tcp"
+      - "4433:4433/udp"
+    volumes:
+      - relay-data:/data
+
+volumes:
+  relay-data:
+```
+
+```sh
+docker compose -f compose.home.yaml up -d --build   # the file above, saved as compose.home.yaml
+```
+
+If the machine also has an interface on the internet, publish the ports on its home network address only, for
+example `"192.168.1.10:8080:8080/tcp"` and `"192.168.1.10:4433:4433/udp"`.
+
+Then:
+
+1. In OpenMaé's settings on the Mac, give `http://<home relay>:8080` as the home relay, `<home relay>` being the
+   machine's name or address on the home network. The Mac registers there for deliveries.
+2. Each source created on the Mac gets an address on the home relay,
+   `http://<home relay>:8080/<inbound name>/in/<secret>`, to paste into the system that sends. The inbound name comes
+   from the Mac's key; the secret is the source's, and only the Mac checks it.
+3. Try it from the home network: `curl -d 'Hello from the home network' http://<home relay>:8080/<inbound name>/in/<secret>`.
+
+The relay answers `403` to callers outside the local network (10/8, 172.16/12, 192.168/16, 169.254/16, 127/8,
+fc00::/7, fe80::/10, ::1: the shared address space 100.64/10 of carrier NAT and Tailscale is not local), `503` while
+the Mac is not connected (it keeps nothing: the sender may try again), `429` beyond 30 deliveries a minute or 5 at
+once for a Mac, `413` beyond 64 KB, `408` for a body that takes more than 10 seconds; otherwise, it passes on the
+Mac's answer. Behind a reverse proxy on the home network, set `RELAY_BEHIND_PROXY=true`, so that the caller's address
+comes from `X-Forwarded-For`.
 
 ## Deploying on Dokploy
 
@@ -218,6 +287,11 @@ Bounds of this relay, so that nothing grows without limit:
 - a client that does not read what the relay writes to it for 30 s (10 s on a control connection) is
   disconnected.
 
+In home mode, per inbound name (that is, per Mac): 30 deliveries per minute and 5 at once (`429` beyond), bodies of
+64 KB at most (`413`), 10 s to receive a body (`408`), then 10 s for the Mac to accept the delivery's tube and 10 s
+for it to answer, in 4 KB at most (`503`, `502`). Deliveries also count among the tubes waiting for an accept, but not
+against a Mac's 3 tubes, which are for iPhones.
+
 Anything that does not follow the protocol gets `bad_request` (when still possible) and the connection is closed.
 A QUIC client that has not enabled datagrams can keep a control connection, but cannot open or accept a tube
 (`bad_request`): without datagrams there would be no sound.
@@ -227,10 +301,12 @@ A QUIC client that has not enabled datagrams can keep a control connection, but 
 Logs go to standard output, one `key=value` line per event: start and stop (ports, key pin), tubes opened and
 closed (transports, duration, bytes and datagrams each way, datagrams dropped, why it closed), and every 10
 minutes a line of counts (Macs registered, tubes, connections, refusals by error code). `RELAY_LOG_LEVEL=debug`
-adds registrations and refusals.
+adds registrations and refusals. In home mode, each delivery passed to a Mac adds a line with its status, size and
+duration, and the counts add the Macs registered for deliveries and the deliveries turned away, by status.
 
 They never contain device ids, tube tokens or IP addresses, not even the relay's own: errors are logged by
-kind, not by their text, and messages from libraries have their addresses removed.
+kind, not by their text, and messages from libraries have their addresses removed. Nor inbound names, secrets or
+anything of a delivery's contents.
 
 ## Push notifications
 
@@ -247,12 +323,14 @@ go test -race ./...
 
 The tests start the relay in-process on random local ports and drive it with test Macs and iPhones over QUIC and
 WebSocket: registration, tubes across every transport combination (bytes and datagrams both ways), every error
-code, rate limits, throttling, teardown, idle timeouts and shutdown.
+code, rate limits, throttling, teardown, idle timeouts and shutdown; in home mode, deliveries from end to end, and
+each status the relay answers.
 
 Code layout: `main.go` reads the environment; `internal/relay` holds the relay. Start with `server.go`
 (listeners, shutdown) and `session.go` (what each control message does); then `tube.go` (piping), `quic.go` and
 `websocket.go` (the two transports), `hub.go` (registrations and pending tubes, in memory), `control.go`
-(messages, device ids, signatures), `limit.go` (rate limits) and `cert.go` (QUIC key and pins).
+(messages, device ids, signatures), `limit.go` (rate limits), `cert.go` (QUIC key and pins) and `inbound.go`
+(home mode: deliveries).
 
 ## Licences
 

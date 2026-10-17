@@ -18,6 +18,7 @@ struct AssistantApp: App {
     @State private var window = WindowState()
     @State private var presence: DesktopPresence
     @State private var phone: PhoneAccess
+    @State private var inbound: InboundAccess
 
     init() {
         Fonts.register()
@@ -29,14 +30,27 @@ struct AssistantApp: App {
         let engine = AssistantHost()
         #endif
         // The demonstration engine has no sound to hand over: an iPhone then only sees and commands it.
-        let link = LinkHost(engine: engine, audio: engine as? any RemoteAudioRouting,
-                            identityStore: KeychainIdentityStore(service: "OpenMaé link"),
+        let identityStore = KeychainIdentityStore(service: "OpenMaé link")
+        let link = LinkHost(engine: engine, audio: engine as? any RemoteAudioRouting, identityStore: identityStore,
                             storeURL: LinkHost.defaultStoreURL, macName: Host.current().localizedName ?? "Mac")
+        // Information sent by other systems (Home Assistant, a script…) is said by the engine, or notified. Not through
+        // the link: a paired iPhone cannot make Maé announce anything.
+        #if DEBUG
+        let inbound = InboundTestHook.isOn
+            ? InboundHost(announcer: engine as? any Announcing, identityStore: InboundTestHook.identityStore,
+                          secrets: MemoryInboundSecrets(), storeURL: InboundTestHook.storeURL)
+            : InboundHost(announcer: engine as? any Announcing, identityStore: identityStore,
+                          secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL)
+        #else
+        let inbound = InboundHost(announcer: engine as? any Announcing, identityStore: identityStore,
+                                  secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL)
+        #endif
         let model = AssistantModel(connection: link)
         let phone = PhoneAccess(link: link)
         _model = State(initialValue: model)
         _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
         _phone = State(initialValue: phone)
+        _inbound = State(initialValue: InboundAccess(host: inbound))
     }
 
     var body: some Scene {
@@ -54,6 +68,7 @@ struct AssistantApp: App {
             }
             .frame(minWidth: 820, minHeight: 700)
             .environment(phone)
+            .environment(inbound)
             // The design has no dark theme yet: the window, its menus and alerts stay light.
             .preferredColorScheme(.light)
             .followsWindowVisibility()

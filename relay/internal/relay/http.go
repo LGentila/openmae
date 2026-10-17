@@ -7,11 +7,16 @@ import (
 	"strings"
 )
 
-func (s *Server) routes() http.Handler {
+// routes serves the HTTP listener, and the HTTPS one in standalone mode.
+// Deliveries come to the plain HTTP listener only, in home mode.
+func (s *Server) routes(deliveries bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", s.serveInfo)
 	mux.HandleFunc("GET /healthz", serveHealth)
 	mux.HandleFunc("GET "+wsPath, s.serveWebSocket)
+	if deliveries {
+		mux.HandleFunc(inboundPattern, s.serveDelivery)
+	}
 	return mux
 }
 
@@ -39,9 +44,11 @@ func (s *Server) redirectToHTTPS() http.Handler {
 	return mux
 }
 
-// clientIP is the address used to rate-limit a WebSocket client. Behind a
-// reverse proxy, the TCP peer is the proxy; the last X-Forwarded-For entry
-// is the one the proxy added, the only one a client cannot forge.
+// clientIP is the address of a client of the HTTP listener, used to
+// rate-limit WebSocket clients and to take deliveries from the local network
+// only. Behind a reverse proxy, the TCP peer is the proxy; the last
+// X-Forwarded-For entry is the one the proxy added, the only one a client
+// cannot forge.
 func clientIP(r *http.Request, behindProxy bool) netip.Addr {
 	if behindProxy {
 		if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {

@@ -101,7 +101,7 @@ struct WebSearchRows: View {
             SecureField(text: $key, prompt: search.braveKeySaved ? Text("Key saved in the keychain") : Text("API key")) {
                 Text("Brave Search API key")
             }
-            .webSearchField()
+            .settingsField()
             .focused($focus, equals: .key)
             .onSubmit(saveKey)
             Button("Save", action: saveKey)
@@ -144,12 +144,12 @@ struct WebSearchRows: View {
     /// Its address, and a user name and a password when a protection in front of it asks for them.
     @ViewBuilder private var searxngRows: some View {
         TextField(text: $address, prompt: Text(verbatim: "https://search.example.org")) { Text("Address of your SearXNG") }
-            .webSearchField()
+            .settingsField()
             .focused($focus, equals: .address)
             .onSubmit(saveFields)
             .padding(.bottom, 8)
         TextField(text: $username, prompt: Text("User name, if it asks for one")) { Text("User name") }
-            .webSearchField()
+            .settingsField()
             .focused($focus, equals: .username)
             .onSubmit(saveFields)
             .padding(.bottom, 8)
@@ -159,7 +159,7 @@ struct WebSearchRows: View {
             {
                 Text("Password")
             }
-            .webSearchField()
+            .settingsField()
             .focused($focus, equals: .password)
             .onSubmit(savePassword)
             Button("Save", action: savePassword)
@@ -265,22 +265,4 @@ struct WebSearchRows: View {
                 : Text("This address doesn’t answer like a SearXNG (code \(status)).")
         }
     }
-}
-
-/// A text field of the settings, drawn like their pop-up menus: 34 points high, on `field`, rounded.
-private struct WebSearchField: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .textFieldStyle(.plain)
-            .textStyle(.label)
-            .foregroundStyle(Palette.ink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .frame(minHeight: 34)
-            .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
-    }
-}
-
-private extension View {
-    func webSearchField() -> some View { modifier(WebSearchField()) }
 }

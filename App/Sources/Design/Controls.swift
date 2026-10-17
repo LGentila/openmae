@@ -260,6 +260,24 @@ struct MenuFieldLabel: View {
     }
 }
 
+/// A text field of the settings, drawn like their pop-up menus: 34 points high, on `field`, rounded.
+struct SettingsField: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .textStyle(.label)
+            .foregroundStyle(Palette.ink)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .frame(minHeight: 34)
+            .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
+    }
+}
+
+extension View {
+    func settingsField() -> some View { modifier(SettingsField()) }
+}
+
 // MARK: - Small pieces
 
 /// A keyboard key, as in "Hold [Space] to talk".

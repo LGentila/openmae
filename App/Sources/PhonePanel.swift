@@ -115,30 +115,17 @@ struct PhonePanel: View {
     }
 
     private func removal(_ device: PairedDevice) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Remove \(device.displayName)?")
-                .textStyle(.confirmTitle)
-                .foregroundStyle(Palette.ink)
-            Text("It will no longer be able to talk to Maé, and its conversation in progress closes. To add it again, you will have to scan a new code.")
-                .textStyle(.panelSmall)
-                .foregroundStyle(Palette.inkMuted)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Button("Remove") {
-                    phone.removing = nil
-                    phone.remove(device)
-                }
-                .buttonStyle(SolidDangerPillStyle())
-                Button("Cancel") { phone.removing = nil }
-                    .buttonStyle(PillButtonStyle())
-            }
-        }
-        .padding(14)
-        .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, -8)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .accessibilityElement(children: .contain)
+        ConfirmationBox(title: Text("Remove \(device.displayName)?"),
+                        message: Text("It will no longer be able to talk to Maé, and its conversation in progress closes. To add it again, you will have to scan a new code."),
+                        confirm: Text("Remove"),
+                        action: {
+                            phone.removing = nil
+                            phone.remove(device)
+                        },
+                        cancel: { phone.removing = nil })
+            .padding(.horizontal, -8)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
     }
 
     /// Why the iPhone reaches this Mac at home only, when it does.
@@ -534,19 +521,32 @@ private struct DoneCheck: View {
 struct PhoneRow: View {
     let phone: PhoneAccess
     let open: () -> Void
+
+    var body: some View {
+        NavigationRow(title: Text("iPhone and iPad"), value: PhonePanel.reachText(phone.reach), open: open)
+    }
+}
+
+/// A row that opens another page of a panel: its title, a value on the right, and a chevron.
+struct NavigationRow: View {
+    let title: Text
+    var value: Text?
+    let open: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                Text("iPhone and iPad")
+                title
                     .textStyle(.setting)
                     .underline(isHovered, color: Palette.ink.opacity(0.25).color)
                     .foregroundStyle(Palette.ink)
                 Spacer(minLength: 0)
-                PhonePanel.reachText(phone.reach)
-                    .textStyle(.navValue)
-                    .foregroundStyle(Palette.inkMuted)
+                if let value {
+                    value
+                        .textStyle(.navValue)
+                        .foregroundStyle(Palette.inkMuted)
+                }
                 IconView(icon: .forward, size: 16)
                     .foregroundStyle(Palette.inkMuted)
             }
@@ -562,25 +562,70 @@ struct PhoneRow: View {
 
 /// The panel's head: back, title, and the status badge on the right.
 struct PanelHeader: View {
-    let title: LocalizedStringKey
+    let title: Text
     let badge: PanelBadge?
+    /// A name the user chose may be long: it is cut short rather than pushing the badge out.
+    let truncatesTitle: Bool
     let back: () -> Void
+
+    init(title: LocalizedStringKey, badge: PanelBadge?, back: @escaping () -> Void) {
+        self.init(title: Text(title), badge: badge, back: back)
+    }
+
+    init(title: Text, badge: PanelBadge?, truncatesTitle: Bool = false, back: @escaping () -> Void) {
+        self.title = title
+        self.badge = badge
+        self.truncatesTitle = truncatesTitle
+        self.back = back
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Button(action: back) { IconView(icon: .back, size: 18) }
                 .buttonStyle(GlassButtonStyle(diameter: 36))
                 .accessibilityLabel(Text("Back"))
-            Text(title)
+            title
                 .textStyle(.panelTitle)
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
-                .fixedSize()
+                .fixedSize(horizontal: !truncatesTitle, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             if let badge { badge }
         }
         .padding(EdgeInsets(top: 0, leading: 2, bottom: 4, trailing: 2))
+    }
+}
+
+/// A confirmation inside a panel ("Remove iPhone 16?"): what will happen, the red button and "Cancel".
+struct ConfirmationBox: View {
+    let title: Text
+    let message: Text
+    /// The red button's title.
+    let confirm: Text
+    let action: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            title
+                .textStyle(.confirmTitle)
+                .foregroundStyle(Palette.ink)
+            message
+                .textStyle(.panelSmall)
+                .foregroundStyle(Palette.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button(action: action) { confirm }
+                    .buttonStyle(SolidDangerPillStyle())
+                Button("Cancel", action: cancel)
+                    .buttonStyle(PillButtonStyle())
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
     }
 }
 
