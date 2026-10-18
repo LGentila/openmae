@@ -1,11 +1,11 @@
-# OpenMaé relay behind a TLS reverse proxy: Dokploy, Coolify, Traefik, Caddy…
+# OpenMaé relay behind a TLS reverse proxy: a self-hosting platform, Traefik, Caddy…
 #
 # - HTTPS goes through the proxy: give the service a domain (for example
 #   relay.example.com) that the proxy forwards to the container's port 8080.
 #   It carries /v1/info, the WebSocket fallback /v1/ws and /healthz.
 # - QUIC does not go through the proxy: the host's UDP port 443 is published
 #   straight to the container's port 4433. If the proxy already holds UDP 443
-#   for HTTP/3 (Dokploy's Traefik does by default, Caddy too), publish 8443
+#   for HTTP/3 (many do by default, Caddy too), publish 8443
 #   instead and set RELAY_QUIC_PUBLIC_PORT to 8443: /v1/info announces the
 #   port, so the apps need no update.
 # - Open that UDP port in the server's firewall.
@@ -47,7 +47,7 @@ services:
       - "8444"
     volumes:
       - relay-data:/data
-    # Plain Traefik only (Dokploy and Coolify add the routing from their
+    # Plain Traefik only (self-hosting platforms add the routing from their
     # interface): route the domain to port 8080, on Traefik's network.
     # labels:
     #   - traefik.enable=true

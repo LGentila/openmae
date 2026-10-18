@@ -71,8 +71,8 @@ state in the `/data` volume. With a host directory instead of a named volume, ma
 
 ### With Docker Compose
 
-[compose.yaml](compose.yaml) is a commented example for a host with a reverse proxy (Dokploy, Coolify, Traefik,
-Caddy): HTTP on 8080 for the proxy, QUIC published as `443:4433/udp`, and the `/data` volume.
+[compose.yaml](compose.yaml) is a commented example for a host with a reverse proxy (a self-hosting platform,
+Traefik, Caddy…): HTTP on 8080 for the proxy, QUIC published as `443:4433/udp`, and the `/data` volume.
 
 ```sh
 docker compose up -d --build
@@ -222,8 +222,8 @@ To turn it on:
 3. **The proxy**, here Traefik, which already serves the relay's HTTPS: a TCP router passes the TLS of these names
    through, unopened, to the relay's port 8444 with the PROXY protocol (the relay closes connections without it), and an
    HTTP router sends Let's Encrypt's challenge for these names to the relay's port 8080. Traefik's dynamic configuration,
-   with the relay's service name on Traefik's network (with Dokploy, the application's name, as in its generated
-   configuration):
+   with the relay's service name on Traefik's network (on a platform that runs Traefik for you, the name it gave the
+   relay's service, as in the configuration it generated):
 
    ```yaml
    tcp:
@@ -261,8 +261,8 @@ To turn it on:
      under the service's `loadBalancer` instead of a `serversTransport`:
      `loadBalancer: { proxyProtocol: { version: 2 }, servers: [...] }`.
    - **Traefik keeps Let's Encrypt's challenges for itself** as soon as it has a certificate resolver of its own (as
-     Dokploy's does): the HTTP router above then never sees them. From Traefik 3.1, allow it in Traefik's static
-     configuration (with Dokploy, `traefik.yml` in its Traefik settings), then restart Traefik:
+     it usually has when it serves the relay's HTTPS): the HTTP router above then never sees them. From Traefik 3.1,
+     allow it in Traefik's static configuration (`traefik.yml`), then restart Traefik:
 
      ```yaml
      entryPoints:
@@ -292,43 +292,41 @@ Limits, per inbound name (that is, per Mac): 30 connections per minute and 5 at 
 for IPv6). Per connection: 1 MB both ways together and 15 seconds. Beyond, or with no Mac connected, the connection is
 closed: nothing is kept.
 
-## Deploying on Dokploy
+## Deploying behind a reverse proxy
 
-For a relay at `relay.openmae.com`, deployed as an Application built with the Dockerfile type (Dockerfile
-`relay/Dockerfile`, build context `relay`), or as a Compose service from `relay/compose.yaml`:
+For a relay at `relay.example.com`, built from `relay/Dockerfile` (build context `relay`), or as a Compose service
+from `relay/compose.yaml`, on a host whose reverse proxy already serves HTTPS:
 
-1. **Domain.** Add `relay.openmae.com`, container port **8080**, HTTPS on, certificate from Let's Encrypt.
-   Dokploy's Traefik then serves HTTPS, `/v1/info` and the WebSocket fallback.
+1. **Domain.** Route `relay.example.com` to container port **8080**, HTTPS on, certificate from Let's Encrypt. The
+   proxy then serves HTTPS, `/v1/info` and the WebSocket fallback.
 2. **Environment.** `RELAY_BEHIND_PROXY=true`, and `RELAY_QUIC_PUBLIC_PORT` set to the published UDP port
    (step 3).
-3. **UDP port for QUIC.** Publish a host UDP port to container port **4433**, protocol **UDP**, publish mode
-   **Host**:
+3. **UDP port for QUIC.** Publish a host UDP port to container port **4433**, protocol **UDP**; on Docker Swarm,
+   publish mode **Host**:
    - **443** is best (`RELAY_QUIC_PUBLIC_PORT=443`): it passes most firewalls.
-   - Dokploy's default Traefik enables HTTP/3 and holds **UDP 443** itself. On such a server, publish **8443**
-     instead and set `RELAY_QUIC_PUBLIC_PORT=8443`, or turn HTTP/3 off in Traefik's configuration to give UDP 443
-     to the relay. `/v1/info` announces whichever port you choose, so the apps need no update.
-   - Not **Ingress** mode: Docker Swarm's ingress network replaces the client's address with its own, so every
-     QUIC client would share one rate limit of 10 attempts a minute. (A Compose service publishes ports
-     directly and keeps the addresses.)
+   - Many proxies enable HTTP/3 by default and hold **UDP 443** themselves. On such a server, publish **8443**
+     instead and set `RELAY_QUIC_PUBLIC_PORT=8443`, or turn HTTP/3 off in the proxy to give UDP 443 to the relay.
+     `/v1/info` announces whichever port you choose, so the apps need no update.
+   - Not Swarm's **Ingress** mode: its ingress network replaces the client's address with its own, so every QUIC
+     client would share one rate limit of 10 attempts a minute. (A Compose service publishes ports directly and
+     keeps the addresses.)
 4. **Volume.** Mount a named volume on **`/data`**. It holds the QUIC key; if it is lost, the key pin changes
    (the apps recover by fetching `/v1/info` again, but keep it anyway).
 5. **Deliveries from the internet** (optional): see [Deliveries from the internet](#deliveries-from-the-internet),
-   with `RELAY_INBOUND_DOMAIN=in.openmae.com`, the wildcard record `*.in.openmae.com`, and the Traefik configuration
-   in Dokploy's Traefik settings (a file of the dynamic configuration, and `allowACMEByPass` in `traefik.yml`).
+   with `RELAY_INBOUND_DOMAIN=in.example.com`, the wildcard record `*.in.example.com`, and the proxy's configuration
+   (with Traefik: a file of the dynamic configuration, and `allowACMEByPass` in `traefik.yml`).
 6. **Health check.** The image's `HEALTHCHECK` runs `/relay -healthcheck`, which asks `/healthz` on port 8080
-   (the image has no shell or curl). Docker marks the container unhealthy when it fails, and Docker Swarm, which
-   Dokploy uses, replaces it. For outside monitoring, watch `https://relay.openmae.com/healthz`.
+   (the image has no shell or curl). Docker marks the container unhealthy when it fails, and Docker Swarm replaces
+   it. For outside monitoring, watch `https://relay.example.com/healthz`.
 7. **Firewall.** Open the UDP port (443 or 8443) in the server's firewall and in the hosting provider's
-   firewall, if it has one. TCP 80 and 443 are already open for Traefik.
+   firewall, if it has one. TCP 80 and 443 are already open for the proxy.
 
-Check from anywhere: `curl https://relay.openmae.com/v1/info` shows the QUIC port and the key pin.
+Check from anywhere: `curl https://relay.example.com/v1/info` shows the QUIC port and the key pin.
 
-### Other platforms
+### Proxies
 
-- **Coolify**: same as Dokploy, with `compose.yaml`: give the service a domain on port 8080 in its interface and
-  keep the UDP port mapping. Check whether its proxy holds UDP 443 for HTTP/3.
-- **Plain Traefik**: use the labels commented out in `compose.yaml`. Traefik replaces or extends
-  `X-Forwarded-For` with the address it sees, which is what `RELAY_BEHIND_PROXY` expects.
+- **Traefik** without a platform in front: use the labels commented out in `compose.yaml`. Traefik replaces or
+  extends `X-Forwarded-For` with the address it sees, which is what `RELAY_BEHIND_PROXY` expects.
 - **Caddy**: `relay.example.com { reverse_proxy relay:8080 }` is enough, WebSocket included. Caddy serves HTTP/3
   on UDP 443 by default: use another UDP port for QUIC, or limit Caddy to `protocols h1 h2`.
 - **A CDN in front** (Cloudflare and others) would make the last `X-Forwarded-For` entry the CDN's address, so
