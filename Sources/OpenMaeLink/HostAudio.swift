@@ -6,7 +6,7 @@ import VoiceCore
 ///
 /// - `play` encodes and sends;
 /// - `waitUntilDone` sends the stream's end and returns when the iPhone says it has played everything (or once it
-///   should have, if the iPhone went silent);
+///   should have, if the iPhone went silent), telling which;
 /// - `stopImmediately` tells the iPhone to stop at once and drop the rest.
 public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
     private let lock = NSLock()
@@ -16,10 +16,14 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
     /// still remembers.
     private var nextStream = StreamNumber.now
     private var stream: UInt32?
+    /// The stream being sent began on a connection that was replaced since (`bind`): what went through the one that
+    /// dropped is lost, so the iPhone cannot have heard it whole, even if it says it played it (it fills in the gaps).
+    private var streamCut = false
     private var sequence: UInt32 = 0
     private var streamStart = ContinuousClock.now
-    private var waiters: [UInt32: [CheckedContinuation<Void, Never>]] = [:]
-    private var finished: Set<UInt32> = []
+    private var waiters: [UInt32: [CheckedContinuation<PlaybackEnd, Never>]] = [:]
+    /// How the last streams ended, once known: the iPhone said it played them, they were stopped, or nobody will say.
+    private var outcomes: [UInt32: PlaybackEnd] = [:]
 
     public init(session: LinkSession) {
         self.session = session
@@ -27,9 +31,13 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         if encoder == nil { DebugLog.log("link: no Opus encoder, the iPhone will not hear the voice") }
     }
 
-    /// The iPhone came back on another connection (a change of network): the voice follows it.
+    /// The iPhone came back on another connection (a change of network): the voice follows it. A stream being sent
+    /// goes on through the new one, but cannot be heard whole: its `waitUntilDone` says so.
     public func bind(_ session: LinkSession?) {
-        lock.withLock { self.session = session }
+        lock.withLock {
+            if stream != nil, session !== self.session { streamCut = true }
+            self.session = session
+        }
     }
 
     public func play(_ samples: [Float], sampleRate: Double) async {
@@ -41,14 +49,16 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
                 nextStream += 1
                 sequence = 0
                 streamStart = .now
+                streamCut = false
                 encoder.reset()
             }
             for packet in encoder.encode(samples) { sendFrame(packet) }
         }
     }
 
-    public func waitUntilDone() async {
-        let pending: (stream: UInt32, deadline: ContinuousClock.Instant)? = lock.withLock {
+    @discardableResult
+    public func waitUntilDone() async -> PlaybackEnd {
+        let pending: (stream: UInt32, deadline: ContinuousClock.Instant, cut: Bool)? = lock.withLock {
             guard let stream else { return nil }
             encoder?.flush().forEach(sendFrame)
             session?.send(.audio(.end(stream: stream, frames: sequence)))
@@ -56,61 +66,78 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
             // When the iPhone should be done with it: real time from the stream's start, plus room for its buffer
             // and the network.
             let duration = Duration.milliseconds(Int(sequence) * 20)
-            return (stream, max(streamStart + duration, .now) + .seconds(2.5))
+            return (stream, max(streamStart + duration, .now) + .seconds(2.5), streamCut)
         }
-        guard let pending else { return }
-        await withTaskGroup(of: Void.self) { tasks in
-            tasks.addTask { await self.finishedSignal(pending.stream) }
+        guard let pending else { return .confirmed }
+        let end = await withTaskGroup(of: PlaybackEnd?.self, returning: PlaybackEnd.self) { tasks in
+            tasks.addTask { await self.outcome(of: pending.stream) }
             tasks.addTask {
+                // The iPhone went silent (or the wait was cancelled): no word will come, do not wait forever.
                 try? await Task.sleep(until: pending.deadline)
-                self.markFinished(pending.stream)  // the iPhone went silent: do not wait forever
+                self.settle(pending.stream, .unconfirmed)
+                return nil
             }
-            await tasks.next()
+            var end = PlaybackEnd.unconfirmed
+            while let result = await tasks.next() {
+                guard let result else { continue }
+                end = result
+                break
+            }
             tasks.cancelAll()
+            return end
         }
+        return pending.cut ? .unconfirmed : end
     }
 
     public func stopImmediately() async {
-        let waiting: [CheckedContinuation<Void, Never>] = lock.withLock {
-            guard let stream else { return [] }
+        let stopped: UInt32? = lock.withLock {
+            guard let stream else { return nil }
             session?.send(.audio(.stopPlayback(stream: stream)))
             encoder?.reset()
             self.stream = nil
-            finished.insert(stream)
-            return waiters.removeValue(forKey: stream) ?? []
+            return stream
         }
-        waiting.forEach { $0.resume() }
+        if let stopped { settle(stopped, .confirmed) }  // stopped as asked: nothing more to hear of it
     }
 
     /// The iPhone played everything of `stream`, or stopped it.
     public func markFinished(_ stream: UInt32) {
-        let waiting: [CheckedContinuation<Void, Never>] = lock.withLock {
-            finished.insert(stream)
-            if finished.count > 64, let oldest = finished.min() { finished.remove(oldest) }
-            return waiters.removeValue(forKey: stream) ?? []
-        }
-        waiting.forEach { $0.resume() }
+        settle(stream, .confirmed)
     }
 
-    /// The link is gone for good: nobody waits for the iPhone any longer.
+    /// The link is gone for good: nobody waits for the iPhone any longer, and what it was playing it will not say it
+    /// played.
     public func detach() {
-        let waiting: [CheckedContinuation<Void, Never>] = lock.withLock {
+        let waiting: [CheckedContinuation<PlaybackEnd, Never>] = lock.withLock {
             session = nil
             stream = nil
             defer { waiters = [:] }
             return waiters.values.flatMap { $0 }
         }
-        waiting.forEach { $0.resume() }
+        waiting.forEach { $0.resume(returning: .unconfirmed) }
     }
 
-    private func finishedSignal(_ stream: UInt32) async {
+    /// How `stream` ended: whoever waits for it is told. The first word on it stays.
+    private func settle(_ stream: UInt32, _ end: PlaybackEnd) {
+        let (waiting, outcome): ([CheckedContinuation<PlaybackEnd, Never>], PlaybackEnd) = lock.withLock {
+            let outcome = outcomes[stream] ?? end
+            outcomes[stream] = outcome
+            if outcomes.count > 64, let oldest = outcomes.keys.min() { outcomes.removeValue(forKey: oldest) }
+            return (waiters.removeValue(forKey: stream) ?? [], outcome)
+        }
+        waiting.forEach { $0.resume(returning: outcome) }
+    }
+
+    /// Returns once it is known how `stream` ended.
+    private func outcome(of stream: UInt32) async -> PlaybackEnd {
         await withCheckedContinuation { continuation in
-            let done = lock.withLock {
-                if finished.contains(stream) || session == nil { return true }
+            let known: PlaybackEnd? = lock.withLock {
+                if let outcome = outcomes[stream] { return outcome }
+                if session == nil { return .unconfirmed }  // let go: nobody will say
                 waiters[stream, default: []].append(continuation)
-                return false
+                return nil
             }
-            if done { continuation.resume() }
+            if let known { continuation.resume(returning: known) }
         }
     }
 

@@ -106,13 +106,19 @@ actor FakeSpeaker: AudioOutput {
     /// How long a stop takes to return once the sound is cut (a device, the iPhone's link): whoever waits for the end
     /// of the playback is released meanwhile, as with the real outputs.
     private let stopDelay: Duration
-    init(stopDelay: Duration = .zero) { self.stopDelay = stopDelay }
+    /// Whether it says it played what it was given: false for a device whose connection keeps dropping.
+    private let confirms: Bool
+    init(stopDelay: Duration = .zero, confirms: Bool = true) {
+        self.stopDelay = stopDelay
+        self.confirms = confirms
+    }
     func play(_ samples: [Float], sampleRate: Double) {
         played += samples.count
         busyUntil = max(busyUntil, .now) + .milliseconds(samples.count)
     }
-    func waitUntilDone() async {
+    func waitUntilDone() async -> PlaybackEnd {
         while busyUntil > .now { try? await Task.sleep(for: .milliseconds(5)) }
+        return confirms ? .confirmed : .unconfirmed
     }
     func stopImmediately() async {
         stops += 1

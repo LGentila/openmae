@@ -161,12 +161,22 @@ public protocol SynthesisStream: Sendable {
     func cancel() async
 }
 
-/// Where the assistant's voice goes: the speakers in the app, a recorder in the CLI.
+/// How the playback of what an output was given ended (`AudioOutput.waitUntilDone`).
+public enum PlaybackEnd: Sendable, Equatable {
+    /// Played to its end, or stopped as asked (`stopImmediately`).
+    case confirmed
+    /// The device that plays it never said it did: its connection dropped, or it let go of the conversation meanwhile.
+    /// The user may have heard none of it, or only part.
+    case unconfirmed
+}
+
+/// Where the assistant's voice goes: the speakers in the app, a recorder in the CLI, an iPhone through the link.
 public protocol AudioOutput: Sendable {
     /// Queues audio for playback and returns quickly (playback continues in the background).
     func play(_ samples: [Float], sampleRate: Double) async
-    /// Returns when everything queued has been played (or stopped).
-    func waitUntilDone() async
+    /// Returns when everything queued has been played (or stopped), and whether that is sure: the Mac's speakers always
+    /// know, a device at the other end of a connection only once it says so.
+    @discardableResult func waitUntilDone() async -> PlaybackEnd
     /// Barge-in: silence now, drop anything queued.
     func stopImmediately() async
 }

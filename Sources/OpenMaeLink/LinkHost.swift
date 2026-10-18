@@ -639,6 +639,9 @@ public actor LinkHost: AssistantConnection {
         state.hand = nil
         hand.grace?.cancel()
         hand.watch?.cancel()
+        // What it was saying, it will not say it played (an announcement is then said again): that waits for the
+        // voice's next output, the Mac's speakers or another iPhone's, rather than going into this one meanwhile.
+        if hand.reachable { await audio?.setRemoteAudioReachable(false) }
         hand.microphone.finish()
         hand.output.detach()
         if notifyPhone { sessions[hand.key]?.session.send(.audio(.released)) }

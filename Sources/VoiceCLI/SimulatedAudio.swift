@@ -19,10 +19,12 @@ actor SimulatedSpeaker: AudioOutput {
         playhead = start + .seconds(Double(samples.count) / sampleRate)
     }
 
-    func waitUntilDone() async {
+    @discardableResult
+    func waitUntilDone() async -> PlaybackEnd {
         while let end = playhead, end > clock.now {
             try? await clock.sleep(until: min(end, clock.now + .milliseconds(20)))
         }
+        return .confirmed
     }
 
     func stopImmediately() {

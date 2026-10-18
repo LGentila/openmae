@@ -270,7 +270,8 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
         if !player.isPlaying { player.play() }
     }
 
-    public func waitUntilDone() async {
+    @discardableResult
+    public func waitUntilDone() async -> PlaybackEnd {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let finished = lock.withLock {
                 if pendingBuffers == 0 {
@@ -282,6 +283,7 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
             }
             if finished { continuation.resume() }
         }
+        return .confirmed  // played, or dropped by a stop: the speakers know
     }
 
     public func stopImmediately() async {

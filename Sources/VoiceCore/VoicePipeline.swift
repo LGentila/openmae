@@ -178,11 +178,19 @@ public actor VoicePipeline {
     private var nextTurnID = 0
 
     /// What the app has to say on its own (a timer that rings), as soon as nobody speaks.
+    ///
+    /// One the user did not hear goes back to the head of the queue, to be said at the next quiet moment (after the
+    /// user's turn, or once the voice's output is back): stopped before any of its sound, or during its chime by the
+    /// user taking the floor (speaking, the talk key, a typed turn, the wake phrase); or said without the device that
+    /// has the conversation saying it played it (`PlaybackEnd.unconfirmed`), or stopped while that device was out of
+    /// reach, and then once more at most, so that it never loops.
     private struct Announcement {
         var text: String
         var note: String
         var language: SpeechLanguage
         var chime: Bool
+        /// Said once already without reaching the user for sure: the next time is the last.
+        var retried = false
     }
     private var announcements: [Announcement] = []
     /// The voice's output can be out of reach for a moment (see `setOutputReachable`): announcements wait meanwhile.
@@ -213,7 +221,16 @@ public actor VoicePipeline {
         var userMessage: ChatMessage?
         /// Tool calls and their results, between the user's message and the answer, for the history.
         var steps: [ChatMessage] = []
-        var isAnnouncement = false
+        /// What the app says on its own in this turn (`announce`); nil in the user's turns.
+        var announcement: Announcement?
+        var isAnnouncement: Bool { announcement != nil }
+        /// An announcement's chime: when it is over. The output plays the words after it.
+        var chimeEnd: ContinuousClock.Instant?
+        /// When the turn's voice (not a chime) first went to the output.
+        var voiceStart: ContinuousClock.Instant?
+        /// The voice's output went out of reach while the announcement was said (`setOutputReachable`): stopped, it is
+        /// said again.
+        var outputLost = false
         /// A turn typed instead of spoken: no transcription.
         var typedText: String?
         /// Wake-word mode: the request, already read by the check of the whole sentence: no transcription.
@@ -312,11 +329,17 @@ public actor VoicePipeline {
     /// out of reach for a moment: its connection dropped (Wi-Fi to 4G, a tunnel) and it may come back by another way.
     /// Meanwhile nothing is announced, since nobody would hear it; the announcements are said once the output is back,
     /// or once the voice is on the Mac's speakers again (`RemoteAudioRouting.setRemoteAudioReachable`).
+    /// An announcement being said when the output goes out of reach, and stopped before the output says how it ended
+    /// (the Mac taking the sound back stops what was playing), is said again once the output is back.
     public func setOutputReachable(_ reachable: Bool) {
         guard reachable != outputReachable else { return }
         outputReachable = reachable
         DebugLog.log(reachable ? "voice output: reachable again" : "voice output: out of reach, announcements wait")
-        if reachable { startAnnouncementIfIdle() }
+        if reachable {
+            startAnnouncementIfIdle()
+        } else if let turn, turn.isAnnouncement {
+            turn.outputLost = true
+        }
     }
 
     public func setListening(_ mode: ListeningMode) async {
@@ -472,10 +495,14 @@ public actor VoicePipeline {
     }
 
     /// Silences the assistant on request (click on the indicator, Escape key). What it already said
-    /// stays in the history.
+    /// stays in the history. An announcement whose chime plays is dropped too; one that made no sound yet is said next.
     public func interrupt() async {
         guard let turn else { return }
-        if turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
+        if turn.audioStarted {
+            await interruptAssistant(askedForQuiet: true)
+        } else {
+            await cancelTurn(stopAudio: false)
+        }
         if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
             utterance = []
             utteranceOpen = turnDetector.isInUtterance
@@ -663,7 +690,7 @@ public actor VoicePipeline {
             if turn.audioStarted {
                 DebugLog.log("barge-in: the wake phrase while the assistant talks")
                 let detected = clock.now
-                await interruptAssistant()
+                await interruptAssistant(askedForQuiet: onlyStops)
                 emit.yield(.bargeIn(stopMs: ms(clock.now - onset), detectionMs: ms(detected - onset)))
             } else {
                 await cancelTurn(stopAudio: false)
@@ -1048,7 +1075,7 @@ public actor VoicePipeline {
         let announcement = announcements.removeFirst()
         nextTurnID += 1
         let turn = Turn(id: nextTurnID)
-        turn.isAnnouncement = true
+        turn.announcement = announcement
         turn.language = announcement.language
         turn.userMessage = ChatMessage(.user, announcement.note)
         self.turn = turn
@@ -1060,18 +1087,33 @@ public actor VoicePipeline {
         do {
             let stream = try await synthesizer.startUtterance(language: announcement.language)
             turn.stream = stream
+            guard !Task.isCancelled else {
+                await stream.cancel()  // stopped while the voice got ready: it has nothing to stop yet
+                return
+            }
             if announcement.chime {
                 let sampleRate = synthesizer.outputSampleRate
-                audioStarted(turn, at: clock.now)
-                await output.play(Chime.samples(sampleRate: sampleRate), sampleRate: sampleRate)
+                let chime = Chime.samples(sampleRate: sampleRate)
+                audioStarted(turn, at: clock.now, chime: .seconds(Double(chime.count) / sampleRate))
+                await output.play(chime, sampleRate: sampleRate)
             }
             startPlayer(turn, stream)
             say(announcement.text, to: turn)
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
-            await output.waitUntilDone()
+            let end = await output.waitUntilDone()
             try Task.checkCancellation()
+            guard self.turn === turn, !turn.interrupted else { return }  // stopped meanwhile: up to whoever stopped it
+            if end == .unconfirmed {
+                guard announcement.retried else {
+                    DebugLog.log("announcement: it may not have reached the user, said again once the voice does")
+                    sayAgainLater(turn, retried: true)
+                    finish(turn, metrics: nil)
+                    return
+                }
+                DebugLog.log("announcement: said twice without reaching the user for sure, not said again")
+            }
             var metrics = TurnMetrics()
             metrics.language = announcement.language
             metrics.assistantText = turn.answer
@@ -1087,12 +1129,40 @@ public actor VoicePipeline {
         (model as? any YieldsToVoice)?.holdGeneration(false)
     }
 
-    private func audioStarted(_ turn: Turn, at time: ContinuousClock.Instant) {
+    /// `chime`: the sound is an announcement's chime, that long; otherwise it is the voice.
+    private func audioStarted(_ turn: Turn, at time: ContinuousClock.Instant, chime: Duration? = nil) {
         guard self.turn === turn else { return }
         DebugLog.log("turn \(turn.id): first audio played")
         turn.audioStarted = true
         turn.audioStartTime = time
+        if let chime {
+            turn.chimeEnd = time + chime
+        } else if turn.voiceStart == nil {
+            turn.voiceStart = time
+        }
         setState(.speaking)
+    }
+
+    /// Whether the user may have heard some of the turn's words: its voice went to the output, and the chime the output
+    /// plays before it (an announcement's) is over.
+    private func wordsMayBeHeard(_ turn: Turn) -> Bool {
+        guard let voiceStart = turn.voiceStart else { return false }
+        return clock.now >= max(voiceStart, turn.chimeEnd ?? voiceStart)
+    }
+
+    /// The turn's announcement did not reach the user: back to the head of the queue, for the next quiet moment. What
+    /// the interfaces showed of it is reported cut off. `retried`: it may have been said to nobody (`Announcement`).
+    private func sayAgainLater(_ turn: Turn, retried: Bool = false) {
+        guard var announcement = turn.announcement else { return }
+        if retried { announcement.retried = true }
+        announcements.insert(announcement, at: 0)
+        DebugLog.log("turn \(turn.id): the announcement is said again later")
+        guard !turn.answer.isEmpty else { return }
+        var metrics = TurnMetrics()
+        metrics.language = announcement.language
+        metrics.assistantText = turn.answer
+        metrics.interrupted = true
+        emit.yield(.turnFinished(metrics))
     }
 
     private func finish(_ turn: Turn, metrics: TurnMetrics?) {
@@ -1157,9 +1227,13 @@ public actor VoicePipeline {
     /// Someone is speaking, and it is meant for Maé (always, outside the wake-word mode).
     private var someoneSpeaksToMae: Bool { turnDetector.isInUtterance && utteranceAddressed }
 
-    /// Barge-in: silence the assistant immediately, keep what it already said in the history.
-    private func interruptAssistant() async {
+    /// Barge-in: silence the assistant immediately, keep what it already said in the history. An announcement whose
+    /// words were not heard yet (its chime plays) is said after the user's turn, unless they asked to be quiet
+    /// (`askedForQuiet`: the stop button, « OK Maé, stop »); one said while the voice's output was out of reach is
+    /// said again either way.
+    private func interruptAssistant(askedForQuiet: Bool = false) async {
         guard let turn else { return }
+        let wordsHeard = wordsMayBeHeard(turn)
         // Before anything that waits: once the voice stops, the turn's own wait for the end of the playback returns,
         // and it would take the answer for one said to its end (recording the exchange a second time, as complete).
         // Marked, it says, records and reports nothing more; the exchange is recorded once, below.
@@ -1169,6 +1243,13 @@ public actor VoicePipeline {
         await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
         await output.stopImmediately()
         await cancelTurn(stopAudio: false)
+        if let announcement = turn.announcement {
+            if turn.outputLost, !announcement.retried {
+                sayAgainLater(turn, retried: true)
+            } else if !wordsHeard, !askedForQuiet {
+                sayAgainLater(turn)
+            }
+        }
         if !turn.userText.isEmpty, let message = turn.userMessage {
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: true)
             letModelCatchUp()  // the model's memory holds what it wrote, the history the answer cut off
@@ -1185,6 +1266,7 @@ public actor VoicePipeline {
         self.turn = nil
         voiceIsAudible()  // never leave the model paused
         DebugLog.log("turn \(turn.id): cancelling")
+        if turn.isAnnouncement, !turn.audioStarted { sayAgainLater(turn) }  // nothing of it was heard yet
         turn.task?.cancel()
         turn.player?.cancel()
         await turn.gate.open()  // release a player waiting for the end of the turn

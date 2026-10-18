@@ -37,7 +37,8 @@ public final class AudioRouter: AudioOutput, @unchecked Sendable {
         await lock.withLock { current }.play(samples, sampleRate: sampleRate)
     }
 
-    public func waitUntilDone() async {
+    @discardableResult
+    public func waitUntilDone() async -> PlaybackEnd {
         await lock.withLock { current }.waitUntilDone()
     }
 
