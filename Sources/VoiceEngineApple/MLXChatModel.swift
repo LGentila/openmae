@@ -23,7 +23,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     let context: ModelContext
     let tokenizer: any Tokenizers.Tokenizer
     private let chatTemplate: String?
-    let parameters: GenerateParameters
+    /// Only its prefill observer ever changes (`watchPrefill`).
+    private(set) var parameters: GenerateParameters
     private let stopTokens: Set<Int>
     /// Gemma 4 writes a tool call between these two tokens: `<|tool_call>call:name{…}<tool_call|>`.
     let toolCallStart: Int?
@@ -90,6 +91,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0)
     /// Diagnostics of the last `catchUp`: tokens computed (0: nothing to do), and time to compute them.
     public private(set) var lastCatchUp = (computed: 0, ms: 0.0)
+    /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
+    /// holds (its offset). They differ only when something left the cache without saying so.
+    public var cacheCounts: (counted: Int, held: Int) { (cachedTokens.count, cache.first?.offset ?? 0) }
     /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
     private var watchingToolCalls = false
     /// With `watchToolCalls(true)`, for the last request: the chance the model gave to opening a tool call at the
@@ -190,6 +194,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     public func watchToolCalls(_ on: Bool) {
         watchingToolCalls = on
+    }
+
+    /// Diagnostics (`voice-cli cache-check`): `observer` is called on the request's own task each time the model has read
+    /// a chunk of a long prompt, with the new tokens read so far and their number (then once more when all are read).
+    /// mlx-swift-lm reads more than 512 new tokens in chunks, and between two it stops if the request was cancelled.
+    public func watchPrefill(_ observer: (@Sendable (_ read: Int, _ total: Int) -> Void)?) {
+        parameters.prefill.progress = observer
     }
 
     public func prefill(_ conversation: [ChatMessage]) throws {

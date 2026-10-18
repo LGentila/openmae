@@ -1,7 +1,8 @@
 // voice-cli cache-check — how much of each request the language model finds in its memory (KV cache), in the
 // sequences of requests the app sends: plain turns, an action, two actions in one request (the app carries out the
 // first and says it does one thing at a time), a refused call and its second try, a long result the model sums up (as
-// after a web search), a turn dropped after its second try (the user spoke again before any voice), a speculative
+// after a web search), that summing up cancelled while the model reads the result (the user spoke over the waiting
+// phrase), a turn dropped after its second try (the user spoke again before any voice), a speculative
 // answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer abandoned after an answer cut
 // off, the tools changing, the history shortened, a new conversation; and answers that the history keeps otherwise
 // than the model wrote them, after a request computed from scratch or not.
@@ -13,10 +14,13 @@
 //
 // Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
 // memory in use after it; and after an exchange is recorded, what the model computes of the history while nobody waits,
-// as in the app ("the history caught up"). VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at
-// token N", with the text on each side; "restored the snapshot"; "prefill N tokens (reused M)").
+// as in the app ("the history caught up"). A request after which the model counts other tokens in its memory than the
+// memory holds is marked "out of step" (the next one would be computed from the wrong place). VOICE_DEBUG=1 adds the
+// model's own lines ("the request leaves the cache at token N", with the text on each side; "restored the snapshot";
+// "prefill N tokens (reused M)").
 
 import Foundation
+import Synchronization
 import VoiceCore
 import VoiceEngineApple
 
@@ -40,6 +44,8 @@ private actor CacheCheck {
     var steps: [Step] = []
     /// Time of each `catchUp` that computed something.
     var catchUps: [Double] = []
+    /// Requests after which the model counted other tokens in its cache than the cache held (`MLXChatModel.cacheCounts`).
+    var outOfStep = 0
     let clock = ContinuousClock()
 
     init(model: MLXChatModel, base: Conversation, dateLine: String) {
@@ -97,10 +103,52 @@ private actor CacheCheck {
         let note = step.rebuilt ? "  ← rebuilt from scratch"
             : step.reused == 0 ? "  ← from scratch" : step.fromBeginning ? "  ← back to the conversations' beginning"
             : step.restored ? "  ← back to a snapshot" : ""
-        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@",
+        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@%@",
                      label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
-                     MLXChatModel.activeMemoryGB, note))
+                     MLXChatModel.activeMemoryGB, note, await outOfStepNote()))
         return (text, calls, moreCalls || calls.count > 1)
+    }
+
+    /// A request the user cancels while the model reads its prompt (they spoke over the waiting phrase while it read a
+    /// long result): it is cancelled once the model has read the first chunk of its new tokens (more than 512 are read in
+    /// chunks), and gives no output. Prints what the model had read then, and whether it still counts the tokens its
+    /// cache holds.
+    private func cancelledRequest(_ label: String, _ messages: [ChatMessage]) async throws {
+        let promptTokens = try await model.tokenCount(messages)
+        let progress = PrefillProgress()
+        await model.watchPrefill { read, total in
+            // On the request's own task: cancelled as the app cancels a turn, it stops before the next chunk.
+            if read < total, progress.firstChunk(read, of: total) { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        var outputs = 0
+        var failure: (any Error)?
+        do {
+            for try await _ in model.reply(to: messages) { outputs += 1 }
+        } catch is CancellationError {
+        } catch {
+            failure = error
+        }
+        await model.watchPrefill(nil)
+        if let failure { throw failure }
+        let what = if let read = progress.read {
+            "cancelled after reading \(read.read) of its \(read.total) new tokens"
+        } else {
+            "not cancelled (new tokens read in one go), \(outputs) outputs"
+        }
+        let counts = await model.cacheCounts
+        if counts.counted != counts.held { outOfStep += 1 }
+        print(String(format: "  %-46@ %5d tokens: %@ · the cache holds %d tokens, the model counts %d%@",
+                     label as NSString, promptTokens, what, counts.held, counts.counted,
+                     counts.counted != counts.held ? "  ← out of step" : ""))
+    }
+
+    /// After a request: a note when the model counts other tokens in its cache than the cache holds (the next request
+    /// would be computed from the wrong place).
+    private func outOfStepNote() async -> String {
+        let counts = await model.cacheCounts
+        guard counts.counted != counts.held else { return "" }
+        outOfStep += 1
+        return "  ← out of step: the model counts \(counts.counted) tokens, its cache holds \(counts.held)"
     }
 
     /// One turn as the pipeline runs it: the answer goes into the history the way the pipeline records it (pieces cut
@@ -108,9 +156,10 @@ private actor CacheCheck {
     /// `refuse`, and the app then says "C'est noté." (and that it does one thing at a time, when the model asked for
     /// more than one); with `summarize`, the call gets that result and the model sums it up (as after a web search or an
     /// agent's report). `record: false`: the turn is dropped (the user spoke again before any voice); `interrupted`: the
-    /// answer is recorded as cut off.
+    /// answer is recorded as cut off. `cancelSumming`: the summing up is cancelled while the model reads the result
+    /// (`cancelledRequest`).
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
-              stopAfter: Int? = nil, interrupted: Bool = false) async throws
+              stopAfter: Int? = nil, interrupted: Bool = false, cancelSumming: Bool = false) async throws
     {
         let user = message(text)
         var request = conversation.messages(adding: user)
@@ -125,6 +174,10 @@ private actor CacheCheck {
         var summing = false
         while true {
             let pass = summing ? " (summing up)" : secondTry ? " (second try)" : ""
+            if summing, cancelSumming {
+                try await cancelledRequest(label + pass, request)
+                break
+            }
             let output = try await self.request(label + pass, request, stopAfter: stopAfter)
             chunker.pieces(adding: filter.push(output.text)).forEach(send)
             chunker.pieces(adding: filter.flush()).forEach(send)
@@ -224,7 +277,24 @@ private actor CacheCheck {
                      firstOutputs.isEmpty ? 0 : firstOutputs[firstOutputs.count / 2], firstOutputs.last ?? 0))
         print(String(format: "the history caught up while nobody waits: %d times (%.0f ms in all)", catchUps.count,
                      catchUps.reduce(0, +)))
+        print("requests after which the model counted other tokens than its cache held: \(outOfStep)")
     }
+}
+
+/// What the model had read of a request's new tokens when it was cancelled (set on the request's task).
+private final class PrefillProgress: Sendable {
+    private let value = Mutex<(read: Int, total: Int)?>(nil)
+
+    /// Records the first chunk read; false for the next ones.
+    func firstChunk(_ read: Int, of total: Int) -> Bool {
+        value.withLock { recorded in
+            guard recorded == nil else { return false }
+            recorded = (read, total)
+            return true
+        }
+    }
+
+    var read: (read: Int, total: Int)? { value.withLock { $0 } }
 }
 
 func runCacheCheck(_ o: Options, arguments: [String]) async throws {
@@ -299,6 +369,17 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("action, its result summed up", "Qu'est-ce que j'ai de prévu cette semaine ?",
                                  summarize: weekAgenda)
             try await check.turn("plain answer after the summary", "Merci. Et le dentiste, c'est à quelle heure déjà ?")
+            try await check.turn("plain answer", "D'accord, merci beaucoup.")
+        }),
+        ("cancelled-summary", {
+            // The user speaks over the waiting phrase while the model reads a long result (as after a web search): the
+            // summing up is cancelled once the model has read the first chunk of it, and the turn is recorded as
+            // interrupted, with the call and its result, as the app does. The next turns go on from what the cache holds.
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("action, its summing up cancelled", "Qu'est-ce que j'ai de prévu cette semaine ?",
+                                 summarize: weekAgenda, interrupted: true, cancelSumming: true)
+            try await check.turn("plain answer after the cancellation", "Et le dentiste, c'est à quelle heure déjà ?")
             try await check.turn("plain answer", "D'accord, merci beaucoup.")
         }),
         ("dropped", {
