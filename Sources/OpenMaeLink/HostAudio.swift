@@ -7,7 +7,8 @@ import VoiceCore
 /// - `play` encodes and sends;
 /// - `waitUntilDone` sends the stream's end and returns when the iPhone says it has played everything (or once it
 ///   should have, if the iPhone went silent), telling which;
-/// - `stopImmediately` tells the iPhone to stop at once and drop the rest.
+/// - `stopImmediately` tells the iPhone to stop at once and drop the rest, also once the stream's end was sent: the
+///   voice is faster than real time, so the iPhone may still have seconds of it in its buffer.
 public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
     private let lock = NSLock()
     private let encoder: OpusEncoder?
@@ -16,6 +17,9 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
     /// still remembers.
     private var nextStream = StreamNumber.now
     private var stream: UInt32?
+    /// The stream whose end was sent, until the iPhone says it played it (or a newer stream starts): it may still be
+    /// playing its buffer, and a barge-in must stop it there.
+    private var endedStream: UInt32?
     /// The stream being sent began on a connection that was replaced since (`bind`): what went through the one that
     /// dropped is lost, so the iPhone cannot have heard it whole, even if it says it played it (it fills in the gaps).
     private var streamCut = false
@@ -46,6 +50,7 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         lock.withLock {
             if stream == nil {
                 stream = nextStream
+                endedStream = nil  // the iPhone's buffer moves on to the new stream
                 nextStream += 1
                 sequence = 0
                 streamStart = .now
@@ -63,6 +68,7 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
             encoder?.flush().forEach(sendFrame)
             session?.send(.audio(.end(stream: stream, frames: sequence)))
             self.stream = nil
+            endedStream = stream
             // When the iPhone should be done with it: real time from the stream's start, plus room for its buffer
             // and the network.
             let duration = Duration.milliseconds(Int(sequence) * 20)
@@ -72,7 +78,8 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         let end = await withTaskGroup(of: PlaybackEnd?.self, returning: PlaybackEnd.self) { tasks in
             tasks.addTask { await self.outcome(of: pending.stream) }
             tasks.addTask {
-                // The iPhone went silent (or the wait was cancelled): no word will come, do not wait forever.
+                // The iPhone went silent (or the wait was cancelled): no word will come, do not wait forever. The
+                // stream may still be playing there, though: a `stopImmediately` that follows must still reach it.
                 try? await Task.sleep(until: pending.deadline)
                 self.settle(pending.stream, .unconfirmed)
                 return nil
@@ -91,17 +98,22 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
 
     public func stopImmediately() async {
         let stopped: UInt32? = lock.withLock {
-            guard let stream else { return nil }
-            session?.send(.audio(.stopPlayback(stream: stream)))
+            // The stream being sent, or else the one whose end was sent but which the iPhone may still be playing.
+            guard let playing = stream ?? endedStream else { return nil }
+            session?.send(.audio(.stopPlayback(stream: playing)))
             encoder?.reset()
-            self.stream = nil
-            return stream
+            stream = nil
+            endedStream = nil
+            return playing
         }
         if let stopped { settle(stopped, .confirmed) }  // stopped as asked: nothing more to hear of it
     }
 
     /// The iPhone played everything of `stream`, or stopped it.
     public func markFinished(_ stream: UInt32) {
+        lock.withLock {
+            if endedStream == stream { endedStream = nil }
+        }
         settle(stream, .confirmed)
     }
 
@@ -111,6 +123,7 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         let waiting: [CheckedContinuation<PlaybackEnd, Never>] = lock.withLock {
             session = nil
             stream = nil
+            endedStream = nil
             defer { waiters = [:] }
             return waiters.values.flatMap { $0 }
         }
