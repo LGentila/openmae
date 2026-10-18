@@ -219,63 +219,21 @@ To turn it on:
 2. **Environment.** `RELAY_INBOUND_DOMAIN=in.example.com`. The relay then listens on `RELAY_INBOUND_ADDR` (`:8444` in
    the container) and announces the domain in `/v1/info`. Port 8444 needs no publishing: only the proxy reaches it,
    on its network.
-3. **The proxy**, here Traefik, which already serves the relay's HTTPS: a TCP router passes the TLS of these names
-   through, unopened, to the relay's port 8444 with the PROXY protocol (the relay closes connections without it), and an
-   HTTP router sends Let's Encrypt's challenge for these names to the relay's port 8080. Traefik's dynamic configuration,
-   with the relay's service name on Traefik's network (on a platform that runs Traefik for you, the name it gave the
-   relay's service, as in the configuration it generated):
+3. **The proxy**, which already serves the relay's HTTPS: it passes the TLS of these names through, unopened, to the
+   relay's port 8444 with the PROXY protocol (the relay closes connections without it), and sends Let's Encrypt's
+   HTTP-01 challenge for these names (`http://<name>/.well-known/acme-challenge/…`) to the relay's port 8080. With
+   Traefik 3: [deploy/traefik/](deploy/traefik/) holds a whole example (static and dynamic configuration, checks, and
+   why each part). Two things to keep from it:
+   - **Traefik keeps Let's Encrypt's challenges for itself** as soon as it has a certificate resolver of its own: allow
+     other routers to take them with `allowACMEByPass: true` on the `web` entry point (Traefik 3.1 or later), then
+     restart Traefik.
+   - That also lowers the priority of Traefik's own challenge router: put it back on top with the example's
+     `traefik-acme` router, or another site's redirection to HTTPS may take the challenges of Traefik's own
+     certificates, and their renewals fail.
 
-   ```yaml
-   tcp:
-     routers:
-       openmae-inbound:
-         entryPoints: [websecure]
-         rule: 'HostSNIRegexp(`^[a-z2-7]{26}\.in\.example\.com$`)'
-         service: openmae-inbound
-         tls:
-           passthrough: true
-     services:
-       openmae-inbound:
-         loadBalancer:
-           serversTransport: openmae-proxy-protocol
-           servers:
-             - address: "<relay service>:8444"
-     serversTransports:
-       openmae-proxy-protocol:
-         proxyProtocol:
-           version: 2
-   http:
-     routers:
-       openmae-acme:
-         entryPoints: [web]
-         rule: 'HostRegexp(`^[a-z2-7]{26}\.in\.example\.com$`) && PathPrefix(`/.well-known/acme-challenge/`)'
-         service: openmae-relay-http
-     services:
-       openmae-relay-http:
-         loadBalancer:
-           servers:
-             - url: "http://<relay service>:8080"
-   ```
-
-   - This is Traefik 3's syntax (regular expressions as Go writes them). Before Traefik 3.5, `proxyProtocol` goes
-     under the service's `loadBalancer` instead of a `serversTransport`:
-     `loadBalancer: { proxyProtocol: { version: 2 }, servers: [...] }`.
-   - **Traefik keeps Let's Encrypt's challenges for itself** as soon as it has a certificate resolver of its own (as
-     it usually has when it serves the relay's HTTPS): the HTTP router above then never sees them. From Traefik 3.1,
-     allow it in Traefik's static configuration (`traefik.yml`), then restart Traefik:
-
-     ```yaml
-     entryPoints:
-       web:
-         address: ":80"
-         allowACMEByPass: true
-     ```
-
-     The router above only takes names under the inbound domain: Traefik goes on answering the challenges of its own
-     certificates.
-   - Check: `curl -i http://abcdefghijklmnopqrstuvwxyz.in.example.com/.well-known/acme-challenge/test` must answer
-     `404` with `404 page not found` **at once**. An answer after a long wait comes from Traefik's own challenge
-     handler: `allowACMEByPass` is missing.
+   Check: `curl -i http://abcdefghijklmnopqrstuvwxyz.in.example.com/.well-known/acme-challenge/test` must answer
+   `404` with the relay's `404 page not found`. An empty `404` comes from Traefik's own challenge handler (in older
+   versions, after a long wait): `allowACMEByPass` is missing.
 
    **Standalone mode** (`RELAY_TLS_DOMAIN`, no proxy): nothing more to do. The relay sorts its own HTTPS port by server
    name, and its HTTP listener (port 80) answers the challenges. `RELAY_INBOUND_ADDR` is not used.
@@ -314,7 +272,7 @@ from `relay/compose.yaml`, on a host whose reverse proxy already serves HTTPS:
    (the apps recover by fetching `/v1/info` again, but keep it anyway).
 5. **Deliveries from the internet** (optional): see [Deliveries from the internet](#deliveries-from-the-internet),
    with `RELAY_INBOUND_DOMAIN=in.example.com`, the wildcard record `*.in.example.com`, and the proxy's configuration
-   (with Traefik: a file of the dynamic configuration, and `allowACMEByPass` in `traefik.yml`).
+   (with Traefik: [deploy/traefik/](deploy/traefik/)).
 6. **Health check.** The image's `HEALTHCHECK` runs `/relay -healthcheck`, which asks `/healthz` on port 8080
    (the image has no shell or curl). Docker marks the container unhealthy when it fails, and Docker Swarm replaces
    it. For outside monitoring, watch `https://relay.example.com/healthz`.
@@ -325,8 +283,9 @@ Check from anywhere: `curl https://relay.example.com/v1/info` shows the QUIC por
 
 ### Proxies
 
-- **Traefik** without a platform in front: use the labels commented out in `compose.yaml`. Traefik replaces or
-  extends `X-Forwarded-For` with the address it sees, which is what `RELAY_BEHIND_PROXY` expects.
+- **Traefik**: a whole example in [deploy/traefik/](deploy/traefik/), or the labels commented out in `compose.yaml`
+  for the relay's HTTPS only. Traefik replaces or extends `X-Forwarded-For` with the address it sees, which is what
+  `RELAY_BEHIND_PROXY` expects.
 - **Caddy**: `relay.example.com { reverse_proxy relay:8080 }` is enough, WebSocket included. Caddy serves HTTP/3
   on UDP 443 by default: use another UDP port for QUIC, or limit Caddy to `protocols h1 h2`.
 - **A CDN in front** (Cloudflare and others) would make the last `X-Forwarded-For` entry the CDN's address, so

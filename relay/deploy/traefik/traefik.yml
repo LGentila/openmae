@@ -1,0 +1,31 @@
+# Traefik 3 static configuration for an OpenMaé relay: the parts it needs, to merge into your own traefik.yml (or to
+# start from, on a host where Traefik serves only the relay). See README.md in this folder. Restart Traefik after a
+# change: the static configuration is read at start only.
+
+entryPoints:
+  web:
+    address: ":80"
+    # Deliveries from the internet: lets the relay answer Let's Encrypt's challenges for the Macs' names (Traefik 3.1 or
+    # later). Without it Traefik keeps every challenge for itself, and the Macs never get their certificates. Keep the
+    # traefik-acme router of openmae-relay.yml with it: it protects the challenges of Traefik's own certificates.
+    allowACMEByPass: true
+    # No redirection of the whole entry point to HTTPS here (http.redirections): redirect per router instead, as
+    # openmae-relay.yml does for the relay's domain.
+  websecure:
+    address: ":443"
+    # HTTP/3 makes Traefik hold UDP 443, which the relay's QUIC would like: then publish another UDP port for the relay
+    # (8443, and RELAY_QUIC_PUBLIC_PORT=8443). Or remove http3 to publish UDP 443 to the relay.
+    http3: {}
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic   # where openmae-relay.yml goes
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: you@example.com
+      storage: /etc/traefik/acme.json
+      httpChallenge:
+        entryPoint: web

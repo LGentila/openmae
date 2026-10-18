@@ -1,0 +1,80 @@
+# Traefik 3 dynamic configuration for an OpenMaé relay (file provider). See README.md in this folder.
+#
+# Replace before use:
+#   relay.example.com   the relay's domain
+#   in\.example\.com    the inbound domain (RELAY_INBOUND_DOMAIN), dots escaped, in both regular expressions
+#   relay               the relay's name on Traefik's network (a Compose service name, or the name a hosting
+#                       platform gave the relay's service), in both server addresses
+#   letsencrypt         the certificate resolver of Traefik's static configuration
+#
+# Without deliveries from the internet (no RELAY_INBOUND_DOMAIN), keep only openmae-relay, openmae-relay-to-https,
+# openmae-https and openmae-relay-http.
+
+http:
+  routers:
+    # The relay's HTTPS: /v1/info, the WebSocket fallback /v1/ws and /healthz.
+    openmae-relay:
+      entryPoints: [websecure]
+      rule: 'Host(`relay.example.com`)'
+      service: openmae-relay-http
+      tls:
+        certResolver: letsencrypt
+    openmae-relay-to-https:
+      entryPoints: [web]
+      rule: 'Host(`relay.example.com`)'
+      middlewares: [openmae-https]
+      service: openmae-relay-http
+
+    # Deliveries from the internet: Let's Encrypt's HTTP-01 challenges for the Macs' names (26 characters a–z and 2–7
+    # under the inbound domain), answered by the relay. Needs allowACMEByPass on the web entry point (traefik.yml).
+    openmae-acme:
+      entryPoints: [web]
+      rule: 'HostRegexp(`^[a-z2-7]{26}\.in\.example\.com$`) && PathPrefix(`/.well-known/acme-challenge/`)'
+      service: openmae-relay-http
+      priority: 1000001
+    # With allowACMEByPass, Traefik's own challenge router loses its top priority: any longer rule on the web entry
+    # point (another site's redirection to HTTPS) would then take the challenges of Traefik's own certificates, and
+    # their renewals would fail. This puts it back above every other router, below openmae-acme only.
+    traefik-acme:
+      entryPoints: [web]
+      rule: 'PathPrefix(`/.well-known/acme-challenge/`)'
+      service: acme-http@internal
+      priority: 1000000
+
+  middlewares:
+    openmae-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+  services:
+    openmae-relay-http:
+      loadBalancer:
+        servers:
+          - url: "http://relay:8080"
+
+tcp:
+  routers:
+    # Deliveries from the internet: the TLS of the Macs' names goes to the relay unopened (the Mac holds the
+    # certificate). Every other name on websecure stays with the HTTP routers above.
+    openmae-inbound:
+      entryPoints: [websecure]
+      rule: 'HostSNIRegexp(`^[a-z2-7]{26}\.in\.example\.com$`)'
+      service: openmae-inbound
+      tls:
+        passthrough: true
+
+  services:
+    openmae-inbound:
+      loadBalancer:
+        # Before Traefik 3.5: drop serversTransport and serversTransports below, and put
+        # proxyProtocol: {version: 2} here instead.
+        serversTransport: openmae-proxy-protocol
+        servers:
+          - address: "relay:8444"
+
+  serversTransports:
+    # The relay closes inbound connections that do not start with the PROXY protocol (it gives the caller's address).
+    openmae-proxy-protocol:
+      proxyProtocol:
+        version: 2
