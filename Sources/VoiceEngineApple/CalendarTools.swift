@@ -46,6 +46,8 @@ public actor CalendarTools: ToolProvider {
     private var undoCount = 0
     /// The default calendar is named once per conversation, so the user knows where events go.
     private var calendarNamed = false
+    /// A creation just refused for its moment (gone), which a change of an item never created makes instead.
+    private var refusedCreation = RefusedCreation()
 
     public init(testCollection: String? = nil) {
         self.testCollection = testCollection
@@ -54,7 +56,13 @@ public actor CalendarTools: ToolProvider {
     public func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
 
     public func check(_ call: ToolCall, context: ToolContext) throws {
-        try ActionCatalog.check(call, context: context)
+        refusedCreation.checking(call)
+        do {
+            try ActionCatalog.check(call, context: context)
+        } catch let refusal as ToolRefusal {
+            refusedCreation.refusal(refusal, of: call)
+            throw refusal
+        }
     }
 
     public func resetConversation() {
@@ -62,6 +70,7 @@ public actor CalendarTools: ToolProvider {
         lastCreated = nil
         undos = [:]
         calendarNamed = false
+        refusedCreation.forget()
     }
 
     // MARK: - Access
@@ -282,7 +291,16 @@ public actor CalendarTools: ToolProvider {
     }
 
     private func change(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
-        let (key, item) = try referenced(call, context)
+        let (key, item): (String, Item)
+        do {
+            (key, item) = try referenced(call, context)
+        } catch let refusal as ToolRefusal {
+            // The item whose creation was just refused for its moment: created at the new one.
+            guard let creation = refusedCreation.creation(insteadOf: call) else { throw refusal }
+            DebugLog.log("calendar: a change of an item never created, made as its creation")
+            return try await perform(creation, context: context)
+        }
+        refusedCreation.forget()
         switch item {
         case .event(let id):
             try await ensureAccess(.event, context: context)

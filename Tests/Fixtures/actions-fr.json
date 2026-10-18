@@ -1,5 +1,5 @@
 {
- "_comment": "French requests for voice-cli actions-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). expected.when: the date the call must carry (to the minute, or the day when no time is given; \"none\" = no date); end: the event's end; seconds: a timer; name: a shortcut. No expected = no action.",
+ "_comment": "French requests for voice-cli actions-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). expected.when: the date the call must carry (to the minute, or the day when no time is given; \"none\" = no date); end: the event's end; seconds: a timer; name: a shortcut; refused: \"past\" = the app refuses the call, its date being already gone (the call is still expected, with the user's words: the app checks the date, not the model; when = the date they give). No expected = no action.",
  "now": "2026-10-15T18:42",
  "shortcuts": [
   "Allumer le salon",
@@ -164,6 +164,22 @@
     "tool": "creer_evenement",
     "when": "2026-10-16T16:00",
     "end": "2026-10-16T16:30"
+   }
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez le dentiste hier à 15 h",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-14T15:00",
+    "refused": "past"
+   }
+  },
+  {
+   "phrase": "Note un déjeuner avec Marc aujourd'hui à midi",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-15T12:00",
+    "refused": "past"
    }
   },
   {

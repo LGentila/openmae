@@ -24,7 +24,12 @@ public enum ActionCatalog {
     ///
     /// The exception to the opening sentence and the example are for the smaller models: without them they
     /// announce the action ("Je crée ton rendez-vous…") and stop there, without calling the tool. An hour that may
-    /// be the morning or the afternoon ("à 3 h") is asked about by the app.
+    /// be the morning or the afternoon ("à 3 h") is asked about by the app, and so is a moment already gone
+    /// (`DateCheck`). Gemma 4 E4B sometimes refuses such a moment itself, without a call ("Je ne peux pas ajouter un
+    /// événement passé.": 10 to 14 % of the time on the dentist of voice-cli dialogue-bench). A rule saying that the
+    /// app checks the dates, and to write the call even for a moment that seems gone, brought that down to 3 to 5 %,
+    /// but made E4B call tools for remarks too (« Demain, je vais au marché avec ma sœur » at 59 % instead of 34 %):
+    /// left out.
     public static func promptAddendum(exampleCall: String?) -> String {
         let rules = """
             Tu peux agir grâce à des outils : rappels, calendrier, minuteurs et raccourcis. \
@@ -221,7 +226,7 @@ public enum ActionCatalog {
             if orSaid, let said = context.userSaid.first, FrenchDates.saysWhen(said),
                let moment = try? FrenchDates.moment(said, now: context.now, calendar: context.calendar)
             {
-                try DateCheck.upcoming(moment, key: keys[0], raw: said, context: context)
+                try DateCheck.upcoming(moment, key: keys[0], raw: said, context: context, tool: call.name)
                 return moment
             }
             if required { throw DateCheck.refusal(.missing, key: keys[0], raw: "", context: context) }
@@ -232,7 +237,7 @@ public enum ActionCatalog {
         }
         do {
             let moment = try readingTheUser(raw, context: context, read: read)
-            try DateCheck.upcoming(moment, key: key, raw: raw, context: context)
+            try DateCheck.upcoming(moment, key: key, raw: raw, context: context, tool: call.name)
             return moment
         } catch let problem as FrenchDates.Problem {
             throw refusal(problem, key: key, raw: raw, context: context)

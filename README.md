@@ -302,6 +302,16 @@ is one the model hesitates on). One search, made as the app makes it (the passwo
 .build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise
 ```
 
+Short conversations, as the app has them: the dialogues of `Tests/Fixtures/dialogues-fr.json` (here, a request for a
+moment already gone, then the user's new moment) are sent turn after turn, text only and with nothing created: each call
+goes through the app's checks and second try, and is carried out on a calendar kept in memory that answers as the app
+would. The model samples its answers, so each dialogue runs several times, and the report says what the model did at
+each turn and how often the item the user wanted was saved:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10
+```
+
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, a refused call and its second try, a long result summed up
 (as after a web search), a turn dropped after a second try, a speculative or interrupted answer, an answer in

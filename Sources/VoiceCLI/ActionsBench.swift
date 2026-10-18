@@ -78,6 +78,9 @@ private struct Corpus: Decodable {
         /// Words a delegation's instruction (or a follow-up's message, or a search's keywords) must contain, whatever
         /// the accents and case.
         var mentions: [String]?
+        /// The app must refuse the call: "past" for a date already gone. The call is still expected, with the user's
+        /// words (the app checks the date, not the model), and `when` is the date they give.
+        var refused: String?
     }
 
     /// An earlier exchange, for corrections ("décale-le") and tasks already handed over; without a call for a plain
@@ -119,8 +122,10 @@ private struct CaseResult: Encodable {
     var resolved: String?
     /// What the app would say if it refused the call (date in the past, malformed…).
     var refusal: String?
-    /// After a refusal, the call the model makes once it knows why (the app gives it that second try).
+    /// After a refusal, the call the model makes once it knows why (the app gives it that second try), or what it says.
     var secondTry: String?
+    /// A call refused when it should not have been, made right at the second try; a refusal the corpus expects, followed
+    /// by no call (the model asks the user) or by a call the app refuses too.
     var rightAfterSecondTry: Bool?
     var firstOutputMs: Double?
     var callMs: Double?
@@ -198,20 +203,7 @@ func runActionsBench(_ o: Options) async throws {
         ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (agents ? [AgentCatalog.promptAddendum] : [])
         + (web ? [WebSearchCatalog.promptAddendum] : [])
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
-    switch examples {
-    case "app": conversation.examples = ActionCatalog.examples(now: now, timeZone: timeZone)
-    case "none": break
-    default:
-        // Experiment: other exchanges shown at the start of every conversation, as if they had happened, and notes
-        // from the app between them ({"system": "…"}).
-        let entries = try JSONDecoder().decode([JSONValue].self, from: Data(contentsOf: URL(fileURLWithPath: examples)))
-        conversation.examples = try entries.flatMap { entry -> [ChatMessage] in
-            if case .object(let fields) = entry, let note = fields["system"]?.text { return [ChatMessage(.system, note)] }
-            let exchange = try JSONDecoder().decode(Corpus.Exchange.self, from: JSONEncoder().encode(entry))
-            return [Conversation.userMessage(exchange.user, language: .french, dateLine: exchange.dateLine)] + exchange.steps
-                + [ChatMessage(.assistant, exchange.answer)]
-        }
-    }
+    conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
     let prefixStart = clock.now
@@ -324,25 +316,37 @@ func runActionsBench(_ o: Options) async throws {
                 let resolved = try resolve(call, created: created, context: context, shortcuts: corpus.shortcuts)
                 result.resolved = resolved.description(timeZone)
                 if result.toolOK, let expected = item.expected {
-                    result.argumentsOK = matches(resolved, expected, context)
+                    result.argumentsOK = expected.refused == nil && matches(resolved, expected, context)
                 }
             } catch let refused as ToolRefusal {
                 refusal = refused
                 result.refusal = refused.forModel
-                if result.toolOK, item.expected != nil { result.argumentsOK = false }
+                if result.toolOK, let expected = item.expected {
+                    result.argumentsOK = refusedAsExpected(call, refused, expected, context)
+                }
             }
         }
         if let call, let refusal, refusal.retryable {
             // As in the app: the model sees why its call was refused and gets one more try.
             secondPass = true
             var retried: ToolCall?
+            var said = ""
             for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal.forModel)])]) {
                 if case .toolCall(let made) = output, retried == nil { retried = made }
+                if case .text(let piece) = output, retried == nil { said += piece }
             }
             let writtenAgain = retried?.name
             retried = retried.map(named)
-            result.secondTry = retried.map { describe($0, written: writtenAgain) } ?? "no call"
-            if let retried, let expected = item.expected, retried.name == expectedTool,
+            var saidFilter = ReasoningFilter()
+            said = (saidFilter.push(said) + saidFilter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+            result.secondTry = retried.map { describe($0, written: writtenAgain) } ?? "no call: “\(said)”"
+            if result.argumentsOK == true {
+                // The refusal the corpus expects: the model must not slip a date of its own past the app.
+                let refusedAgain = retried.map { again in
+                    (try? resolve(again, created: created, context: context, shortcuts: corpus.shortcuts)) == nil
+                } ?? true
+                result.rightAfterSecondTry = refusedAgain
+            } else if let retried, let expected = item.expected, retried.name == expectedTool,
                retried.name == WebSearchCatalog.searchName
             {
                 result.rightAfterSecondTry = (try? WebSearchCatalog.check(retried, context: context)) != nil
@@ -390,6 +394,24 @@ func runActionsBench(_ o: Options) async throws {
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(found).write(to: URL(fileURLWithPath: record))
         print("searches recorded: \(record) (\(found.count))")
+    }
+}
+
+/// The exchanges every conversation starts with, as --examples says: "app" (the app's, `ActionCatalog.examples`), "none",
+/// or a file of exchanges shown as if they had happened (the shape of a case's "before", plus an optional "dateLine"), with
+/// notes from the app between them ({"system": "…"}).
+func exampleExchanges(_ examples: String, now: Date, timeZone: TimeZone) throws -> [ChatMessage] {
+    switch examples {
+    case "app": return ActionCatalog.examples(now: now, timeZone: timeZone)
+    case "none": return []
+    default:
+        let entries = try JSONDecoder().decode([JSONValue].self, from: Data(contentsOf: URL(fileURLWithPath: examples)))
+        return try entries.flatMap { entry -> [ChatMessage] in
+            if case .object(let fields) = entry, let note = fields["system"]?.text { return [ChatMessage(.system, note)] }
+            let exchange = try JSONDecoder().decode(Corpus.Exchange.self, from: JSONEncoder().encode(entry))
+            return [Conversation.userMessage(exchange.user, language: .french, dateLine: exchange.dateLine)] + exchange.steps
+                + [ChatMessage(.assistant, exchange.answer)]
+        }
     }
 }
 
@@ -666,6 +688,23 @@ private func mentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
     return mentions.allSatisfy { text.contains(folded($0)) }
 }
 
+/// Whether the app refused a call as the corpus expects: for a date in the past ("past"), the one the words give (`when`):
+/// the model's words, or the user's sentence when the model changed them (as the app reads them).
+private func refusedAsExpected(_ call: ToolCall, _ refusal: ToolRefusal, _ expected: Corpus.Expected,
+                               _ context: ToolContext) -> Bool
+{
+    guard expected.refused == "past", refusal.spoken == ActionPhrases.datePassed(context.language) else { return false }
+    guard let when = expected.when else { return true }
+    let raw = call.text("quand") ?? call.text("debut") ?? call.text("echeance") ?? ""
+    let said = context.userSaid.first ?? ""
+    let words = FrenchDates.wordsAreTheUser(raw, said: context.userSaid) || !FrenchDates.saysWhen(said) ? raw : said
+    guard let moment = try? FrenchDates.moment(words, now: context.now, calendar: context.calendar),
+          let wanted = LocalDateTime.parse(when, in: context.timeZone)
+    else { return false }
+    return wanted.hasTime ? moment.hasTime && moment.start == wanted.date
+        : context.calendar.isDate(moment.start, inSameDayAs: wanted.date)
+}
+
 /// Compares what the app would do (dates to the minute, or to the day; length; shortcut) with the expected one.
 private func matches(_ resolved: Resolved, _ expected: Corpus.Expected, _ context: ToolContext) -> Bool {
     let timeZone = context.timeZone
@@ -704,7 +743,11 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     print(String(format: "right tool: %d / %d (%.0f %%)", rightTool, actions.count, percent(rightTool, actions.count)))
     print(String(format: "right tool and right date / length / name: %d / %d (%.0f %%)", rightAction, actions.count,
                  percent(rightAction, actions.count)))
-    let rightInApp = rightAction + actions.filter { $0.rightAfterSecondTry == true }.count
+    // A request wrong at first and right at the second try; or right at first, its second try (after a refusal the
+    // corpus expects) not wrong.
+    let rightInApp = actions.filter {
+        $0.toolOK && $0.argumentsOK != false ? $0.rightAfterSecondTry != false : $0.rightAfterSecondTry == true
+    }.count
     print(String(format: "  with the app's second try after a refused call: %d / %d (%.0f %%)", rightInApp,
                  actions.count, percent(rightInApp, actions.count)))
     print("requests without an action that triggered one: \(falseTriggers.count) / \(others.count)"

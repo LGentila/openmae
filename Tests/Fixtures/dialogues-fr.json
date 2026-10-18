@@ -1,0 +1,59 @@
+{
+ "_comment": "French dialogues for voice-cli dialogue-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue's turns are sent in order, as long as its goal is not reached: the item the user wants saved: one of goal.tool's kind (an event for creer_evenement, a reminder for creer_rappel) that the app created, whatever call the model wrote, its title containing goal.title (whatever the accents and case), at goal.when (to the minute, or the day alone). A dialogue may have its own reference time (now), which its goal follows. Here each first request asks for a moment already gone, which the app refuses: the model must write the call anyway (the app checks the date, not the model) and keep the item when the user gives another moment.",
+ "now": "2026-10-15T18:42",
+ "dialogues": [
+  {
+   "name": "dentist yesterday, as in the app on Saturday 17 October at 14:45",
+   "now": "2026-10-17T14:45",
+   "turns": [
+    "Ajoute un rendez-vous chez le dentiste hier à quinze heures.",
+    "Demain à 16h.",
+    "Celui que je venais de te dire."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "dentiste",
+    "when": "2026-10-18T16:00"
+   }
+  },
+  {
+   "name": "dentist yesterday, then tomorrow at 16:00",
+   "turns": [
+    "Ajoute un rendez-vous chez le dentiste hier à quinze heures.",
+    "Demain à 16h.",
+    "Celui que je venais de te dire."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "dentiste",
+    "when": "2026-10-16T16:00"
+   }
+  },
+  {
+   "name": "garage this morning, then tomorrow morning",
+   "turns": [
+    "Note un rendez-vous chez le garagiste ce matin à 9 h.",
+    "Ah non, c'est demain matin à 9 h.",
+    "Le rendez-vous chez le garagiste."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "garag",
+    "when": "2026-10-16T09:00"
+   }
+  },
+  {
+   "name": "reminder earlier today, then tomorrow",
+   "turns": [
+    "Rappelle-moi d'appeler Paul aujourd'hui à 14 h.",
+    "Alors demain à 14 h.",
+    "Le rappel pour appeler Paul."
+   ],
+   "goal": {
+    "tool": "creer_rappel",
+    "title": "Paul",
+    "when": "2026-10-16T14:00"
+   }
+  }
+ ]
+}

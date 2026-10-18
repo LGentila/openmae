@@ -10,6 +10,9 @@
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
+//   voice-cli dialogue-bench [--repeats 10] [--corpus file.json]
+//                                                       the model in short conversations, turn after turn, as the
+//                                                       app has them (text only; see DialogueBench.swift)
 //   voice-cli cache-check [--scenario name] [--agents]  how much of each request the model finds in its memory,
 //                                                       in the app's sequences of requests (text only; see
 //                                                       CacheCheck.swift)
@@ -56,7 +59,8 @@ struct Options {
     var followUp: Double?
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
-    var repeats = 3
+    /// voice-onset: 3 by default; dialogue-bench: 10.
+    var repeats: Int?
     var now: String?
     var corpus: String?
     var showPrompt = false
@@ -65,6 +69,8 @@ struct Options {
     var addendum: String?
     var examples: String?
     var web = false
+    /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
+    var agents = false
     var searxng: String?
     var searxngUser: String?
     var record: String?
@@ -93,7 +99,7 @@ struct Options {
             case "--out": o.out = URL(fileURLWithPath: it.next() ?? "measurements")
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
-            case "--repeats": o.repeats = Int(it.next() ?? "") ?? o.repeats
+            case "--repeats": o.repeats = Int(it.next() ?? "")
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
@@ -102,6 +108,7 @@ struct Options {
             case "--addendum": o.addendum = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
+            case "--agents": o.agents = true
             case "--searxng": o.searxng = it.next()
             case "--searxng-user": o.searxngUser = it.next()
             case "--record": o.record = it.next()
@@ -383,7 +390,7 @@ func runVoiceOnset(_ o: Options) async throws {
             var silences: [Double] = []
             var firstAudible: [Double] = []
             var mute = 0
-            for _ in 0..<o.repeats {
+            for _ in 0..<(o.repeats ?? 3) {
                 for sentence in sentences {
                     let r = try await speak(sentence, manager: manager, voice: voice, temperature: temperature,
                                             clock: clock)
@@ -421,8 +428,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog", "actions-bench", "cache-check", "link-client", "delegate",
-    "web-search"].contains(options.command)
+   ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "link-client",
+    "delegate", "web-search"].contains(options.command)
 {
     do {
         switch options.command {
@@ -430,6 +437,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "verify": try runVerify(options)
         case "catalog": try await runCatalog(options)
         case "actions-bench": try await runActionsBench(options)
+        case "dialogue-bench": try await runDialogueBench(options)
         case "cache-check": try await runCacheCheck(options, arguments: CommandLine.arguments)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
@@ -453,6 +461,9 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--compare-beginnings]
+               voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
+                                        [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
+                                        [--watch-calls]
                voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…

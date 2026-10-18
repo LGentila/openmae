@@ -205,6 +205,8 @@ public struct ToolRefusal: Error, Sendable {
     public var spoken: String
     /// The model may correct its call (wrong arguments); false when retrying cannot help (permission refused).
     public var retryable: Bool
+    /// The moment the call gives is already gone: the app asks the user for another one (`DateCheck`).
+    public var momentGone = false
 
     public init(forModel: String, spoken: String, retryable: Bool = true) {
         self.forModel = forModel

@@ -65,7 +65,42 @@ struct ActionPhraseTests {
         // Words it cannot read: the model may write the date itself on its second try.
         let words = try #require(refusal("tomorrow at 3 pm"))
         #expect(words.retryable && words.forModel.contains("AAAA-MM-JJTHH:MM"))
-        #expect(try #require(refusal("hier à 15 h")).forModel.contains("mercredi 14 octobre"))
+        // A moment already gone: asked to the user at once too, since only they can give another one; the model is told
+        // to write the creation again once they do.
+        let past = try #require(refusal("hier à 15 h"))
+        #expect(past.forModel.contains("mercredi 14 octobre") && !past.retryable && past.momentGone)
+        #expect(past.forModel.hasSuffix("appelle de nouveau creer_rappel avec ses mots (pas modifier_element : rien n'existe "
+                                        + "encore)."))
+        #expect(past.spoken == "Cette date est déjà passée. Tu peux me redire quand\(nb)?")
+    }
+
+    /// A creation refused for its moment, then a change of the "last" item, which was never created ("Demain à 16h.",
+    /// as Gemma 4 26B writes it): the creation again, at the change's moment; only for the call right after it.
+    @Test func changeRightAfterARefusedCreationCreatesIt() throws {
+        let creation = ToolCall(name: "creer_evenement", arguments: ["titre": "Dentiste", "quand": "hier à 15 h"])
+        var thrown: ToolRefusal?
+        do { try ActionCatalog.check(creation, context: context()) } catch let refusal as ToolRefusal { thrown = refusal }
+        let refusal = try #require(thrown)
+        var refused = RefusedCreation()
+        refused.checking(creation)
+        refused.refusal(refusal, of: creation)
+        let change = ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "debut": "demain à 16 h"])
+        refused.checking(change)
+        let made = refused.creation(insteadOf: change)
+        let again = try #require(made)
+        #expect(again == ToolCall(name: "creer_evenement", arguments: ["titre": "Dentiste", "debut": "demain à 16 h"]))
+        #expect(try ActionCatalog.eventTimes(again, context: context()).start == date("2026-10-16T16:00"))
+        let twice = refused.creation(insteadOf: change)
+        #expect(twice == nil)  // once
+        // Another call in between, or a refusal for another reason: nothing kept.
+        refused.refusal(refusal, of: creation)
+        refused.checking(ToolCall(name: "minuteur", arguments: ["duree": "5 minutes"]))
+        refused.checking(change)
+        let afterAnother = refused.creation(insteadOf: change)
+        #expect(afterAnother == nil)
+        refused.refusal(ToolRefusal(forModel: "Il manque « titre ».", spoken: ""), of: creation)
+        let afterOther = refused.creation(insteadOf: change)
+        #expect(afterOther == nil)
     }
 
     @Test func saysDatesInFull() {
@@ -421,6 +456,23 @@ actor RecordingTools: ToolProvider {
     }
 }
 
+/// The calendar's tools with the app's checks (`ActionCatalog.check`); an event "saved" only gets an id.
+actor CheckedCalendar: ToolProvider {
+    nonisolated let identifier = "calendar"
+    private(set) var created: [ToolCall] = []
+
+    func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
+
+    func check(_ call: ToolCall, context: ToolContext) throws {
+        try ActionCatalog.check(call, context: context)
+    }
+
+    func perform(_ call: ToolCall, context: ToolContext) throws -> ToolOutcome {
+        created.append(call)
+        return ToolOutcome(spoken: "C’est dans ton agenda\(nb): Dentiste.", forModel: ["id": .string("e\(created.count)")])
+    }
+}
+
 @Suite("Tool runner")
 struct ToolRunnerTests {
     @Test func sensitiveActionWaitsForYes() async {
@@ -708,6 +760,40 @@ struct PipelineActionTests {
         #expect(second.suffix(2).map(\.role) == [.assistant, .tool])  // the model sees why it was refused
         #expect(await log.pieces.joined(separator: " ") == ActionPhrases.missingTitle(.french))
         #expect(await tools.performed.isEmpty)
+    }
+
+    /// A moment already gone: the app asks the user for another one at once (a second try could only make one up), and
+    /// the call stays in the history, so the model still has the event when the user gives that moment.
+    @Test func pastMomentIsAskedToTheUserWithTheCallKept() async throws {
+        func event(_ when: String) -> [ModelOutput] {
+            [.toolCall(ToolCall(name: "creer_evenement", arguments: ["titre": "Dentiste", "quand": .string(when)]))]
+        }
+        let (model, speaker, calendar) = (ScriptedModel(scripts: [event("hier à 15 h"), event("demain à 16 h")]),
+                                          FakeSpeaker(), CheckedCalendar())
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        let pipeline = VoicePipeline(detector: LoudnessDetector(),
+                                     transcriber: ScriptedTranscriber(["Ajoute le dentiste hier à 15 h", "Demain à 16 h"]),
+                                     model: model, synthesizer: FakeSynthesizer(), output: speaker,
+                                     tools: ToolRunner(providers: [calendar]), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { !(await log.pieces.isEmpty) }
+        #expect(await log.pieces.joined(separator: " ") == ActionPhrases.datePassed(.french))
+        #expect(await model.requests.count == 1)  // no second try
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await calendar.created.count == 1 }
+        #expect(await calendar.created.first?.arguments["quand"] == "demain à 16 h")
+        // The first turn as the model then sees it: its call, why it was refused, and the app's question.
+        let turn = Array(try #require(await model.requests.last).suffix(5))
+        #expect(turn.map(\.role) == [.user, .assistant, .tool, .assistant, .user])
+        #expect(turn[1].toolCalls.first?.arguments["titre"] == "Dentiste")
+        guard case .object(let result)? = turn[2].toolResult else { Issue.record("no result"); return }
+        #expect(result["erreur"]?.text?.contains("déjà passé") == true)
+        #expect(turn[3].content == ActionPhrases.datePassed(.french))
     }
 
     @Test func cancelIsHandledWithoutTheModel() async throws {
