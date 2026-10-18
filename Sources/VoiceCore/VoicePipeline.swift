@@ -468,7 +468,7 @@ public actor VoicePipeline {
     /// Turns actions on (a runner) or off (nil). The tools are part of the system prompt, so a new
     /// conversation starts.
     public func setTools(_ runner: ToolRunner?) async throws {
-        await cancelTurn(stopAudio: true, forgetting: true)
+        let stopped = await stopTurnForNewConversation()
         forgetUnheard()
         await tools?.resetConversation()  // an action waiting for its "oui" is dropped (its read-back leaves the screen)
         tools = runner
@@ -476,6 +476,7 @@ public actor VoicePipeline {
         conversation.clear()
         await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])
+        if stopped { restAfterStoppedTurn() }
         try await model.prefillBeginning(conversation.beginning)
     }
 
@@ -651,12 +652,35 @@ public actor VoicePipeline {
 
     /// Forget the conversation (new session). The model starts again from the beginning it keeps.
     public func resetConversation() async throws {
-        await cancelTurn(stopAudio: true, forgetting: true)
+        let stopped = await stopTurnForNewConversation()
         resetPartials()  // the interface cleared the conversation: words found for it before are not shown
         forgetUnheard()
         conversation.clear()
         await tools?.resetConversation()
+        if stopped { restAfterStoppedTurn() }
         try await model.prefillBeginning(conversation.beginning)
+    }
+
+    /// A new conversation starts (`resetConversation`, `setTools`): the turn under way stops, its sound with it, and is
+    /// not recorded; what was heard of the user's sentence goes with it, as with `interrupt`. An announcement that made
+    /// no sound yet goes back to the queue (`cancelTurn`). True when there was a turn: the caller goes back to rest
+    /// (`restAfterStoppedTurn`) once the new conversation is set up.
+    private func stopTurnForNewConversation() async -> Bool {
+        guard turn != nil else { return false }
+        await cancelTurn(stopAudio: true, forgetting: true)
+        clearHeardSentence()
+        return true
+    }
+
+    /// Back to rest after a turn stopped for a new conversation, as after `interrupt`: the interfaces no longer show the
+    /// stopped answer's "thinking" or "speaking", the model may work in the background again and the models are kept
+    /// warm; an announcement waiting (one stopped before any of its sound) starts now, in the new conversation. Once the
+    /// conversation is cleared and the model has its tools, before it computes the new beginning
+    /// (`LanguageModel.prefillBeginning`, seconds when the tools changed): at rest meanwhile, as when a new conversation
+    /// starts with no turn. Nothing changes when another turn started meanwhile: it set the state itself.
+    private func restAfterStoppedTurn() {
+        guard turn == nil else { return }
+        setState(someoneSpeaksToMae ? .userSpeaking : .listening)
     }
 
     // MARK: - Microphone input
@@ -801,11 +825,7 @@ public actor VoicePipeline {
         } else {
             await cancelTurn(stopAudio: false)
         }
-        if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
-            utterance = []
-            utteranceOpen = turnDetector.isInUtterance
-            resetPartials()
-        }
+        clearHeardSentence()
         setState(someoneSpeaksToMae ? .userSpeaking : .listening)
     }
 
@@ -1791,11 +1811,7 @@ public actor VoicePipeline {
             if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
         }
-        if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
-            utterance = []
-            utteranceOpen = turnDetector.isInUtterance
-            resetPartials()
-        }
+        clearHeardSentence()
         // After an answer, Maé listens a few seconds more without the wake phrase.
         if config.listening == .wakeWord, metrics != nil { stayAwake() }
         setState(someoneSpeaksToMae ? .userSpeaking : .listening)
@@ -1830,11 +1846,7 @@ public actor VoicePipeline {
     /// Wake-word mode: the phrase alone wakes Maé (a chime, then she listens to any voice for a few seconds); "stop"
     /// only silences her.
     private func endWithoutTurn(wakes: Bool) {
-        if utteranceAddressed {
-            utterance = []
-            utteranceOpen = turnDetector.isInUtterance
-            resetPartials()
-        }
+        clearHeardSentence()
         if wakes {
             DebugLog.log("the wake phrase alone → listening")
             let sampleRate = synthesizer.outputSampleRate
@@ -1849,6 +1861,15 @@ public actor VoicePipeline {
 
     /// Someone is speaking, and it is meant for Maé (always, outside the wake-word mode).
     private var someoneSpeaksToMae: Bool { turnDetector.isInUtterance && utteranceAddressed }
+
+    /// A turn is over or stopped: what was heard of the user's sentence goes with it, and a sentence still going on
+    /// starts again from the next audio. A sentence still being checked for the wake phrase goes on.
+    private func clearHeardSentence() {
+        guard utteranceAddressed else { return }
+        utterance = []
+        utteranceOpen = turnDetector.isInUtterance
+        resetPartials()
+    }
 
     /// Barge-in: silence the assistant immediately, keep what it already said in the history. An announcement whose
     /// words were not heard yet (its chime plays) is said after the user's turn, unless they asked to be quiet
