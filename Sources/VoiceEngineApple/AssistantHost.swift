@@ -29,6 +29,9 @@ public actor AssistantHost: AssistantConnection {
     private var playbackSampleRate = 24_000.0
     private var tasks: [Task<Void, Never>] = []
     private var activity: NSObjectProtocol?
+    /// While an exchange goes on (the user speaks to Maé, she thinks, she answers), the Mac does not go to sleep on its
+    /// own: neither the sentence nor the answer is cut. At rest it may (see `SystemAudio.allowIdleSleep`).
+    private var exchangeActivity: NSObjectProtocol?
     private var restartingAudio = false
     /// The voice's output: the Mac's speakers, or an iPhone's (see `useRemoteAudio`).
     private var router: AudioRouter?
@@ -303,6 +306,7 @@ public actor AssistantHost: AssistantConnection {
         route = nil
         if let activity { ProcessInfo.processInfo.endActivity(activity) }
         activity = nil
+        keepAwakeDuringExchange(false)
         // MLX keeps freed GPU memory for reuse: give it back to macOS (about 15 GB for the 26B model).
         MLXChatModel.releaseCachedMemory()
         stage = .idle
@@ -315,6 +319,7 @@ public actor AssistantHost: AssistantConnection {
         audio?.stop()
         if let activity { ProcessInfo.processInfo.endActivity(activity) }
         activity = nil
+        keepAwakeDuringExchange(false)
     }
 
     // MARK: - Models: download, tier, deletion
@@ -614,6 +619,16 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
     }
 
+    private func keepAwakeDuringExchange(_ inExchange: Bool) {
+        if inExchange, exchangeActivity == nil {
+            exchangeActivity = ProcessInfo.processInfo.beginActivity(
+                options: .idleSystemSleepDisabled, reason: "OpenMaé: in a conversation")
+        } else if !inExchange, let exchangeActivity {
+            ProcessInfo.processInfo.endActivity(exchangeActivity)
+            self.exchangeActivity = nil
+        }
+    }
+
     /// Other apps are silent while the user speaks (hands-free: from voice detection; push-to-talk: while the key
     /// or button is held), lower while Maé prepares and says the answer, and left alone at rest.
     private func adjustOtherApps() {
@@ -677,6 +692,7 @@ public actor AssistantHost: AssistantConnection {
         case .state(let state):
             pipelineState = state
             adjustOtherApps()
+            keepAwakeDuringExchange(state != .listening)
             emit.yield(.state(state))
         case .userTranscript(let text, let language):
             DebugLog.log("user [\(language.rawValue)]: \(text)")

@@ -98,6 +98,7 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
     @discardableResult
     public func start(mode: AudioMode, playbackSampleRate: Double) throws -> Route {
         stop()
+        Self.allowIdleSleep()
         let engine = AVAudioEngine()
         let input = engine.inputNode
         if mode == .speakers {
@@ -355,6 +356,21 @@ public final class SystemAudio: AudioOutput, @unchecked Sendable {
         }
         guard status == noErr else { return nil }
         return name?.takeRetainedValue() as String?
+    }
+
+    /// By default Core Audio keeps the Mac from going to sleep on its own while a process's microphone or speakers run
+    /// (`pmset -g assertions`: coreaudiod's "…context.preventuseridlesleep", created for this process, "audio-in
+    /// audio-out"). Here they run as long as the app is open: the Mac would never sleep. This lets it sleep; the
+    /// engine keeps it awake itself during an exchange (`AssistantHost`). For the whole process, before the engine
+    /// starts.
+    static func allowIdleSleep() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertySleepingIsAllowed, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var allowed = UInt32(1)
+        let status = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+                                                UInt32(MemoryLayout<UInt32>.size), &allowed)
+        if status != noErr { DebugLog.log("audio: could not let the Mac sleep with the microphone open (\(status))") }
     }
 
     static func defaultDevice(input: Bool) -> AudioDeviceID? {
