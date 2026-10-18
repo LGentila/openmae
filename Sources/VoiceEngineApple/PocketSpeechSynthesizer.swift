@@ -56,9 +56,12 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
         async throws
     {
         let session = try await manager.makeSession(voice: voices[language])
+        let trace = DebugLog.enabled ? VoiceTrace(label: "TTS kept warm") : nil
+        trace?.enqueued(text)
         session.enqueue(text)
         session.finish()
-        for try await _ in session.frames {}
+        for try await frame in session.frames { trace?.received(frame) }
+        trace?.ended()
     }
 
     private func manager(for language: SpeechLanguage) async throws -> PocketTtsManager {
@@ -78,15 +81,23 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
 struct PocketStream: SynthesisStream {
     let session: PocketTtsSession
     let audio: AsyncThrowingStream<[Float], Error>
+    private let trace: VoiceTrace?
 
     init(session: PocketTtsSession) {
         self.session = session
+        let trace = DebugLog.enabled ? VoiceTrace() : nil
+        self.trace = trace
         audio = AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    for try await frame in session.frames { continuation.yield(frame.samples) }
+                    for try await frame in session.frames {
+                        trace?.received(frame)
+                        continuation.yield(frame.samples)
+                    }
+                    trace?.ended()
                     continuation.finish()
                 } catch {
+                    trace?.ended()
                     continuation.finish(throwing: error)
                 }
             }
@@ -94,7 +105,117 @@ struct PocketStream: SynthesisStream {
         }
     }
 
-    func enqueue(_ text: String) { session.enqueue(text) }
+    func enqueue(_ text: String) {
+        trace?.enqueued(text)
+        session.enqueue(text)
+    }
+
     func finish() { session.finish() }
-    func cancel() async { await session.cancel() }
+
+    func cancel() async {
+        trace?.cancelled()
+        await session.cancel()
+    }
+}
+
+/// Diagnostics (VOICE_DEBUG=1): for each sentence the voice speaks, how long its first frame took, how many near-silent
+/// frames came before the first audible one and how fast the frames came; or that it stayed silent from start to end.
+final class VoiceTrace: @unchecked Sendable {
+    /// Quieter than this (dB) is near-silence, as for the pipeline (`PipelineConfig.leadingSilenceThresholdDB`).
+    static let audibleDB: Float = PipelineConfig().leadingSilenceThresholdDB ?? -45
+
+    private struct Sentence {
+        var index: Int
+        var words: Int
+        /// When the voice could start on it: its text given, and the sentence before it done.
+        var start: ContinuousClock.Instant
+        var firstFrame: ContinuousClock.Instant?
+        var lastFrame: ContinuousClock.Instant?
+        var frames = 0
+        var quietFrames = 0
+        var audible = false
+        var loudest: Float = -120
+    }
+
+    private let label: String
+    private let lock = NSLock()
+    private let clock = ContinuousClock()
+    // Guarded by `lock`.
+    private var given: [(words: Int, at: ContinuousClock.Instant)] = []
+    private var current: Sentence?
+    private var stopped = false
+
+    init(label: String = "TTS") { self.label = label }
+
+    func enqueued(_ text: String) {
+        // FluidAudio skips the texts that are only white space, and counts the others.
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lock.withLock { given.append((trimmed.split(separator: " ").count, clock.now)) }
+    }
+
+    func received(_ frame: PocketTtsSynthesizer.AudioFrame) {
+        let now = clock.now
+        let level = Self.loudnessDB(frame.samples)
+        lock.withLock {
+            let index = frame.utteranceIndex ?? 0
+            if current?.index != index {
+                let previousEnd = current?.lastFrame
+                close()
+                let text: (words: Int, at: ContinuousClock.Instant) = index < given.count ? given[index] : (0, now)
+                current = Sentence(index: index, words: text.words, start: max(text.at, previousEnd ?? text.at))
+            }
+            guard var s = current else { return }
+            if s.firstFrame == nil { s.firstFrame = now }
+            s.lastFrame = now
+            s.frames += 1
+            s.loudest = max(s.loudest, level)
+            if !s.audible {
+                if level < Self.audibleDB {
+                    s.quietFrames += 1
+                } else {
+                    s.audible = true
+                    let first = s.firstFrame ?? now
+                    let pace = s.frames > 1 ? Self.ms(now - first) / Double(s.frames - 1) : 0
+                    DebugLog.log(String(
+                        format: "%@: sentence %d (%d words) audible at frame %d after %d near-silent (%.2f s of audio),"
+                            + " %.0f ms after its text; first frame after %.0f ms, then %.0f ms per frame",
+                        label, s.index + 1, s.words, s.frames, s.quietFrames, Double(s.quietFrames) * 0.08,
+                        Self.ms(now - s.start), Self.ms(first - s.start), pace))
+                }
+            }
+            current = s
+        }
+    }
+
+    func ended() { lock.withLock { close() } }
+
+    /// Stopped before its end (an interruption, or another voice audible sooner).
+    func cancelled() { lock.withLock { stopped = true } }
+
+    /// Reports a sentence that ended without an audible frame. Called with `lock` held.
+    private func close() {
+        guard let s = current, !s.audible, let first = s.firstFrame, let last = s.lastFrame else { return }
+        if stopped {
+            DebugLog.log(String(
+                format: "%@: sentence %d stopped after %d near-silent frames (%.2f s of audio), %.0f ms after its text",
+                label, s.index + 1, s.frames, Double(s.frames) * 0.08, Self.ms(last - s.start)))
+            return
+        }
+        DebugLog.log(String(
+            format: "%@: sentence %d (%d words) silent throughout: %d frames (%.2f s of audio, loudest %.0f dB) in"
+                + " %.0f ms after its text; first frame after %.0f ms",
+            label, s.index + 1, s.words, s.frames, Double(s.frames) * 0.08, s.loudest, Self.ms(last - s.start),
+            Self.ms(first - s.start)))
+    }
+
+    static func loudnessDB(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return -120 }
+        let meanSquare = samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count)
+        return 10 * log10(max(meanSquare, 1e-12))
+    }
+
+    private static func ms(_ d: Duration) -> Double {
+        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+    }
 }

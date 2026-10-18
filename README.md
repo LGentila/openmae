@@ -265,7 +265,21 @@ Memory over time (here 10 minutes):
 is declined); with `--new-conversation-every 4`, a new conversation starts every four turns, as with "New
 conversation" in the app, and the time it takes is shown. `--wake-word` only answers the recordings that start with
 « OK Maé », as the app's wake-word mode; add `--follow-up 0` so that every recording needs the phrase (no seconds of
-attention after an answer).
+attention after an answer). `--no-voice-restart` keeps the voice going when its opening stays near-silent (the app
+starts it again after 1.2 s of near-silence), and `--racing-voices 2` starts each answer with two voices at once, the
+first one audible saying it (off in the app: 1.2 GB more memory).
+
+The voice alone: how long it takes to make its first audible sound on typical first sentences, and the near-silence it
+produces before (Pocket TTS opens each sentence with a breath of random length). `--parallel 2` has two voices speak
+each sentence at once, the first audible one counting (as `--racing-voices 2` in a conversation); `--with-llm` has the
+language model write an answer meanwhile, paused once its first sentence is written, as in a turn:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli voice-onset --repeats 5 --parallel 2
+```
+
+With `VOICE_DEBUG=1`, every engine command also logs, for each sentence the voice says, how long its first frame took,
+how many near-silent frames came before the first audible one and how fast the frames came.
 
 Check that the language model picks the right action, with the right date. Text only, nothing is created: the
 French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a

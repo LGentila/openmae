@@ -509,7 +509,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             }
             detokenizer.append(token: token)
             if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
-            hold.waitWhileHeld(atMost: .milliseconds(1500))
+            let pause = clock.now
+            if let ranOut = hold.waitWhileHeld(atMost: .milliseconds(1500)) {
+                DebugLog.log("LLM: paused for the voice \(clock.now - pause) after \(produced.count) tokens"
+                             + (ranOut ? ", the pause ran out" : ""))
+            }
         }
         if watchingToolCalls {
             // values[i] is the chance at the i-th token of the answer (the iterator reads one token ahead: the last
@@ -820,14 +824,18 @@ final class GenerationHold: @unchecked Sendable {
         condition.unlock()
     }
 
-    func waitWhileHeld(atMost limit: Duration) {
+    /// Nil when generation was not held; otherwise whether the pause ran out of time (the voice still not audible).
+    @discardableResult
+    func waitWhileHeld(atMost limit: Duration) -> Bool? {
         condition.lock()
         defer { condition.unlock() }
-        guard held else { return }
+        guard held else { return nil }
         let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
         let deadline = Date().addingTimeInterval(seconds)
         while held, condition.wait(until: deadline) {}
+        let ranOut = held
         held = false  // a pause that ran out of time is over for this answer
+        return ranOut
     }
 }
 

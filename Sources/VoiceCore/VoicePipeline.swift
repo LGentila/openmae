@@ -29,6 +29,18 @@ public struct PipelineConfig: Sendable {
     /// audio quieter than this (dB) is skipped until the first audible sound, so the answer starts
     /// sooner and the latency measures what the user actually hears. nil = keep everything.
     public var leadingSilenceThresholdDB: Float? = -45
+    /// The voice's opening of an answer still near-silent after this long (seconds of its audio: 1.2 s takes it 0.6 to
+    /// 0.9 s on the reference Mac) starts again in a new utterance, which draws its breath again (see
+    /// `VoiceRestart`), at most `voiceRestarts` times. nil = never. Needs `leadingSilenceThresholdDB`.
+    public var voiceRestartAfterSeconds: Double? = 1.2
+    public var voiceRestarts = 2
+    /// Voices that start each answer at once, each with its own random draws: the first one to be audible says the
+    /// answer, the others stop (see `VoiceRace`). With two, on the reference Mac (`voice-cli voice-onset`, typical
+    /// first sentences): first sound 208 ms instead of 372 ms in the median, 537 ms instead of 855 ms for the slowest
+    /// tenth, 1.0 s instead of 2.2 s at worst; but the voice then takes 1.2 GB more memory (2.3 GB instead of 1.1 GB),
+    /// which is why it is off. 1 = a single voice (then `voiceRestartAfterSeconds` applies). Needs
+    /// `leadingSilenceThresholdDB`.
+    public var racingVoices = 1
     /// Pauses of the voice longer than this (between sentences, each one starting with near-silence)
     /// are shortened to it. nil = keep them.
     public var maxVoicePauseMs: Double? = 300
@@ -848,7 +860,7 @@ public actor VoicePipeline {
 
             // 2. Voice: started now, so its set-up overlaps with the language model's first words.
             DebugLog.log("turn \(turn.id): STT done (\(metrics.transcriptionMs ?? 0) ms)")
-            let stream = try await synthesizer.startUtterance(language: lang)
+            let stream = try await startVoice(language: lang)
             DebugLog.log("turn \(turn.id): TTS session ready")
             turn.stream = stream
             startPlayer(turn, stream)
@@ -971,6 +983,36 @@ public actor VoicePipeline {
         }
     }
 
+    /// The voice of an answer: one utterance, started again if its opening stays near-silent too long
+    /// (`voiceRestartAfterSeconds`), or several racing for the first audible sound (`racingVoices`).
+    private func startVoice(language: SpeechLanguage) async throws -> any SynthesisStream {
+        guard let threshold = config.leadingSilenceThresholdDB else {
+            return try await synthesizer.startUtterance(language: language)
+        }
+        let audible: @Sendable ([Float]) -> Bool = { Self.loudnessDB($0) >= threshold }
+        if config.racingVoices > 1 {
+            var runners: [any SynthesisStream] = []
+            do {
+                for _ in 0..<config.racingVoices {
+                    runners.append(try await synthesizer.startUtterance(language: language))
+                }
+            } catch {
+                for runner in runners { await runner.cancel() }
+                throw error
+            }
+            return VoiceRace(runners, audible: audible)
+        }
+        let first = try await synthesizer.startUtterance(language: language)
+        guard let seconds = config.voiceRestartAfterSeconds, config.voiceRestarts > 0 else { return first }
+        let (synthesizer, model) = (synthesizer, model)
+        let patience = Int(seconds * synthesizer.outputSampleRate)
+        // The language model's pause for the voice (`YieldsToVoice`, 1.5 s at most) starts again with the voice.
+        return VoiceRestart(first, patience: patience, restarts: config.voiceRestarts, audible: audible,
+                            restarting: { (model as? any YieldsToVoice)?.holdGeneration(true) }) {
+            try await synthesizer.startUtterance(language: language)
+        }
+    }
+
     /// Plays the voice as it is produced. A speculative answer waits for the end of the user's turn.
     private func startPlayer(_ turn: Turn, _ stream: any SynthesisStream) {
         let sampleRate = synthesizer.outputSampleRate
@@ -1089,7 +1131,7 @@ public actor VoicePipeline {
 
     private func runAnnouncement(_ turn: Turn, _ announcement: Announcement) async {
         do {
-            let stream = try await synthesizer.startUtterance(language: announcement.language)
+            let stream = try await startVoice(language: announcement.language)
             turn.stream = stream
             guard !Task.isCancelled else {
                 await stream.cancel()  // stopped while the voice got ready: it has nothing to stop yet

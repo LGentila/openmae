@@ -5,7 +5,7 @@
 //                                                       talks over the assistant; time to silence it
 //   voice-cli endurance --minutes N [--new-conversation-every N] [options] <phrase.wav>...
 //                                                       loops a conversation; memory after every turn
-//   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
+//   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1] [--with-llm]
 //                                                       silence the voice produces before speaking
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>]
 //                                                       does the model pick the right action, or search? (text
@@ -30,6 +30,9 @@
 //   --silence-ms <n>         end-of-turn silence (default 500)
 //   --history-budget <n>     history size in tokens before the oldest exchanges are dropped
 //   --actions                the actions in the model's instructions, as in the app (none is carried out)
+//   --racing-voices <n>      voices starting each answer at once, the first audible one says it (default 1)
+//   --no-voice-restart       never start the voice again after a long near-silent opening (the app does, after 1.2 s)
+//   --voice-restart-after <s> seconds of near-silent opening before the voice starts again (default 1.2)
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
 //   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
 //   --out <folder>           where reports and audio go (default ./measurements)
@@ -61,6 +64,18 @@ struct Options {
     var temperatures: [Float] = [0.7]
     /// voice-onset: 3 by default; dialogue-bench: 10.
     var repeats: Int?
+    /// voice-onset: voices speaking each sentence at once (the first audible one counts).
+    var parallel = 1
+    /// voice-onset: the language model loaded too, writing an answer while the voice opens, as in a turn.
+    var withLLM = false
+    /// voice-onset --with-llm: the voice's session made before the language model writes, as the pipeline does.
+    var earlySession = false
+    /// Voices racing for each answer's first sound (`PipelineConfig.racingVoices`).
+    var racingVoices: Int?
+    /// The voice is never started again after a long near-silent opening (`PipelineConfig.voiceRestartAfterSeconds`).
+    var noVoiceRestart = false
+    /// Seconds of near-silent opening before the voice starts again (default: the app's).
+    var voiceRestartAfter: Double?
     var now: String?
     var corpus: String?
     var showPrompt = false
@@ -100,6 +115,12 @@ struct Options {
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
             case "--repeats": o.repeats = Int(it.next() ?? "")
+            case "--parallel": o.parallel = max(1, Int(it.next() ?? "") ?? 1)
+            case "--with-llm": o.withLLM = true
+            case "--early-session": o.earlySession = true
+            case "--racing-voices": o.racingVoices = Int(it.next() ?? "")
+            case "--no-voice-restart": o.noVoiceRestart = true
+            case "--voice-restart-after": o.voiceRestartAfter = Double(it.next() ?? "")
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
@@ -149,7 +170,8 @@ actor EventLog {
                       + "  [silence \(fmt(m.endOfTurnMs)) · transcription \(fmt(m.transcriptionMs))"
                       + " · first word \(fmt(m.firstTokenMs)) · first piece \(fmt(m.firstPieceMs))"
                       + " · voice \(fmt(m.synthesisFirstAudioMs))]"
-                      + (m.speculative ? " (prepared speculatively)" : ""))
+                      + (m.speculative ? " (prepared speculatively)" : "")
+                      + String(format: " · memory %.2f GB", ProcessMemory.footprintGB))
             }
         case .bargeIn(let stopMs, let detectionMs):
             bargeIns.append((stopMs, detectionMs))
@@ -221,6 +243,9 @@ func buildEngine(_ o: Options) async throws -> Engine {
         config.historyTrimTarget = budget * 2 / 3
     }
     config.actionExamples = ActionCatalog.showsExamples(on: tier)
+    if let voices = o.racingVoices { config.racingVoices = max(1, voices) }
+    if let seconds = o.voiceRestartAfter { config.voiceRestartAfterSeconds = seconds }
+    if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     let speaker = SimulatedSpeaker()
@@ -370,20 +395,34 @@ func save(_ turns: [TurnMetrics], name: String, options: Options) throws {
 }
 
 /// Pocket TTS often opens with near-silence before the first word (seen in the app: up to 2 s). This
-/// measures it per voice and temperature, on typical first sentences, without the language model.
+/// measures it per voice and temperature, on typical first sentences, without the language model (`--with-llm`: with it
+/// writing an answer meanwhile).
 func runVoiceOnset(_ o: Options) async throws {
+    // First sentences of answers, as Gemma 4 26B writes them in `voice-cli conversation`.
     let sentences = [
         "Le ciel est bleu à cause de la lumière.", "Bonjour, je vais t'aider avec plaisir.",
         "Tu pourrais faire une randonnée en forêt.", "Oui, ça marche parfaitement sans four.",
-        "Tu voulais cuisiner des courgettes ce soir.",
+        "Tu voulais cuisiner des courgettes ce soir.", "Salut, je peux t'aider avec plaisir.",
+        "C'est une question vraiment fascinante.", "Tu voulais cuisiner des courgettes.",
+        "Oui, ça fonctionne très bien sans four.", "Tu veux cuisiner des courgettes.",
     ]
     // Only "estelle" is downloaded with the app: other voices are fetched by FluidAudio into its own cache.
     let directory = o.voices == ["estelle"] ? ModelStore().voiceBaseFolder : nil
     let manager = PocketTtsManager(defaultVoice: o.voices[0], language: .french24L, directory: directory,
                                    computeUnits: o.ttsOnCPU ? .uniform(.cpuOnly) : .avoidNeuralEngine)
     try await manager.initialize()
+    var llm: MLXChatModel?
+    if o.withLLM {
+        guard let languageModel = ModelCatalog.languageModel(for: try tierOption(o)) else {
+            throw CLIError("no language model for this tier")
+        }
+        let url = o.llm.map { URL(fileURLWithPath: $0) } ?? ModelStore().folder(languageModel)
+        llm = try await MLXChatModel.load(directory: url)
+        print("loaded: \(url.lastPathComponent)")
+    }
     let clock = ContinuousClock()
-    print("voice;temperature;leading_silence_median_ms;leading_silence_max_ms;first_audible_median_ms;mute")
+    print("voice;temperature;leading_silence_median_ms;leading_silence_p90_ms;leading_silence_max_ms;"
+          + "first_audible_median_ms;first_audible_p90_ms;first_audible_max_ms;within_600_ms;mute")
     for voice in o.voices {
         _ = try await speak("Bonjour.", manager: manager, voice: voice, temperature: 0.7, clock: clock)  // load + warm up
         for temperature in o.temperatures {
@@ -392,36 +431,95 @@ func runVoiceOnset(_ o: Options) async throws {
             var mute = 0
             for _ in 0..<(o.repeats ?? 3) {
                 for sentence in sentences {
-                    let r = try await speak(sentence, manager: manager, voice: voice, temperature: temperature,
-                                            clock: clock)
+                    let early = !o.earlySession ? nil
+                        : try await manager.makeSession(voice: voice, temperature: temperature)
+                    let writing = if let llm { await writeFirstSentence(llm) } else { Task<Void, Never> {} }
+                    let all = try await withThrowingTaskGroup(of: (leadingMs: Double, firstAudibleMs: Double?).self) {
+                        group in
+                        for runner in 0..<o.parallel {
+                            group.addTask {
+                                try await speak(sentence, manager: manager, voice: voice, temperature: temperature,
+                                                clock: clock, session: runner == 0 ? early : nil)
+                            }
+                        }
+                        var all: [(leadingMs: Double, firstAudibleMs: Double?)] = []
+                        for try await r in group { all.append(r) }
+                        return all
+                    }
+                    llm?.holdGeneration(false)
+                    writing.cancel()
+                    await writing.value
+                    // Several voices at once: the first audible one counts.
+                    let r = all.min { ($0.firstAudibleMs ?? .infinity) < ($1.firstAudibleMs ?? .infinity) }!
                     silences.append(r.leadingMs)
                     if let audible = r.firstAudibleMs { firstAudible.append(audible) } else { mute += 1 }
+                    let each = all.map { "\(fmt($0.firstAudibleMs)) after \(fmt($0.leadingMs))" }
+                    let others = all.count > 1 ? " [" + each.joined(separator: ", ") + "]" : ""
+                    print("  \(fmt(r.firstAudibleMs)) (near-silence \(fmt(r.leadingMs)))\(others): \(sentence)")
                 }
             }
-            print("\(voice);\(temperature);\(fmt(median(silences)));\(fmt(silences.max()));"
-                  + "\(fmt(median(firstAudible)));\(mute)")
+            print(String(format: "  memory: %.2f GB", ProcessMemory.footprintGB))
+            let within = firstAudible.filter { $0 <= 600 }.count
+            print("\(voice);\(temperature);\(fmt(median(silences)));\(fmt(percentile(silences, 0.9)));"
+                  + "\(fmt(silences.max()));\(fmt(median(firstAudible)));\(fmt(percentile(firstAudible, 0.9)));"
+                  + "\(fmt(firstAudible.max()));\(within)/\(silences.count);\(mute)")
         }
     }
 }
 
-func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature: Float, clock: ContinuousClock)
-    async throws -> (leadingMs: Double, firstAudibleMs: Double?)
+/// `voice-onset --with-llm`: the language model writes a long answer and pauses once its first sentence is written, as
+/// in a turn while the voice opens (`YieldsToVoice`: 1.5 s at most). Returns the task writing, once paused.
+func writeFirstSentence(_ model: MLXChatModel) async -> Task<Void, Never> {
+    let (paused, signal) = AsyncStream.makeStream(of: Void.self)
+    let task = Task {
+        var text = ""
+        var paused = false
+        do {
+            let request = [ChatMessage(.user, "Raconte-moi une longue histoire de pirates.")]
+            for try await output in model.reply(to: request) {
+                guard case .text(let piece) = output, !paused else { continue }
+                text += piece
+                if text.contains(". ") || text.contains("! ") {
+                    paused = true
+                    model.holdGeneration(true)
+                    signal.yield()
+                }
+            }
+        } catch {}
+        signal.finish()
+    }
+    for await _ in paused { break }
+    return task
+}
+
+/// The value below which `fraction` of the values lie (nearest rank).
+func percentile(_ values: [Double], _ fraction: Double) -> Double? {
+    guard !values.isEmpty else { return nil }
+    let s = values.sorted()
+    return s[min(s.count - 1, max(0, Int((fraction * Double(s.count)).rounded(.up)) - 1))]
+}
+
+/// Speaks `text` until its first audible frame (then stops): the near-silence before it, and the time it took.
+func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature: Float, clock: ContinuousClock,
+           session ready: PocketTtsSession? = nil) async throws -> (leadingMs: Double, firstAudibleMs: Double?)
 {
     let start = clock.now
-    let session = try await manager.makeSession(voice: voice, temperature: temperature)
+    let session = if let ready { ready } else { try await manager.makeSession(voice: voice, temperature: temperature) }
     session.enqueue(text)
     session.finish()
     var leading = 0
     var firstAudible: Double?
-    for try await frame in session.frames where firstAudible == nil {
+    for try await frame in session.frames {
         let meanSquare = frame.samples.reduce(0) { $0 + $1 * $1 } / Float(max(frame.samples.count, 1))
         if 10 * log10(max(meanSquare, 1e-12)) < -45 {
             leading += frame.samples.count
         } else {
             let d = clock.now - start
             firstAudible = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+            break
         }
     }
+    await session.cancel()
     return (Double(leading) / 24, firstAudible)
 }
 
@@ -457,7 +555,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                          [--out folder] files.wav…
                voice-cli download [--tier minimum|standard|comfort|max]
                voice-cli verify [--tier tier | --all]
-               voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3]
+               voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
+                                     [--with-llm]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--compare-beginnings]
