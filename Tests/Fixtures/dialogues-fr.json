@@ -1,5 +1,5 @@
 {
- "_comment": "French dialogues for voice-cli dialogue-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue's turns are sent in order, as long as its goal is not reached: the item the user wants saved: one of goal.tool's kind (an event for creer_evenement, a reminder for creer_rappel) that the app created, whatever call the model wrote, its title containing goal.title (whatever the accents and case), at goal.when (to the minute, or the day alone). A dialogue may have its own reference time (now), which its goal follows. Here each first request asks for a moment already gone, which the app refuses: the model must write the call anyway (the app checks the date, not the model) and keep the item when the user gives another moment.",
+ "_comment": "French dialogues for voice-cli dialogue-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue's turns are sent in order, as long as its goal is not reached: the item the user wants saved: one of goal.tool's kind (an event for creer_evenement, a reminder for creer_rappel) that the app created, whatever call the model wrote, its title containing goal.title (whatever the accents and case), at goal.when (to the minute, or the day alone). A dialogue may have its own reference time (now), which its goal follows. In the first four, the first request asks for a moment already gone, which the app refuses: the model must write the call anyway (the app checks the date, not the model) and keep the item when the user gives another moment. In the others, the app refuses the first request's call for something the model may correct, which gives it a second try: a weekday that does not match the date (the 22nd is a Thursday), nothing created yet to move, no title, a list or a calendar that does not exist, words that cannot be placed in time. A second try that says nothing leaves the app's question; the user then answers it.",
  "now": "2026-10-15T18:42",
  "dialogues": [
   {
@@ -53,6 +53,78 @@
     "tool": "creer_rappel",
     "title": "Paul",
     "when": "2026-10-16T14:00"
+   }
+  },
+  {
+   "name": "physio on Sunday 22 October, a Thursday",
+   "turns": [
+    "Ajoute un rendez-vous chez le kiné dimanche 22 octobre à 10 h.",
+    "Le dimanche 25, à 10 h.",
+    "Le rendez-vous chez le kiné."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "kine",
+    "when": "2026-10-25T10:00"
+   }
+  },
+  {
+   "name": "move it, with nothing created yet",
+   "turns": [
+    "Décale-le à 16 h.",
+    "Alors ajoute un rendez-vous chez le dentiste demain à 16 h."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "dentiste",
+    "when": "2026-10-16T16:00"
+   }
+  },
+  {
+   "name": "reminder without what",
+   "turns": [
+    "Rappelle-moi demain à 9 h.",
+    "D'appeler le plombier."
+   ],
+   "goal": {
+    "tool": "creer_rappel",
+    "title": "plombier",
+    "when": "2026-10-16T09:00"
+   }
+  },
+  {
+   "name": "a shopping list that does not exist",
+   "turns": [
+    "Ajoute du pain à ma liste de courses.",
+    "Mets-le dans tes rappels alors."
+   ],
+   "goal": {
+    "tool": "creer_rappel",
+    "title": "pain"
+   }
+  },
+  {
+   "name": "a Work calendar that does not exist",
+   "turns": [
+    "Ajoute une réunion demain à 10 h dans mon calendrier Travail.",
+    "Mets-la dans Maison alors."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "reunion",
+    "when": "2026-10-16T10:00"
+   }
+  },
+  {
+   "name": "hairdresser after work",
+   "turns": [
+    "Ajoute un rendez-vous chez le coiffeur après le travail.",
+    "Demain à 18 h."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "coiffeur",
+    "when": "2026-10-16T18:00"
    }
   }
  ]

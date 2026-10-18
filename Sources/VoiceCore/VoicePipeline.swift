@@ -930,7 +930,9 @@ public actor VoicePipeline {
                 say(reply.spoken, to: turn)
             } else {
                 var request = conversation.messages(adding: turn.userMessage!)
-                var secondTry = false
+                /// Set once a call is refused for its arguments and the model gets its second try: what the app asks
+                /// the user about that refusal (`ToolRefusal.spoken`), said if the second try says nothing.
+                var refusalQuestion: String?
                 var fillerSaid = false
                 /// Summing up a text that came from outside (an agent's report, search results, see
                 /// `ToolOutcome.modelSpeaks`): what the model writes is said, but no call it writes then is carried
@@ -978,7 +980,18 @@ public actor VoicePipeline {
                         if turn.answer == answered { say(fallback, to: turn) }
                         break
                     }
-                    guard let tools, !calls.isEmpty || unreadable else { break }
+                    guard let tools, !calls.isEmpty || unreadable else {
+                        if let question = refusalQuestion {
+                            // The second try wrote no call. Unless the model said something itself, the user hears the
+                            // app's question, not silence after the waiting phrase.
+                            chunker.remainingPieces().forEach(send)
+                            if turn.answer == answered {
+                                DebugLog.log("turn \(turn.id): the second try said nothing, the app asks")
+                                say(question, to: turn)
+                            }
+                        }
+                        break
+                    }
                     // Nothing is ever carried out before the user's turn is really over.
                     try await waitForCommit(turn)
                     chunker.remainingPieces().forEach(send)
@@ -991,10 +1004,10 @@ public actor VoicePipeline {
                     metrics.tool = call.name
                     let reply = await tools.handle(call, context: toolContext(turn, now: now))
                     turn.steps += [.call(call), .result(of: call, reply.forModel)]
-                    if reply.retryable, !secondTry {
+                    if reply.retryable, refusalQuestion == nil {
                         // The arguments were refused: the model sees why and gets one more try.
                         DebugLog.log("turn \(turn.id): tool call refused, second try: \(reply.forModel)")
-                        secondTry = true
+                        refusalQuestion = reply.spoken
                         request = conversation.messages(adding: turn.userMessage!) + turn.steps
                         continue
                     }

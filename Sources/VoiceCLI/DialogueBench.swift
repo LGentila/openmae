@@ -3,13 +3,14 @@
 // Text only, and nothing is carried out for real. Each dialogue of the corpus (Tests/Fixtures/dialogues-fr.json) is a
 // few sentences of the user, sent one after the other at a fixed reference time, with the app's system prompt, tools and
 // date line. Each turn goes as in the app (`VoicePipeline.runTurn`): "oui", "non" and "annule" are answered by the app;
-// a call goes through the app's `ToolRunner`, whose checks refuse what the app would refuse (a date in the past, an hour
-// that may be the morning or the afternoon…) and give the model its second try; the actions are carried out on a
-// calendar kept in memory (`MemoryCalendar`), which gives the model the results and the user the sentences the app
-// would. The history keeps each turn as the app records it, and the next sentence follows, until the dialogue's goal is
-// reached (the item the user wanted is saved) or its sentences run out. The model samples its answers: each dialogue
-// runs --repeats times (default 10), and the report counts, turn by turn, what the model did and how often the goal was
-// reached.
+// a call goes through the app's `ToolRunner`, whose checks refuse what the app would refuse, then ask the user at once
+// (a date in the past, an hour that may be the morning or the afternoon) or give the model its second try (if that
+// try says nothing, the app says its question); the actions are carried out on a calendar kept in memory
+// (`MemoryCalendar`), which gives the model the results and the user the sentences the app would. The history keeps
+// each turn as the app records it, and the next sentence follows, until the dialogue's goal is reached (the item the
+// user wanted is saved) or its sentences run out. The model samples its answers: each dialogue runs --repeats times
+// (default 10), and the report counts, turn by turn, what the model did, how many answers said nothing to the user and
+// how often the goal was reached.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web]
@@ -214,7 +215,9 @@ private struct Talk {
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
             func send(_ piece: SentenceChunker.Piece) { SpeakableText.record(piece.text, after: piece.separator, in: &answer) }
-            var secondTry = false
+            /// As the app: the question of the refusal that gave the model its second try, said if that try says
+            /// nothing.
+            var refusalQuestion: String?
             var summing: String?
             while true {
                 var pass = Pass(text: "")
@@ -247,6 +250,10 @@ private struct Talk {
                 }
                 guard !calls.isEmpty || pass.unreadable != nil else {
                     result.passes.append(pass)
+                    if let question = refusalQuestion {
+                        chunker.remainingPieces().forEach(send)
+                        if answer == answered { say(question) }
+                    }
                     break
                 }
                 chunker.remainingPieces().forEach(send)
@@ -266,9 +273,9 @@ private struct Talk {
                 if case .object(let fields) = reply.forModel, fields["erreur"] != nil { pass.refused = true }
                 if calls.count > 1 || moreCalls { pass.moreCalls = true }
                 result.passes.append(pass)
-                if reply.retryable, !secondTry {
+                if reply.retryable, refusalQuestion == nil {
                     // The arguments were refused: the model sees why and gets one more try.
-                    secondTry = true
+                    refusalQuestion = reply.spoken
                     request = conversation.messages(adding: message) + steps
                     continue
                 }
@@ -384,10 +391,14 @@ extension JSONValue {
 }
 
 /// Per dialogue: how often the goal was reached and at which turn; per turn, what the model did at its first pass and at
-/// its second try, over the runs that got that far.
+/// its second try ("nothing said": no call and not a word), over the runs that got that far, and how many answers left
+/// the user in silence.
 private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
     func outcome(_ pass: Pass) -> String {
-        guard let call = pass.call else { return pass.unreadable != nil ? "unreadable call" : "no call" }
+        guard let call = pass.call else {
+            if pass.unreadable != nil { return "unreadable call" }
+            return SpeakableText.clean(pass.text).isEmpty ? "nothing said" : "no call"
+        }
         let creation = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(call.name)
         return call.name + (pass.refused == true ? " (refused)" : pass.created == true && !creation ? " (created)" : "")
     }
@@ -414,6 +425,8 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             print("  first pass: " + counts(turns.map { $0.passes.first.map(outcome) ?? "answered by the app" }))
             let second = turns.compactMap { $0.passes.count > 1 ? $0.passes[1] : nil }
             if !second.isEmpty { print("  second pass: " + counts(second.map(outcome))) }
+            let silent = turns.filter { $0.answer.isEmpty }.count
+            if silent > 0 { print("  silent answers (nothing said to the user): \(silent)") }
             let chances = turns.compactMap(\.firstCallChance)
             if !chances.isEmpty {
                 print(String(format: "  call chance at the first token: median %.0f %% (%.0f–%.0f %%)",

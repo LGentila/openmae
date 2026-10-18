@@ -318,10 +318,11 @@ is one the model hesitates on). One search, made as the app makes it (the passwo
 ```
 
 Short conversations, as the app has them: the dialogues of `Tests/Fixtures/dialogues-fr.json` (here, a request for a
-moment already gone, then the user's new moment) are sent turn after turn, text only and with nothing created: each call
+moment already gone, then the user's new moment; or a request whose call the app refuses for the model's second try,
+then the user's answer to the app's question) are sent turn after turn, text only and with nothing created: each call
 goes through the app's checks and second try, and is carried out on a calendar kept in memory that answers as the app
 would. The model samples its answers, so each dialogue runs several times, and the report says what the model did at
-each turn and how often the item the user wanted was saved:
+each turn, how many answers said nothing to the user and how often the item the user wanted was saved:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10

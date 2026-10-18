@@ -762,6 +762,37 @@ struct PipelineActionTests {
         #expect(await tools.performed.isEmpty)
     }
 
+    /// The second try after a refused call writes no call. When it says nothing at all (the model ends its answer at
+    /// once), the user hears the app's question for the refusal rather than silence, after the waiting phrase if there
+    /// was one, and the history keeps that question as the answer. What the model says itself is left as it is.
+    @Test(arguments: ["", "Que veux-tu que je note ?"], [false, true])
+    func secondTryWithoutACall(says text: String, filler: Bool) async throws {
+        let bad: [ModelOutput] = [.toolCallStarted, .toolCall(ToolCall(name: "noter"))]
+        let secondTry: [ModelOutput] = text.isEmpty ? [] : [.text(text)]
+        let thanks: [ModelOutput] = [.text("Avec plaisir, à ton service.")]
+        let (model, speaker, tools) = (ScriptedModel(scripts: [bad, secondTry, thanks]), FakeSpeaker(),
+                                       RecordingTools())
+        let pipeline = make(model, ScriptedTranscriber(["Note", "Merci"]), speaker, tools, filler: filler)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await model.requests.count == 2)
+        let answer = text.isEmpty ? ActionPhrases.missingTitle(.french) : text
+        let heard = (filler ? [ActionPhrases.oneMoment(.french)] : []) + [answer]
+        #expect(await log.pieces.joined(separator: " ") == heard.joined(separator: " "))
+        #expect(await log.finished.first?.assistantText == answer)
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 3 }
+        // The first turn as the model then sees it: its call, why it was refused, and what the user heard.
+        let history = try #require(await model.requests.last)
+        #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
+        #expect(history[4].content == answer)
+        #expect(await tools.performed.isEmpty)
+    }
+
     /// A moment already gone: the app asks the user for another one at once (a second try could only make one up), and
     /// the call stays in the history, so the model still has the event when the user gives that moment.
     @Test func pastMomentIsAskedToTheUserWithTheCallKept() async throws {
