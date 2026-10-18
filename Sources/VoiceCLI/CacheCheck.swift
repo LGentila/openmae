@@ -225,9 +225,13 @@ private actor CacheCheck {
         await model.useTools(tools)
         let start = clock.now
         try await model.prefillBeginning(conversation.beginning)
+        let beginningMs = milliseconds(clock.now - start)
+        let beginning = await model.lastBeginning
         try await model.prefill(conversation.messages)
-        print(String(format: "  %-46@ prefill of the whole conversation: %.0f ms", label as NSString,
-                     milliseconds(clock.now - start)))
+        print(String(format: "  %-46@ prefill of the whole conversation: %.0f ms (the beginning: %d tokens in %.0f ms, "
+                     + "GPU memory peak %.2f GB; then the conversation) · GPU memory %.2f GB", label as NSString,
+                     milliseconds(clock.now - start), beginning?.computed ?? 0, beginningMs, beginning?.peakGB ?? 0,
+                     MLXChatModel.activeMemoryGB))
     }
 
     /// The history grew too long: the oldest exchanges are dropped once the model has prepared the shorter one.
@@ -324,8 +328,9 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     try await model.prefillBeginning(base.beginning)
     let computeMs = milliseconds(ContinuousClock.now - computeStart)
     let promptTokens = try await model.tokenCount(base.messages)
-    print(String(format: "system prompt with %d tools: %d tokens, computed in %.0f ms · GPU memory %.2f GB\n",
-                 tools.count, promptTokens, computeMs, MLXChatModel.activeMemoryGB))
+    print(String(format: "system prompt with %d tools: %d tokens, computed in %.0f ms (GPU memory peak %.2f GB) · GPU "
+                 + "memory %.2f GB\n", tools.count, promptTokens, computeMs, await model.lastBeginning?.peakGB ?? 0,
+                 MLXChatModel.activeMemoryGB))
 
     let check = CacheCheck(model: model, base: base, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone))
     let scenarios: [(String, () async throws -> Void)] = [

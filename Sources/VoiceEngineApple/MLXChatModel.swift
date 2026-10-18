@@ -100,6 +100,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
     /// holds (its offset). They differ only when something left the cache without saying so.
     public var cacheCounts: (counted: Int, held: Int) { (cachedTokens.count, cache.first?.offset ?? 0) }
+    /// Diagnostics of the last `prefillBeginning` that computed something: tokens computed, time to compute them, and the
+    /// GPU memory peak meanwhile (GB, the weights included).
+    public private(set) var lastBeginning: (computed: Int, ms: Double, peakGB: Double)?
     /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
     private var watchingToolCalls = false
     /// With `watchToolCalls(true)`, for the last request: the chance the model gave to opening a tool call at the
@@ -233,7 +236,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
         if beginning?.tokens != tokens { beginning = nil }  // another beginning: the old one's memory goes first
-        try prefill(tokens: tokens)
+        let clock = ContinuousClock()
+        let t0 = clock.now
+        GPU.resetPeakMemory()
+        let computed = try prefill(tokens: tokens)
+        if computed > 0 {
+            let d = clock.now - t0
+            lastBeginning = (computed, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
+                             Double(Memory.peakMemory) / 1e9)
+        }
         beginning = (tokens, cache.map { $0.copy() })
     }
 

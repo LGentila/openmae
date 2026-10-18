@@ -209,7 +209,8 @@ func runActionsBench(_ o: Options) async throws {
     let prefixStart = clock.now
     try await model.prefillBeginning(conversation.beginning)
     let prefixTokens = try await model.tokenCount(conversation.messages)
-    print("system prompt with \(tools.count) tools: \(prefixTokens) tokens, computed in \(clock.now - prefixStart)\n")
+    print("system prompt with \(tools.count) tools: \(prefixTokens) tokens, computed in \(clock.now - prefixStart)"
+          + String(format: " (GPU memory peak %.2f GB)\n", await model.lastBeginning?.peakGB ?? 0))
     if o.showPrompt { print(try await model.promptText(conversation.messages) + "\n") }
     if o.compareBeginnings {
         try await compareBeginnings(corpus, conversation: conversation, tools: tools, dateLine: dateLine, model: model,
@@ -436,15 +437,17 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
 {
     guard let atLoad = await model.beginningState(named: "at load") else { throw CLIError("no beginning kept") }
     let clock = ContinuousClock()
-    var start = clock.now
-    await model.useTools(Array(tools.dropLast()))
-    try await model.prefillBeginning(conversation.beginning)
-    await model.useTools(tools)
-    try await model.prefillBeginning(conversation.beginning)
+    for (label, offered) in [("one tool less", Array(tools.dropLast())), ("the tools back", tools)] {
+        await model.useTools(offered)
+        let started = clock.now
+        try await model.prefillBeginning(conversation.beginning)
+        let computed = await model.lastBeginning
+        print("tools changed (\(label)): the beginning computed again in \(clock.now - started)"
+              + String(format: " (%d tokens, GPU memory peak %.2f GB)", computed?.computed ?? 0, computed?.peakGB ?? 0))
+    }
     guard let toolsChanged = await model.beginningState(named: "tools changed") else { throw CLIError("no beginning kept") }
-    print("the tools changed and changed back: the beginning computed again in \(clock.now - start)")
     let requests = corpus.cases.map { caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine) }
-    start = clock.now
+    let start = clock.now
     let comparison = try await model.compareBeginnings([atLoad, toolsChanged], requests: requests)
     print("compared in \(clock.now - start)\n")
     let names = comparison.names
