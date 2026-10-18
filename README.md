@@ -21,7 +21,7 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   interrupts). Closing the window leaves OpenMaé in the menu bar, where its icon shows when Maé is active and
   has Quit; with the window closed, Maé only listens after ⌥ Space (unless she waits for « OK Maé », below).
   While OpenMaé runs, ⌥ Space no longer types a non-breaking space in other apps.
-- **« OK Maé » (optional).** In Settings › Sound, choose to talk after « OK Maé »: Maé then only answers the
+- **« OK Maé » (optional).** In Settings › Voice and sound, choose to talk after « OK Maé »: Maé then only answers the
   sentences that start with it, so the TV and the conversations around no longer start her, and listens to any
   voice for a few seconds after each answer. While she speaks, only « OK Maé, stop », ⌥ Space, a click on the orb or
   Escape interrupt her. With the window closed she still waits for the phrase, and the capsule shows when she wakes;
@@ -31,19 +31,19 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
 - **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
   the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
 - **French first, English too.** It answers in the language you speak, and switches by itself.
-- **Actions (optional).** Turn on Settings › Conversation › Actions, and Maé adds events and reminders to your
+- **Actions (optional).** Turn on Settings › Actions, and Maé adds events and reminders to your
   calendars (every account macOS knows: iCloud, Google, Exchange…), reads you what is planned, sets timers and
   runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
   out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
   set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars.
 - **Long tasks handed to Claude Code (optional).** With the actions on, switch on Claude Code in Settings ›
-  Conversation, then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
+  Agents, then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
   Maé reads the task back, waits for your “oui”, and hands it to the Claude Code installed and signed in on
   your Mac, which works on its own in a new folder of `~/OpenMae` (or in a folder you allowed). Ask “où en est
   le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
   By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
   What you hand to Claude Code leaves your Mac — that is the point of handing it over.
-- **Searching the internet (optional).** Switch on Settings › Conversation › Search the internet and choose where
+- **Searching the internet (optional).** Switch on Settings › Search the internet and choose where
   the searches go: **Brave Search**, with your own API key (create one on [Brave's site](https://brave.com/search/api/)
   and paste it), or **your own [SearXNG](https://docs.searxng.org/)**, with its JSON format on (and the password of
   a protection in front of it, if any). Keys and passwords go in the keychain; "Test" checks it all. Ask something
@@ -54,7 +54,7 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   they only live in the conversation. Public SearXNG instances are not used: they turn programs away, and OpenMaé
   never passes for a browser.
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
-  with a QR code (Settings › iPhone), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
+  with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
   never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
@@ -127,7 +127,7 @@ while the models keep running on the Mac. A conversation started on one goes on 
 the screen locked, and whoever speaks last has it (the Mac's window shows "Maé is on your iPhone" and "Take over
 here").
 
-- **Pairing, once.** On the Mac, Settings › iPhone › "Add an iPhone" shows a QR code, valid five minutes and
+- **Pairing, once.** On the Mac, Settings › iPhone and iPad › "Add a device" shows a QR code, valid five minutes and
   usable once; scan it with the app. It carries the Mac's public key and a one-time code, after the `#` of a link
   (a browser never sends that part to a server).
 - **At home**, the iPhone finds the Mac with Bonjour and talks to it directly over QUIC. The Mac and the iPhone
@@ -142,7 +142,7 @@ here").
   echo itself; 24 kHz for the voice, through a jitter buffer that conceals lost frames.
 - **Powers.** The iPhone can talk, interrupt, start a new conversation and choose hands-free or hold-to-talk;
   downloading or deleting models, and quitting, stay on the Mac. Sensitive actions still ask for a spoken "yes".
-- While an iPhone is paired, the Mac can stay awake when plugged in (Settings › iPhone › Sleep). An iPhone cannot
+- While an iPhone is paired, the Mac can stay awake when plugged in (Settings › iPhone and iPad › Sleep). An iPhone cannot
   wake a sleeping Mac.
 
 Build it and install it on the iPhone connected to this Mac (with your Apple Developer team in

@@ -7,9 +7,40 @@ enum Icon {
     case check, smallCheck, cancel, pause, stop, chevrons
     // The iPhone and its link with the Mac.
     case home, globe, refresh, compose, back, forward, plus, phone, tablet, laptop, lock, camera, moon, info
+    // The settings window: its sidebar, notes and lists.
+    case bolt, robot, search, plug, inbox, terminal, folder, copy, document, branch, wifi, warning, arrowRight, bulb
+    case chat
 
     fileprivate var elements: [IconElement] {
         switch self {
+        case .bolt: [.path("M13 3 5.5 13.5H12L11 21l7.5-10.5H12L13 3z")]
+        case .robot:
+            [.roundedRect(CGRect(x: 5, y: 8.5, width: 14, height: 10.5), radius: 3.5), .path("M12 8.5V5.8"),
+             .circle(CGPoint(x: 12, y: 4.3), radius: 1.3), .path("M9.5 13v1.2M14.5 13v1.2")]
+        case .search: [.circle(CGPoint(x: 11, y: 11), radius: 6.5), .path("m16 16 4.5 4.5")]
+        case .plug: [.path("M9 3.5v4M15 3.5v4"), .path("M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0V7.5z"), .path("M12 16.5v4")]
+        case .inbox:
+            [.path("M4 13.5 6.5 5h11L20 13.5"),
+             .path("M4 13.5V18a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 18v-4.5h-4.5a3.5 3.5 0 0 1-7 0H4z")]
+        case .terminal:
+            [.roundedRect(CGRect(x: 3.5, y: 5, width: 17, height: 14), radius: 3), .path("m8 10 3 2.5L8 15M13 15h3.5")]
+        case .folder: [.path("M3.5 7.5a2 2 0 0 1 2-2H10l2 2.5h6.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z")]
+        case .copy:
+            [.roundedRect(CGRect(x: 8.5, y: 8.5, width: 11, height: 11), radius: 2.5),
+             .path("M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2")]
+        case .document: [.path("M7 3.5h7.5L18.5 7.5v13H7z"), .path("M14.5 3.5v4h4M9.5 12h6M9.5 16h6")]
+        case .branch:
+            [.circle(CGPoint(x: 7, y: 6), radius: 2), .circle(CGPoint(x: 7, y: 18), radius: 2),
+             .circle(CGPoint(x: 17, y: 8), radius: 2), .path("M7 8v8M17 10c0 4-10 2-10 6")]
+        case .wifi:
+            [.path("M4.5 9.5a11 11 0 0 1 15 0M7.5 12.8a6.8 6.8 0 0 1 9 0M10.4 16a2.7 2.7 0 0 1 3.2 0"), .path("M12 19v.1")]
+        case .warning: [.path("M12 4 3.5 19h17z"), .path("M12 10v4M12 16.6v.2")]
+        case .arrowRight: [.path("M5 12h13M13 6.5 18.5 12 13 17.5")]
+        case .bulb:
+            [.path("M9 17.5h6M10 20.5h4"),
+             .path("M12 3.5a5.5 5.5 0 0 0-3.2 10c.8.6 1.2 1.3 1.2 2.2v.8h4v-.8c0-.9.4-1.6 1.2-2.2a5.5 5.5 0 0 0-3.2-10z")]
+        case .chat:
+            [.path("M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V15h-.5A2.5 2.5 0 0 1 4 12.5z")]
         case .home: [.path("M4 11.2 12 4l8 7.2"), .path("M6 10v9h12v-9"), .path("M10 19v-5h4v5")]
         case .globe:
             [.circle(CGPoint(x: 12, y: 12), radius: 8.5), .path("M3.5 12h17"),
@@ -71,6 +102,7 @@ enum Icon {
         case .chevrons: 1.6
         case .back, .forward: 2
         case .plus: 2.2
+        case .copy, .wifi, .warning, .arrowRight, .bulb: 2
         case .moon: 1.8
         default: 1.9
         }

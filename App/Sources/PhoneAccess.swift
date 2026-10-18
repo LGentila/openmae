@@ -9,7 +9,7 @@ import VoiceCore
 @Observable
 final class PhoneAccess {
     private(set) var status = LinkStatus()
-    /// The iPhone whose removal is being confirmed in Settings › iPhone.
+    /// The iPhone whose removal is being confirmed in Settings › iPhone and iPad.
     var removing: PairedDevice.ID?
     /// Told the relay's address at first, then on every change (the internet path of received information follows it).
     @ObservationIgnored var relayChanged: ((URL?) -> Void)?
@@ -50,6 +50,19 @@ final class PhoneAccess {
 
     /// The iPhone that has the conversation.
     var hand: LinkStatus.Hand? { status.hand }
+
+    /// The sheet over Settings › iPhone and iPad: the pairing (its code, its expiry, the device added), or a removal
+    /// waiting for a yes.
+    enum Sheet: Hashable {
+        case pairing
+        case remove(PairedDevice.ID)
+    }
+
+    var sheet: Sheet? {
+        if status.pairing != .idle { return .pairing }
+        if let removing, status.devices.contains(where: { $0.id == removing }) { return .remove(removing) }
+        return nil
+    }
 
     /// The badge of the iPhone settings, and the value of their row in the settings.
     enum Reach: Equatable {

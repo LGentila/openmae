@@ -94,6 +94,23 @@ enum Palette {
     static let panel = RGBA(red: 255 / 255, green: 251 / 255, blue: 244 / 255, alpha: 0.88)
     /// Hover of a pop-up menu.
     static let fieldHover = RGBA(0xE9E4D9)
+
+    // The settings window. These values come from the redesign's screens and are not in the design's tokens yet:
+    // kept apart until it is decided whether they join the tokens or move to existing ones.
+    static let sidebar = RGBA(0xF4EFE4)  // background of the sidebar
+    static let sheet = RGBA(0xFFFBF4)  // background of a modal sheet
+    static let advancedDisc = RGBA(0xE6DFD0)  // icon disc of the Advanced page
+    static let warnText = RGBA(0x8A4A00)  // warning caption, "waiting" in a log
+    static let warnSoft = RGBA(0xFFEFC2)  // warning note, "to look at" pill
+    static let warnInk = RGBA(0x5C3F00)  // text on warnSoft
+    static let errorSoft = RGBA(0xFFEBE5)  // error note
+    static let errorInk = RGBA(0x5E3A30)  // text on errorSoft
+    static let successInk = RGBA(0x0B5A3E)  // text of a success note, on successSoft
+    static let infoInk = RGBA(0x0A4F8E)  // text of an information note, on linkSoft
+    static let glassHover = RGBA(0xF7F3EA)  // hover of a white button
+    static let dangerHover = RGBA(0xFFD6CC)  // hover of a red-tinted button
+    static let solidDangerHover = RGBA(0x8F2909)  // hover of the solid red button
+    static let cardOutline = RGBA(rgba: 0x1F1B_160F)  // outline of a white card of the window (ink at 6 %)
 }
 
 /// The colours that follow the conversation: cream at rest, pale blue while the user speaks, sand while Maé
@@ -160,6 +177,11 @@ enum Radius {
     static let segment: CGFloat = 8
     static let key: CGFloat = 7
     static let code: CGFloat = 5
+    // The settings window (not in tokens.json yet, see Palette).
+    static let sidebarItem: CGFloat = 12
+    static let note: CGFloat = 14
+    static let choice: CGFloat = 18
+    static let progress: CGFloat = 3
 }
 
 /// Durations, in seconds.

@@ -49,7 +49,7 @@ final class InboundAccess {
         return await host.addSource(name: name, origin: origin, mode: .sayNow)
     }
 
-    /// The relay the iPhones use (Settings › iPhone), which the internet path goes through.
+    /// The relay the iPhones use (Settings › iPhone and iPad), which the internet path goes through.
     func setPublicRelay(_ relay: URL?) {
         Task { await host?.setPublicRelay(relay) }
     }
@@ -75,14 +75,10 @@ final class InboundAccess {
         Task { await host?.sendTest(id) }
     }
 
-    // MARK: - What Settings › Received information shows (InboundPanel.swift)
+    // MARK: - What Settings › Received information shows (InboundPage.swift)
 
-    /// Its page: the home relay and the sources, a source, or how to send from Home Assistant.
+    /// Its page: the paths and the sources, or a source.
     var page = Page.list
-    /// "Add a source" was clicked: its name is being typed.
-    var addingSource = false
-    /// Where the source being added sends from.
-    var addingOrigin = InboundSource.Origin.home
-    /// On a source's page: the change of its address, or its removal, waiting for a yes.
-    var confirming: Confirmation?
+    /// The sheet over it.
+    var sheet: Sheet?
 }

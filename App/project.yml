@@ -73,13 +73,13 @@ targets:
         # Shown from Resources/InfoPlist.xcstrings, in English as in French: change it there too.
         NSMicrophoneUsageDescription: >-
           The assistant listens to what you say in order to answer. Sound never leaves this Mac.
-        # Actions (Settings › Conversation): asked the first time the user requests something that needs them.
+        # Actions (Settings › Actions): asked the first time the user requests something that needs them.
         # Shown from Resources/InfoPlist.xcstrings too.
         NSCalendarsFullAccessUsageDescription: >-
           Maé adds the events you ask for to your calendar and reads it to you when you ask what is planned.
         NSRemindersFullAccessUsageDescription: >-
           Maé adds the reminders you ask for and reads you those still to do.
-        # The iPhone app finds this Mac on the local network (Settings › iPhone). Shown from
+        # The iPhone app finds this Mac on the local network (Settings › iPhone and iPad). Shown from
         # Resources/InfoPlist.xcstrings too.
         NSLocalNetworkUsageDescription: >-
           Your iPhone finds this Mac on your Wi-Fi to talk to Maé.

@@ -19,6 +19,8 @@ struct AssistantApp: App {
     @State private var presence: DesktopPresence
     @State private var phone: PhoneAccess
     @State private var inbound: InboundAccess
+    @State private var navigation = SettingsNavigation()
+    @State private var tools = ConnectedToolsAccess()
 
     init() {
         Fonts.register()
@@ -84,6 +86,7 @@ struct AssistantApp: App {
             .frame(minWidth: 820, minHeight: 700)
             .environment(phone)
             .environment(inbound)
+            .environment(navigation)
             // The design has no dark theme yet: the window, its menus and alerts stay light.
             .preferredColorScheme(.light)
             .followsWindowVisibility()
@@ -99,8 +102,7 @@ struct AssistantApp: App {
                     .disabled(!model.isReady)
             }
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") { window.toggle(.settings) }
-                    .keyboardShortcut(",")
+                SettingsCommand(navigation: navigation)
             }
             CommandGroup(before: .sidebar) {
                 Button(window.showMeasurements ? "Hide Measurements" : "Show Measurements") {
@@ -110,12 +112,42 @@ struct AssistantApp: App {
                 Divider()
             }
         }
+
+        // The settings: a window with a sidebar (⌘ , or "All settings…" of the quick panel).
+        Window("Settings", id: SettingsNavigation.windowID) {
+            SettingsWindowView(model: model, navigation: navigation, tools: tools)
+                .frame(minWidth: 820, minHeight: 560)
+                .environment(phone)
+                .environment(inbound)
+                .environment(navigation)
+                .preferredColorScheme(.light)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowBackgroundDragBehavior(.enabled)
+        .defaultSize(width: 960, height: 700)
+        .windowResizability(.contentMinSize)
+        .restorationBehavior(.disabled)
+        .commandsRemoved()
+    }
+}
+
+/// "Settings…" (⌘ ,): opens the settings window, or brings it to the front.
+private struct SettingsCommand: View {
+    let navigation: SettingsNavigation
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Settings…") { openWindow(id: SettingsNavigation.windowID) }
+            .keyboardShortcut(",")
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+        #if DEBUG
+        Snapshots.start()
+        #endif
     }
 
     /// Closing the window leaves OpenMaé in the menu bar, whose icon has Quit.
@@ -171,31 +203,5 @@ private struct MainWindowLink: View {
                 let openWindow = openWindow
                 presence.reopenWindow = { openWindow(id: "assistant") }
             }
-    }
-}
-
-/// Reports the window a view is in, once it is in one.
-private struct WindowReader: NSViewRepresentable {
-    let found: (NSWindow) -> Void
-
-    func makeNSView(context: Context) -> NSView { ReaderView(found: found) }
-
-    func updateNSView(_ view: NSView, context: Context) {}
-
-    private final class ReaderView: NSView {
-        let found: (NSWindow) -> Void
-
-        init(found: @escaping (NSWindow) -> Void) {
-            self.found = found
-            super.init(frame: .zero)
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let window { found(window) }
-        }
     }
 }

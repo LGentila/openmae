@@ -2,31 +2,20 @@ import AppKit
 import SwiftUI
 import VoiceCore
 
-/// What the window shows on top of its screen: a panel (settings or conversation) and the measurements.
+/// What the window shows on top of its screen: a panel (the quick settings or the conversation) and the measurements.
 /// Shared with the menu commands.
 @MainActor
 @Observable
 final class WindowState {
-    /// `phone`: Settings › iPhone, `inbound`: Settings › Received information, both in the settings' place.
     enum Panel: Hashable {
-        case settings, history, phone, inbound
-
-        /// The settings or one of their pages: the settings button is lit, and closes it.
-        var isSettings: Bool { self == .settings || self == .phone || self == .inbound }
+        case settings, history
     }
 
     var panel: Panel?
-    /// The settings were opened from "Choose another tier…": the tier row is pointed at.
-    var pointsAtTier = false
     var showMeasurements = false
 
-    func toggle(_ panel: Panel, pointingAtTier: Bool = false) {
-        if self.panel == panel {
-            self.panel = nil
-        } else {
-            self.panel = panel
-            pointsAtTier = pointingAtTier
-        }
+    func toggle(_ panel: Panel) {
+        self.panel = self.panel == panel ? nil : panel
     }
 }
 
@@ -35,6 +24,8 @@ final class WindowState {
 struct ContentView: View {
     @Bindable var model: AssistantModel
     @Bindable var window: WindowState
+    @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,7 +69,11 @@ struct ContentView: View {
         case .loading(let step):
             ConversationView(model: model, isLoading: true, loadingStep: step)
         case .setup(let setup):
-            SetupView(model: model, setup: setup) { window.toggle(.settings, pointingAtTier: true) }
+            SetupView(model: model, setup: setup) {
+                // "Choose another tier…": the settings window, on Advanced, its tier row outlined.
+                navigation?.pointAtTier()
+                openWindow(id: SettingsNavigation.windowID)
+            }
         case .problem(let problem):
             ProblemView(problem: problem, retry: model.start, deleteModels: model.deleteModels)
         case .ready:
@@ -117,15 +112,13 @@ struct ContentView: View {
     }
 
     private func settingsButton(diameter: CGFloat) -> some View {
-        Button {
-            if let panel = window.panel, panel.isSettings { window.toggle(panel) } else { window.toggle(.settings) }
-        } label: {
+        Button { window.toggle(.settings) } label: {
             IconView(icon: .settings, size: 20)
         }
-        .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel?.isSettings == true))
+        .buttonStyle(GlassButtonStyle(diameter: diameter, isOn: window.panel == .settings))
         .accessibilityLabel(Text("Settings"))
         .help(Text("Settings"))
-        .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0, .phone: $0, .inbound: $0] }
+        .anchorPreference(key: PanelButtons.self, value: .bounds) { [.settings: $0] }
     }
 }
 
@@ -184,8 +177,8 @@ private struct PanelLayer: View {
     @Bindable var model: AssistantModel
     let window: WindowState
     let buttons: [WindowState.Panel: Anchor<CGRect>]
-    @Environment(PhoneAccess.self) private var phone: PhoneAccess?
-    @Environment(InboundAccess.self) private var inbound: InboundAccess?
+    @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         GeometryReader { proxy in
@@ -199,22 +192,17 @@ private struct PanelLayer: View {
                         .onTapGesture { window.panel = nil }
                         .accessibilityHidden(true)
                     PanelChrome(pointerX: button.midX - leading, maxHeight: proxy.size.height - top - 14,
-                                startsAtBottom: panel == .history, page: page(of: panel))
+                                startsAtBottom: panel == .history, page: panel == .history ? nil : AnyHashable(panel))
                     {
                         switch panel {
                         case .settings:
-                            SettingsPanel(model: model, pointsAtTier: window.pointsAtTier, close: { window.panel = nil },
-                                          openPhone: phone == nil ? nil : { window.panel = .phone },
-                                          openInbound: inbound == nil ? nil : {
-                                              inbound?.show(.list)
-                                              window.panel = .inbound
-                                          })
+                            QuickPanel(model: model, close: { window.panel = nil }) { page in
+                                window.panel = nil
+                                if let page { navigation?.show(page) }
+                                openWindow(id: SettingsNavigation.windowID)
+                            }
                         case .history:
                             HistoryPanel(entries: model.transcript, tasks: model.tasks, stopTask: model.stopTask)
-                        case .phone:
-                            if let phone { PhonePanel(phone: phone) { window.panel = .settings } }
-                        case .inbound:
-                            if let inbound { InboundPanel(inbound: inbound) { window.panel = .settings } }
                         }
                     }
                     .padding(.top, top)
@@ -228,15 +216,6 @@ private struct PanelLayer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .animation(Easing.animation(CubicBezier(0.2, 1.2, 0.4, 1), 0.35), value: window.panel)
-        }
-    }
-
-    /// What the panel shows, so that a new page starts at its top (the conversation stays at its end).
-    private func page(of panel: WindowState.Panel) -> AnyHashable? {
-        switch panel {
-        case .history: nil
-        case .inbound: AnyHashable(inbound?.page)
-        case .settings, .phone: AnyHashable(panel)
         }
     }
 }
@@ -280,6 +259,8 @@ struct KeyboardControls: ViewModifier {
     /// Returns true when the key was used (so the system does not beep).
     @MainActor
     private func handle(_ event: NSEvent) -> Bool {
+        // The settings window keeps its keys: the space bar types, Escape closes its sheet.
+        if let settings = SettingsWindowLink.window, event.window === settings { return false }
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty
         else { return false }
         if event.keyCode == 53, event.type == .keyDown, window.panel != nil {  // escape
@@ -287,7 +268,7 @@ struct KeyboardControls: ViewModifier {
             return true
         }
         guard model.isReady else { return false }
-        // Typing in a field of a panel (a source's name): the space bar types a space, unless it is held to talk.
+        // Typing in a field: the space bar types a space, unless it is held to talk.
         if event.keyCode == 49, !model.talkKeyDown, event.window?.firstResponder is NSTextView { return false }
         switch event.keyCode {
         case 49 where model.settings.listening == .pushToTalk || model.talkKeyDown:  // space

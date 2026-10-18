@@ -41,6 +41,16 @@
         }
       }
     },
+    "%@ does not answer. Check that this Mac is on the same network as it, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ne répond pas. Vérifie que ce Mac est sur le même réseau que lui, puis réessaie."
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -57,6 +67,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ sur %2$@"
+          }
+        }
+      }
+    },
+    "%@ settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages de %@"
           }
         }
       }
@@ -81,12 +101,32 @@
         }
       }
     },
+    "%lld actions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld actions"
+          }
+        }
+      }
+    },
     "%lld min %lld s": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "%lld min %lld s"
+          }
+        }
+      }
+    },
+    "%lld ready": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld prêt"
           }
         }
       }
@@ -101,12 +141,32 @@
         }
       }
     },
+    "%lld tools": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld outils"
+          }
+        }
+      }
+    },
     "1 source": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "1 source"
+          }
+        }
+      }
+    },
+    "1 tool": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 outil"
           }
         }
       }
@@ -161,12 +221,12 @@
         }
       }
     },
-    "A name to recognize it. Its page then gives its address.": {
+    "A name to recognize it, and where it sends from. Its page then gives its secret address.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Un nom pour la reconnaître. Sa page te donne ensuite son adresse."
+            "value": "Un nom pour la reconnaître, et d’où elle envoie. Sa page donne ensuite son adresse secrète."
           }
         }
       }
@@ -181,12 +241,52 @@
         }
       }
     },
+    "A program on this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un programme sur ce Mac"
+          }
+        }
+      }
+    },
+    "A service on your network or on the internet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un service sur ton réseau ou sur internet"
+          }
+        }
+      }
+    },
+    "A source is a secret address to give to Home Assistant or a script. Each one can tell Maé something.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source est une adresse secrète à donner à Home Assistant ou à un script. Chacune peut dire quelque chose à Maé."
+          }
+        }
+      }
+    },
     "A task is still in progress": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Une tâche est en cours"
+          }
+        }
+      }
+    },
+    "A token": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un jeton"
           }
         }
       }
@@ -201,6 +301,26 @@
         }
       }
     },
+    "Access": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès"
+          }
+        }
+      }
+    },
+    "Access refused": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès refusé"
+          }
+        }
+      }
+    },
     "Accessing the microphone…": {
       "localizations": {
         "fr": {
@@ -211,12 +331,32 @@
         }
       }
     },
+    "Act · %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agir · %lld"
+          }
+        }
+      }
+    },
     "Actions": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Actions"
+          }
+        }
+      }
+    },
+    "Actions off": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actions désactivées"
           }
         }
       }
@@ -241,6 +381,16 @@
         }
       }
     },
+    "Add a folder…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter un dossier…"
+          }
+        }
+      }
+    },
     "Add a source": {
       "localizations": {
         "fr": {
@@ -251,12 +401,12 @@
         }
       }
     },
-    "Add one, then paste its address in the other system.": {
+    "Add a tool": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ajoutes-en une, puis colle son adresse dans l’autre système."
+            "value": "Ajouter un outil"
           }
         }
       }
@@ -301,16 +451,6 @@
         }
       }
     },
-    "Add…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter…"
-          }
-        }
-      }
-    },
     "Advanced": {
       "localizations": {
         "fr": {
@@ -341,12 +481,52 @@
         }
       }
     },
+    "Agents": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agents"
+          }
+        }
+      }
+    },
+    "Aim its camera at this code.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vise ce code avec son appareil photo."
+          }
+        }
+      }
+    },
+    "All settings…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tous les réglages…"
+          }
+        }
+      }
+    },
     "Allowed": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Autorisés"
+          }
+        }
+      }
+    },
+    "An action that changes something (turn on, create, delete) asks for your “yes”, unless you choose otherwise for that tool.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une action qui change quelque chose (allumer, créer, supprimer) demande ton « oui », sauf si tu choisis autrement pour cet outil."
           }
         }
       }
@@ -361,12 +541,32 @@
         }
       }
     },
+    "Arguments": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arguments"
+          }
+        }
+      }
+    },
     "Ask first": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Demander d’abord"
+          }
+        }
+      }
+    },
+    "Ask first: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Demander d’abord : %@"
           }
         }
       }
@@ -407,6 +607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Audio"
+          }
+        }
+      }
+    },
+    "Audio output": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sortie audio"
           }
         }
       }
@@ -471,12 +681,32 @@
         }
       }
     },
-    "Brave Search API key": {
+    "Before running a shortcut": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Clé API de Brave Search"
+            "value": "Avant de lancer un raccourci"
+          }
+        }
+      }
+    },
+    "Brave API key": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé API Brave"
+          }
+        }
+      }
+    },
+    "Brave API key, kept in the keychain": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé API Brave, rangée dans le trousseau"
           }
         }
       }
@@ -491,12 +721,12 @@
         }
       }
     },
-    "Brave refuses your key.": {
+    "Brave refused the key. Check it on Brave’s website.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Brave refuse ta clé."
+            "value": "Brave a refusé la clé. Vérifie-la sur le site de Brave."
           }
         }
       }
@@ -517,16 +747,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Annuler"
-          }
-        }
-      }
-    },
-    "Certificate…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Certificat…"
           }
         }
       }
@@ -571,12 +791,42 @@
         }
       }
     },
+    "Change…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier…"
+          }
+        }
+      }
+    },
+    "Check": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifier"
+          }
+        }
+      }
+    },
     "Checking what your relay offers…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Je regarde ce que propose ton relais…"
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification…"
           }
         }
       }
@@ -597,16 +847,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choisir un autre palier…"
-          }
-        }
-      }
-    },
-    "Choose “OpenMaé relay” to talk to Maé from anywhere.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choisis « Relais OpenMaé » pour parler à Maé de n’importe où."
           }
         }
       }
@@ -641,12 +881,32 @@
         }
       }
     },
+    "Claude Code isn’t installed on this Mac. Once it is, Maé can hand it long tasks.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code n’est pas installé sur ce Mac. Une fois installé, Maé pourra lui confier des tâches longues."
+          }
+        }
+      }
+    },
     "Claude Code isn’t signed in. Open it once in Terminal to sign in.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Claude Code n’est pas connecté. Ouvre-le une fois dans le Terminal pour te connecter."
+          }
+        }
+      }
+    },
+    "Claude Code settings": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages de Claude Code"
           }
         }
       }
@@ -661,22 +921,32 @@
         }
       }
     },
-    "Code expired": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Code expiré"
-          }
-        }
-      }
-    },
     "Comfort (32 to 36 GB)": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Confort (32 à 36 Go)"
+          }
+        }
+      }
+    },
+    "Command": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Commande"
+          }
+        }
+      }
+    },
+    "Completed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fait"
           }
         }
       }
@@ -691,12 +961,72 @@
         }
       }
     },
+    "Connect Home Assistant, your notes or another service: Maé can act for you, without you touching the Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecte Home Assistant, tes notes ou un autre service : Maé pourra agir pour toi, sans que tu touches au Mac."
+          }
+        }
+      }
+    },
+    "Connect Maé to other systems with MCP: she will be able to turn on a light, add a task or search your notes. You can connect several at once.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Branche Maé à d’autres systèmes avec MCP : elle pourra allumer une lumière, ajouter une tâche ou chercher dans tes notes. Tu peux en connecter plusieurs à la fois."
+          }
+        }
+      }
+    },
     "Connected": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Connecté"
+          }
+        }
+      }
+    },
+    "Connected tools": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outils connectés"
+          }
+        }
+      }
+    },
+    "Connected tools are not available yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les outils connectés ne sont pas encore disponibles."
+          }
+        }
+      }
+    },
+    "Connected · %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connectés · %lld"
+          }
+        }
+      }
+    },
+    "Connected: %lld actions found. You will choose which ones Maé may use.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecté : %lld actions trouvées. Tu choisiras lesquelles Maé peut utiliser."
           }
         }
       }
@@ -721,6 +1051,16 @@
         }
       }
     },
+    "Connection": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion"
+          }
+        }
+      }
+    },
     "Connection lost. The download will resume by itself as soon as the Internet is back.": {
       "localizations": {
         "fr": {
@@ -731,12 +1071,12 @@
         }
       }
     },
-    "Conversation": {
+    "Control": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Conversation"
+            "value": "Contrôle"
           }
         }
       }
@@ -811,16 +1151,6 @@
         }
       }
     },
-    "Create a key on Brave’s website, then paste it here. It is kept in your Mac’s keychain.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Crée une clé sur le site de Brave, puis colle-la ici. Elle est rangée dans le trousseau de ton Mac."
-          }
-        }
-      }
-    },
     "Date and time": {
       "localizations": {
         "fr": {
@@ -861,16 +1191,6 @@
         }
       }
     },
-    "Delete the log": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Effacer le journal"
-          }
-        }
-      }
-    },
     "Delete the models?": {
       "localizations": {
         "fr": {
@@ -901,12 +1221,42 @@
         }
       }
     },
+    "Depends on the shortcut": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selon le raccourci"
+          }
+        }
+      }
+    },
     "Devices": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Appareils"
+          }
+        }
+      }
+    },
+    "Devices and sources": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils et sources"
+          }
+        }
+      }
+    },
+    "Do it directly": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faire directement"
           }
         }
       }
@@ -981,12 +1331,22 @@
         }
       }
     },
-    "Echo cancellation keeps the assistant from hearing itself. Other apps are turned down slightly during the conversation.": {
+    "Echo cancellation keeps Maé from hearing herself. Other apps are turned down slightly during the conversation.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’annulation d’écho empêche l’assistant de s’entendre lui-même. Les autres apps sont un peu baissées pendant la conversation."
+            "value": "L’annulation d’écho empêche Maé de s’entendre elle-même. Les autres apps sont un peu baissées pendant la conversation."
+          }
+        }
+      }
+    },
+    "Engine": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moteur"
           }
         }
       }
@@ -1001,12 +1361,72 @@
         }
       }
     },
+    "Erase": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer"
+          }
+        }
+      }
+    },
+    "Erase the log?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer le journal ?"
+          }
+        }
+      }
+    },
+    "Erase the log…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer le journal…"
+          }
+        }
+      }
+    },
+    "Everything she does with a tool is noted in its log.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tout ce qu’elle fait avec un outil est noté dans son journal."
+          }
+        }
+      }
+    },
     "Failed": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Échouée"
+          }
+        }
+      }
+    },
+    "Failed: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec : %@"
+          }
+        }
+      }
+    },
+    "Files": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichiers"
           }
         }
       }
@@ -1027,6 +1447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Terminée"
+          }
+        }
+      }
+    },
+    "First download of the models: %lld%%. The tier is locked until the end.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premier téléchargement des modèles : %lld %%. Le palier est verrouillé jusqu’à la fin."
           }
         }
       }
@@ -1061,6 +1491,16 @@
         }
       }
     },
+    "For Home Assistant: turn on the “MCP Server” integration in Settings › Devices & services. Only administrator accounts can connect to it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour Home Assistant : active l’intégration « Serveur MCP » dans Paramètres › Appareils et services. Seuls les comptes administrateur peuvent s’y connecter."
+          }
+        }
+      }
+    },
     "For your tests of “OK Maé”: the start of each sentence Maé hears, and what she did with it, is written in a file on this Mac.": {
       "localizations": {
         "fr": {
@@ -1071,12 +1511,32 @@
         }
       }
     },
+    "Found in the “OpenMaé” folder · %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trouvés dans le dossier « OpenMaé » · %lld"
+          }
+        }
+      }
+    },
     "Free space on this Mac": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Espace libre sur ce Mac"
+          }
+        }
+      }
+    },
+    "From another app": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Depuis une autre app"
           }
         }
       }
@@ -1231,12 +1691,12 @@
         }
       }
     },
-    "Home path": {
+    "Home Assistant, GitHub, Todoist… You give its address.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "À la maison"
+            "value": "Home Assistant, GitHub, Todoist… Tu donnes son adresse."
           }
         }
       }
@@ -1261,12 +1721,32 @@
         }
       }
     },
+    "How to install it": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment l’installer"
+          }
+        }
+      }
+    },
     "How to talk": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Pour parler"
+          }
+        }
+      }
+    },
+    "How you talk to Maé, and how she answers you.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment tu parles à Maé, et par où elle te répond."
           }
         }
       }
@@ -1421,16 +1901,6 @@
         }
       }
     },
-    "Internet path": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Depuis internet"
-          }
-        }
-      }
-    },
     "Interrupt": {
       "localizations": {
         "fr": {
@@ -1511,22 +1981,32 @@
         }
       }
     },
-    "It works: %lld results in %@.": {
+    "It works: %lld actions in %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ça marche : %lld résultats en %@."
+            "value": "Ça marche : %lld actions en %@"
           }
         }
       }
     },
-    "It works: one result in %@.": {
+    "It works: %lld results in %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ça marche : un résultat en %@."
+            "value": "Ça marche : %lld résultats en %@"
+          }
+        }
+      }
+    },
+    "It works: one result in %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ça marche : un résultat en %@"
           }
         }
       }
@@ -1581,12 +2061,12 @@
         }
       }
     },
-    "Key saved in the keychain": {
+    "Kept in your Mac’s keychain. Create a key on Brave’s website if you want to change it.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Clé rangée dans le trousseau"
+            "value": "Rangée dans le trousseau de ton Mac. Crée une clé sur le site de Brave si tu veux la changer."
           }
         }
       }
@@ -1601,12 +2081,12 @@
         }
       }
     },
-    "Last deliveries": {
+    "Last actions": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dernières informations"
+            "value": "Dernières actions"
           }
         }
       }
@@ -1631,6 +2111,16 @@
         }
       }
     },
+    "Last information": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernières informations"
+          }
+        }
+      }
+    },
     "Last turn": {
       "localizations": {
         "fr": {
@@ -1647,6 +2137,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dernière étape"
+          }
+        }
+      }
+    },
+    "Limit reached": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limite atteinte"
           }
         }
       }
@@ -1691,6 +2191,16 @@
         }
       }
     },
+    "MCP is an open standard: a tool that speaks it gives Maé new actions. Choose how this one connects.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP est un standard ouvert : un outil qui le parle donne à Maé de nouvelles actions. Choisis comment celui-ci se connecte."
+          }
+        }
+      }
+    },
     "Mac": {
       "localizations": {
         "fr": {
@@ -1721,6 +2231,16 @@
         }
       }
     },
+    "Maé acts as soon as you ask, without waiting for your “yes”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé agit dès que tu le demandes, sans attendre ton « oui »."
+          }
+        }
+      }
+    },
     "Maé adds events and reminders, reads your calendar, sets timers and runs the shortcuts of the “OpenMaé” folder in the Shortcuts app. She tells you what she saved: say “cancel” to take it back.": {
       "localizations": {
         "fr": {
@@ -1741,12 +2261,12 @@
         }
       }
     },
-    "Maé can hand it long tasks: a website, code, research. What you hand it leaves this Mac: Claude Code works with Anthropic’s online models. You get a notification when it is done.": {
+    "Maé answers sentences that start with “OK Maé”, then listens a few seconds more. The TV on hinders her; plugged in, this Mac no longer sleeps.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé peut lui confier des tâches longues : un site, du code, une recherche. Ce que tu lui confies quitte ce Mac : Claude Code travaille avec les modèles en ligne d’Anthropic. Une notification te prévient quand c’est fini."
+            "value": "Maé répond aux phrases qui commencent par « OK Maé », puis t’écoute encore quelques secondes. La télé allumée la gêne ; sur secteur, ce Mac ne se met plus en veille."
           }
         }
       }
@@ -1757,6 +2277,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé ne peut pas s’en servir. Autorise OpenMaé dans Réglages Système, Confidentialité et sécurité."
+          }
+        }
+      }
+    },
+    "Maé hands long tasks to an agent: a website, code, research. It works on its own, and a notification tells you when it is done.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé confie les tâches longues à un agent : un site, du code, une recherche. Il travaille de son côté, et une notification te prévient quand c’est fini."
+          }
+        }
+      }
+    },
+    "Maé hands tasks to an agent only while the actions are on.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne confie de tâche à un agent que si les actions sont activées."
           }
         }
       }
@@ -1811,22 +2351,22 @@
         }
       }
     },
-    "Maé looks up what she can’t know: the news, a score, opening hours, a price.": {
+    "Maé looks up what she can’t know: the news, a score, opening hours, a price. What you search for goes to the chosen engine; the rest of the conversation stays on your Mac.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix."
+            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix. Ce que tu cherches part chez le moteur choisi ; le reste de la conversation reste sur ton Mac."
           }
         }
       }
     },
-    "Maé only answers sentences that start with “OK Maé”, and keeps listening a few seconds after each answer. With the TV on, she hears you less well. Plugged in, this Mac no longer goes to sleep.": {
+    "Maé runs the shortcut as soon as you ask for it.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé ne répond qu’aux phrases qui commencent par « OK Maé », et t’écoute encore quelques secondes après chaque réponse. Quand la télé est allumée, elle t’entend moins bien. Branché sur secteur, ce Mac ne se met plus en veille."
+            "value": "Maé lance le raccourci dès que tu le demandes."
           }
         }
       }
@@ -1867,6 +2407,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé te dit ce qu’elle va envoyer et attend ton « oui ». La consigne complète est dans l’historique."
+          }
+        }
+      }
+    },
+    "Maé uses a tool only if what you ask needs it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé n’utilise un outil que si ta demande en a besoin."
+          }
+        }
+      }
+    },
+    "Maé will no longer be able to search with Brave until you paste a key again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne pourra plus chercher avec Brave tant que tu n’auras pas collé une nouvelle clé."
+          }
+        }
+      }
+    },
+    "Maé will no longer be able to speak until you download them again (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne pourra plus parler tant que tu ne les auras pas téléchargés de nouveau (%@)."
+          }
+        }
+      }
+    },
+    "Maé will no longer be able to use it, and its log is erased. You can add it again later.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne pourra plus s’en servir, et son journal est effacé. Tu pourras le rajouter plus tard."
           }
         }
       }
@@ -1991,12 +2571,42 @@
         }
       }
     },
+    "Models": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèles"
+          }
+        }
+      }
+    },
     "Models on this Mac": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Modèles sur ce Mac"
+          }
+        }
+      }
+    },
+    "My agents · %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mes agents · %lld"
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nom"
           }
         }
       }
@@ -2031,6 +2641,16 @@
         }
       }
     },
+    "No answer": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas de réponse"
+          }
+        }
+      }
+    },
     "No device": {
       "localizations": {
         "fr": {
@@ -2056,27 +2676,37 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pas de relais"
+            "value": "Aucun relais"
           }
         }
       }
     },
-    "No relay is chosen, so nothing can come from the internet. Choose one in Settings › iPhone.": {
+    "No relay is chosen, so nothing can come from the internet. Choose one in iPhone and iPad.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucun relais n’est choisi, donc rien ne peut venir d’internet. Choisis-en un dans Réglages › iPhone."
+            "value": "Aucun relais n’est choisi, donc rien ne peut venir d’internet. Choisis-en un dans iPhone et iPad."
           }
         }
       }
     },
-    "No relay is chosen. Choose one in Settings › iPhone to receive from the internet.": {
+    "No relay is chosen. Choose one in iPhone and iPad to receive from the internet.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucun relais n’est choisi. Choisis-en un dans Réglages › iPhone pour recevoir depuis internet."
+            "value": "Aucun relais n’est choisi. Choisis-en un dans iPhone et iPad pour recevoir depuis internet."
+          }
+        }
+      }
+    },
+    "No shortcut yet. Put some in an “OpenMaé” folder of the Shortcuts app: Maé will be able to run them.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun raccourci pour l’instant. Range-en dans un dossier « OpenMaé » de l’app Raccourcis : Maé pourra les lancer."
           }
         }
       }
@@ -2091,12 +2721,12 @@
         }
       }
     },
-    "No source yet": {
+    "No tool connected": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucune source pour l’instant"
+            "value": "Aucun outil connecté"
           }
         }
       }
@@ -2151,12 +2781,12 @@
         }
       }
     },
-    "Not installed on this Mac. Once it is, Maé can hand it long tasks: a website, code, research.": {
+    "Not installed": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pas installé sur ce Mac. Une fois installé, Maé pourra lui confier des tâches longues : un site, du code, une recherche."
+            "value": "Pas installé"
           }
         }
       }
@@ -2171,12 +2801,12 @@
         }
       }
     },
-    "Not offered by your relay": {
+    "Not set up": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pas proposé par ton relais"
+            "value": "Pas réglé"
           }
         }
       }
@@ -2197,6 +2827,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Noter ce que Maé entend"
+          }
+        }
+      }
+    },
+    "Notes": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes"
+          }
+        }
+      }
+    },
+    "Notes, files, browser… Maé starts it herself.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes, fichiers, navigateur… Maé le lance elle-même."
+          }
+        }
+      }
+    },
+    "Nothing done yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien de fait pour l’instant."
           }
         }
       }
@@ -2261,12 +2921,42 @@
         }
       }
     },
+    "Off, Maé no longer uses this tool. The connection is kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Éteint, Maé n’utilise plus cet outil. La connexion est gardée."
+          }
+        }
+      }
+    },
     "On": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Activé"
+          }
+        }
+      }
+    },
+    "On this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur ce Mac"
+          }
+        }
+      }
+    },
+    "On this Mac · Anthropic’s online models": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur ce Mac · modèles en ligne d’Anthropic"
           }
         }
       }
@@ -2301,12 +2991,52 @@
         }
       }
     },
-    "Open OpenMaé on your iPhone or iPad and scan this code.": {
+    "Open %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvre OpenMaé sur ton iPhone ou ton iPad et scanne ce code."
+            "value": "Ouvrir %@"
+          }
+        }
+      }
+    },
+    "Open Actions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir Actions"
+          }
+        }
+      }
+    },
+    "Open Claude Code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir Claude Code"
+          }
+        }
+      }
+    },
+    "Open OpenMaé on your iPhone or iPad.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvre OpenMaé sur ton iPhone ou ton iPad."
+          }
+        }
+      }
+    },
+    "Open Shortcuts": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir Raccourcis"
           }
         }
       }
@@ -2321,12 +3051,32 @@
         }
       }
     },
+    "Open iPhone and iPad": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir iPhone et iPad"
+          }
+        }
+      }
+    },
     "Open the folder": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Ouvrir le dossier"
+          }
+        }
+      }
+    },
+    "OpenMaé %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenMaé %@"
           }
         }
       }
@@ -2371,6 +3121,16 @@
         }
       }
     },
+    "Over the internet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Par internet"
+          }
+        }
+      }
+    },
     "Pairing QR code": {
       "localizations": {
         "fr": {
@@ -2391,16 +3151,6 @@
         }
       }
     },
-    "Password, if it asks for one": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mot de passe, s’il en demande un"
-          }
-        }
-      }
-    },
     "Paste it in the other system. Anyone who knows it can send Maé information: keep it to yourself.": {
       "localizations": {
         "fr": {
@@ -2417,6 +3167,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Colle d’abord ta clé Brave."
+          }
+        }
+      }
+    },
+    "Paste your key here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colle ta clé ici"
           }
         }
       }
@@ -2471,6 +3231,16 @@
         }
       }
     },
+    "Permissions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisations"
+          }
+        }
+      }
+    },
     "Prepared during the silence (speculative start): stages overlap.": {
       "localizations": {
         "fr": {
@@ -2501,6 +3271,16 @@
         }
       }
     },
+    "Protected by a password": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protégé par un mot de passe"
+          }
+        }
+      }
+    },
     "Public relay": {
       "localizations": {
         "fr": {
@@ -2517,16 +3297,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuyer pour parler"
-          }
-        }
-      }
-    },
-    "Put shortcuts in a folder named “OpenMaé” in the Shortcuts app: Maé will be able to run them.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Range des raccourcis dans un dossier « OpenMaé » de l’app Raccourcis : Maé pourra les lancer."
           }
         }
       }
@@ -2571,12 +3341,22 @@
         }
       }
     },
-    "Read the task back first": {
+    "Read back before sending": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Relire avant d’envoyer"
+          }
+        }
+      }
+    },
+    "Read · %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire · %lld"
           }
         }
       }
@@ -2601,6 +3381,16 @@
         }
       }
     },
+    "Reconnect": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se reconnecter"
+          }
+        }
+      }
+    },
     "Refused": {
       "localizations": {
         "fr": {
@@ -2611,22 +3401,22 @@
         }
       }
     },
+    "Refused by you": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusé par toi"
+          }
+        }
+      }
+    },
     "Relay": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Relais"
-          }
-        }
-      }
-    },
-    "Relay not in home mode": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Relais pas en mode maison"
           }
         }
       }
@@ -2651,16 +3441,6 @@
         }
       }
     },
-    "Remove %@": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retirer %@"
-          }
-        }
-      }
-    },
     "Remove %@?": {
       "localizations": {
         "fr": {
@@ -2671,22 +3451,32 @@
         }
       }
     },
-    "Remove the key": {
+    "Remove the folder %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retirer la clé"
+            "value": "Retirer le dossier %@"
           }
         }
       }
     },
-    "Remove the password": {
+    "Remove the key?": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retirer le mot de passe"
+            "value": "Retirer la clé ?"
+          }
+        }
+      }
+    },
+    "Remove the key…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer la clé…"
           }
         }
       }
@@ -2701,12 +3491,32 @@
         }
       }
     },
+    "Remove this tool…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer cet outil…"
+          }
+        }
+      }
+    },
     "Remove…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Retirer…"
+          }
+        }
+      }
+    },
+    "Replace the key…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remplacer la clé…"
           }
         }
       }
@@ -2731,6 +3541,16 @@
         }
       }
     },
+    "Run it at once": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le lancer tout de suite"
+          }
+        }
+      }
+    },
     "Said": {
       "localizations": {
         "fr": {
@@ -2747,16 +3567,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Enregistrer"
-          }
-        }
-      }
-    },
-    "Saved in the keychain": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rangé dans le trousseau"
           }
         }
       }
@@ -2801,12 +3611,52 @@
         }
       }
     },
+    "Scan a code with the OpenMaé app: the conversation goes through your device, your Mac does the work.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanne un code avec l’app OpenMaé : la conversation se fait par ton appareil, ton Mac fait le travail."
+          }
+        }
+      }
+    },
+    "SearXNG protected by a password": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SearXNG protégé par un mot de passe"
+          }
+        }
+      }
+    },
+    "Search engine": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moteur de recherche"
+          }
+        }
+      }
+    },
     "Search the internet": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Recherche sur internet"
+          }
+        }
+      }
+    },
+    "See the %lld other actions": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voir les %lld autres actions"
           }
         }
       }
@@ -2851,6 +3701,16 @@
         }
       }
     },
+    "Set the address…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir l’adresse…"
+          }
+        }
+      }
+    },
     "Set the home relay": {
       "localizations": {
         "fr": {
@@ -2867,6 +3727,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Préparer %@"
+          }
+        }
+      }
+    },
+    "Setting": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglage"
           }
         }
       }
@@ -2951,6 +3821,16 @@
         }
       }
     },
+    "Sign-in needed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À connecter"
+          }
+        }
+      }
+    },
     "Silence wait": {
       "localizations": {
         "fr": {
@@ -2971,12 +3851,12 @@
         }
       }
     },
-    "Sound": {
+    "Soon": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Son"
+            "value": "Bientôt"
           }
         }
       }
@@ -2987,16 +3867,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Le son ne démarre pas"
-          }
-        }
-      }
-    },
-    "Source": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Source"
           }
         }
       }
@@ -3121,26 +3991,6 @@
         }
       }
     },
-    "Systems on the internet reach Maé through your relay, which cannot read what they send: it stays encrypted up to this Mac.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les systèmes d’internet joignent Maé par ton relais, qui ne peut pas lire ce qu’ils envoient : tout reste chiffré jusqu’à ce Mac."
-          }
-        }
-      }
-    },
-    "Systems on the internet reach Maé through your relay, which cannot read what they send: it stays encrypted up to this Mac. Its certificate renews by itself (valid until %@).": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les systèmes d’internet joignent Maé par ton relais, qui ne peut pas lire ce qu’ils envoient : tout reste chiffré jusqu’à ce Mac. Son certificat se renouvelle tout seul (valable jusqu’au %@)."
-          }
-        }
-      }
-    },
     "Take over here": {
       "localizations": {
         "fr": {
@@ -3167,16 +4017,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Parler"
-          }
-        }
-      }
-    },
-    "Talk from another app": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Parler depuis une autre app"
           }
         }
       }
@@ -3221,12 +4061,52 @@
         }
       }
     },
+    "Test and add": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tester et ajouter"
+          }
+        }
+      }
+    },
+    "Test the connection": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tester la connexion"
+          }
+        }
+      }
+    },
+    "Test the search": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tester la recherche"
+          }
+        }
+      }
+    },
     "Testing…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Test en cours…"
+          }
+        }
+      }
+    },
+    "The OpenMaé relay in home mode, on a machine at home. Type the address it listens on.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais OpenMaé en mode maison, sur une machine de la maison. Tape l’adresse où il écoute."
           }
         }
       }
@@ -3241,12 +4121,12 @@
         }
       }
     },
-    "The address appears once a relay is chosen, in Settings › iPhone.": {
+    "The address appears once a relay is chosen, in iPhone and iPad.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’adresse apparaît une fois un relais choisi, dans Réglages › iPhone."
+            "value": "L’adresse apparaît une fois un relais choisi, dans iPhone et iPad."
           }
         }
       }
@@ -3321,12 +4201,12 @@
         }
       }
     },
-    "The code stays between this Mac and your device: the relay cannot read it.": {
+    "The code works only once and stays between this Mac and your device: the relay cannot read it.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le code reste entre ce Mac et ton appareil : le relais ne peut pas le lire."
+            "value": "Le code ne marche qu’une fois et reste entre ce Mac et ton appareil : le relais ne peut pas le lire."
           }
         }
       }
@@ -3391,6 +4271,16 @@
         }
       }
     },
+    "The last try at the certificate failed, I try again later: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dernier essai pour obtenir le certificat a échoué, je réessaie plus tard : %@"
+          }
+        }
+      }
+    },
     "The microphone is blocked": {
       "localizations": {
         "fr": {
@@ -3451,6 +4341,26 @@
         }
       }
     },
+    "The models that run Maé on this Mac, and what she notes for you.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les modèles qui font tourner Maé sur ce Mac, et ce qu’elle note pour toi."
+          }
+        }
+      }
+    },
+    "The new key replaces the old one in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La nouvelle clé remplace l’ancienne dans le trousseau de ton Mac."
+          }
+        }
+      }
+    },
     "The old address stops working at once: you will have to paste the new one in the other system.": {
       "localizations": {
         "fr": {
@@ -3461,12 +4371,22 @@
         }
       }
     },
-    "The relay does not answer. Your devices can reach you at home only. I keep trying.": {
+    "The relay does not answer: your devices reach you at home only for now. Maé tries again on her own.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le relais ne répond pas. Tes appareils ne peuvent te joindre qu’à la maison. Je réessaie toute seule."
+            "value": "Le relais ne répond pas : tes appareils ne te joignent qu’à la maison pour l’instant. Maé réessaie toute seule."
+          }
+        }
+      }
+    },
+    "The server refused the user name or the password. Check them, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur a refusé l’identifiant ou le mot de passe. Vérifie-les, puis réessaie."
           }
         }
       }
@@ -3517,16 +4437,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce Mac demande à Let’s Encrypt le certificat qui garde les envois chiffrés jusqu’à lui. Ça prend quelques secondes."
-          }
-        }
-      }
-    },
-    "This Mac asks Let’s Encrypt for the certificate that keeps deliveries encrypted up to it. The last try failed, I try again later: %@": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ce Mac demande à Let’s Encrypt le certificat qui garde les envois chiffrés jusqu’à lui. Le dernier essai a échoué, je réessaie plus tard : %@"
           }
         }
       }
@@ -3601,6 +4511,16 @@
         }
       }
     },
+    "This program runs on your Mac with your rights. Only add programs you know.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce programme tourne sur ton Mac avec tes droits. N’ajoute que des programmes que tu connais."
+          }
+        }
+      }
+    },
     "This relay is not in home mode, so it passes nothing on to Maé. Start it with RELAY_HOME_INBOUND=true.": {
       "localizations": {
         "fr": {
@@ -3627,6 +4547,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce palier demande plus de mémoire que ce Mac n’en a : l’assistant risque d’être très lent."
+          }
+        }
+      }
+    },
+    "Those switched on below ask first: Maé says which one she is about to run and waits for your “yes”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ceux qui sont allumés ci-dessous demandent d’abord : Maé dit lequel elle va lancer et attend ton « oui »."
           }
         }
       }
@@ -3667,6 +4597,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Pour t’entendre, l’assistant a besoin du micro. Autorise-le dans Réglages Système › Confidentialité et sécurité › Micro, puis reviens ici. Le son ne quitte jamais ce Mac."
+          }
+        }
+      }
+    },
+    "To look at": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À regarder"
+          }
+        }
+      }
+    },
+    "To reconnect": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À reconnecter"
+          }
+        }
+      }
+    },
+    "To set up": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À régler"
           }
         }
       }
@@ -3741,6 +4701,46 @@
         }
       }
     },
+    "Turn on %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer %@"
+          }
+        }
+      }
+    },
+    "Turn on Claude Code": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer Claude Code"
+          }
+        }
+      }
+    },
+    "Turn the actions on to choose the permissions and the shortcuts.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active les actions pour choisir les autorisations et les raccourcis."
+          }
+        }
+      }
+    },
+    "Turn the search on to choose its engine.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active la recherche pour choisir son moteur."
+          }
+        }
+      }
+    },
     "Turns": {
       "localizations": {
         "fr": {
@@ -3757,6 +4757,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tape d’abord l’adresse de ton SearXNG."
+          }
+        }
+      }
+    },
+    "Unexpected answer": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réponse inattendue"
           }
         }
       }
@@ -3791,16 +4801,6 @@
         }
       }
     },
-    "User name, if it asks for one": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Identifiant, s’il en demande un"
-          }
-        }
-      }
-    },
     "Valid for another": {
       "localizations": {
         "fr": {
@@ -3817,6 +4817,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Voix"
+          }
+        }
+      }
+    },
+    "Voice and sound": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voix et son"
           }
         }
       }
@@ -3851,16 +4861,6 @@
         }
       }
     },
-    "Waiting for your device…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "En attente de ton appareil…"
-          }
-        }
-      }
-    },
     "Waiting for your yes": {
       "localizations": {
         "fr": {
@@ -3871,12 +4871,22 @@
         }
       }
     },
-    "Waiting…": {
+    "What Claude Code may do": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "En attente…"
+            "value": "Ce que Claude Code peut faire"
+          }
+        }
+      }
+    },
+    "What Maé can do": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que Maé peut faire"
           }
         }
       }
@@ -3887,6 +4897,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce que fait Maé"
+          }
+        }
+      }
+    },
+    "What Maé noted of the sentences she heard is erased from this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que Maé a noté des phrases entendues est effacé de ce Mac."
           }
         }
       }
@@ -3921,22 +4941,12 @@
         }
       }
     },
-    "What you search for goes out on the internet: to your SearXNG, then to the search engines. The rest of the conversation stays on your Mac.": {
+    "What you hand it leaves this Mac: Claude Code works with Anthropic’s online models.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce que tu cherches part sur internet : vers ton SearXNG, puis vers les moteurs de recherche. Le reste de la conversation reste sur ton Mac."
-          }
-        }
-      }
-    },
-    "What you search for goes to Brave Search. The rest of the conversation stays on your Mac.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ce que tu cherches part chez Brave Search. Le reste de la conversation reste sur ton Mac."
+            "value": "Ce que tu lui confies quitte ce Mac : Claude Code travaille avec les modèles en ligne d’Anthropic."
           }
         }
       }
@@ -3951,12 +4961,42 @@
         }
       }
     },
+    "When Maé acts": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand Maé agit"
+          }
+        }
+      }
+    },
+    "When information arrives": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand une info arrive"
+          }
+        }
+      }
+    },
     "When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Quand elle marque une information comme urgente, Maé la dit tout de suite, quel que soit le mode : elle peut couper sa propre phrase, jamais la tienne."
+          }
+        }
+      }
+    },
+    "When she acts": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand elle agit"
           }
         }
       }
@@ -3981,22 +5021,62 @@
         }
       }
     },
-    "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: the assistant would interrupt itself.": {
+    "With a token": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avec un casque, il n’y a pas d’écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, l’assistant se couperait la parole."
+            "value": "Avec un jeton"
           }
         }
       }
     },
-    "Without a relay, your devices reach you at home only, on the same Wi-Fi as this Mac.": {
+    "With headphones there is no echo, so the microphone is used as is. Avoid this mode with speakers: Maé would interrupt herself.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sans relais, tes appareils ne te joignent qu’à la maison, sur le même Wi-Fi que ce Mac."
+            "value": "Avec un casque, il n’y a pas d’écho : le micro est utilisé tel quel. Évite ce mode sur les haut-parleurs, Maé se couperait la parole."
+          }
+        }
+      }
+    },
+    "With my account": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avec mon compte"
+          }
+        }
+      }
+    },
+    "Without a key, Maé can’t search. Create a key on Brave’s website, then paste it here: it is kept in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans clé, Maé ne peut pas chercher. Crée une clé sur le site de Brave, puis colle-la ici : elle est rangée dans le trousseau de ton Mac."
+          }
+        }
+      }
+    },
+    "Without a relay, nothing goes through the internet: only your devices on the same network reach you.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans relais, rien ne passe par internet : seuls tes appareils connectés à la même box te joignent."
+          }
+        }
+      }
+    },
+    "Without a relay, your devices reach you at home only. Choose a relay to talk to them from anywhere.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans relais, tes appareils ne te joignent qu’à la maison. Choisis un relais pour leur parler de partout."
           }
         }
       }
@@ -4017,16 +5097,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mauvaise méthode : envoie avec POST, ou GET avec ?text=."
-          }
-        }
-      }
-    },
-    "Wrong mode": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mauvais mode"
           }
         }
       }
@@ -4081,12 +5151,32 @@
         }
       }
     },
+    "You can remove it whenever you want.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu pourras le retirer quand tu veux."
+          }
+        }
+      }
+    },
     "You need a Mac with Apple silicon (M1 or later) and at least 8 GB of memory. This Mac: %@, %@.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Il faut un Mac avec une puce Apple (M1 ou plus récente) et au moins 8 Go de mémoire. Ce Mac : %@, %@."
+          }
+        }
+      }
+    },
+    "Your %@ account": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton compte %@"
           }
         }
       }
@@ -4111,16 +5201,6 @@
         }
       }
     },
-    "Your SearXNG": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton SearXNG"
-          }
-        }
-      }
-    },
     "Your SearXNG asks for a user name and a password.": {
       "localizations": {
         "fr": {
@@ -4137,16 +5217,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton SearXNG n’accepte pas les programmes : active son format JSON."
-          }
-        }
-      }
-    },
-    "Your SearXNG refuses the password.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton SearXNG refuse le mot de passe."
           }
         }
       }
@@ -4171,12 +5241,32 @@
         }
       }
     },
-    "Your iPhone or iPad is the microphone and the speaker. The work stays on this Mac, with its models. Everything is end-to-end encrypted.": {
+    "Your iPhone or iPad lends its microphone, its speaker and its screen. Maé always works on your Mac.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ton iPhone ou ton iPad sert de micro et de haut-parleur. Le travail reste sur ce Mac, avec ses modèles. Tout est chiffré de bout en bout."
+            "value": "Ton iPhone ou ton iPad prête son micro, son haut-parleur et son écran. Maé travaille toujours sur ton Mac."
+          }
+        }
+      }
+    },
+    "Your relay cannot read what is sent: it stays encrypted up to this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton relais ne peut pas lire ce qui est envoyé : c’est chiffré jusqu’à ce Mac."
+          }
+        }
+      }
+    },
+    "Your relay cannot read what is sent: it stays encrypted up to this Mac. The certificate renews by itself (valid until %@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton relais ne peut pas lire ce qui est envoyé : c’est chiffré jusqu’à ce Mac. Le certificat se renouvelle tout seul (valable jusqu’au %@)."
           }
         }
       }
@@ -4197,16 +5287,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton relais ne répond pas : ce qui est envoyé depuis internet ne peut pas arriver jusqu’à Maé. Je réessaie toute seule."
-          }
-        }
-      }
-    },
-    "Your relay does not offer it": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton relais ne propose pas l’entrée des informations"
           }
         }
       }
@@ -4421,12 +5501,32 @@
         }
       }
     },
+    "“Ask first”: Maé says what she is about to do, for example “I turn on the living room”, and waits for your “yes”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« Demander d’abord » : Maé dit ce qu’elle va faire, par exemple « j’allume le salon », et attend ton « oui »."
+          }
+        }
+      }
+    },
     "“Ask first”: Maé says which shortcut she is about to run and waits for your “yes”.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "« Demander d’abord » : Maé dit quel raccourci elle va lancer et attend ton « oui »."
+          }
+        }
+      }
+    },
+    "“OK Maé” log": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journal de « OK Maé »"
           }
         }
       }

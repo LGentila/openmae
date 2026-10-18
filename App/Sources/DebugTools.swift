@@ -74,6 +74,16 @@ enum Snapshots {
         return URL(fileURLWithPath: arguments[i + 1])
     }
 
+    /// Draws every picture once, then quits. Called when the app has finished launching.
+    @MainActor
+    static func start() {
+        guard let folder else { return }
+        Task {
+            await render(to: folder)
+            exit(0)
+        }
+    }
+
     @MainActor
     static func render(to folder: URL) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -141,49 +151,18 @@ enum Snapshots {
             await save(view, size: CGSize(width: 960, height: 700), to: folder.appending(path: scenario.name + ".png")) {
                 // Once the window has started the (scripted) engine, which closes any panel.
                 window.panel = scenario.panel
-                window.pointsAtTier = scenario.name.hasPrefix("setup")
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
-        // The settings in the wake-word mode, whole (its log is at the bottom, in Advanced).
-        let wakeWordSettings = await scriptedModel(ready)
-        let savedSettings = wakeWordSettings.settings
-        wakeWordSettings.settings.listening = .wakeWord
-        let wakeWordWindow = WindowState()
-        await save(ContentView(model: wakeWordSettings, window: wakeWordWindow).environment(\.stillFrame, 1.7)
-                       .preferredColorScheme(.light),
-                   size: CGSize(width: 960, height: 2000), to: folder.appending(path: "main-20-settings-wake-word.png")) {
-            wakeWordWindow.panel = .settings
-        }
-        wakeWordSettings.settings = savedSettings
-        // The settings with the actions on: access not asked yet, then refused.
         let shortcuts = ["Allumer le salon", "Mode concentration"]
-        for (name, access) in [("main-9-settings-actions", ActionsStatus.Access.notAsked),
-                               ("main-10-settings-actions-denied", .denied)]
-        {
-            let model = await scriptedModel(ready + [.actions(ActionsStatus(calendar: access, reminders: access,
-                                                                            shortcuts: shortcuts))])
-            let saved = model.settings
-            model.settings.actionsEnabled = true
-            model.settings.shortcutsToConfirm = ["Mode concentration"]
-            let window = WindowState()
-            let view = ContentView(model: model, window: window)
-                .environment(\.stillFrame, 1.7)
-                .preferredColorScheme(.light)
-            await save(view, size: CGSize(width: 960, height: 700), to: folder.appending(path: name + ".png")) {
-                window.panel = .settings
-            }
-            model.settings = saved
-        }
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
-        await renderWebSearch(to: folder, ready: ready)
         await renderPresence(to: folder)
         await renderPhone(to: folder)
-        await renderInbound(to: folder)
+        await renderSettings(to: folder)
     }
 
-    /// Claude Code: its settings (a tall window, to see the whole panel), and the history with three tasks: one
-    /// done, one in progress, one waiting for the user's "oui" (its instruction shown).
+    /// The history with three tasks handed to Claude Code: one done, one in progress, one waiting for the user's "oui"
+    /// (its instruction shown).
     @MainActor
     private static func renderTasks(to folder: URL, conversation: [AssistantEvent], shortcuts: [String]) async {
         let now = Date()
@@ -216,54 +195,6 @@ enum Snapshots {
         await save(ContentView(model: history, window: window).environment(\.stillFrame, 1.7).preferredColorScheme(.light),
                    size: CGSize(width: 960, height: 1100), to: folder.appending(path: "main-11-history-tasks.png")) {
             window.panel = .history
-        }
-
-        let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
-        let model = await scriptedModel(ready + [.actions(ActionsStatus(calendar: .granted, reminders: .granted,
-                                                                        shortcuts: shortcuts,
-                                                                        claudeCode: .ready(version: "2.1.206")))])
-        let saved = model.settings
-        model.settings.actionsEnabled = true
-        model.settings.claudeCode.enabled = true
-        model.settings.claudeCode.folders = ["/Users/me/Projets/Sites"]
-        let settingsWindow = WindowState()
-        await save(ContentView(model: model, window: settingsWindow).environment(\.stillFrame, 1.7)
-                       .preferredColorScheme(.light),
-                   size: CGSize(width: 960, height: 1700), to: folder.appending(path: "main-12-settings-claude-code.png")) {
-            settingsWindow.panel = .settings
-        }
-        model.settings = saved
-    }
-
-    /// The web search's settings, switched on: with Brave Search before its key is pasted, after a test that worked and
-    /// after a refused key; with a SearXNG after a test that worked and one that was refused.
-    @MainActor
-    private static func renderWebSearch(to folder: URL, ready: [AssistantEvent]) async {
-        let tests: [(name: String, source: WebSearchSource, key: Bool, test: WebSearchTest?)] = [
-            ("main-13-settings-web-search-brave-new", .brave, false, nil),
-            ("main-14-settings-web-search-brave", .brave, true, .works(results: 5, seconds: 0.62)),
-            ("main-15-settings-web-search-brave-refused", .brave, true, .failed(.unauthorized)),
-            ("main-16-settings-web-search-searxng", .searxng, false, .works(results: 25, seconds: 1.24)),
-            ("main-17-settings-web-search-searxng-refused", .searxng, false, .failed(.forbidden)),
-        ]
-        for (name, source, key, test) in tests {
-            let events: [AssistantEvent] = ready + (test.map { [AssistantEvent.webSearchTested($0)] } ?? [])
-            let model = AssistantModel(connection: ScriptedConnection(events))
-            model.hasTalkShortcut = true
-            // Before the events arrive: a change of these settings forgets the last test.
-            let saved = model.settings
-            model.settings.webSearch.enabled = true
-            model.settings.webSearch.source = source
-            model.settings.webSearch.braveKeySaved = key
-            model.settings.webSearch.address = source == .searxng ? "https://search.example.org" : ""
-            try? await Task.sleep(for: .milliseconds(150))
-            let window = WindowState()
-            await save(ContentView(model: model, window: window).environment(\.stillFrame, 1.7)
-                           .preferredColorScheme(.light),
-                       size: CGSize(width: 960, height: 1100), to: folder.appending(path: name + ".png")) {
-                window.panel = .settings
-            }
-            model.settings = saved
         }
     }
 
@@ -482,7 +413,7 @@ private struct MenuBarIconSheet: View {
 
 /// An engine that only replays a list of events, at once and again when asked to start (as the window does
 /// when it appears).
-private final class ScriptedConnection: AssistantConnection {
+final class ScriptedConnection: AssistantConnection {
     let events: AsyncStream<AssistantEvent>
     private let list: [AssistantEvent]
     private let sink: AsyncStream<AssistantEvent>.Continuation
@@ -499,16 +430,14 @@ private final class ScriptedConnection: AssistantConnection {
 }
 
 /// Window content in snapshot mode: renders, then quits.
+/// What the main window shows meanwhile. The pictures are drawn in their own off-screen windows, started by the app
+/// delegate (`Snapshots.start()`): macOS may not open the main window when the app is launched from a shell.
 struct SnapshotRunner: View {
     let folder: URL
 
     var body: some View {
         Text(verbatim: "Snapshots → \(folder.path)")
             .padding()
-            .task {
-                await Snapshots.render(to: folder)
-                exit(0)
-            }
     }
 }
 
