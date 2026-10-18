@@ -4,6 +4,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXNN
+import Synchronization
 import Tokenizers
 import VoiceCore
 
@@ -88,6 +89,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var rebuild: (tokens: [Int], cache: [KVCache], done: Int)?
     private var rebuildTask: Task<Void, Never>?
     private var backgroundAllowed = true
+    /// Counts what uses the cache, but the history computed ahead (`catchUp`): requests, conversations computed,
+    /// beginnings, the tools changing. That computation stops as soon as the count moves.
+    private var cacheUses = 0
+    /// Requests sent and not answered yet, counted as soon as they are sent, before they reach the actor: the history
+    /// computed ahead gives way to them (`catchUp`).
+    private nonisolated let pendingRequests = Atomic<Int>(0)
+    /// The history computed ahead goes this many tokens at a time: a request that comes meanwhile waits for one chunk at
+    /// most (0.53 s with Gemma 4 26B, 0.28 s with E4B, on the reference Mac in `voice-cli cache-check`).
+    private static let aheadChunk = 64
     /// Set from outside while a generation runs (the actor is busy then), hence a lock, not the actor.
     private nonisolated let hold = GenerationHold()
     // Note: "wiring" the weights in memory (MLX WiredMemoryTicket) was tried against a
@@ -106,8 +116,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var snapshotRestores = 0
     /// Diagnostics: how many times a request went back to the conversations' beginning (see `beginning`).
     public private(set) var beginningRestores = 0
-    /// Diagnostics of the last request: tokens found in the cache, tokens computed, and time to compute them.
-    public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0)
+    /// Diagnostics of the last request: tokens found in the cache, tokens computed, time to compute them, and how long
+    /// it waited for the model before (another computation under way: the history computed ahead, a keep-warm pass).
+    public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0, waitedMs: 0.0)
     /// Diagnostics of the last `catchUp`: tokens computed (0: nothing to do), and time to compute them.
     public private(set) var lastCatchUp = (computed: 0, ms: 0.0)
     /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
@@ -189,10 +200,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { continuation in
             let requested = ContinuousClock.now
+            pendingRequests.add(1, ordering: .relaxed)  // counted at once: the history computed ahead gives way
             let task = Task {
+                defer { self.pendingRequests.subtract(1, ordering: .relaxed) }
                 do {
-                    DebugLog.log("LLM: waiting for the model (\(ContinuousClock.now - requested))")
-                    try await self.generate(conversation) { continuation.yield($0) }
+                    try await self.generate(conversation, requested: requested) { continuation.yield($0) }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -204,6 +216,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// `async` like the protocol's default: a synchronous version would lose to that default in async callers.
     public func useTools(_ tools: [VoiceCore.ToolSpec]) async {
+        cacheUses += 1  // the history renders otherwise
         self.tools = tools
         toolSchemas = tools.isEmpty ? nil : tools.map(Self.schema)
     }
@@ -249,6 +262,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `async` like the protocol's default (see `useTools`): called on the model itself (voice-cli), a synchronous
     /// version lost to that default, which keeps nothing.
     public func prefillBeginning(_ conversation: [ChatMessage]) async throws {
+        cacheUses += 1
         logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
         snapshot = nil
@@ -333,19 +347,73 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// as soon as it is recorded, while the user speaks (after an interruption) or nobody does: the next request extends
     /// the cache, and its snapshot sits at its user's message. Computing that request's earlier turns in a pass of their
     /// own would give the same snapshot, but that second pass cost 0.25–0.5 s more at every such request. Nothing is
-    /// computed when the cache holds the history or a request already went past it, nor when the history goes on from
-    /// the cache (the next request computes the rest in its own pass, as usual).
+    /// computed when the cache holds the history or a request already went past it.
+    ///
+    /// The history also goes on from the cache with what the model never wrote: what the app says on its own (an
+    /// announcement: the note, then what was said), and after an action the tool's result and the app's own sentences
+    /// ("C'est noté."). The next request computed that too, while the user waited: the turn after an announcement 101
+    /// tokens in 600 ms instead of 46 in 446 ms, the turn after an action 85 in 542 ms (Gemma 4 26B on the reference Mac;
+    /// E4B: 93 tokens in 305 ms instead of 42 in 206 ms, and 77 in 302 ms). It is computed here instead, ahead
+    /// (`computeAhead`), while nobody speaks: the turn after an announcement then computes 51 tokens in 456 ms (E4B: 47 in
+    /// 185 ms), the turn after an action 52 in 465 ms (E4B: 48 in 187 ms). Nothing is computed ahead after an answer the
+    /// model ended itself: only the end of its turn follows (the `\n` after `<turn|>`, no token the model stops at), which
+    /// the next request computes with its own message.
     /// `async` like the protocol's default (see `useTools`).
     public func catchUp(with conversation: [ChatMessage]) async {
         lastCatchUp = (0, 0)
         guard let tokens = try? render(conversation, generationPrompt: false) else { return }
         let common = commonPrefix(cachedTokens, tokens, answering: false)
-        guard common < cachedTokens.count, common < tokens.count else { return }
+        guard common < tokens.count else { return }
+        if common == cachedTokens.count {
+            // A turn the model did not end follows when the rest holds a token it stops at (`<turn|>`, `<|tool_response>`).
+            guard tokens[common...].contains(where: stopTokens.contains) else { return }
+            lastCatchUp = await computeAhead(tokens, from: common)
+            return
+        }
         let clock = ContinuousClock()
         let t0 = clock.now
         guard let computed = try? prefill(tokens: tokens) else { return }
         let d = clock.now - t0
         lastCatchUp = (computed, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+    }
+
+    /// Computes `tokens[start...]` into the cache, which holds `tokens[..<start]`, in the background (see `catchUp`):
+    /// `aheadChunk` tokens at a time, while background work is allowed (nobody speaks: `allowBackgroundWork`) and no
+    /// request is sent. A request sent meanwhile goes first, once the chunk under way is done, and computes the rest in
+    /// its own pass, as before; so does the next request when someone speaks. A pass of its own costs more than the same
+    /// tokens in a request's (about 50 tokens: 0.56 s instead of 0.15 s with Gemma 4 26B, 0.29 s instead of 0.1 s with
+    /// E4B), but nobody waits for it: it starts as soon as the announcement is said, and the user's next request comes
+    /// later (a pause after their first words, then its transcription). Given up too as soon as anything else uses the
+    /// cache (a new conversation, other tools), and when the task is cancelled. Returns the tokens computed, and the time
+    /// spent computing them.
+    private func computeAhead(_ tokens: [Int], from start: Int) async -> (computed: Int, ms: Double) {
+        let uses = cacheUses
+        let clock = ContinuousClock()
+        var spent = Duration.zero
+        var computed = 0
+        while backgroundAllowed, pendingRequests.load(ordering: .relaxed) == 0, cacheUses == uses, !Task.isCancelled,
+              cachedTokens.count < tokens.count
+        {
+            let done = cachedTokens.count
+            let chunk = Array(tokens[..<min(done + Self.aheadChunk, tokens.count)])
+            let t0 = clock.now
+            let read = (try? readPrompt(chunk, from: done)) != nil  // which keeps `cachedTokens` in step if it throws
+            if read {
+                eval(cache.flatMap(\.state))
+                cachedTokens = Array(chunk.prefix(cachedTokenCount(upTo: chunk.count)))
+            }
+            spent += clock.now - t0
+            computed += cachedTokens.count - done
+            guard read else { break }
+            await Task.yield()  // a request sent meanwhile goes first
+        }
+        let stopped = cacheUses != uses ? "the cache was used meanwhile"
+            : cachedTokens.count >= tokens.count ? nil
+            : pendingRequests.load(ordering: .relaxed) > 0 ? "a request was sent" : !backgroundAllowed ? "someone speaks"
+            : "stopped"
+        DebugLog.log("LLM: computed \(computed) of \(tokens.count - start) tokens of the history ahead (reused \(start)) in "
+            + "\(spent)" + (stopped.map { ", then gave way: \($0)" } ?? ""))
+        return (computed, Double(spent.components.seconds) * 1000 + Double(spent.components.attoseconds) / 1e15)
     }
 
     /// Returns how many tokens were computed.
@@ -495,9 +563,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     // MARK: - Generation
 
-    private func generate(_ conversation: [ChatMessage], maxTokens: Int? = nil,
+    /// `requested`: when the request was sent (`reply`), to tell how long it waited for the model.
+    private func generate(_ conversation: [ChatMessage], maxTokens: Int? = nil, requested: ContinuousClock.Instant? = nil,
                           onOutput: @Sendable (ModelOutput) -> Void) throws
     {
+        let waited = requested.map { ContinuousClock.now - $0 } ?? .zero
+        if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
         hold.set(false)  // a new answer never starts paused
         logResidency("before the request")
         let prompt = try render(conversation, generationPrompt: true)
@@ -532,7 +603,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var iterator = try readPrompt(prompt, from: start, components: components)
         let d = clock.now - t0
         lastPrefill = (reused, prompt.count - reused,
-                       Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+                       Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
+                       Double(waited.components.seconds) * 1000 + Double(waited.components.attoseconds) / 1e15)
         DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms")
         if answeringAgain || wentBack {
             // Once the tool's result is in, or the prompt of a request that went back (see `snapshot`).
@@ -674,6 +746,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// turn, an interrupted answer, an answer the history keeps otherwise than the model wrote it, a
     /// turn dropped after a tool call, a new conversation), rebuild it.
     private func reuseCache(for tokens: [Int], answering: Bool = true) throws -> (reused: Int, from: Start) {
+        cacheUses += 1
         if let r = rebuild, r.done >= r.tokens.count - 1, commonPrefix(r.tokens, tokens) >= r.done {
             cache = r.cache  // the shortened history is ready: switch to it
             cachedTokens = Array(r.tokens[..<r.done])

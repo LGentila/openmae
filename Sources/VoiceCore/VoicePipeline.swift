@@ -184,6 +184,9 @@ public actor VoicePipeline {
     private var warmTask: Task<Void, Never>?
     /// The model catching up with the history just recorded (`LanguageModel.catchUp`), after the one before.
     private var catchUpTask: Task<Void, Never>?
+    /// Telling the model whether it may work in the background (`LanguageModel.allowBackgroundWork`), after the call
+    /// before: it gets them in the order the states came.
+    private var backgroundPermission: Task<Void, Never>?
 
     // The turn being prepared or spoken (at most one).
     private var turn: Turn?
@@ -421,6 +424,7 @@ public actor VoicePipeline {
     /// Stops for good, before the models are released (another tier chosen, or the models deleted).
     public func stop() async {
         await cancelTurn(stopAudio: true)
+        catchUpTask?.cancel()  // what the model computes ahead stops at its next chunk
         await catchUpTask?.value  // the model is not released while it still computes
         warmTask?.cancel()
         warmTask = nil
@@ -1268,9 +1272,10 @@ public actor VoicePipeline {
         guard self.turn === turn, !turn.interrupted else { return }
         voiceIsAudible()  // never leave the model paused
         self.turn = nil
+        var recorded = false
         if let metrics, let message = turn.userMessage {
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: false)
-            letModelCatchUp()
+            recorded = true
             if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
         }
@@ -1281,17 +1286,22 @@ public actor VoicePipeline {
         // After an answer, Maé listens a few seconds more without the wake phrase.
         if config.listening == .wakeWord, metrics != nil { stayAwake() }
         setState(someoneSpeaksToMae ? .userSpeaking : .listening)
+        // Once the state says whether someone speaks, or another announcement starts.
+        if recorded { letModelCatchUp() }
     }
 
     /// Once an exchange is recorded, the model computes what of the history its memory no longer holds (an answer cut
     /// off, or kept otherwise than it wrote it) right away, while the user speaks or nobody does, rather than in the
     /// next answer's time; then a speculative answer abandoned, and the user's message heard in full after it, only cost
-    /// that message (`LanguageModel.catchUp`). One after the other, in the order the exchanges were recorded.
+    /// that message (`LanguageModel.catchUp`). So does it what it never wrote (an announcement once said, a tool's result
+    /// and the app's own sentences), if nobody speaks: it knows by then whether someone does (`backgroundPermission`).
+    /// One after the other, in the order the exchanges were recorded.
     private func letModelCatchUp() {
         let messages = conversation.messages
-        let previous = catchUpTask
+        let (previous, permission) = (catchUpTask, backgroundPermission)
         catchUpTask = Task { [model] in
             await previous?.value
+            await permission?.value
             await model.catchUp(with: messages)
         }
     }
@@ -1429,7 +1439,11 @@ public actor VoicePipeline {
         if newState == .listening, let awakeUntil, clock.now >= awakeUntil { fallAsleep() }
         emit.yield(.state(newState))
         let quiet = newState == .listening
-        Task { [model] in await model.allowBackgroundWork(quiet) }
+        let previous = backgroundPermission
+        backgroundPermission = Task { [model] in
+            await previous?.value
+            await model.allowBackgroundWork(quiet)
+        }
         keepModelsWarm(quiet)
         if quiet { startAnnouncementIfIdle() }
     }

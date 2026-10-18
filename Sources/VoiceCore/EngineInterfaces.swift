@@ -102,8 +102,11 @@ public protocol LanguageModel: Sendable {
     func prefill(_ conversation: [ChatMessage]) async throws
     /// The history as the next request will start, once an exchange is recorded. A model that keeps its working memory
     /// between requests computes now what of it that memory no longer matches (an answer cut off, or recorded otherwise
-    /// than the model wrote it), while nobody waits for an answer; nothing when the memory holds it (or went past it),
-    /// or when the history only goes on from what the memory holds.
+    /// than the model wrote it), while nobody waits for an answer. What the model never wrote, after what its memory
+    /// holds (an announcement, a tool's result and the app's own sentences), it computes in the background, while that is
+    /// allowed (`allowBackgroundWork`), and it gives way to any request sent meanwhile, which then computes the rest.
+    /// Nothing when the memory holds the history (or went past it), or when only the end of an answer the model wrote
+    /// follows. Returns once that is done, or given up.
     func catchUp(with conversation: [ChatMessage]) async
     /// Processes the beginning every conversation starts with (`Conversation.beginning`: the system prompt, and the
     /// example exchanges when there are) and keeps it, so that a new conversation starts from it without computing it
@@ -114,8 +117,8 @@ public protocol LanguageModel: Sendable {
     /// Prepares a shortened history (oldest exchanges dropped) in the background and returns once it is
     /// ready. Meanwhile the caller keeps sending the full history, which the current memory serves.
     func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws
-    /// Background work may use the GPU only while this is true (the pipeline turns it off while the
-    /// assistant is thinking or speaking, so the voice never stutters).
+    /// Background work may use the GPU only while this is true (the pipeline turns it off while someone
+    /// speaks or the assistant is thinking or speaking, so the voice never stutters).
     func allowBackgroundWork(_ allowed: Bool) async
 }
 

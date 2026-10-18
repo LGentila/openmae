@@ -1,11 +1,12 @@
 // voice-cli cache-check — how much of each request the language model finds in its memory (KV cache), in the
 // sequences of requests the app sends: plain turns, an action, two actions in one request (the app carries out the
-// first and says it does one thing at a time), what the app says on its own (an announcement), a refused call and its
-// second try, a long result the model sums up (as after a web search), that summing up cancelled while the model reads
-// the result (the user spoke over the waiting phrase), a turn dropped after its second try (the user spoke again before
-// any voice), a speculative answer abandoned, an interrupted answer, an answer in paragraphs, a speculative answer
-// abandoned after an answer cut off, the tools changing, the history shortened, a new conversation; and answers that
-// the history keeps otherwise than the model wrote them, after a request computed from scratch or not.
+// first and says it does one thing at a time), what the app says on its own (an announcement, and a request sent while
+// the model computes it in the background), a refused call and its second try, a long result the model sums up (as
+// after a web search), that summing up cancelled while the model reads the result (the user spoke over the waiting
+// phrase), a turn dropped after its second try (the user spoke again before any voice), a speculative answer abandoned,
+// an interrupted answer, an answer in paragraphs, a speculative answer abandoned after an answer cut off, the tools
+// changing, the history shortened, a new conversation; and answers that the history keeps otherwise than the model
+// wrote them, after a request computed from scratch or not.
 //
 // Text only, as the app would send it with actions on (the same system prompt, tools and date line); no call is
 // carried out: an action "succeeds" or is refused as each scenario says.
@@ -13,11 +14,12 @@
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
 //
 // Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
-// memory in use after it; and after an exchange is recorded, what the model computes of the history while nobody waits,
-// as in the app ("the history caught up"). A request after which the model counts other tokens in its memory than the
-// memory holds is marked "out of step" (the next one would be computed from the wrong place). VOICE_DEBUG=1 adds the
-// model's own lines ("the request leaves the cache at token N", with the text on each side; "restored the snapshot";
-// "prefill N tokens (reused M)").
+// memory in use after it (and how long it waited for the model, when it did); and after an exchange is recorded, what the
+// model computes of the history while nobody waits, as in the app ("the history caught up"): an answer cut off, or what
+// the model never wrote (an announcement, a tool's result and the app's own sentences). A request after which the model
+// counts other tokens in its memory than the memory holds is marked "out of step" (the next one would be computed from
+// the wrong place). VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at token N", with the text
+// on each side; "restored the snapshot"; "prefill N tokens (reused M)"; "computed N of M tokens of the history ahead").
 
 import Foundation
 import Synchronization
@@ -68,15 +70,22 @@ private actor CacheCheck {
         Conversation.userMessage(text, language: .french, dateLine: dateLine)
     }
 
-    /// Sends a request; `stopAfter`: stop reading (cancel) after this many pieces of output.
+    /// The model's counts of requests computed from scratch, gone back to a snapshot, and to the conversations' beginning.
+    typealias WentBack = (rebuilds: Int, restores: Int, beginnings: Int)
+
+    private func wentBack() async -> WentBack {
+        (await model.cacheRebuilds, await model.snapshotRestores, await model.beginningRestores)
+    }
+
+    /// Sends a request; `stopAfter`: stop reading (cancel) after this many pieces of output. `wentBackBefore`: the
+    /// model's counts, read before something else started on the model (read here, they would wait for it, and so would
+    /// the request).
     /// `moreCalls`: the model wrote more than one call, or went on to another (`ModelOutput.moreToolCalls`).
-    private func request(_ label: String, _ messages: [ChatMessage], stopAfter: Int? = nil) async throws
-        -> (text: String, calls: [ToolCall], moreCalls: Bool)
+    private func request(_ label: String, _ messages: [ChatMessage], stopAfter: Int? = nil,
+                         wentBackBefore: WentBack? = nil) async throws -> (text: String, calls: [ToolCall], moreCalls: Bool)
     {
-        let rebuildsBefore = await model.cacheRebuilds
-        let restoresBefore = await model.snapshotRestores
-        let beginningsBefore = await model.beginningRestores
-        let promptTokens = try await model.tokenCount(messages)
+        let before: WentBack
+        if let wentBackBefore { before = wentBackBefore } else { before = await wentBack() }
         var text = ""
         var calls: [ToolCall] = []
         var moreCalls = false
@@ -95,17 +104,19 @@ private actor CacheCheck {
             if let stopAfter, pieces >= stopAfter { break }
         }
         let prefill = await model.lastPrefill
-        let step = Step(label: label, promptTokens: promptTokens, reused: prefill.reused, computed: prefill.computed,
-                        prefillMs: prefill.ms, firstOutputMs: first, rebuilt: await model.cacheRebuilds > rebuildsBefore,
-                        restored: await model.snapshotRestores > restoresBefore,
-                        fromBeginning: await model.beginningRestores > beginningsBefore)
+        let after = await wentBack()
+        let step = Step(label: label, promptTokens: try await model.tokenCount(messages), reused: prefill.reused,
+                        computed: prefill.computed, prefillMs: prefill.ms, firstOutputMs: first,
+                        rebuilt: after.rebuilds > before.rebuilds, restored: after.restores > before.restores,
+                        fromBeginning: after.beginnings > before.beginnings)
         steps.append(step)
         let note = step.rebuilt ? "  ← rebuilt from scratch"
             : step.reused == 0 ? "  ← from scratch" : step.fromBeginning ? "  ← back to the conversations' beginning"
             : step.restored ? "  ← back to a snapshot" : ""
-        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@%@",
+        let waited = prefill.waitedMs >= 1 ? String(format: " · waited %.0f ms for the model", prefill.waitedMs) : ""
+        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@%@%@",
                      label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
-                     MLXChatModel.activeMemoryGB, note, await outOfStepNote()))
+                     MLXChatModel.activeMemoryGB, waited, note, await outOfStepNote()))
         return (text, calls, moreCalls || calls.count > 1)
     }
 
@@ -157,9 +168,10 @@ private actor CacheCheck {
     /// more than one); with `summarize`, the call gets that result and the model sums it up (as after a web search or an
     /// agent's report). `record: false`: the turn is dropped (the user spoke again before any voice); `interrupted`: the
     /// answer is recorded as cut off. `cancelSumming`: the summing up is cancelled while the model reads the result
-    /// (`cancelledRequest`).
+    /// (`cancelledRequest`). `wentBackBefore`: see `request`. `catchingUp: false`: recorded without catching up.
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
-              stopAfter: Int? = nil, interrupted: Bool = false, cancelSumming: Bool = false) async throws
+              stopAfter: Int? = nil, interrupted: Bool = false, cancelSumming: Bool = false,
+              wentBackBefore: WentBack? = nil, catchingUp: Bool = true) async throws
     {
         let user = message(text)
         var request = conversation.messages(adding: user)
@@ -178,7 +190,8 @@ private actor CacheCheck {
                 try await cancelledRequest(label + pass, request)
                 break
             }
-            let output = try await self.request(label + pass, request, stopAfter: stopAfter)
+            let output = try await self.request(label + pass, request, stopAfter: stopAfter,
+                                                wentBackBefore: pass.isEmpty ? wentBackBefore : nil)
             chunker.pieces(adding: filter.push(output.text)).forEach(send)
             chunker.pieces(adding: filter.flush()).forEach(send)
             guard !summing, let call = output.calls.first else { break }  // a call written while summing up: ignored
@@ -204,22 +217,48 @@ private actor CacheCheck {
         chunker.remainingPieces().forEach(send)
         if record {
             conversation.record(user: user, steps: steps, assistant: answer, interrupted: interrupted)
-            await catchUp()
+            if catchingUp { await catchUp() }
         }
     }
 
     /// What the app says on its own (a timer that rang, received information), recorded as the pipeline does: the note
     /// as the user's message, what was said as the answer, without asking the model anything.
     func announcement(note: String, said: String) async {
+        recordAnnouncement(note: note, said: said)
+        await catchUp()
+    }
+
+    /// An announcement recorded as `announcement` does, and a request sent `after` the model started computing it ahead
+    /// (the user typed at once): the model gives way to the request once the chunk it computes is done, and the request
+    /// computes the rest. Prints what was computed ahead before the request.
+    func announcement(note: String, said: String, thenRequest label: String, _ text: String, after delay: Duration)
+        async throws
+    {
+        recordAnnouncement(note: note, said: said)
+        let before = await wentBack()  // read now: read with the request, they would wait for the computation ahead
+        let history = conversation.messages
+        let ahead = Task { [model] () -> (computed: Int, ms: Double) in
+            await model.catchUp(with: history)
+            return await model.lastCatchUp
+        }
+        try await Task.sleep(for: delay)
+        try await turn(label, text, wentBackBefore: before, catchingUp: false)
+        let done = await ahead.value  // read before the next catch-up
+        if done.computed > 0 { catchUps.append(done.ms) }
+        print(String(format: "  %-46@ %5d tokens computed ahead in %6.0f ms, then the request went first",
+                     "  before it, the history caught up" as NSString, done.computed, done.ms))
+        await catchUp()
+    }
+
+    private func recordAnnouncement(note: String, said: String) {
         var answer = ""
         SpeakableText.record(said, in: &answer)
         conversation.record(user: ChatMessage(.user, note), steps: [], assistant: answer, interrupted: false)
         print(String(format: "  %-46@ recorded, no request", "announcement" as NSString))
-        await catchUp()
     }
 
     /// As the pipeline does once an exchange is recorded: the model computes what of the history its memory no longer
-    /// holds (`MLXChatModel.catchUp`), while nobody waits for an answer.
+    /// holds, and what it never wrote (`MLXChatModel.catchUp`), while nobody waits for an answer.
     private func catchUp() async {
         await model.catchUp(with: conversation.messages)
         let done = await model.lastCatchUp
@@ -368,6 +407,20 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             await check.announcement(note: InboundPhrases.note(source: "Home Assistant", receivedAt: now),
                                      said: "Sonnette\u{00A0}: quelqu'un est à la porte.")
             try await check.turn("plain answer after the second", "Qui ça peut bien être à cette heure-ci ?")
+        }),
+        ("announcement-request", {
+            // A request sent while the model computes an announcement ahead (the user typed at once, 50 ms after it was
+            // said): the model gives way to it once the chunk it computes is done. A long announcement, as received
+            // information can be, so that more than one chunk is left to compute.
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.announcement(
+                note: InboundPhrases.note(source: "Home Assistant", receivedAt: now),
+                said: "Le lave-linge a fini son cycle il y a cinq minutes. La fenêtre de la chambre est restée ouverte, "
+                    + "il fait quatorze degrés dans la pièce, et le facteur a déposé un colis devant la porte d'entrée.",
+                thenRequest: "plain answer, sent while it is computed", "Merci. Je fais quoi en premier, à ton avis ?",
+                after: .milliseconds(50))
+            try await check.turn("plain answer", "D'accord, merci beaucoup.")
         }),
         ("second-try", {
             try await check.newConversation()

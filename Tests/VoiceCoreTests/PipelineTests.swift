@@ -68,7 +68,14 @@ actor ScriptedModel: LanguageModel {
     func prefillBeginning(_ beginning: [ChatMessage]) async throws { prefills.append((true, beginning)) }
     /// The histories the pipeline asked the model to catch up with, in order.
     private(set) var catchUps: [[ChatMessage]] = []
-    func catchUp(with conversation: [ChatMessage]) async { catchUps.append(conversation) }
+    /// Whether background work was allowed (`allowBackgroundWork`) when each of them came.
+    private(set) var backgroundAllowedAtCatchUps: [Bool] = []
+    private var backgroundAllowed = true
+    func catchUp(with conversation: [ChatMessage]) async {
+        catchUps.append(conversation)
+        backgroundAllowedAtCatchUps.append(backgroundAllowed)
+    }
+    func allowBackgroundWork(_ allowed: Bool) async { backgroundAllowed = allowed }
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
     private(set) var shortenings = 0
     func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws {
@@ -226,6 +233,25 @@ struct PipelineTests {
         #expect(await log.pieces.prefix(3) == ["Bien sûr, voici une petite histoire.",
                                               "Il était une fois un chat très curieux.", "Il aimait regarder les étoiles."])
         #expect(await model.catchUps.first == Array(request.dropLast()))  // once the answer was recorded
+    }
+
+    /// What the model never wrote (an announcement once said) it computes in the background, only while nobody speaks:
+    /// each recorded exchange reaches it once it knows whether someone does. Here an announcement waits for the end of
+    /// an answer: the answer's exchange reaches the model as the announcement starts (no background work then), the
+    /// announcement's own once it is over and nobody speaks.
+    @Test func modelCatchesUpOnceItKnowsWhetherSomeoneSpeaks() async throws {
+        let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
+        let pipeline = make(model, stt, speaker)
+        try await pipeline.start()
+        await pipeline.submit(text: "Bonjour")
+        await waitFor { await speaker.played > 0 }
+        await pipeline.announce("Ton minuteur de 10 minutes est terminé.", note: "(Le minuteur a sonné.)",
+                                language: .french)
+        await waitFor { await model.catchUps.count == 2 }  // the answer (1 s), then the chime and the announcement
+        let histories = await model.catchUps
+        #expect(histories.map { $0.filter { $0.role == .user }.count } == [1, 2])
+        #expect(histories.last?.last?.content == "Ton minuteur de 10 minutes est terminé.")
+        #expect(await model.backgroundAllowedAtCatchUps == [false, true])
     }
 
     @Test func speculativeAnswerIsDroppedWhenTheUserGoesOn() async throws {
