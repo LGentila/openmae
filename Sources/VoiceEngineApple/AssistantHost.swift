@@ -244,9 +244,11 @@ public actor AssistantHost: AssistantConnection {
                 }
             },
         ]
-        // Keep macOS from slowing the app down when its window is in the background (App Nap).
+        // Keep macOS from slowing the app down when its window is in the background (App Nap), but let the Mac go to
+        // sleep on its own as usual: `.userInitiated` would also keep it awake, on battery too, as long as the models
+        // are loaded. The Mac stays awake only through a `KeepAwake` (iPhone access, the wake-word mode), on mains.
         activity = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiated, .latencyCritical], reason: "Conversation vocale")
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Conversation vocale")
         emit.yield(.ready(EngineInfo(
             chip: hardware.chipName, memoryGiB: hardware.memoryGiB, tier: tier, recommendedTier: recommended,
             languageModel: languageModel.displayName,
