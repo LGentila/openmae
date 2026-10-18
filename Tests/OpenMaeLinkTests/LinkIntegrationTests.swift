@@ -179,7 +179,7 @@ private final class ScriptedEngine: AssistantConnection, RemoteAudioRouting, @un
         }
     }
 
-    func setRemoteAudioReachable(_ reachable: Bool) async {}
+    func setRemoteAudioReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant?) async {}
 
     func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {}
 

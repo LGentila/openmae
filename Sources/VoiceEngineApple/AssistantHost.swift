@@ -671,6 +671,7 @@ public actor AssistantHost: AssistantConnection {
         await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
         audio?.stop()  // the Mac's microphone and speakers are free again
         await pipeline.resetAudioInput()
+        await pipeline.voiceOutputChanged()  // what waited for another iPhone out of reach is not said to this one
         await pipeline.setOutputReachable(remoteReachable)  // a pipeline loaded while the iPhone was out of reach
         if remoteFeed == nil {
             remoteFeed = Task { [weak self] in
@@ -746,11 +747,11 @@ extension AssistantHost: RemoteAudioRouting {
         await attachRemote()
     }
 
-    public func setRemoteAudioReachable(_ reachable: Bool) async {
+    public func setRemoteAudioReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant?) async {
         guard remote != nil, reachable != remoteReachable else { return }
         remoteReachable = reachable
         guard stage == .running else { return }  // a pipeline still loading gets it from `attachRemote`
-        await pipeline?.setOutputReachable(reachable)
+        await pipeline?.setOutputReachable(reachable, reachedUntil: reachedUntil)
     }
 
     public func useLocalAudio() async {
@@ -763,8 +764,12 @@ extension AssistantHost: RemoteAudioRouting {
         await router.use(audio)
         await restartAudio()  // the Mac's microphone and speakers again, with the current settings
         // What waited for the iPhone (a timer that rang while it was out of reach) is said here, now that the speakers
-        // are back; unless another iPhone took the conversation meanwhile (`attachRemote` told the pipeline then).
-        if remote == nil { await pipeline?.setOutputReachable(true) }
+        // are back; unless another iPhone took the conversation meanwhile (`attachRemote` told the pipeline then). Not
+        // what it did not hear of an answer, nor the request to repeat a sentence of the user's that its drop cut.
+        if remote == nil {
+            await pipeline?.voiceOutputChanged()
+            await pipeline?.setOutputReachable(true)
+        }
         DebugLog.log("audio: the Mac has the microphone and the voice again")
     }
 

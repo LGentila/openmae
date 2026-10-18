@@ -91,15 +91,17 @@ struct FakeSynthesizer: SpeechSynthesizer {
 }
 
 final class FakeStream: SynthesisStream, @unchecked Sendable {
-    let audio: AsyncThrowingStream<[Float], Error>
-    private let continuation: AsyncThrowingStream<[Float], Error>.Continuation
+    let audio: AsyncThrowingStream<VoiceAudio, Error>
+    private let continuation: AsyncThrowingStream<VoiceAudio, Error>.Continuation
     private var started = false
+    private var texts = 0
     init() { (audio, continuation) = AsyncThrowingStream.makeStream() }
     func enqueue(_ text: String) {
         // Like Pocket TTS, the voice sometimes opens with a near-silent breath.
-        if !started { continuation.yield([Float](repeating: 0.0001, count: 300)) }
+        if !started { continuation.yield(VoiceAudio([Float](repeating: 0.0001, count: 300), text: texts)) }
         started = true
-        continuation.yield([Float](repeating: 0.1, count: 500))
+        continuation.yield(VoiceAudio([Float](repeating: 0.1, count: 500), text: texts))
+        texts += 1
     }
     func finish() { continuation.finish() }
     func cancel() async { continuation.finish() }

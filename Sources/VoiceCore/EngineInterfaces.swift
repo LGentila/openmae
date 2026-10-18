@@ -166,10 +166,25 @@ public protocol SynthesisStream: Sendable {
     func enqueue(_ text: String)
     /// No more text: the audio stream ends once everything enqueued has been spoken.
     func finish()
-    /// Audio chunks (mono Float32 at `outputSampleRate`), in order.
-    var audio: AsyncThrowingStream<[Float], Error> { get }
+    /// Audio chunks, in order, each with the text it says.
+    var audio: AsyncThrowingStream<VoiceAudio, Error> { get }
     /// Stops generation immediately (barge-in). Returns once no more audio will be produced.
     func cancel() async
+}
+
+/// A chunk of a voice's audio, and the text it says: the pipeline knows from it which sentence of an answer was being
+/// said when the device that plays it went out of reach (`VoicePipeline.setOutputReachable`).
+public struct VoiceAudio: Sendable, Equatable {
+    /// Mono Float32 at the voice's `outputSampleRate`.
+    public var samples: [Float]
+    /// The text it says: which `enqueue` call gave it, counted from 0 (blank texts included); nil when the voice cannot
+    /// tell.
+    public var text: Int?
+
+    public init(_ samples: [Float], text: Int? = nil) {
+        self.samples = samples
+        self.text = text
+    }
 }
 
 /// How the playback of what an output was given ended (`AudioOutput.waitUntilDone`).
@@ -190,4 +205,13 @@ public protocol AudioOutput: Sendable {
     @discardableResult func waitUntilDone() async -> PlaybackEnd
     /// Barge-in: silence now, drop anything queued.
     func stopImmediately() async
+    /// The device that plays the voice went out of reach (its connection dropped): what is being given to it is dropped
+    /// without telling it, so that what it already has it still plays (it could not be told to stop anyway), and the
+    /// next sound starts anew. Whoever waits for the end of the playback is let go. Speakers that are always within reach
+    /// stop, as for a barge-in.
+    func abandon() async
+}
+
+extension AudioOutput {
+    public func abandon() async { await stopImmediately() }
 }

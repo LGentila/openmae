@@ -219,10 +219,10 @@ final class Rig: @unchecked Sendable {
     /// `transcriber`, `model`, `voice`: the engine's stages, none of which hears, answers or speaks by default (beyond
     /// the announcement, said by the voice alone).
     init(gracePeriod: Duration = .seconds(15), transcriber: any Transcriber = Deaf(), model: any LanguageModel = Mute(),
-         voice: any SpeechSynthesizer = ToneVoice()) async throws
+         voice: any SpeechSynthesizer = ToneVoice(), config: PipelineConfig = .init()) async throws
     {
         folder = FileManager.default.temporaryDirectory.appending(path: "held-announcement-\(UUID().uuidString)")
-        engine = try await PipelineEngine(transcriber: transcriber, model: model, voice: voice)
+        engine = try await PipelineEngine(transcriber: transcriber, model: model, voice: voice, config: config)
         host = LinkHost(engine: engine, audio: engine, identityStore: NoIdentity(),
                         storeURL: folder.appending(path: "link.json"), macName: "Mac de test", gracePeriod: gracePeriod)
     }
@@ -537,18 +537,27 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
     private var interrupted: [String] = []
     private var bargeIns = 0
     private var received: [AssistantCommand] = []
+    private var statesSeen: [PipelineState] = []
+    private var piecesShown: [String] = []
     private var feed: Task<Void, Never>?
 
-    init(transcriber: any Transcriber, model: any LanguageModel, voice: any SpeechSynthesizer) async throws {
+    init(transcriber: any Transcriber, model: any LanguageModel, voice: any SpeechSynthesizer,
+         config: PipelineConfig = .init()) async throws
+    {
         router = AudioRouter(speakers)
         pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model, synthesizer: voice,
-                                 output: router)
+                                 output: router, config: config)
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         try await pipeline.start()
         Task { [weak self, pipeline, emit] in
             for await event in pipeline.events {
                 switch event {
-                case .state(let state): emit.yield(.state(state))
+                case .state(let state):
+                    self?.lock.withLock { self?.statesSeen.append(state) }
+                    emit.yield(.state(state))
+                case .assistantPiece(let piece):
+                    self?.lock.withLock { self?.piecesShown.append(piece) }
+                    emit.yield(.assistantPiece(piece))
                 case .turnFinished(let metrics):
                     self?.lock.withLock {
                         if metrics.interrupted {
@@ -586,6 +595,15 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
     var interruptions: Int { lock.withLock { bargeIns } }
     /// The commands it got, in order.
     var commands: [AssistantCommand] { lock.withLock { received } }
+    /// The conversation's states, in order.
+    var states: [PipelineState] { lock.withLock { statesSeen } }
+    /// What the interfaces were shown of what Maé said, piece by piece.
+    var pieces: [String] { lock.withLock { piecesShown } }
+
+    /// The user speaks into the iPhone (on) or stops (off): its microphone's frames are taken for speech meanwhile.
+    func iPhoneUserSpeaks(_ on: Bool) {
+        detector.hearsSpeech = on
+    }
 
     /// The user speaks into the Mac's microphone, for `seconds`.
     func speakIntoTheMac(seconds: Double) async {
@@ -623,12 +641,14 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
         await router.use(CountingOutput(output: output) { [weak self] samples in
             self?.lock.withLock { self?.counts.remotePlayed += samples }
         })
+        await pipeline.resetAudioInput()
+        await pipeline.voiceOutputChanged()
         await pipeline.setOutputReachable(true)
     }
 
-    func setRemoteAudioReachable(_ reachable: Bool) async {
+    func setRemoteAudioReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant?) async {
         lock.withLock { reachabilityTold.append(reachable) }
-        await pipeline.setOutputReachable(reachable)
+        await pipeline.setOutputReachable(reachable, reachedUntil: reachedUntil)
     }
 
     func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {
@@ -642,7 +662,7 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
     }
 
     /// As `AssistantHost` does: the Mac's speakers again, what was playing stopped while its audio restarts, then what
-    /// waited for the voice is said.
+    /// waited for the voice is said (not what waited for the iPhone only).
     func useLocalAudio() async {
         lock.withLock {
             counts.localRoutes += 1
@@ -652,6 +672,7 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
         await router.use(speakers)
         await pipeline.interrupt()
         await pipeline.resetAudioInput()
+        await pipeline.voiceOutputChanged()
         await pipeline.setOutputReachable(true)
     }
 }
@@ -718,7 +739,7 @@ private final class GatedStream: SynthesisStream, @unchecked Sendable {
     private var held: [String]? = []
     private var finishing = false
 
-    var audio: AsyncThrowingStream<[Float], Error> { tone.audio }
+    var audio: AsyncThrowingStream<VoiceAudio, Error> { tone.audio }
 
     init(_ door: Door) {
         Task { [weak self] in
@@ -793,6 +814,7 @@ struct CountingOutput: AudioOutput {
 
     func waitUntilDone() async -> PlaybackEnd { await output.waitUntilDone() }
     func stopImmediately() async { await output.stopImmediately() }
+    func abandon() async { await output.abandon() }
 }
 
 /// The Mac's speakers: they count what they are given, and play it in real time; held (`hold()`), what they play

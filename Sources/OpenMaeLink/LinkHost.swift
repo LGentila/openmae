@@ -166,6 +166,8 @@ public actor LinkHost: AssistantConnection {
         var grace: Task<Void, Never>?
         /// When its microphone was last heard on its current session (nil: not since that session opened).
         var heard: ContinuousClock.Instant?
+        /// When its microphone was last heard, on any session: the voice sent to it before then reached it.
+        var lastHeard: ContinuousClock.Instant
         /// What the engine was last told: whether the iPhone hears the voice (see `updateReach`).
         var reachable = true
         /// Checks a few times a second that the iPhone is still heard.
@@ -177,6 +179,15 @@ public actor LinkHost: AssistantConnection {
     /// minute later (when the iPhone could not say so), or its sound stopped (a phone call). Either way it does not hear
     /// the voice for now.
     static let silenceLimit = Duration.seconds(1)
+
+    /// The voice sent this long before the iPhone was last heard may still have been on its way when its connection
+    /// dropped: it is taken as not heard (a round trip through the relay over a cellular network, with room to spare).
+    static let inFlight = Duration.milliseconds(300)
+
+    /// A new session from the iPhone that has the conversation, heard on the one it replaces this recently: it changes
+    /// its way (from the relay to the local network, at a silence) rather than coming back from a drop, which takes
+    /// longer (it has to notice the drop, then look for the Mac both ways).
+    static let changeOfWay = Duration.milliseconds(300)
 
     /// `audio`: nil when the engine cannot switch its sound (a demonstration engine): the iPhones then see and
     /// command the conversation without sound. `gracePeriod`: how long an iPhone whose connection dropped keeps the
@@ -573,8 +584,10 @@ public actor LinkHost: AssistantConnection {
             hand.grace?.cancel()
             hand.grace = nil
             hand.output.bind(session)
-            // Heard again once its microphone is, on this session: then its end of it is surely up.
-            hand.heard = nil
+            // Heard again once its microphone is, on this session: then its end of it is surely up. Not after a change of
+            // way: it is not out of reach meanwhile, which would cut a sentence the user is starting.
+            let changesWay = previous != nil && hand.heard.map { ContinuousClock.now - $0 < Self.changeOfWay } == true
+            if !changesWay { hand.heard = nil }
             self.hand = hand
             state.hand = LinkStatus.Hand(device: device, path: session.path)
         }
@@ -615,8 +628,8 @@ public actor LinkHost: AssistantConnection {
             stations[key] = station
         }
         if var hand, hand.key == key, hand.grace == nil {
-            // Wi-Fi to 4G, a tunnel: the iPhone has a few seconds to come back by another way.
-            hand.microphone.fillSilence()
+            // Wi-Fi to 4G, a tunnel: the iPhone has a few seconds to come back by another way. A sentence the user was
+            // saying is cut, not ended as if they had stopped talking: the engine is told it is out of reach, below.
             hand.grace = Task { [weak self, gracePeriod] in
                 try? await Task.sleep(for: gracePeriod)
                 guard !Task.isCancelled else { return }
@@ -745,6 +758,7 @@ public actor LinkHost: AssistantConnection {
         guard let hand, hand.key == key else { return }
         hand.microphone.receive(packet)
         self.hand?.heard = .now
+        self.hand?.lastHeard = .now
         if !hand.reachable { await updateReach() }
     }
 
@@ -762,7 +776,7 @@ public actor LinkHost: AssistantConnection {
             }
         }
         // It just asked for the conversation: it is heard.
-        hand = Hand(key: key, microphone: microphone, output: output, heard: .now, watch: watch)
+        hand = Hand(key: key, microphone: microphone, output: output, heard: .now, lastHeard: .now, watch: watch)
         lastUsed[key] = .now
         state.hand = LinkStatus.Hand(device: peer.device, path: peer.session.path)
         DebugLog.log("link: the iPhone has the conversation")
@@ -781,7 +795,7 @@ public actor LinkHost: AssistantConnection {
         hand.watch?.cancel()
         // What it was saying, it will not say it played (an announcement is then said again): that waits for the
         // voice's next output, the Mac's speakers or another iPhone's, rather than going into this one meanwhile.
-        if hand.reachable { await audio?.setRemoteAudioReachable(false) }
+        if hand.reachable { await audio?.setRemoteAudioReachable(false, reachedUntil: hand.lastHeard - Self.inFlight) }
         hand.microphone.finish()
         hand.output.detach()
         if notifyPhone { sessions[hand.key]?.session.send(.audio(.released)) }
@@ -803,9 +817,10 @@ public actor LinkHost: AssistantConnection {
 
     /// Tells the engine when the iPhone that has the conversation stops hearing the voice (its session closed, or
     /// nothing came from it for a moment) and when it hears it again, so that what the app says on its own (a timer
-    /// that rings) waits for it rather than being said to nobody. If it does not come back, its session ends (at once,
-    /// or after a minute of silence when the iPhone could not say so), then the grace period, and the Mac takes the
-    /// sound back and says it.
+    /// that rings) waits for it rather than being said to nobody, and what Maé or the user was saying is cut there (an
+    /// answer is said again from the sentence that was cut once it is back, a sentence of the user's is asked again).
+    /// If it does not come back, its session ends (at once, or after a minute of silence when the iPhone could not say
+    /// so), then the grace period, and the Mac takes the sound back and says the announcements.
     private func updateReach() async {
         // Again after telling: the iPhone may have come and gone meanwhile.
         while let hand, hand.reachable != hears(hand) {
@@ -813,7 +828,9 @@ public actor LinkHost: AssistantConnection {
             self.hand?.reachable = reachable
             DebugLog.log(reachable ? "link: the iPhone hears the voice again"
                 : "link: the iPhone is out of reach, what Maé says on her own waits")
-            await audio?.setRemoteAudioReachable(reachable)
+            // What was sent to it before it was last heard reached it.
+            let reachedUntil = reachable ? nil : hand.lastHeard - Self.inFlight
+            await audio?.setRemoteAudioReachable(reachable, reachedUntil: reachedUntil)
         }
     }
 

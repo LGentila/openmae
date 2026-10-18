@@ -12,9 +12,9 @@ import Foundation
 /// Before one is audible, the near-silence of all of them is dropped (the pipeline skips it anyway); then the winner's
 /// audio goes through as it comes, near-silence included. The others are stopped and let go at once.
 public final class VoiceRace: SynthesisStream, @unchecked Sendable {
-    public let audio: AsyncThrowingStream<[Float], Error>
+    public let audio: AsyncThrowingStream<VoiceAudio, Error>
     private let count: Int
-    private let output: AsyncThrowingStream<[Float], Error>.Continuation
+    private let output: AsyncThrowingStream<VoiceAudio, Error>.Continuation
     private let audible: @Sendable ([Float]) -> Bool
     private let lock = NSLock()
     // Guarded by `lock`.
@@ -30,7 +30,7 @@ public final class VoiceRace: SynthesisStream, @unchecked Sendable {
         self.runners = runners
         count = runners.count
         self.audible = audible
-        (audio, output) = AsyncThrowingStream.makeStream(of: [Float].self)
+        (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
         let readers = runners.enumerated().map { index, runner in
             Task {
                 do {
@@ -61,10 +61,10 @@ public final class VoiceRace: SynthesisStream, @unchecked Sendable {
     private var speaking: [any SynthesisStream] { lock.withLock { runners.compactMap { $0 } } }
 
     /// Whether `chunk`'s runner is still in the race, or speaks. The first audible chunk decides: the others stop.
-    private func take(_ chunk: [Float], from index: Int) -> Bool {
+    private func take(_ chunk: VoiceAudio, from index: Int) -> Bool {
         let (keep, losers): (Bool, [any SynthesisStream]) = lock.withLock {
             if winner == nil {
-                guard audible(chunk) else { return (true, []) }
+                guard audible(chunk.samples) else { return (true, []) }
                 winner = index
                 DebugLog.log("voice: voice \(index + 1) of \(count) audible first")
                 output.yield(chunk)

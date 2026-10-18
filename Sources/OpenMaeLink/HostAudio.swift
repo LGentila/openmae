@@ -8,7 +8,8 @@ import VoiceCore
 /// - `waitUntilDone` sends the stream's end and returns when the iPhone says it has played everything (or once it
 ///   should have, if the iPhone went silent), telling which;
 /// - `stopImmediately` tells the iPhone to stop at once and drop the rest, also once the stream's end was sent: the
-///   voice is faster than real time, so the iPhone may still have seconds of it in its buffer.
+///   voice is faster than real time, so the iPhone may still have seconds of it in its buffer;
+/// - `abandon` lets the stream go without a word, when the iPhone went out of reach: it plays what it has.
 public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
     private let lock = NSLock()
     private let encoder: OpusEncoder?
@@ -112,6 +113,21 @@ public final class RemoteVoiceOutput: AudioOutput, @unchecked Sendable {
         if let stopped { settle(stopped, .confirmed) }  // stopped as asked: nothing more to hear of it
     }
 
+    /// The iPhone went out of reach while it was given the voice: the stream being sent (or whose end was sent) is let
+    /// go without a word to the iPhone, which plays what it already has; the next sound starts a new stream, which it
+    /// plays after that (rather than taking it for the rest of this one, with the frames lost in between made up).
+    public func abandon() {
+        let dropped: [UInt32] = lock.withLock {
+            defer {
+                stream = nil
+                endedStream = nil
+                encoder?.reset()
+            }
+            return [stream, endedStream].compactMap { $0 }
+        }
+        for stream in dropped { settle(stream, .unconfirmed) }  // whoever waits for it is told, now or later
+    }
+
     /// The iPhone played everything of `stream`, or stopped it.
     public func markFinished(_ stream: UInt32) {
         lock.withLock {
@@ -196,8 +212,9 @@ public final class RemoteMicrophone: @unchecked Sendable {
         chunks.forEach { sink.yield($0) }
     }
 
-    /// The microphone went quiet (muted, or the connection dropped): a moment of silence, so that a sentence in
-    /// progress ends as if the user had stopped talking.
+    /// The microphone goes away (the Mac takes the sound back): a moment of silence, so that a sentence in progress ends
+    /// as if the user had stopped talking. Not when the connection drops: the sentence is cut then
+    /// (`RemoteAudioRouting.setRemoteAudioReachable`).
     public func fillSilence(seconds: Double = 0.8) {
         let chunk = [Float](repeating: 0, count: Int(LinkAudio.microphoneRate * 0.02))
         for _ in 0..<Int(seconds / 0.02) { sink.yield(chunk) }

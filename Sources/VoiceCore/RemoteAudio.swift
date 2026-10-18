@@ -9,8 +9,11 @@ public protocol RemoteAudioRouting: Sendable {
     func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async
     /// Whether the device that has the conversation hears the voice right now: false while its connection is down
     /// (Wi-Fi to 4G, a tunnel), until it comes back, maybe by another way, or until `useLocalAudio`. Meanwhile what the
-    /// app has to say on its own (`VoicePipeline.announce`) waits, rather than being said to nobody.
-    func setRemoteAudioReachable(_ reachable: Bool) async
+    /// app has to say on its own (`VoicePipeline.announce`) waits, rather than being said to nobody; an answer it did not
+    /// hear to its end is said again from the sentence that was cut once it is back, and a sentence of the user's that
+    /// the drop cut is not answered (`VoicePipeline.setOutputReachable`). `reachedUntil`, when it goes out of reach: the
+    /// voice sent to it before that instant reached it (it plays it), what was sent since may be lost.
+    func setRemoteAudioReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant?) async
     /// Back to the Mac's microphone and speakers.
     func useLocalAudio() async
     /// Where what the app says on its own (`VoicePipeline.announce`) is spoken: `output`, a home station's speaker,
@@ -72,5 +75,19 @@ public final class AudioRouter: AudioOutput, @unchecked Sendable {
 
     public func stopImmediately() async {
         await lock.withLock { current }.stopImmediately()
+    }
+
+    public func abandon() async {
+        await lock.withLock { current }.abandon()
+    }
+}
+
+/// What the app says when the connection of the device that has the conversation dropped. Written as `ActionPhrases`
+/// are: "tu", a non-breaking space before « ? », at least five words.
+public enum OutOfReachPhrases {
+    /// A sentence of the user's was cut by the drop: it was not answered, they are asked to say it again.
+    public static func sentenceCut(_ language: SpeechLanguage) -> String {
+        language == .french ? "Ta phrase a été coupée, tu peux répéter\u{00A0}?"
+            : "Your sentence was cut off. Can you say it again?"
     }
 }

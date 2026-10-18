@@ -152,15 +152,22 @@ struct ToneVoice: SpeechSynthesizer {
 
 final class ToneStream: SynthesisStream, @unchecked Sendable {
     static let pieceSamples = 4_800
-    let audio: AsyncThrowingStream<[Float], Error>
-    private let continuation: AsyncThrowingStream<[Float], Error>.Continuation
+    let audio: AsyncThrowingStream<VoiceAudio, Error>
+    private let continuation: AsyncThrowingStream<VoiceAudio, Error>.Continuation
+    private let lock = NSLock()
+    private var texts = 0
 
     init() {
         (audio, continuation) = AsyncThrowingStream.makeStream()
     }
 
     func enqueue(_ text: String) {
-        continuation.yield((0..<Self.pieceSamples).map { Float(0.2 * sin(2 * .pi * 440 * Double($0) / 24_000)) })
+        let number: Int = lock.withLock {
+            defer { texts += 1 }
+            return texts
+        }
+        let tone = (0..<Self.pieceSamples).map { Float(0.2 * sin(2 * .pi * 440 * Double($0) / 24_000)) }
+        continuation.yield(VoiceAudio(tone, text: number))
     }
 
     func finish() { continuation.finish() }

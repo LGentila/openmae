@@ -77,22 +77,25 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
     }
 }
 
-/// One spoken answer: text goes in sentence by sentence, 80 ms audio frames come out.
+/// One spoken answer: text goes in sentence by sentence, 80 ms audio frames come out, each with the text it says.
 struct PocketStream: SynthesisStream {
     let session: PocketTtsSession
-    let audio: AsyncThrowingStream<[Float], Error>
+    let audio: AsyncThrowingStream<VoiceAudio, Error>
     private let trace: VoiceTrace?
+    private let texts: TextNumbers
 
     init(session: PocketTtsSession) {
         self.session = session
         let trace = DebugLog.enabled ? VoiceTrace() : nil
         self.trace = trace
+        let texts = TextNumbers()
+        self.texts = texts
         audio = AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     for try await frame in session.frames {
                         trace?.received(frame)
-                        continuation.yield(frame.samples)
+                        continuation.yield(VoiceAudio(frame.samples, text: frame.utteranceIndex.flatMap(texts.text)))
                     }
                     trace?.ended()
                     continuation.finish()
@@ -107,6 +110,7 @@ struct PocketStream: SynthesisStream {
 
     func enqueue(_ text: String) {
         trace?.enqueued(text)
+        texts.given(text)
         session.enqueue(text)
     }
 
@@ -115,6 +119,27 @@ struct PocketStream: SynthesisStream {
     func cancel() async {
         trace?.cancelled()
         await session.cancel()
+    }
+}
+
+/// FluidAudio numbers the texts of a session it speaks, skipping those that are only white space (`utteranceIndex`):
+/// back to the numbers of the `enqueue` calls, which count every text.
+final class TextNumbers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    /// For each text FluidAudio speaks, in order: its `enqueue` number.
+    private var spoken: [Int] = []
+
+    func given(_ text: String) {
+        lock.withLock {
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { spoken.append(count) }
+            count += 1
+        }
+    }
+
+    /// The `enqueue` number of the text FluidAudio numbers `utterance`.
+    func text(_ utterance: Int) -> Int? {
+        lock.withLock { spoken.indices.contains(utterance) ? spoken[utterance] : nil }
     }
 }
 

@@ -62,6 +62,12 @@ public struct PipelineConfig: Sendable {
     public var partialTranscriptSeconds: Double? = 0.5
     /// The first pass waits for this much of the utterance: speech recognition pads anything shorter with silence.
     public var partialTranscriptMinSeconds: Double = 1
+    /// The device that has the conversation (an iPhone) went out of reach while Maé answered, or while the user spoke
+    /// (`setOutputReachable`). Back within this long, it hears the rest of the answer from the sentence that was cut, or
+    /// is asked to say the user's sentence again; later, the rest is dropped (an old answer is not said), as it is when the
+    /// voice goes to another device meanwhile. The same as the time the link gives the iPhone to come back
+    /// (`LinkHost`'s grace period) before the Mac takes the sound back.
+    public var outOfReachPatienceSeconds: Double = 15
     public init() {}
 }
 
@@ -245,6 +251,71 @@ public actor VoicePipeline {
         var id: UUID?
     }
     private var announcements: [Announcement] = []
+
+    /// A piece of an answer as the turn gave it to the voice (`deliver`): what it takes to say it again, and to record it.
+    private struct SpokenPiece: Sendable {
+        var text: String
+        /// The white space the model wrote before it (`SpeakableText.record`).
+        var separator: String
+        /// Part of the answer the model sees afterwards: false for the phrase said while it writes a tool call.
+        var inHistory: Bool
+
+        /// The answer as the history keeps these pieces.
+        static func answer(_ pieces: some Sequence<SpokenPiece>) -> String {
+            var answer = ""
+            for piece in pieces where piece.inHistory {
+                SpeakableText.record(piece.text, after: piece.separator, in: &answer)
+            }
+            return answer
+        }
+    }
+
+    /// The device that has the conversation went out of reach before it heard all of an answer.
+    private struct Cut: Sendable {
+        /// The first piece (`Turn.pieces`) it may not have heard whole: the answer is said again from there.
+        var from: Int
+        var at: ContinuousClock.Instant
+    }
+
+    /// An answer cut by a drop, to be said again from piece `from`, and its exchange: recorded whole once said, or as cut
+    /// after what was heard once it is given up.
+    private struct Resume: Sendable {
+        var userText: String
+        var userMessage: ChatMessage
+        var steps: [ChatMessage]
+        var language: SpeechLanguage
+        var pieces: [SpokenPiece]
+        var from: Int
+
+        /// What is said again: the pieces from the cut on, without the phrase said while the model wrote a tool call
+        /// (the tool's result is known by then).
+        var rest: [SpokenPiece] { pieces[from...].filter(\.inHistory) }
+        /// The answer as the history keeps what was heard of it: the pieces before the cut.
+        var heard: String { SpokenPiece.answer(pieces[..<from]) }
+    }
+
+    /// What waits for the device that has the conversation to be back in reach (`setOutputReachable`): the rest of an
+    /// answer it did not hear, or the request to say again a sentence of the user's that the drop cut. Said where the
+    /// conversation is (never on a home station), before the announcements, as soon as it is back and nobody speaks; given
+    /// up at `expires` (`outOfReachPatienceSeconds`), when the conversation goes on without it (someone speaks, a typed
+    /// turn, the stop button, a new conversation), or when the voice goes to another device (`voiceOutputChanged`). An
+    /// answer given up goes into the history as cut after what was heard.
+    private struct Unheard: Sendable {
+        enum Kind: Sendable {
+            case answer(Resume)
+            /// « Ta phrase a été coupée, tu peux répéter ? » (`OutOfReachPhrases`): not in the history, which never had
+            /// the cut sentence either.
+            case repeatRequest
+        }
+        var kind: Kind
+        var language: SpeechLanguage
+        var expires: ContinuousClock.Instant
+        var id: Int
+    }
+    private var unheard: Unheard?
+    private var unheardTimer: Task<Void, Never>?
+    private var unheardCount = 0
+
     /// The voice's output can be out of reach for a moment (see `setOutputReachable`): announcements wait meanwhile.
     private var outputReachable = true
     /// Where announcements are spoken when it is not where the conversation is: a home station's speaker (see
@@ -301,10 +372,46 @@ public actor VoicePipeline {
         var wakeDecision: WakeDecision?
         /// The sentence began while Maé was awake: its transcript goes to the wake log.
         var whileAwake = false
+        // What the device that plays the voice heard, should it go out of reach (`setOutputReachable`).
+        /// The pieces given to the voice (`deliver`), in order; after a cut, the rest of the answer, kept for later.
+        var pieces: [SpokenPiece] = []
+        /// Where the current voice's texts are in `pieces`: its text number (`VoiceAudio.text`) → piece.
+        var voicePieces: [Int: Int] = [:]
+        /// Texts given to the current voice so far.
+        var voiceTexts = 0
+        /// The first piece given to the current voice (the pieces before it were said before a cut).
+        var firstVoiced = 0
+        /// The chunks of the voice the player read, in order: the piece each one says, and when it went to the output
+        /// (nil: near-silence skipped).
+        var chunks: [(piece: Int?, sent: ContinuousClock.Instant?)] = []
+        /// The player read the voice to its end.
+        var voiceEnded = false
+        /// The device went out of reach before it heard the whole answer: the voice stopped, the rest waits for it.
+        var cut: Cut?
+        /// Stopping the voice after the cut: the turn ends once it is done.
+        var voiceStop: Task<Void, Never>?
+        /// Said for the device that was out of reach (`Unheard`): the rest of an answer, or the request to repeat.
+        var unheard: Unheard.Kind?
         init(id: Int, output: any AudioOutput) {
             self.id = id
             self.output = output
         }
+
+        /// The first piece the device may not have heard whole when it went out of reach, the voice that went to it before
+        /// `reachedUntil` having reached it; nil when it heard all of the answer.
+        func firstUnheardPiece(reachedUntil: ContinuousClock.Instant) -> Int? {
+            // A voice that cannot tell which text it says: all of it again.
+            if let lost = chunks.first(where: { $0.sent.map { $0 >= reachedUntil } ?? false }) {
+                return lost.piece ?? firstVoiced
+            }
+            if voiceEnded { return nil }
+            // All that went to it reached it, but the voice was not done: from the piece it was on (if that piece was
+            // over, it is heard twice rather than not at all).
+            return chunks.last.map { $0.piece ?? firstVoiced } ?? firstVoiced
+        }
+
+        /// The answer as the history keeps what was heard of it: all of it, or the pieces before the cut.
+        var answerHeard: String { cut.map { SpokenPiece.answer(pieces[..<$0.from]) } ?? answer }
     }
 
     public init(
@@ -361,7 +468,8 @@ public actor VoicePipeline {
     /// Turns actions on (a runner) or off (nil). The tools are part of the system prompt, so a new
     /// conversation starts.
     public func setTools(_ runner: ToolRunner?) async throws {
-        await cancelTurn(stopAudio: true)
+        await cancelTurn(stopAudio: true, forgetting: true)
+        forgetUnheard()
         await tools?.resetConversation()  // an action waiting for its "oui" is dropped (its read-back leaves the screen)
         tools = runner
         await updatePrompt()
@@ -409,14 +517,84 @@ public actor VoicePipeline {
     /// or once the voice is on the Mac's speakers again (`RemoteAudioRouting.setRemoteAudioReachable`).
     /// An announcement being said when the output goes out of reach, and stopped before the output says how it ended
     /// (the Mac taking the sound back stops what was playing), is said again once the output is back.
-    public func setOutputReachable(_ reachable: Bool) {
+    ///
+    /// Going out of reach also cuts what the user and Maé were saying to each other (`Unheard`):
+    /// - Maé was answering: her voice stops there (what the device already has, it plays). `reachedUntil`: the voice that
+    ///   went to the device before that instant reached it, what went since may be lost. Once it is back, the answer is
+    ///   said again from the first sentence it may not have heard whole, and the exchange goes into the history once,
+    ///   whole; if it does not come back in time, the history keeps what was heard, cut off.
+    /// - The user was speaking: what was heard of the sentence may be incomplete. It is not answered (nor sent to the
+    ///   model); once the device is back, Maé asks them to say it again.
+    /// Meanwhile the microphone is not listened to: what still comes from it belongs to the cut sentence.
+    public func setOutputReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant? = nil) async {
         guard reachable != outputReachable else { return }
         outputReachable = reachable
         DebugLog.log(reachable ? "voice output: reachable again" : "voice output: out of reach, announcements wait")
         if reachable {
             startAnnouncementIfIdle()
-        } else if let turn, turn.isAnnouncement, !turn.elsewhere {
-            turn.outputLost = true
+            return
+        }
+        // What came from it last, it said before the drop.
+        pendingSamples = []
+        preRoll = []
+        if let turn, turn.isAnnouncement {
+            if !turn.elsewhere { turn.outputLost = true }
+        } else if userSentenceInProgress {
+            await cutUsersSentence()
+        } else if let turn, turn.committed {
+            cutAnswer(turn, reachedUntil: reachedUntil ?? clock.now)
+        }
+    }
+
+    /// The voice now goes to another device: the Mac's speakers, or another iPhone (`RemoteAudioRouting`). What waited for
+    /// the one that was out of reach is not said here; an answer still being written after its cut stops there. Either
+    /// way the history keeps what was heard of the answer, cut off.
+    public func voiceOutputChanged() async {
+        giveUpUnheard("the voice went to another device")
+        if let turn, turn.cut != nil { await interruptAssistant(askedForQuiet: true) }
+    }
+
+    /// The user is saying something to Maé that has not become a whole turn yet (an answer prepared during a pause may
+    /// still be dropped).
+    private var userSentenceInProgress: Bool {
+        if talkKeyPressed { return true }
+        guard utteranceAddressed, utteranceOpen || turnDetector.isInUtterance else { return false }
+        return turn.map { !$0.committed } ?? true
+    }
+
+    /// The device went out of reach while the user spoke (`setOutputReachable`).
+    private func cutUsersSentence() async {
+        DebugLog.log("the user's sentence was cut by the drop: not answered, they will be asked to say it again")
+        replaceUnheard(.repeatRequest, language: language)
+        talkKeyPressed = false
+        turnDetector.reset()
+        inPause = false
+        voicedRunStart = nil
+        preRoll = []
+        utterance = []
+        utteranceOpen = false
+        resetPartials()  // the cut sentence's words are not shown any more
+        if let turn, !turn.committed { await cancelTurn(stopAudio: false) }  // the answer prepared during a pause
+        if turn == nil { setState(.listening) }
+    }
+
+    /// The device went out of reach while Maé answered (`setOutputReachable`): her voice stops at once, the turn goes on
+    /// (the model finishes writing, `deliver` keeps the rest) and ends with the rest waiting for the device (`endCut`).
+    private func cutAnswer(_ turn: Turn, reachedUntil: ContinuousClock.Instant) {
+        guard turn.cut == nil, !turn.interrupted else { return }
+        guard let from = turn.firstUnheardPiece(reachedUntil: reachedUntil) else {
+            DebugLog.log("turn \(turn.id): out of reach after the whole answer went to the device")
+            return
+        }
+        DebugLog.log("turn \(turn.id): out of reach before the device heard piece \(from + 1): it will be said again")
+        turn.cut = Cut(from: from, at: clock.now)
+        voiceIsAudible()  // the model is not held for a voice that stopped
+        let (player, stream, output) = (turn.player, turn.stream, turn.output)
+        player?.cancel()
+        turn.voiceStop = Task {
+            await player?.value  // no chunk on its way to the output once it lets the stream go
+            await output.abandon()
+            await stream?.cancel()
         }
     }
 
@@ -459,7 +637,8 @@ public actor VoicePipeline {
 
     /// Stops for good, before the models are released (another tier chosen, or the models deleted).
     public func stop() async {
-        await cancelTurn(stopAudio: true)
+        await cancelTurn(stopAudio: true, forgetting: true)
+        forgetUnheard()
         catchUpTask?.cancel()  // what the model computes ahead stops at its next chunk
         await catchUpTask?.value  // the model is not released while it still computes
         warmTask?.cancel()
@@ -472,8 +651,9 @@ public actor VoicePipeline {
 
     /// Forget the conversation (new session). The model starts again from the beginning it keeps.
     public func resetConversation() async throws {
-        await cancelTurn(stopAudio: true)
+        await cancelTurn(stopAudio: true, forgetting: true)
         resetPartials()  // the interface cleared the conversation: words found for it before are not shown
+        forgetUnheard()
         conversation.clear()
         await tools?.resetConversation()
         try await model.prefillBeginning(conversation.beginning)
@@ -481,8 +661,10 @@ public actor VoicePipeline {
 
     // MARK: - Microphone input
 
-    /// Feed microphone audio (16 kHz mono Float32), in chunks of any size, in real time.
+    /// Feed microphone audio (16 kHz mono Float32), in chunks of any size, in real time. Not listened to while the device
+    /// that has the conversation is out of reach (`setOutputReachable`).
     public func push(_ samples: [Float]) async {
+        guard outputReachable else { return }
         pendingSamples += samples
         let n = detector.chunkSize
         while pendingSamples.count >= n {
@@ -498,6 +680,7 @@ public actor VoicePipeline {
             emit.yield(.failure("VAD: \(error)"))
             return
         }
+        guard outputReachable else { return }  // it went out of reach meanwhile: this belongs to what the drop cut
         let now = clock.now
         let chunkDuration = Duration.milliseconds(config.turn.chunkMs)
         if p >= config.turn.speechThreshold {
@@ -581,6 +764,7 @@ public actor VoicePipeline {
     }
 
     private func userStartedSpeaking() async {
+        giveUpUnheard("the user speaks")
         utteranceWhileAwake = config.listening == .wakeWord
         if let turn {
             if turn.audioStarted {
@@ -608,7 +792,9 @@ public actor VoicePipeline {
 
     /// Silences the assistant on request (click on the indicator, Escape key). What it already said
     /// stays in the history. An announcement whose chime plays is dropped too; one that made no sound yet is said next.
+    /// What waited for the device that has the conversation to be back (`Unheard`) is not said.
     public func interrupt() async {
+        giveUpUnheard("asked to be quiet")
         guard let turn else { return }
         if turn.audioStarted {
             await interruptAssistant(askedForQuiet: true)
@@ -643,6 +829,7 @@ public actor VoicePipeline {
 
     /// A turn typed instead of spoken (debug tools, tests): answered as if the user had just said it.
     public func submit(text: String) async {
+        giveUpUnheard("a typed turn")
         if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
         nextTurnID += 1
         let turn = Turn(id: nextTurnID, output: output)
@@ -663,6 +850,7 @@ public actor VoicePipeline {
         talkKeyPressed = pressed
         if pressed {
             wakeModelsUp()
+            giveUpUnheard("the talk key")
             if !utteranceAddressed { dropCandidate() }  // the key decides: no wake phrase needed
             utteranceWhileAwake = false
             if let turn, turn.audioStarted { await interruptAssistant() } else { await cancelTurn(stopAudio: false) }
@@ -798,6 +986,7 @@ public actor VoicePipeline {
         candidate.check?.cancel()
         candidate = Candidate()
         utteranceAddressed = true
+        giveUpUnheard("the user speaks")
         // « OK Maé, stop », unless it answers an action waiting for its "oui" (then the action is dropped, out loud).
         var onlyStops = false
         if let request, StopRequest.matches(request) {
@@ -1151,8 +1340,14 @@ public actor VoicePipeline {
             stream.finish()
             await turn.player?.value
             try Task.checkCancellation()
-            await turn.output.waitUntilDone()
+            if turn.cut == nil { await turn.output.waitUntilDone() }
             try Task.checkCancellation()
+            if turn.cut != nil {
+                // The device went out of reach before it heard all of it: the rest waits for it.
+                await turn.voiceStop?.value
+                endCut(turn)
+                return
+            }
 
             // 4. Done: record the exchange and the measurements.
             if let firstPiece = turn.firstPieceTime {
@@ -1213,26 +1408,37 @@ public actor VoicePipeline {
             var playing = false
             var quietSamples = 0
             do {
-                for try await samples in stream.audio {
+                for try await chunk in stream.audio {
+                    let samples = chunk.samples
+                    // The piece it says, and when it went out: what the device heard, should it go out of reach.
+                    let piece = chunk.text.flatMap { turn.voicePieces[$0] }
                     let quiet = silenceThreshold.map { Self.loudnessDB(samples) < $0 } ?? false
                     if !voiceHeard {
                         // The voice often opens with near-silence: skip it, so the answer starts (and
                         // the latency is measured) at the first sound the user can actually hear.
-                        if quiet { continue }
+                        if quiet {
+                            turn.chunks.append((piece, nil))
+                            continue
+                        }
                         voiceHeard = true
                         self.voiceIsAudible()
                     }
                     // Each sentence starts again with near-silence: cap the pauses between sentences.
                     quietSamples = quiet ? quietSamples + samples.count : 0
-                    if let maxPauseSamples, quietSamples > maxPauseSamples { continue }
+                    if let maxPauseSamples, quietSamples > maxPauseSamples {
+                        turn.chunks.append((piece, nil))
+                        continue
+                    }
                     await turn.gate.wait()  // a speculative answer waits for the end of the turn
                     if Task.isCancelled { break }
                     if !playing {
                         playing = true
                         self.audioStarted(turn, at: clock.now)
                     }
+                    turn.chunks.append((piece, clock.now))
                     await output.play(samples, sampleRate: sampleRate)
                 }
+                if !Task.isCancelled { turn.voiceEnded = true }
             } catch {}
         }
     }
@@ -1244,14 +1450,21 @@ public actor VoicePipeline {
         guard self.turn === turn, !turn.interrupted, let stream = turn.stream else { return }
         let speakable = SpeakableText.clean(piece)
         guard !speakable.isEmpty else { return }
-        if turn.firstPieceTime == nil {
+        // After a cut (`cutAnswer`), the rest of the answer is kept for the device, not spoken now.
+        let voiced = turn.cut == nil
+        if voiced, turn.firstPieceTime == nil {
             turn.firstPieceTime = clock.now
             DebugLog.log("turn \(turn.id): first piece")
             // Leave the GPU to the voice until it is audible (the model is far ahead of speech).
             (model as? any YieldsToVoice)?.holdGeneration(true)
         }
         if inHistory { SpeakableText.record(piece, after: separator, in: &turn.answer) }
-        stream.enqueue(SpeakableText.forVoice(speakable, language: turn.language))
+        turn.pieces.append(SpokenPiece(text: piece, separator: separator, inHistory: inHistory))
+        if voiced {
+            turn.voicePieces[turn.voiceTexts] = turn.pieces.count - 1
+            turn.voiceTexts += 1
+            stream.enqueue(SpeakableText.forVoice(speakable, language: turn.language))
+        }
         // A speculative answer may still be thrown away: the interface only sees it once committed.
         if turn.committed {
             emit.yield(.assistantPiece(speakable))
@@ -1302,9 +1515,170 @@ public actor VoicePipeline {
         }
     }
 
+    // MARK: - What the device out of reach did not hear
+
+    /// The turn of an answer cut by a drop is over (`cutAnswer`): the rest waits for the device (`Unheard`), and the
+    /// exchange goes into the history once it is said, or given up. The interfaces showed the answer as the model wrote
+    /// it: that attempt is reported cut off, the rest shows again once said.
+    private func endCut(_ turn: Turn) {
+        guard self.turn === turn, !turn.interrupted, let cut = turn.cut else { return }
+        var waiting: Unheard.Kind?
+        if case .repeatRequest? = turn.unheard {
+            waiting = .repeatRequest
+        } else if let message = turn.userMessage, !turn.userText.isEmpty {
+            let resume = Resume(userText: turn.userText, userMessage: message, steps: turn.steps,
+                                language: turn.language, pieces: turn.pieces, from: cut.from)
+            if !resume.rest.isEmpty { waiting = .answer(resume) }
+        }
+        guard let waiting else {
+            // Nothing that matters was left to say (the phrase said while a tool call was written): heard.
+            var metrics = TurnMetrics()
+            metrics.userText = turn.userText
+            metrics.assistantText = turn.answer
+            metrics.language = turn.language
+            finish(turn, metrics: turn.userMessage == nil ? nil : metrics)
+            return
+        }
+        voiceIsAudible()
+        self.turn = nil
+        replaceUnheard(waiting, language: turn.language, since: cut.at)
+        if case .answer = waiting {
+            language = turn.language
+            var metrics = TurnMetrics()
+            metrics.userText = turn.userText
+            metrics.assistantText = turn.answer
+            metrics.language = turn.language
+            metrics.interrupted = true
+            emit.yield(.turnFinished(metrics))
+        }
+        if utteranceAddressed {
+            utterance = []
+            utteranceOpen = turnDetector.isInUtterance
+        }
+        setState(someoneSpeaksToMae ? .userSpeaking : .listening)
+    }
+
+    /// `kind` waits for the device from now on (`since`: when it went out of reach), instead of what waited before (an
+    /// answer that waited goes into the history as heard).
+    private func replaceUnheard(_ kind: Unheard.Kind, language: SpeechLanguage, since: ContinuousClock.Instant? = nil) {
+        giveUpUnheard("something newer waits")
+        unheardCount += 1
+        let expires = (since ?? clock.now) + .seconds(config.outOfReachPatienceSeconds)
+        let id = unheardCount
+        unheard = Unheard(kind: kind, language: language, expires: expires, id: id)
+        unheardTimer = Task {
+            try? await Task.sleep(until: expires, clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self.unheardExpired(id)
+        }
+    }
+
+    private func unheardExpired(_ id: Int) {
+        guard unheard?.id == id else { return }
+        giveUpUnheard("the device was out of reach for too long")
+    }
+
+    /// What waited for the device is not said; an answer goes into the history as it was heard, cut off.
+    private func giveUpUnheard(_ why: String) {
+        guard let unheard else { return }
+        DebugLog.log("not said for the device that was out of reach: \(why)")
+        forgetUnheard()
+        if case .answer(let resume) = unheard.kind { recordHeard(resume) }
+    }
+
+    /// A new conversation, or the end: what waited for the device goes with the conversation.
+    private func forgetUnheard() {
+        unheard = nil
+        unheardTimer?.cancel()
+        unheardTimer = nil
+    }
+
+    /// An answer cut by a drop and not said again: the history keeps what the device heard of it, cut off.
+    private func recordHeard(_ resume: Resume) {
+        conversation.record(user: resume.userMessage, steps: resume.steps, assistant: resume.heard, interrupted: true)
+        language = resume.language
+        letModelCatchUp()
+    }
+
+    /// Says what the device that has the conversation did not hear (`Unheard`), once it is back and nobody speaks: where
+    /// the conversation is, never on a home station. True when it started.
+    private func startUnheardIfIdle() -> Bool {
+        let userSpeaks = utteranceAddressed && (utteranceOpen || turnDetector.isInUtterance)
+        guard let unheard, turn == nil, !userSpeaks, !talkKeyPressed, outputReachable else { return false }
+        guard clock.now < unheard.expires else {
+            giveUpUnheard("the device was out of reach for too long")
+            return false
+        }
+        forgetUnheard()
+        nextTurnID += 1
+        let turn = Turn(id: nextTurnID, output: output)
+        turn.unheard = unheard.kind
+        turn.language = unheard.language
+        if case .answer(let resume) = unheard.kind {
+            turn.userMessage = resume.userMessage
+            turn.steps = resume.steps
+            turn.pieces = Array(resume.pieces[..<resume.from])
+            turn.firstVoiced = resume.from
+            turn.answer = resume.heard
+        }
+        self.turn = turn
+        commit(turn)
+        // After `commit`, which would show the user's words again.
+        if case .answer(let resume) = unheard.kind { turn.userText = resume.userText }
+        turn.task = Task { await self.runUnheard(turn, unheard.kind) }
+        return true
+    }
+
+    private func runUnheard(_ turn: Turn, _ kind: Unheard.Kind) async {
+        do {
+            let stream = try await startVoice(language: turn.language)
+            turn.stream = stream
+            guard !Task.isCancelled else {
+                await stream.cancel()  // stopped while the voice got ready
+                return
+            }
+            startPlayer(turn, stream)
+            switch kind {
+            case .answer(let resume):
+                DebugLog.log("turn \(turn.id): the device is back, the answer again from piece \(resume.from + 1)")
+                for piece in resume.rest { deliver(piece.text, after: piece.separator, to: turn) }
+            case .repeatRequest:
+                DebugLog.log("turn \(turn.id): the device is back, the user is asked to say their sentence again")
+                say(OutOfReachPhrases.sentenceCut(turn.language), to: turn)
+            }
+            stream.finish()
+            await turn.player?.value
+            try Task.checkCancellation()
+            if turn.cut == nil { await turn.output.waitUntilDone() }
+            try Task.checkCancellation()
+            if turn.cut != nil {
+                await turn.voiceStop?.value  // out of reach again: what is left waits for it again
+                endCut(turn)
+                return
+            }
+            guard self.turn === turn, !turn.interrupted else { return }
+            guard case .answer = kind else {
+                finish(turn, metrics: nil)  // the request to repeat is not part of the conversation
+                return
+            }
+            var metrics = TurnMetrics()
+            metrics.userText = turn.userText
+            metrics.assistantText = turn.answer
+            metrics.language = turn.language
+            finish(turn, metrics: metrics)  // the exchange, whole
+        } catch is CancellationError {
+        } catch {
+            emit.yield(.failure("\(error)"))
+            guard self.turn === turn else { return }
+            if case .answer(let resume) = kind { recordHeard(resume) }
+            finish(turn, metrics: nil)
+        }
+    }
+
     // MARK: - Announcements
 
     private func startAnnouncementIfIdle() {
+        if startUnheardIfIdle() { return }  // what the device that was out of reach did not hear comes first
         // A sentence still being checked for the wake phrase does not hold it back.
         let userSpeaks = utteranceAddressed && (utteranceOpen || turnDetector.isInUtterance)
         // On a home station when there is one (`announceThrough`), otherwise where the conversation is; each waits while
@@ -1500,22 +1874,27 @@ public actor VoicePipeline {
             }
         }
         if !turn.userText.isEmpty, let message = turn.userMessage {
-            conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: true)
+            // An answer cut by a drop before: what the device heard of it, not what was written meanwhile.
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answerHeard, interrupted: true)
             letModelCatchUp()  // the model's memory holds what it wrote, the history the answer cut off
             var metrics = TurnMetrics()
             metrics.userText = turn.userText
-            metrics.assistantText = turn.answer
+            metrics.assistantText = turn.answerHeard
             metrics.interrupted = true
             emit.yield(.turnFinished(metrics))
         }
     }
 
-    private func cancelTurn(stopAudio: Bool) async {
+    /// `forgetting`: the conversation is forgotten (a new one starts, or the pipeline stops); otherwise the rest of an
+    /// answer that the device that was out of reach did not hear, dropped before any sound, goes into the history as it
+    /// was heard.
+    private func cancelTurn(stopAudio: Bool, forgetting: Bool = false) async {
         guard let turn else { return }
         self.turn = nil
         voiceIsAudible()  // never leave the model paused
         DebugLog.log("turn \(turn.id): cancelling")
         if turn.isAnnouncement, !turn.audioStarted { sayAgainLater(turn) }  // nothing of it was heard yet
+        if !forgetting, !turn.interrupted, case .answer(let resume)? = turn.unheard { recordHeard(resume) }
         turn.task?.cancel()
         turn.player?.cancel()
         await turn.gate.open()  // release a player waiting for the end of the turn

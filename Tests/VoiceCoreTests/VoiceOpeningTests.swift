@@ -6,7 +6,7 @@ import Testing
 /// A voice that takes its time, as Pocket TTS does: `opening` near-silent samples before its first text (100 samples a
 /// millisecond), then 500 audible samples per text.
 final class PacedStream: SynthesisStream, @unchecked Sendable {
-    let audio: AsyncThrowingStream<[Float], Error>
+    let audio: AsyncThrowingStream<VoiceAudio, Error>
     private let texts: AsyncStream<String>.Continuation
     private let producer: Task<Void, Never>
     private let lock = NSLock()
@@ -14,22 +14,24 @@ final class PacedStream: SynthesisStream, @unchecked Sendable {
     private var stopped = false
 
     init(opening: Int) {
-        let (audio, output) = AsyncThrowingStream.makeStream(of: [Float].self)
+        let (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
         let (textStream, texts) = AsyncStream.makeStream(of: String.self)
         self.audio = audio
         self.texts = texts
         producer = Task {
             var first = true
+            var text = 0
             for await _ in textStream {
                 if first {
                     first = false
                     for _ in 0..<(opening / 100) where !Task.isCancelled {
-                        output.yield([Float](repeating: 0.0001, count: 100))
+                        output.yield(VoiceAudio([Float](repeating: 0.0001, count: 100), text: text))
                         try? await Task.sleep(for: .milliseconds(1))
                     }
                 }
                 if Task.isCancelled { break }
-                output.yield([Float](repeating: 0.1, count: 500))
+                output.yield(VoiceAudio([Float](repeating: 0.1, count: 500), text: text))
+                text += 1
             }
             output.finish()
         }
@@ -78,11 +80,11 @@ struct VoiceRaceTests {
         race.enqueue("Bonjour, je suis bien là.")
         var samples: [Float] = []
         var iterator = race.audio.makeAsyncIterator()
-        samples += try #require(try await iterator.next())
+        samples += try #require(try await iterator.next()).samples
         #expect(race.heard == 1)
         race.enqueue("Comment vas-tu ce matin ?")  // after the race: only the voice heard gets it
         race.finish()
-        while let chunk = try await iterator.next() { samples += chunk }
+        while let chunk = try await iterator.next() { samples += chunk.samples }
         #expect(samples.count == 1000)  // its two sentences, without the near-silence before them
         #expect(samples.allSatisfy { $0 == 0.1 })
         #expect(quick.received.count == 2)
@@ -99,7 +101,7 @@ struct VoiceRaceTests {
         race.enqueue("Bonjour, je suis bien là.")
         race.finish()
         var samples = 0
-        for try await chunk in race.audio { samples += chunk.count }
+        for try await chunk in race.audio { samples += chunk.samples.count }
         #expect(samples == 0)
         #expect(race.heard == nil)
     }
@@ -153,8 +155,13 @@ struct VoiceRestartTests {
         voice.enqueue("Comment vas-tu ce matin ?")
         voice.finish()
         var samples: [Float] = []
-        for try await chunk in voice.audio { samples += chunk }
+        var texts: [Int?] = []
+        for try await chunk in voice.audio {
+            samples += chunk.samples
+            texts.append(chunk.text)
+        }
         #expect(samples.count == 1000)  // both sentences, once, without the near-silence before them
+        #expect(texts == [0, 1])  // the voice started again numbers its texts as the first one did
         #expect(samples.allSatisfy { $0 == 0.1 })
         let streams = await synthesizer.streams
         #expect(streams.count == 2)
@@ -175,7 +182,7 @@ struct VoiceRestartTests {
         voice.enqueue("Comment vas-tu ce matin ?")
         voice.finish()
         var samples = 0
-        for try await chunk in voice.audio { samples += chunk.count }
+        for try await chunk in voice.audio { samples += chunk.samples.count }
         #expect(samples == 1000)
         #expect(await synthesizer.streams[1].received == ["Bonjour, je suis bien là.", "Comment vas-tu ce matin ?"])
     }
@@ -190,7 +197,7 @@ struct VoiceRestartTests {
         voice.enqueue("Bonjour, je suis bien là.")
         voice.finish()
         var samples = 0
-        for try await chunk in voice.audio { samples += chunk.count }
+        for try await chunk in voice.audio { samples += chunk.samples.count }
         #expect(samples == 500)
         #expect(await synthesizer.streams.count == 2)
     }
