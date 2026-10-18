@@ -23,6 +23,7 @@
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
 //   voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
+//   voice-cli inbound --public-relay <relay> [--acme <directory> [--acme-root <PEM>]] [--name Essai] [--seconds 600]
 //                                                       received information through a home relay, printed instead
 //                                                       of said (no model; see InboundListen.swift)
 // Options:
@@ -598,6 +599,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
                                   [--follow-up "…"] [--stop-after seconds]
                voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
+               voice-cli inbound --public-relay <relay> [--acme <directory> [--acme-root <PEM>]] [--name Essai] [--seconds 600]
         """)
     exit(2)
 }

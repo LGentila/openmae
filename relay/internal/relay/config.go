@@ -5,6 +5,9 @@
 // encrypts everything before it reaches a tube. The one exception is home
 // mode, off by default, for a relay on the home network: systems there post
 // deliveries to a Mac over plain HTTP, and the relay passes them in clear.
+// Deliveries from the internet (an inbound domain, off by default) stay
+// encrypted: the relay passes their TLS through to the Mac, which holds the
+// certificate.
 package relay
 
 import (
@@ -35,11 +38,16 @@ type Limits struct {
 	TubeIdle          time.Duration // a tube that carries nothing either way for this long is closed
 	Linger            time.Duration // to let a last message reach the peer before closing
 
-	// Home mode only, per inbound name.
+	// Home mode and the inbound domain, per inbound name.
 	InboundPerMinute int           // deliveries in the last minute
 	InboundAtOnce    int           // deliveries in progress at once
-	InboundBodyBytes int           // the largest delivery body
-	InboundTimeout   time.Duration // to receive a delivery, then for the Mac to accept its tube, then to answer
+	InboundBodyBytes int           // home mode: the largest delivery body
+	InboundTimeout   time.Duration // home mode: to receive a delivery, then for the Mac to accept its tube, then to answer
+
+	// The inbound domain only: connections passed through to a Mac.
+	PassthroughPerIP   int           // connections per caller in the last minute
+	PassthroughBytes   int           // bytes both ways, per connection
+	PassthroughTimeout time.Duration // per connection, from its first byte to its end
 }
 
 func (l Limits) withDefaults() Limits {
@@ -70,6 +78,9 @@ func (l Limits) withDefaults() Limits {
 	set(&l.InboundAtOnce, 5)
 	set(&l.InboundBodyBytes, 64<<10)
 	setD(&l.InboundTimeout, 10*time.Second)
+	set(&l.PassthroughPerIP, 20)
+	set(&l.PassthroughBytes, 1<<20)
+	setD(&l.PassthroughTimeout, 15*time.Second)
 	return l
 }
 
@@ -105,6 +116,17 @@ type Config struct {
 	// network: a public relay must never turn it on. It cannot be combined
 	// with TLSDomain.
 	HomeInbound bool
+	// InboundDomain turns on deliveries from the internet without reading
+	// them: a TLS connection whose server name is <inbound name>.<this
+	// domain> is passed through, unopened, to the Mac registered for
+	// deliveries under that name, which holds the name's certificate. The
+	// connections come on InboundAddr, from a proxy that passes TLS through
+	// and sends the PROXY protocol; in standalone mode, on HTTPSAddr. Empty:
+	// off. It cannot be combined with HomeInbound.
+	InboundDomain string
+	// InboundAddr is the TCP listener for those connections (default
+	// ":8444"), not used in standalone mode.
+	InboundAddr string
 	Limits      Limits
 	Logger      *slog.Logger
 	// Pusher sends push notifications; nil on every relay without an APNs key.
@@ -123,6 +145,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.HTTPSAddr == "" {
 		c.HTTPSAddr = ":443"
+	}
+	if c.InboundAddr == "" {
+		c.InboundAddr = ":8444"
 	}
 	if c.MaxConnections <= 0 {
 		c.MaxConnections = 4096

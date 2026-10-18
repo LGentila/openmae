@@ -27,6 +27,10 @@ services:
       # RELAY_PREVIOUS_PINS: "<old pin>"
       # Never RELAY_HOME_INBOUND here: home mode is for a relay on the home
       # network only (see "Home relay" in README.md).
+      # Deliveries from the internet, passed through unread to the Macs
+      # (see "Deliveries from the internet" in README.md): the proxy sends
+      # the TLS of *.in.example.com to port 8444, with the PROXY protocol.
+      # RELAY_INBOUND_DOMAIN: "in.example.com"
     ports:
       # "443:4433/udp", in long form for "mode: host": deployed as a Swarm
       # stack, the default ingress mode would hide the clients' addresses and
@@ -36,9 +40,11 @@ services:
         published: 443
         protocol: udp
         mode: host
-    # Reached by the proxy only, not published on the host.
+    # Reached by the proxy only, not published on the host: HTTP, and the
+    # deliveries from the internet when RELAY_INBOUND_DOMAIN is set.
     expose:
       - "8080"
+      - "8444"
     volumes:
       - relay-data:/data
     # Plain Traefik only (Dokploy and Coolify add the routing from their

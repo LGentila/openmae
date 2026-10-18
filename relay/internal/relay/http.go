@@ -8,7 +8,9 @@ import (
 )
 
 // routes serves the HTTP listener, and the HTTPS one in standalone mode.
-// Deliveries come to the plain HTTP listener only, in home mode.
+// Deliveries come to the plain HTTP listener only, in home mode. With an
+// inbound domain, the plain HTTP listener also answers Let's Encrypt's
+// HTTP-01 challenge for the names under it.
 func (s *Server) routes(deliveries bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", s.serveInfo)
@@ -17,7 +19,41 @@ func (s *Server) routes(deliveries bool) http.Handler {
 	if deliveries {
 		mux.HandleFunc(inboundPattern, s.serveDelivery)
 	}
-	return mux
+	if s.cfg.InboundDomain == "" {
+		return mux
+	}
+	return s.inboundChallenges(mux)
+}
+
+const challengePrefix = "/.well-known/acme-challenge/"
+
+// inboundChallenges answers requests for names under the inbound domain:
+// the answers Macs left for Let's Encrypt's HTTP-01 challenge, and 404 for
+// anything else. Other names go to next.
+func (s *Server) inboundChallenges(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, ok := inboundNameOf(r.Host, s.cfg.InboundDomain)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		token, isChallenge := strings.CutPrefix(r.URL.Path, challengePrefix)
+		var answer string
+		if isChallenge && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			answer, ok = s.challenges.get(name, token)
+		} else {
+			ok = false
+		}
+		if !ok {
+			s.stats.count("challenge_404")
+			http.NotFound(w, r)
+			return
+		}
+		s.log.Debug("challenge answered")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, answer)
+	})
 }
 
 func (s *Server) serveInfo(w http.ResponseWriter, _ *http.Request) {

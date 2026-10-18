@@ -3,11 +3,12 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// Settings › Received information: short texts that other systems at home (Home Assistant, a script…) send Maé to
-/// say. Its first page shows the home relay, which passes their deliveries on to this Mac, and the sources; a source's
-/// page shows its secret address, what Maé does with what it sends and its last deliveries; a third page shows how to
-/// send from Home Assistant. Built from the settings' usual pieces until the design draws it. Home sources only for now:
-/// the public relay and OpenMaé's internal door come in later steps.
+/// Settings › Received information: short texts that other systems (Home Assistant, a script, a service on the
+/// internet…) send Maé to say. Its first page shows the two paths their deliveries take to this Mac (the home relay,
+/// and the internet path through the iPhones' relay, which cannot read them) and the sources; a source's page shows
+/// its secret address, what Maé does with what it sends and its last deliveries; a third page shows how to send from
+/// Home Assistant. Built from the settings' usual pieces until the design draws it. OpenMaé's internal door comes in a
+/// later step.
 struct InboundPanel: View {
     let inbound: InboundAccess
     /// Back to the settings.
@@ -32,6 +33,7 @@ struct InboundPanel: View {
         .animation(.easeOut(duration: Timing.ui), value: inbound.page)
         .animation(.easeOut(duration: Timing.ui), value: inbound.addingSource)
         .animation(.easeOut(duration: Timing.ui), value: inbound.confirming)
+        .onAppear { inbound.checkInternetOffer() }
     }
 
     /// The width of a block's content: the panel's, less its margins and the block's.
@@ -81,16 +83,20 @@ private struct InboundList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            PanelHeader(title: "Received information", badge: InboundPanel.badge(status.homeRelay), back: back)
-            Text("Other systems at home, like Home Assistant or a script, can send Maé a sentence to say. It only informs her: it never triggers an action.")
+            PanelHeader(title: "Received information", badge: InboundPanel.badge(status), back: back)
+            Text("Other systems, at home like Home Assistant or on the internet, can send Maé a sentence to say. It only informs her: it never triggers an action.")
                 .textStyle(.panelSmall)
                 .foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(EdgeInsets(top: 0, leading: 6, bottom: 4, trailing: 6))
-            if let banner = InboundPanel.banner(status.homeRelay) { banner }
+            if let banner = InboundPanel.banner(status) { banner }
             SectionTitle("Home path")
             PanelBlock(padding: EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16)) {
                 HomeRelayRows(inbound: inbound)
+            }
+            SectionTitle("Internet path")
+            PanelBlock(padding: EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16)) {
+                InternetPathRows(status: status)
             }
             SectionTitle("Sources")
             PanelBlock(padding: EdgeInsets(top: 2, leading: 16, bottom: 12, trailing: 16)) {
@@ -118,8 +124,8 @@ private struct InboundList: View {
             SourceRow(source: source, last: status.logs[source.id]?.first?.date) { inbound.show(.source(source.id)) }
             Hairline()
         }
-        if status.homeRelayAddress == nil {
-            HelpText("A source gets its address once the home relay is set.")
+        if status.homeRelayAddress == nil, status.sources.contains(where: { $0.origin == .home }) {
+            HelpText("A home source gets its address once the home relay is set.")
                 .padding(.top, 8)
         }
         if inbound.addingSource {
@@ -224,6 +230,55 @@ private struct HomeRelayRows: View {
     }
 }
 
+/// "Internet path": where it stands, and what that means.
+private struct InternetPathRows: View {
+    let status: InboundStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Through your relay")
+                .textStyle(.setting)
+            Spacer(minLength: 8)
+            InboundPanel.internetWord(status.internetPath)
+                .textStyle(.value)
+                .foregroundStyle(status.internetPath == .ready ? Palette.success : Palette.inkMuted)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 48)
+        Group {
+            switch status.internetPath {
+            case .ready:
+                if let expiry = status.certificateExpiry {
+                    HelpText(Text("Systems on the internet reach Maé through your relay, which cannot read what they send: it stays encrypted up to this Mac. Its certificate renews by itself (valid until \(expiry.formatted(.dateTime.day().month(.wide).locale(TaskText.locale))))."))
+                } else {
+                    HelpText("Systems on the internet reach Maé through your relay, which cannot read what they send: it stays encrypted up to this Mac.")
+                }
+            case .gettingCertificate:
+                if let problem = status.certificateProblem {
+                    HelpText(Text("This Mac asks Let’s Encrypt for the certificate that keeps deliveries encrypted up to it. The last try failed, I try again later: \(problem)"))
+                } else {
+                    HelpText("This Mac asks Let’s Encrypt for the certificate that keeps deliveries encrypted up to it. It takes a few seconds.")
+                }
+            case .notOffered:
+                if status.publicRelayAddress == nil {
+                    HelpText("No relay is chosen. Choose one in Settings › iPhone to receive from the internet.")
+                } else {
+                    HelpText("Your relay does not take information from the internet. Its operator can turn it on (RELAY_INBOUND_DOMAIN).")
+                }
+            case .unreachable:
+                HelpText("Your relay does not answer. I keep trying.")
+            case .available:
+                HelpText("Your relay offers it, without being able to read what is sent. Add a source with the origin Internet to use it.")
+            case .checking:
+                HelpText("Checking what your relay offers…")
+            }
+        }
+        .padding(.top, 2)
+        .padding(.bottom, 6)
+    }
+}
+
 /// A source in the list: its name, where it sends from and what Maé does with it, and when it last sent something.
 private struct SourceRow: View {
     let source: InboundSource
@@ -284,7 +339,7 @@ private struct SourceRow: View {
     }
 }
 
-/// "Add a source": its name, then its page opens. Home sources only for now.
+/// "Add a source": its name and where it sends from, then its page opens.
 private struct AddSourceForm: View {
     let inbound: InboundAccess
     @State private var name = ""
@@ -295,6 +350,22 @@ private struct AddSourceForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("Where it sends from")
+                .textStyle(.setting)
+                .foregroundStyle(Palette.ink)
+            Segmented(selection: Binding(get: { inbound.addingOrigin }, set: { inbound.addingOrigin = $0 }),
+                      options: [(value: .home, title: "Home"), (value: .internet, title: "Internet")],
+                      width: InboundPanel.blockWidth)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text("Where it sends from"))
+            Group {
+                if inbound.addingOrigin == .home {
+                    HelpText("From your home network, through the home relay.")
+                } else {
+                    HelpText("From the internet, through your relay, which cannot read what is sent.")
+                }
+            }
+            .padding(.bottom, 6)
             Text("Name of the new source")
                 .textStyle(.setting)
                 .foregroundStyle(Palette.ink)
@@ -319,8 +390,9 @@ private struct AddSourceForm: View {
         guard !typed.isEmpty, !isAdding else { return }
         isAdding = true
         let name = typed
+        let origin = inbound.addingOrigin
         Task {
-            if let id = await inbound.addSource(name: name) {
+            if let id = await inbound.addSource(name: name, origin: origin) {
                 inbound.show(.source(id))
             }
             isAdding = false
@@ -341,7 +413,8 @@ private struct InboundSourcePage: View {
             PanelHeader(title: Text(verbatim: source.name),
                         badge: source.paused ? PanelBadge(text: Text("Paused"), tone: .idle) : nil,
                         truncatesTitle: true) { inbound.show(.list) }
-            if let banner = InboundPanel.banner(status.homeRelay) { banner }
+            if let banner = source.origin == .home ? InboundPanel.banner(status.homeRelay)
+                : InboundPanel.internetBanner(status) { banner }
             SectionTitle("Address", isFirst: true)
             PanelBlock(padding: EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16)) { address }
             SectionTitle("What Maé does")
@@ -392,6 +465,18 @@ private struct InboundSourcePage: View {
                 HelpText("Paste it in the other system. Anyone who knows it can send Maé information: keep it to yourself.")
                     .padding(.top, 8)
                     .padding(.bottom, 8)
+            }
+        } else if source.origin == .internet {
+            switch status.internetPath {
+            case .notOffered where status.publicRelayAddress == nil:
+                HelpText("The address appears once a relay is chosen, in Settings › iPhone.")
+                    .padding(.bottom, 12)
+            case .notOffered:
+                HelpText("Your relay does not take information from the internet: this source has no address.")
+                    .padding(.bottom, 12)
+            default:
+                HelpText("The address appears once your relay answers.")
+                    .padding(.bottom, 12)
             }
         } else if status.homeRelayAddress == nil {
             HelpText("The address appears once the home relay is set.")
@@ -670,14 +755,85 @@ extension InboundPanel {
     static func summary(_ status: InboundStatus) -> Text {
         let sources = status.sources
         guard !sources.isEmpty else { return Text("No source") }
-        switch status.homeRelay {
-        case .none: return Text("No home relay")
-        case .connecting: return Text("Connecting…")
-        case .unreachable: return Text("Relay unreachable")
-        case .notHomeMode: return Text("Relay not in home mode")
-        case .connected:
-            if sources.allSatisfy(\.paused) { return Text("Paused") }
-            return sources.count == 1 ? Text("1 source") : Text("\(sources.count) sources")
+        if sources.contains(where: { $0.origin == .home }) {
+            switch status.homeRelay {
+            case .none: return Text("No home relay")
+            case .connecting: return Text("Connecting…")
+            case .unreachable: return Text("Relay unreachable")
+            case .notHomeMode: return Text("Relay not in home mode")
+            case .connected: break
+            }
+        }
+        if sources.contains(where: { $0.origin == .internet }) {
+            switch status.internetPath {
+            case .ready, .available: break
+            case .checking: return Text("Connecting…")
+            case .gettingCertificate: return Text("Getting the certificate…")
+            case .unreachable: return Text("Relay unreachable")
+            case .notOffered: return Text("Not offered by your relay")
+            }
+        }
+        if sources.allSatisfy(\.paused) { return Text("Paused") }
+        return sources.count == 1 ? Text("1 source") : Text("\(sources.count) sources")
+    }
+
+    /// The panel's head: the home relay's state, or the internet path's when only internet sources are there.
+    static func badge(_ status: InboundStatus) -> PanelBadge {
+        let internetOnly = !status.sources.isEmpty && status.sources.allSatisfy { $0.origin == .internet }
+        guard internetOnly, status.homeRelayAddress == nil else { return badge(status.homeRelay) }
+        return internetBadge(status.internetPath)
+    }
+
+    static func internetBadge(_ path: InboundStatus.InternetPath) -> PanelBadge {
+        switch path {
+        case .ready: PanelBadge(text: Text("Ready"), tone: .ok)
+        case .gettingCertificate: PanelBadge(text: Text("Getting the certificate…"), tone: .wait, short: Text("Certificate…"))
+        case .checking: PanelBadge(text: Text("Connecting…"), tone: .wait)
+        case .unreachable: PanelBadge(text: Text("Relay unreachable"), tone: .warn, short: Text("Unreachable"))
+        case .notOffered: PanelBadge(text: Text("Not offered"), tone: .warn)
+        case .available: PanelBadge(text: Text("Available"), tone: .idle)
+        }
+    }
+
+    /// The internet path's state, in a word.
+    static func internetWord(_ path: InboundStatus.InternetPath) -> Text {
+        switch path {
+        case .ready: Text("Ready")
+        case .gettingCertificate: Text("Getting the certificate…")
+        case .checking: Text("Connecting…")
+        case .unreachable: Text("Relay unreachable")
+        case .notOffered: Text("Your relay does not offer it")
+        case .available: Text("Available")
+        }
+    }
+
+    /// What the list's head says: the home relay's trouble, else the internet path's when an internet source waits.
+    static func banner(_ status: InboundStatus) -> Banner? {
+        if status.sources.contains(where: { $0.origin == .home }) || status.homeRelayAddress != nil,
+           let banner = banner(status.homeRelay)
+        {
+            return banner
+        }
+        return internetBanner(status)
+    }
+
+    /// Why nothing arrives from the internet, when an internet source exists.
+    static func internetBanner(_ status: InboundStatus) -> Banner? {
+        guard status.sources.contains(where: { $0.origin == .internet }) else { return nil }
+        switch status.internetPath {
+        case .unreachable:
+            return Banner(text: Text("Your relay does not answer: what is sent from the internet cannot reach Maé. I keep trying."),
+                          warning: true)
+        case .notOffered:
+            return Banner(text: status.publicRelayAddress == nil
+                ? Text("No relay is chosen, so nothing can come from the internet. Choose one in Settings › iPhone.")
+                : Text("Your relay does not take information from the internet, so internet sources receive nothing."),
+                warning: true)
+        case .gettingCertificate where status.certificateProblem != nil:
+            return Banner(text: Text("This Mac could not get its certificate yet: what is sent from the internet cannot reach Maé. I try again later."),
+                          warning: true)
+        default:
+            return nil
         }
     }
 

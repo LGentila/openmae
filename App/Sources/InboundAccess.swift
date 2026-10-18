@@ -42,11 +42,21 @@ final class InboundAccess {
         Task { await host?.setHomeRelay(nil) }
     }
 
-    /// A new home source; its id once added.
-    func addSource(name: String) async -> InboundSource.ID? {
+    /// A new source; its id once added.
+    func addSource(name: String, origin: InboundSource.Origin = .home) async -> InboundSource.ID? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let host else { return nil }
-        return await host.addSource(name: name, origin: .home, mode: .sayNow)
+        return await host.addSource(name: name, origin: origin, mode: .sayNow)
+    }
+
+    /// The relay the iPhones use (Settings › iPhone), which the internet path goes through.
+    func setPublicRelay(_ relay: URL?) {
+        Task { await host?.setPublicRelay(relay) }
+    }
+
+    /// Whether that relay takes information from the internet, when the panel shows it.
+    func checkInternetOffer() {
+        Task { await host?.checkInternetOffer() }
     }
 
     func update(_ source: InboundSource) {
@@ -71,6 +81,8 @@ final class InboundAccess {
     var page = Page.list
     /// "Add a source" was clicked: its name is being typed.
     var addingSource = false
+    /// Where the source being added sends from.
+    var addingOrigin = InboundSource.Origin.home
     /// On a source's page: the change of its address, or its removal, waiting for a yes.
     var confirming: Confirmation?
 }

@@ -11,6 +11,9 @@ final class PhoneAccess {
     private(set) var status = LinkStatus()
     /// The iPhone whose removal is being confirmed in Settings › iPhone.
     var removing: PairedDevice.ID?
+    /// Told the relay's address at first, then on every change (the internet path of received information follows it).
+    @ObservationIgnored var relayChanged: ((URL?) -> Void)?
+    @ObservationIgnored private var toldRelay: URL??
     @ObservationIgnored private let link: LinkHost?
 
     /// `link`: nil in still pictures of the screens, which set `status` themselves.
@@ -26,6 +29,7 @@ final class PhoneAccess {
                 }
                 #endif
                 self?.status = status
+                self?.tellRelay(status.relayChoice.url)
             }
         }
         #if DEBUG
@@ -36,6 +40,12 @@ final class PhoneAccess {
             MainActor.assumeIsolated { self?.startPairing() }
         }
         #endif
+    }
+
+    private func tellRelay(_ relay: URL?) {
+        guard toldRelay != .some(relay) else { return }
+        toldRelay = .some(relay)
+        relayChanged?(relay)
     }
 
     /// The iPhone that has the conversation.

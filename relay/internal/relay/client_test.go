@@ -130,6 +130,11 @@ func (r *testRelay) info(t *testing.T) map[string]any {
 
 func (r *testRelay) pins(t *testing.T) []string {
 	t.Helper()
+	if r.srv.cfg.TLSDomain != "" {
+		// Standalone mode serves /v1/info over HTTPS only, with a certificate
+		// from Let's Encrypt the tests cannot get.
+		return []string{r.srv.pin}
+	}
 	var pins []string
 	for _, p := range r.info(t)["quic"].(map[string]any)["spki_sha256"].([]any) {
 		pins = append(pins, p.(string))

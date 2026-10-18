@@ -1,9 +1,11 @@
 #if os(macOS)
+import CryptoKit
 import Foundation
 import Security
 import VoiceCore
 
 // Received information, the Mac's side: the sources and their secret addresses, the home relay registration, the
+// internet path (the public relay passing TLS through to the Mac's own certificate, InboundInternet.swift), the
 // deliveries' HTTP exchange, and what becomes of them (said, notified, ignored), with a log per source.
 
 /// A delivery in its source's log: when, by which path, in which form, what became of it, from which address, and
@@ -70,12 +72,38 @@ public struct InboundStatus: Sendable, Equatable {
         case notHomeMode
     }
 
+    /// The internet path: the public relay (the one the iPhones use) passes deliveries from the internet through to
+    /// this Mac without reading them, encrypted to a certificate the Mac holds.
+    public enum InternetPath: Sendable, Equatable {
+        /// Reading what the relay offers.
+        case checking
+        /// No relay is chosen, or the relay does not take deliveries from the internet.
+        case notOffered
+        /// The relay does not answer; tried again on its own.
+        case unreachable
+        /// Offered, and not used: no internet source.
+        case available
+        /// Getting the certificate (or waiting to try again, with `certificateProblem`).
+        case gettingCertificate
+        case ready
+    }
+
     public var homeRelayAddress: URL?
     public var homeRelay = HomeRelay.none
+    /// The relay the iPhones use, which is the internet path's; nil when none is chosen.
+    public var publicRelayAddress: URL?
+    public var internetPath = InternetPath.notOffered
+    /// The relay's inbound domain, once known: internet sources' addresses are `https://<inbound name>.<domain>/in/…`.
+    public var inboundDomain: String?
+    /// Why the last try to get the certificate failed, while it is tried again.
+    public var certificateProblem: String?
+    /// When the certificate stops being valid (it is renewed well before).
+    public var certificateExpiry: Date?
     /// The Mac's inbound name, once its keys exist.
     public var inboundName: String?
     public var sources: [InboundSource] = []
-    /// Each source's secret address, when it has one (a home source needs the home relay).
+    /// Each source's secret address, when it has one (a home source needs the home relay, an internet source a relay
+    /// with an inbound domain).
     public var addresses: [UUID: URL] = [:]
     /// The last deliveries of each source, newest first.
     public var logs: [UUID: [InboundLogEntry]] = [:]
@@ -177,22 +205,50 @@ public actor InboundHost {
     private var registration: RelayRegistration?
     private var registrationTasks: [Task<Void, Never>] = []
 
+    // The internet path.
+    private let keys: any InboundKeyStore
+    private let acme: ACMEServer
+    private var publicRelay: URL?
+    private var publicRegistration: RelayRegistration?
+    private var publicTasks: [Task<Void, Never>] = []
+    /// Reads the relay's offer, again now and then while it is not used.
+    private var offerTask: Task<Void, Never>?
+    private var certificate: InboundCertificate?
+    private var certificateTask: Task<Void, Never>?
+    private var renewalTask: Task<Void, Never>?
+    private var certificateFailures = 0
+    private nonisolated let tlsServer: InboundTLSServer
+
     /// `announcer`: the engine (nil: notifications only). `storeURL`: nil keeps everything in memory (tests).
+    /// `keys`: the internet path's keys (nil: in memory). `acme`: where its certificate comes from.
     /// `requestTime`: how long a caller has to send its request. `expiryUnit`: one second of an announcement's expiry
     /// (the tests shorten both).
     public init(announcer: (any Announcing)?, identityStore: any IdentityStore, secrets: any InboundSecretStore,
-                storeURL: URL?, requestTime: Duration = .seconds(10), expiryUnit: Duration = .seconds(1),
+                storeURL: URL?, keys: (any InboundKeyStore)? = nil, acme: ACMEServer = .letsEncrypt,
+                requestTime: Duration = .seconds(10), expiryUnit: Duration = .seconds(1),
                 now: @escaping @Sendable () -> Date = { Date() })
     {
         self.announcer = announcer
         self.identityStore = identityStore
         self.secrets = secrets
         self.storeURL = storeURL
+        self.keys = keys ?? MemoryInboundKeys()
+        self.acme = acme
         self.requestTime = requestTime
         self.expiryUnit = expiryUnit
         self.now = now
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let host = HostReference()
+        tlsServer = InboundTLSServer { transport, caller in
+            Task { await host.value?.serve(transport, from: caller, path: .publicRelay) }
+        }
+        host.value = self
         Task { await self.load() }
+    }
+
+    /// The host, for the HTTPS server's connections, without a cycle.
+    private final class HostReference: @unchecked Sendable {
+        weak var value: InboundHost?
     }
 
     /// Next to the link's `link.json`.
@@ -224,6 +280,17 @@ public actor InboundHost {
         publish()
     }
 
+    /// The relay the iPhones use (Settings › iPhone), which is also the internet path's; nil when none is chosen.
+    public func setPublicRelay(_ address: URL?) {
+        guard address != publicRelay || state.publicRelayAddress != address else { return }
+        publicRelay = address
+        state.publicRelayAddress = address
+        stopInternetPath()
+        state.inboundDomain = nil
+        updateInternetPath()
+        publish()
+    }
+
     /// Adds a source with a new secret address; returns its id.
     @discardableResult
     public func addSource(name: String, origin: InboundSource.Origin = .home, mode: InboundSource.Mode = .sayNow) -> UUID {
@@ -233,6 +300,7 @@ public actor InboundHost {
         state.sources.append(source)
         save()
         updateRegistration()
+        updateInternetPath()
         publish()
         if first || mode == .notifyOnly {
             // What a source sends may end in a notification (not said in time, Maé not ready).
@@ -253,6 +321,7 @@ public actor InboundHost {
             Task { await announcer?.requestNotificationPermission() }
         }
         save()
+        updateInternetPath()
         publish()
     }
 
@@ -262,6 +331,7 @@ public actor InboundHost {
         setSecret(nil, for: id)
         rules.forget(id)
         save()
+        updateInternetPath()
         publish()
     }
 
@@ -561,12 +631,326 @@ public actor InboundHost {
         return identity
     }
 
+    // MARK: - Internet path
+
+    /// `<inbound name>.<inbound domain>`: the name of the certificate and of the internet sources' addresses.
+    private var internetHost: String? {
+        guard let name = state.inboundName, let domain = state.inboundDomain else { return nil }
+        return "\(name).\(domain)"
+    }
+
+    private var hasInternetSources: Bool { state.sources.contains { $0.origin == .internet } }
+
+    /// What the relay was found to offer, before its inbound domain is known.
+    private var offer = InboundStatus.InternetPath.checking
+    private var publicRegistered = false
+    private var publicUnreachable = false
+    /// The name whose certificate the HTTPS server holds now.
+    private var installedHost: String?
+    private var nextCertificateTry: Date?
+    private var retryTask: Task<Void, Never>?
+
+    /// Follows the relay and the sources: reads what the relay offers, registers for deliveries from the internet while
+    /// an internet source exists, gets the certificate and keeps it renewed.
+    private func updateInternetPath() {
+        defer { refreshInternetState() }
+        guard let relay = publicRelay else {
+            stopInternetPath()
+            return
+        }
+        guard state.inboundDomain != nil else {
+            // Asked while an internet source waits for it; otherwise only when the settings show it.
+            if hasInternetSources { checkOffer(relay) }
+            return
+        }
+        guard hasInternetSources else {
+            stopInternetPath(keepOffer: true)
+            return
+        }
+        guard let identity = loadIdentity() else { return }
+        if publicRegistration == nil {
+            let registration = RelayRegistration(relay: relay, identity: identity, passthrough: true)
+            publicRegistration = registration
+            let server = tlsServer
+            publicTasks = [
+                Task { [weak self] in
+                    for await status in registration.status { await self?.setPublicStatus(status, of: registration) }
+                },
+                Task {
+                    for await delivery in registration.deliveries {
+                        Task {
+                            do {
+                                let tube = try await RelayClient.accept(relay: relay, tube: delivery.tube)
+                                await server.pipe(tube, from: delivery.from)
+                            } catch {
+                                DebugLog.log("received information: could not accept a delivery from the internet (\(error))")
+                            }
+                        }
+                    }
+                },
+            ]
+            Task { await registration.start() }
+        }
+        ensureCertificate()
+    }
+
+    /// What the settings show: reads, once, whether the relay takes deliveries from the internet, if that is not
+    /// known yet. Nothing is asked of the relay otherwise until an internet source exists.
+    public func checkInternetOffer() {
+        guard let relay = publicRelay, state.inboundDomain == nil else { return }
+        checkOffer(relay)
+    }
+
+    /// Reads the relay's /v1/info until it says whether it takes deliveries from the internet; asks again every ten
+    /// minutes while it does not (its operator may turn it on) and an internet source waits for it.
+    private func checkOffer(_ relay: URL) {
+        guard offerTask == nil else { return }
+        offerTask = Task { [weak self] in
+            var wait = 30.0
+            while !Task.isCancelled {
+                do {
+                    let domain = try await RelayClient.info(relay).inbound?.domain
+                    guard let self else { return }
+                    if await self.offerRead(relay, domain: domain) { return }
+                    wait = 600
+                } catch {
+                    guard let self else { return }
+                    if await self.offerUnreachable(relay) { return }
+                    wait = min(wait * 2, 600)
+                }
+                try? await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    /// True when there is no need to ask again: the relay offers the internet path, or no internet source waits for it.
+    private func offerRead(_ relay: URL, domain: String?) -> Bool {
+        guard relay == publicRelay else { return true }
+        guard let domain = domain.flatMap(Self.validDomain) else {
+            if offer != .notOffered { DebugLog.log("received information: the relay takes no deliveries from the internet") }
+            offer = .notOffered
+            refreshInternetState()
+            publish()
+            return stopAsking()
+        }
+        offerTask = nil
+        state.inboundDomain = domain
+        updateInternetPath()
+        publish()
+        return true
+    }
+
+    /// True when there is no need to ask again.
+    private func offerUnreachable(_ relay: URL) -> Bool {
+        guard relay == publicRelay else { return true }
+        offer = .unreachable
+        refreshInternetState()
+        publish()
+        return stopAsking()
+    }
+
+    /// Without an internet source, one answer is enough: the settings ask again when they show it.
+    private func stopAsking() -> Bool {
+        guard !hasInternetSources else { return false }
+        offerTask = nil
+        return true
+    }
+
+    /// An inbound domain as the relay gives it, if it is a DNS name.
+    static func validDomain(_ text: String) -> String? {
+        let domain = text.lowercased()
+        let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, domain.count <= 200,
+              labels.allSatisfy({ !$0.isEmpty && $0.count <= 63 && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } })
+        else { return nil }
+        return domain
+    }
+
+    private func setPublicStatus(_ status: RelayRegistration.Status, of registration: RelayRegistration) {
+        guard publicRegistration === registration else { return }
+        switch status {
+        case .connecting:
+            break
+        case .registered:
+            publicRegistered = true
+            publicUnreachable = false
+            ensureCertificate()
+        case .unreachable:
+            publicRegistered = false
+            publicUnreachable = true
+        case .inboundOff:
+            // The relay no longer takes deliveries from the internet: read its offer again.
+            stopInternetPath()
+            state.inboundDomain = nil
+            offer = .notOffered
+            updateInternetPath()
+        }
+        refreshInternetState()
+        publish()
+    }
+
+    /// Installs a valid certificate, and gets a new one when there is none or it is due for renewal.
+    private func ensureCertificate() {
+        guard let host = internetHost, publicRegistration != nil else { return }
+        let usable = usableCertificate(for: host)
+        if let usable, installedHost != host {
+            installedHost = host
+            let server = tlsServer
+            let tls = usable.tls
+            Task { [weak self] in
+                do {
+                    try await server.start(identity: tls.identity, chain: tls.chain)
+                } catch {
+                    DebugLog.log("received information: the HTTPS server cannot start (\(error))")
+                    await self?.installFailed(host)
+                }
+                await self?.refreshAndPublish()
+            }
+        }
+        if let renewal = usable?.renewal, now() < renewal {
+            scheduleRenewal(at: renewal)
+            return
+        }
+        guard publicRegistered, certificateTask == nil else { return }
+        if let next = nextCertificateTry, now() < next { return }
+        certificateTask = Task { await self.obtainCertificate(for: host) }
+    }
+
+    private func installFailed(_ host: String) {
+        if installedHost == host { installedHost = nil }
+    }
+
+    private func refreshAndPublish() {
+        refreshInternetState()
+        publish()
+    }
+
+    /// The stored certificate when it is for `host`, from this ACME server, still valid, with its key.
+    private func usableCertificate(for host: String) -> (tls: TLSIdentity, renewal: Date?)? {
+        guard let certificate, certificate.domain == host, certificate.directory == acme.directory,
+              let validity = certificate.validity, now() < validity.until,
+              let keyData = keys.key("certificate"),
+              let key = try? P256.Signing.PrivateKey(rawRepresentation: keyData),
+              let (identity, chain) = certificate.identity(key: key)
+        else { return nil }
+        return (TLSIdentity(identity: identity, chain: chain), certificate.renewal)
+    }
+
+    /// A certificate with its key, as the HTTPS server takes it. Security's objects are immutable.
+    private struct TLSIdentity: @unchecked Sendable {
+        let identity: SecIdentity
+        let chain: [SecCertificate]
+    }
+
+    private func obtainCertificate(for host: String) async {
+        defer { certificateTask = nil }
+        guard let registration = publicRegistration else { return }
+        let accountKey: ACMEAccountKey
+        if let data = keys.key("acme-account"), let key = try? P256.Signing.PrivateKey(rawRepresentation: data) {
+            accountKey = ACMEAccountKey(key: key)
+        } else {
+            accountKey = ACMEAccountKey()
+            keys.setKey(accountKey.key.rawRepresentation, "acme-account")
+        }
+        let key = P256.Signing.PrivateKey()
+        DebugLog.log("received information: getting the internet path's certificate from \(acme.directory.host() ?? "?")")
+        refreshAndPublish()
+        do {
+            let chain = try await ACMEClient(server: acme, accountKey: accountKey)
+                .certificate(for: host, key: key) { token, keyAuthorization in
+                    try await registration.depositChallenge(token: token, keyAuthorization: keyAuthorization)
+                }
+            guard publicRegistration === registration else { return }  // stopped meanwhile
+            keys.setKey(key.rawRepresentation, "certificate")
+            certificate = InboundCertificate(domain: host, chain: chain, directory: acme.directory)
+            certificateFailures = 0
+            nextCertificateTry = nil
+            state.certificateProblem = nil
+            installedHost = nil  // the new one replaces the one being served
+            save()
+            DebugLog.log("received information: certificate obtained, valid until \(certificate?.validity?.until.description ?? "?")")
+            ensureCertificate()
+        } catch {
+            guard publicRegistration === registration else { return }
+            certificateFailures += 1
+            // 5 minutes, then twice as long each time, up to 6 hours: Let's Encrypt limits failed validations.
+            let delay = min(300 * pow(2, Double(certificateFailures - 1)), 6 * 3600)
+            nextCertificateTry = now() + delay
+            state.certificateProblem = "\(error)"
+            DebugLog.log("received information: no certificate (\(error)); next try in \(Int(delay)) s")
+            retryTask?.cancel()
+            retryTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                await self?.ensureCertificateAndPublish()
+            }
+        }
+        refreshAndPublish()
+    }
+
+    private func ensureCertificateAndPublish() {
+        ensureCertificate()
+        refreshAndPublish()
+    }
+
+    private func scheduleRenewal(at date: Date) {
+        renewalTask?.cancel()
+        renewalTask = Task { [weak self] in
+            // Checked every hour rather than slept through: the Mac may sleep meanwhile.
+            while !Task.isCancelled, date.timeIntervalSinceNow > 0 {
+                try? await Task.sleep(for: .seconds(min(date.timeIntervalSinceNow, 3600)))
+            }
+            guard !Task.isCancelled else { return }
+            await self?.ensureCertificateAndPublish()
+        }
+    }
+
+    private func stopInternetPath(keepOffer: Bool = false) {
+        publicTasks.forEach { $0.cancel() }
+        publicTasks = []
+        if let publicRegistration { Task { await publicRegistration.stop() } }
+        publicRegistration = nil
+        publicRegistered = false
+        publicUnreachable = false
+        certificateTask?.cancel()
+        certificateTask = nil
+        renewalTask?.cancel()
+        renewalTask = nil
+        retryTask?.cancel()
+        retryTask = nil
+        tlsServer.stop()
+        installedHost = nil
+        if !keepOffer {
+            offerTask?.cancel()
+            offerTask = nil
+            offer = .checking
+        }
+    }
+
+    private func refreshInternetState() {
+        state.internetPath = if publicRelay == nil {
+            .notOffered
+        } else if state.inboundDomain == nil {
+            offer
+        } else if !hasInternetSources {
+            .available
+        } else if publicUnreachable {
+            .unreachable
+        } else if publicRegistered, installedHost != nil, installedHost == internetHost {
+            .ready
+        } else {
+            .gettingCertificate
+        }
+    }
+
     // MARK: - Storage
 
     private struct Stored: Codable {
         var homeRelay: URL?
         var sources: [InboundSource] = []
         var logs: [UUID: [InboundLogEntry]] = [:]
+        /// The internet path's certificate (public; its key is in the keychain).
+        var certificate: InboundCertificate?
     }
 
     private func load() {
@@ -576,6 +960,7 @@ public actor InboundHost {
             state.homeRelayAddress = stored.homeRelay
             state.sources = stored.sources
             state.logs = stored.logs.mapValues { Self.pruned($0, now: now()) }
+            certificate = stored.certificate
         }
         for source in state.sources {
             if let secret = secrets.secret(for: source.id) {
@@ -591,12 +976,14 @@ public actor InboundHost {
             state.inboundName = InboundName.make(signingKey: existing.signingKey.publicKey.rawRepresentation)
         }
         updateRegistration()
+        updateInternetPath()
         publish()
     }
 
     private func save() {
         guard let storeURL else { return }
-        let stored = Stored(homeRelay: state.homeRelayAddress, sources: state.sources, logs: state.logs)
+        let stored = Stored(homeRelay: state.homeRelayAddress, sources: state.sources, logs: state.logs,
+                            certificate: certificate)
         do {
             try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
@@ -622,6 +1009,13 @@ public actor InboundHost {
                 state.addresses[source.id] = relay.appending(path: name).appending(path: "in").appending(path: secret)
             }
         }
+        if let host = internetHost {
+            for source in state.sources where source.origin == .internet {
+                guard let secret = known[source.id] else { continue }
+                state.addresses[source.id] = URL(string: "https://\(host)/in/\(secret)")
+            }
+        }
+        state.certificateExpiry = certificate?.domain == internetHost ? certificate?.validity?.until : nil
         statusSink.yield(state)
     }
 }

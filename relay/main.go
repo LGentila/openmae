@@ -68,13 +68,19 @@ func configFromEnv(getenv func(string) string) (relay.Config, slog.Level, error)
 		return def
 	}
 	cfg := relay.Config{
-		HTTPAddr:  get("RELAY_HTTP_ADDR", ":8080"),
-		QUICAddr:  get("RELAY_QUIC_ADDR", ":4433"),
-		DataDir:   get("RELAY_DATA_DIR", "/data"),
-		TLSDomain: get("RELAY_TLS_DOMAIN", ""),
-		HTTPSAddr: get("RELAY_HTTPS_ADDR", ":443"),
+		HTTPAddr:    get("RELAY_HTTP_ADDR", ":8080"),
+		QUICAddr:    get("RELAY_QUIC_ADDR", ":4433"),
+		DataDir:     get("RELAY_DATA_DIR", "/data"),
+		TLSDomain:   get("RELAY_TLS_DOMAIN", ""),
+		HTTPSAddr:   get("RELAY_HTTPS_ADDR", ":443"),
+		InboundAddr: get("RELAY_INBOUND_ADDR", ":8444"),
 	}
 	var err error
+	if v := get("RELAY_INBOUND_DOMAIN", ""); v != "" {
+		if cfg.InboundDomain, err = relay.ParseInboundDomain(v); err != nil {
+			return cfg, 0, fmt.Errorf("RELAY_INBOUND_DOMAIN: %w", err)
+		}
+	}
 	if v := get("RELAY_QUIC_PUBLIC_PORT", ""); v != "" {
 		if cfg.QUICPublicPort, err = strconv.Atoi(v); err != nil || cfg.QUICPublicPort < 1 || cfg.QUICPublicPort > 65535 {
 			return cfg, 0, fmt.Errorf("RELAY_QUIC_PUBLIC_PORT: %q is not a port number", v)

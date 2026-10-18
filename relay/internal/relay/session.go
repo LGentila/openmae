@@ -62,8 +62,10 @@ func (s *Server) refuse(c conn, code string) {
 }
 
 // serveMac registers a Mac, then keeps its control connection. A hello with
-// "inbound" registers it for deliveries instead (home mode): that control
-// connection then gets inbound messages, never incoming ones.
+// "inbound" registers it for deliveries instead (home mode, or an inbound
+// domain): that control connection then gets inbound messages, never
+// incoming ones. With an inbound domain, it may also leave answers to Let's
+// Encrypt's HTTP-01 challenge for its name (acme_challenge).
 func (s *Server) serveMac(c conn, hello message) {
 	if !s.attempts.allow(c.ip()) {
 		s.refuse(c, codeRateLimited)
@@ -73,7 +75,7 @@ func (s *Server) serveMac(c conn, hello message) {
 		s.refuse(c, code)
 		return
 	}
-	if hello.Inbound && !s.cfg.HomeInbound {
+	if hello.Inbound && !s.cfg.HomeInbound && s.cfg.InboundDomain == "" {
 		s.refuse(c, codeInboundOff)
 		return
 	}
@@ -164,6 +166,19 @@ func (s *Server) serveMac(c conn, hello message) {
 				return
 			}
 		case "pong": // the relay sends no pings, but answering one is harmless
+		case "acme_challenge":
+			if !reg.inbound || s.cfg.InboundDomain == "" || !validChallenge(m.Token, m.KeyAuthorization) {
+				s.refuse(c, codeBadRequest)
+				return
+			}
+			if !s.challenges.put(reg.id, m.Token, m.KeyAuthorization) {
+				s.refuse(c, codeBusy)
+				return
+			}
+			s.log.Debug("challenge left")
+			if c.writeControl(challengeStoredMessage(m.Token)) != nil {
+				return
+			}
 		default:
 			s.refuse(c, codeBadRequest)
 			return

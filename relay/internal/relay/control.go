@@ -26,7 +26,7 @@ const (
 	codeUnknownTube        = "unknown_tube"
 	codeRateLimited        = "rate_limited"
 	codeUnsupportedVersion = "unsupported_version"
-	codeInboundOff         = "inbound_off" // a hello with "inbound" to a relay not in home mode
+	codeInboundOff         = "inbound_off" // a hello with "inbound" to a relay neither in home mode nor with an inbound domain
 )
 
 // errProtocol marks everything a client sends that openmae-relay/1 does not
@@ -50,6 +50,9 @@ type message struct {
 	Sig     string `json:"sig"`
 	To      string `json:"to"`
 	Tube    string `json:"tube"`
+	// acme_challenge, on an inbound registration with an inbound domain.
+	Token            string `json:"token"`
+	KeyAuthorization string `json:"key_authorization"`
 }
 
 func parseMessage(b []byte) (message, error) {

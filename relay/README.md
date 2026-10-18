@@ -30,6 +30,10 @@ Its logs hold no device id, tube token or IP address (see [Logs](#logs)).
 One exception, off by default: a relay run on the home network in **home mode** also passes short texts that
 systems on that network post to the Mac, and reads them in clear (see [Home relay](#home-relay)).
 
+A public relay can also take short texts that systems on the internet post to a Mac, **without reading them**: with an
+**inbound domain**, it passes their TLS through to the Mac, which holds the certificate (see
+[Deliveries from the internet](#deliveries-from-the-internet)).
+
 ## How it is reached
 
 | What | Transport | Where |
@@ -39,6 +43,7 @@ systems on that network post to the Mac, and reads them in clear (see [Home rela
 | Tubes, fallback when UDP is blocked | WebSocket, `GET /v1/ws` | HTTPS, through the reverse proxy |
 | Health: `GET /healthz` | HTTP | answers `200 ok` |
 | Deliveries, home mode only: `/<inbound name>/in/<secret>` | plain HTTP | the HTTP listener, on the home network (see [Home relay](#home-relay)) |
+| Deliveries from the internet, with an inbound domain: `https://<inbound name>.<inbound domain>/in/<secret>` | TLS passed through to the Mac | the inbound listener (8444), behind a proxy passing TLS through; Let's Encrypt's HTTP-01 challenge on the HTTP listener (see [Deliveries from the internet](#deliveries-from-the-internet)) |
 
 Inside the container the relay speaks plain HTTP on port 8080 and QUIC on UDP port 4433. QUIC cannot go
 through an HTTP reverse proxy, so its UDP port is published on the host directly. `/v1/info` tells the apps
@@ -123,6 +128,8 @@ Environment variables only. All are optional.
 | `RELAY_HTTPS_ADDR` | `:443` | HTTPS listener in standalone mode. |
 | `RELAY_MAX_CONNECTIONS` | `4096` | QUIC and WebSocket connections at once. Past it, new QUIC connections are refused during their handshake and WebSocket upgrades get `503`. |
 | `RELAY_HOME_INBOUND` | `false` | Home mode: systems on the local network can post deliveries to the Macs registered for them, on the HTTP listener (see [Home relay](#home-relay)). Only for a relay on the home network: the relay reads deliveries in clear, so a public relay must never turn it on. Refused with `RELAY_TLS_DOMAIN`. |
+| `RELAY_INBOUND_DOMAIN` | none | Deliveries from the internet, unread: names under this domain (`<inbound name>.<domain>`) are passed through to the Mac holding their certificate (see [Deliveries from the internet](#deliveries-from-the-internet)). Refused with `RELAY_HOME_INBOUND`. |
+| `RELAY_INBOUND_ADDR` | `:8444` | With `RELAY_INBOUND_DOMAIN`: the TCP listener for those connections, behind a proxy that passes TLS through and sends the PROXY protocol. Not used in standalone mode, where the HTTPS port sorts them. |
 | `RELAY_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. `debug` adds registrations and refusals. |
 
 Booleans accept `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`. A malformed value stops the relay at start,
@@ -192,6 +199,99 @@ once for a Mac, `413` beyond 64 KB, `408` for a body that takes more than 10 sec
 Mac's answer. Behind a reverse proxy on the home network, set `RELAY_BEHIND_PROXY=true`, so that the caller's address
 comes from `X-Forwarded-For`.
 
+## Deliveries from the internet
+
+A relay reachable from the internet can take deliveries for the Macs registered with it, from systems anywhere (a
+server's alert, a web service's webhook), **without being able to read them**. Each Mac gets a name under the relay's
+inbound domain, `<inbound name>.in.example.com`, and a certificate for it from Let's Encrypt, whose key never leaves the
+Mac. A delivery is `https://<inbound name>.in.example.com/in/<secret>`: the relay reads the TLS ClientHello just far
+enough to see the name, then passes the encrypted connection, unopened, to that Mac through the Mac's own connection.
+No port opens on the Mac (see "Inbound domain" in [PROTOCOL.md](PROTOCOL.md)).
+
+What the relay sees: the name (so which Mac), the caller's address, when and how many bytes. Never the secret or the
+text. The names are public anyway (Let's Encrypt publishes every certificate in the certificate transparency logs); they
+hold nothing personal.
+
+To turn it on:
+
+1. **DNS.** A wildcard record `*.in.example.com` pointing at the server (A, and AAAA if the server has IPv6). Behind
+   Cloudflare, set it **DNS only** (grey cloud): its proxy would end TLS itself.
+2. **Environment.** `RELAY_INBOUND_DOMAIN=in.example.com`. The relay then listens on `RELAY_INBOUND_ADDR` (`:8444` in
+   the container) and announces the domain in `/v1/info`. Port 8444 needs no publishing: only the proxy reaches it,
+   on its network.
+3. **The proxy**, here Traefik, which already serves the relay's HTTPS: a TCP router passes the TLS of these names
+   through, unopened, to the relay's port 8444 with the PROXY protocol (the relay closes connections without it), and an
+   HTTP router sends Let's Encrypt's challenge for these names to the relay's port 8080. Traefik's dynamic configuration,
+   with the relay's service name on Traefik's network (with Dokploy, the application's name, as in its generated
+   configuration):
+
+   ```yaml
+   tcp:
+     routers:
+       openmae-inbound:
+         entryPoints: [websecure]
+         rule: 'HostSNIRegexp(`^[a-z2-7]{26}\.in\.example\.com$`)'
+         service: openmae-inbound
+         tls:
+           passthrough: true
+     services:
+       openmae-inbound:
+         loadBalancer:
+           serversTransport: openmae-proxy-protocol
+           servers:
+             - address: "<relay service>:8444"
+     serversTransports:
+       openmae-proxy-protocol:
+         proxyProtocol:
+           version: 2
+   http:
+     routers:
+       openmae-acme:
+         entryPoints: [web]
+         rule: 'HostRegexp(`^[a-z2-7]{26}\.in\.example\.com$`) && PathPrefix(`/.well-known/acme-challenge/`)'
+         service: openmae-relay-http
+     services:
+       openmae-relay-http:
+         loadBalancer:
+           servers:
+             - url: "http://<relay service>:8080"
+   ```
+
+   - This is Traefik 3's syntax (regular expressions as Go writes them). Before Traefik 3.5, `proxyProtocol` goes
+     under the service's `loadBalancer` instead of a `serversTransport`:
+     `loadBalancer: { proxyProtocol: { version: 2 }, servers: [...] }`.
+   - **Traefik keeps Let's Encrypt's challenges for itself** as soon as it has a certificate resolver of its own (as
+     Dokploy's does): the HTTP router above then never sees them. From Traefik 3.1, allow it in Traefik's static
+     configuration (with Dokploy, `traefik.yml` in its Traefik settings), then restart Traefik:
+
+     ```yaml
+     entryPoints:
+       web:
+         address: ":80"
+         allowACMEByPass: true
+     ```
+
+     The router above only takes names under the inbound domain: Traefik goes on answering the challenges of its own
+     certificates.
+   - Check: `curl -i http://abcdefghijklmnopqrstuvwxyz.in.example.com/.well-known/acme-challenge/test` must answer
+     `404` with `404 page not found` **at once**. An answer after a long wait comes from Traefik's own challenge
+     handler: `allowACMEByPass` is missing.
+
+   **Standalone mode** (`RELAY_TLS_DOMAIN`, no proxy): nothing more to do. The relay sorts its own HTTPS port by server
+   name, and its HTTP listener (port 80) answers the challenges. `RELAY_INBOUND_ADDR` is not used.
+4. **Let's Encrypt's limits.** Each Mac's certificate counts against Let's Encrypt's limit of 50 new certificates per
+   registered domain per week (here `example.com`), renewals aside. That is plenty for a relay of one's own. A large
+   public relay needs Let's Encrypt to raise it, or its inbound domain on the
+   [Public Suffix List](https://publicsuffix.org), which makes each name a registered domain of its own.
+
+Then, in OpenMaé on the Mac, a source with the origin "Internet" gets its `https://` address once the Mac has its
+certificate, a few seconds after the first such source is added. Try it from anywhere:
+`curl -d 'Hello from the internet' https://<inbound name>.in.example.com/in/<secret>`.
+
+Limits, per inbound name (that is, per Mac): 30 connections per minute and 5 at once. Per caller: 20 a minute (per /64
+for IPv6). Per connection: 1 MB both ways together and 15 seconds. Beyond, or with no Mac connected, the connection is
+closed: nothing is kept.
+
 ## Deploying on Dokploy
 
 For a relay at `relay.openmae.com`, deployed as an Application built with the Dockerfile type (Dockerfile
@@ -212,10 +312,13 @@ For a relay at `relay.openmae.com`, deployed as an Application built with the Do
      directly and keeps the addresses.)
 4. **Volume.** Mount a named volume on **`/data`**. It holds the QUIC key; if it is lost, the key pin changes
    (the apps recover by fetching `/v1/info` again, but keep it anyway).
-5. **Health check.** The image's `HEALTHCHECK` runs `/relay -healthcheck`, which asks `/healthz` on port 8080
+5. **Deliveries from the internet** (optional): see [Deliveries from the internet](#deliveries-from-the-internet),
+   with `RELAY_INBOUND_DOMAIN=in.openmae.com`, the wildcard record `*.in.openmae.com`, and the Traefik configuration
+   in Dokploy's Traefik settings (a file of the dynamic configuration, and `allowACMEByPass` in `traefik.yml`).
+6. **Health check.** The image's `HEALTHCHECK` runs `/relay -healthcheck`, which asks `/healthz` on port 8080
    (the image has no shell or curl). Docker marks the container unhealthy when it fails, and Docker Swarm, which
    Dokploy uses, replaces it. For outside monitoring, watch `https://relay.openmae.com/healthz`.
-6. **Firewall.** Open the UDP port (443 or 8443) in the server's firewall and in the hosting provider's
+7. **Firewall.** Open the UDP port (443 or 8443) in the server's firewall and in the hosting provider's
    firewall, if it has one. TCP 80 and 443 are already open for Traefik.
 
 Check from anywhere: `curl https://relay.openmae.com/v1/info` shows the QUIC port and the key pin.
@@ -302,7 +405,10 @@ Logs go to standard output, one `key=value` line per event: start and stop (port
 closed (transports, duration, bytes and datagrams each way, datagrams dropped, why it closed), and every 10
 minutes a line of counts (Macs registered, tubes, connections, refusals by error code). `RELAY_LOG_LEVEL=debug`
 adds registrations and refusals. In home mode, each delivery passed to a Mac adds a line with its status, size and
-duration, and the counts add the Macs registered for deliveries and the deliveries turned away, by status.
+duration, and the counts add the Macs registered for deliveries and the deliveries turned away, by status. With an
+inbound domain, each connection passed to a Mac adds a `passthrough` line (why it ended, bytes each way, duration),
+and the counts add those turned away by reason (`passthrough_unknown_name`, `passthrough_no_proxy_header`,
+`passthrough_mac_offline`, `passthrough_rate_limited`…) and the challenge answers not found (`challenge_404`).
 
 They never contain device ids, tube tokens or IP addresses, not even the relay's own: errors are logged by
 kind, not by their text, and messages from libraries have their addresses removed. Nor inbound names, secrets or
@@ -324,13 +430,14 @@ go test -race ./...
 The tests start the relay in-process on random local ports and drive it with test Macs and iPhones over QUIC and
 WebSocket: registration, tubes across every transport combination (bytes and datagrams both ways), every error
 code, rate limits, throttling, teardown, idle timeouts and shutdown; in home mode, deliveries from end to end, and
-each status the relay answers.
+each status the relay answers; with an inbound domain, TLS connections sorted by server name and passed through
+unopened, the PROXY protocol, Let's Encrypt's challenge answers, the limits, and standalone mode's sorting.
 
 Code layout: `main.go` reads the environment; `internal/relay` holds the relay. Start with `server.go`
 (listeners, shutdown) and `session.go` (what each control message does); then `tube.go` (piping), `quic.go` and
 `websocket.go` (the two transports), `hub.go` (registrations and pending tubes, in memory), `control.go`
-(messages, device ids, signatures), `limit.go` (rate limits), `cert.go` (QUIC key and pins) and `inbound.go`
-(home mode: deliveries).
+(messages, device ids, signatures), `limit.go` (rate limits), `cert.go` (QUIC key and pins), `inbound.go`
+(home mode: deliveries) and `passthrough.go` (the inbound domain: deliveries from the internet, passed through).
 
 ## Licences
 

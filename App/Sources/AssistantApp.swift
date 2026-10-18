@@ -35,22 +35,37 @@ struct AssistantApp: App {
                             storeURL: LinkHost.defaultStoreURL, macName: Host.current().localizedName ?? "Mac")
         // Information sent by other systems (Home Assistant, a script…) is said by the engine, or notified. Not through
         // the link: a paired iPhone cannot make Maé announce anything.
+        // Its certificate for the internet path comes from Let's Encrypt; `defaults write … ACMEDirectory staging` uses
+        // its staging server instead, for trying a relay out.
         #if DEBUG
+        let acme = ACMEServer.fromDefaults(allowTestRoot: true)
         let inbound = InboundTestHook.isOn
             ? InboundHost(announcer: engine as? any Announcing, identityStore: InboundTestHook.identityStore,
-                          secrets: MemoryInboundSecrets(), storeURL: InboundTestHook.storeURL)
+                          secrets: MemoryInboundSecrets(), storeURL: InboundTestHook.storeURL,
+                          keys: MemoryInboundKeys(), acme: InboundTestHook.acme ?? acme)
             : InboundHost(announcer: engine as? any Announcing, identityStore: identityStore,
-                          secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL)
+                          secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL,
+                          keys: KeychainInboundKeys(), acme: acme)
         #else
         let inbound = InboundHost(announcer: engine as? any Announcing, identityStore: identityStore,
-                                  secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL)
+                                  secrets: KeychainInboundSecrets(), storeURL: InboundHost.defaultStoreURL,
+                                  keys: KeychainInboundKeys(), acme: ACMEServer.fromDefaults(allowTestRoot: false))
         #endif
         let model = AssistantModel(connection: link)
         let phone = PhoneAccess(link: link)
+        let inboundAccess = InboundAccess(host: inbound)
+        // The internet path goes through the iPhones' relay, and follows when it changes.
+        #if DEBUG
+        if InboundTestHook.publicRelay == nil {
+            phone.relayChanged = { inboundAccess.setPublicRelay($0) }
+        }
+        #else
+        phone.relayChanged = { inboundAccess.setPublicRelay($0) }
+        #endif
         _model = State(initialValue: model)
         _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
         _phone = State(initialValue: phone)
-        _inbound = State(initialValue: InboundAccess(host: inbound))
+        _inbound = State(initialValue: inboundAccess)
     }
 
     var body: some Scene {

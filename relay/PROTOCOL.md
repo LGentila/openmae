@@ -5,6 +5,8 @@ How the iPhone and iPad app talks to OpenMaé on the Mac, directly on the local 
 Everything the user says or hears, and every text, is encrypted end to end between the iPhone and the Mac: a
 relay only passes opaque bytes along. The one exception is a relay's [home mode](#home-mode-deliveries), off by
 default: systems on the home network post short texts to the Mac through a relay on that network, which reads them.
+Texts posted from the internet through a relay's [inbound domain](#inbound-domain-deliveries-from-the-internet) stay
+encrypted: the relay passes their TLS through to the Mac, which holds the certificate.
 
 There are two layers:
 
@@ -38,7 +40,8 @@ Served over HTTPS (behind the usual reverse proxy, with a public certificate). T
   "quic": { "port": 443, "alpn": "openmae-relay/1", "spki_sha256": ["<base64>", "…"] },
   "websocket": { "path": "/v1/ws" },
   "limits": { "tubes_per_mac": 3, "kbit_per_tube": 256, "attempts_per_minute": 10 },
-  "push": false
+  "push": false,
+  "inbound": { "domain": "in.openmae.com" }
 }
 ```
 
@@ -49,6 +52,9 @@ Served over HTTPS (behind the usual reverse proxy, with a public certificate). T
   key matches one of these pins. The first pin is the current key; during a key change the previous one stays
   listed for a month.
 - `push`: whether this relay can send push notifications (only the official relay holds the APNs key).
+- `inbound`: present only on a relay with an inbound domain (`RELAY_INBOUND_DOMAIN`): it takes deliveries from the
+  internet for the Macs, at `<inbound name>.<domain>` (see [Inbound domain](#inbound-domain-deliveries-from-the-internet)).
+  Clients that do not know it ignore it.
 
 `GET /healthz` answers `200 ok`.
 
@@ -92,7 +98,8 @@ checks that `id` matches `key` and that the signature is valid. A new registrati
 previous one, whose connection is closed.
 
 `hello` may also carry `"inbound": true`, which registers the Mac for deliveries instead (see
-[Home mode](#home-mode-deliveries)). Without it, or with `false`, the registration is the one above.
+[Home mode](#home-mode-deliveries) and [Inbound domain](#inbound-domain-deliveries-from-the-internet)). Without it, or
+with `false`, the registration is the one above.
 
 Then, while the control connection lasts:
 
@@ -120,7 +127,7 @@ bytes and datagrams of each side to the other, unchanged, until one side closes;
 **Errors**: `{"op":"error","code":"<code>"}`, then the relay closes the connection. Codes: `bad_request`,
 `bad_signature`, `mac_offline` (no Mac registered with that id), `mac_timeout` (the Mac did not accept in time),
 `busy` (the Mac already has its maximum of tubes), `unknown_tube`, `rate_limited`, `unsupported_version`,
-`inbound_off` (a `hello` with `"inbound": true` to a relay not in home mode).
+`inbound_off` (a `hello` with `"inbound": true` to a relay neither in home mode nor with an inbound domain).
 
 ### Limits
 
@@ -130,6 +137,8 @@ bytes and datagrams of each side to the other, unchanged, until one side closes;
 - No other traffic: a connection that does not follow this protocol is closed.
 - In home mode, per inbound name: 30 deliveries per minute and 5 at once, bodies of 64 KB at most, and 10 seconds
   each to receive a delivery, for the Mac to accept its tube, and for the Mac to answer.
+- With an inbound domain: 30 connections per minute and 5 at once per inbound name, 20 per minute per caller's IP
+  address (per /64 for IPv6), and 1 MB (both ways together) and 15 seconds per connection.
 
 The relay keeps everything in memory (no database). After a restart, Macs register again within 30 seconds.
 
@@ -214,6 +223,60 @@ nothing to the relay: the Mac checks it, and everything else in the request. The
 
 The relay's own answers have a short `text/plain` body.
 
+### Inbound domain: deliveries from the internet
+
+A relay reachable from the internet can take deliveries for the Macs registered with it **without being able to read
+them**. Its operator gives it an *inbound domain* (`RELAY_INBOUND_DOMAIN`, for example `in.openmae.com`), with a
+wildcard DNS record `*.<inbound domain>` pointing at the relay, and `/v1/info` announces it
+(`"inbound": {"domain": "…"}`). A Mac's address for deliveries from the internet is then:
+
+`https://<inbound name>.<inbound domain>/in/<secret>`
+
+The inbound name is the Mac's (see [Home mode](#home-mode-deliveries)). The Mac holds a certificate for that name, from
+Let's Encrypt, whose key never leaves it: HTTPS stays encrypted all the way to the Mac, and the relay passes the TLS
+connection through without opening it. A relay with an inbound domain is never in home mode (the relay refuses to
+start with both).
+
+**Inbound registration.** As in home mode: `hello` with `"inbound": true`, answered
+`{"op":"registered","inbound":"<inbound name>"}`. A Mac registers so only while it has a source on the internet.
+
+**A connection.** The relay reads the caller's TLS ClientHello just far enough to know its server name (SNI), without
+answering it. Unless the name is `<26 characters a–z, 2–7>.<inbound domain>` (in any case), with a Mac registered for
+deliveries under that inbound name, the relay closes the connection without a word: it holds no certificate for these
+names. Otherwise it sends on that Mac's inbound control connection:
+
+`{"op":"inbound","tube":"<16 random bytes, b64url>","from":"<the caller's IP address>"}`
+
+as in home mode, and the Mac accepts the tube the same way (`accept`, answered `accepted`). The relay then writes into
+the tube every byte it has read from the caller, its ClientHello first, and from then on copies the bytes both ways,
+unchanged; datagrams have no place in such a tube and are dropped. It closes both sides when the Mac's side ends, a
+moment after the caller's side ends, at 1 MB or at 15 seconds. Nothing is kept: with no Mac connected, the caller's
+connection is closed.
+
+The connections reach the relay in one of two ways:
+
+- **Behind a proxy that passes TLS through** (Traefik's TCP routers with `tls.passthrough`): on the relay's inbound
+  listener (`RELAY_INBOUND_ADDR`, `:8444`), each connection starting with the PROXY protocol header, version 2 or 1,
+  which gives the caller's address. A connection without it is closed.
+- **Standalone** (`RELAY_TLS_DOMAIN`): on the relay's own HTTPS port, sorted by server name. Names under the inbound
+  domain go to the Macs as above; every other name gets the relay's own HTTPS, as before.
+
+**Let's Encrypt's HTTP-01 challenge.** To get its certificate, the Mac leaves the challenge's answer with the relay on
+its inbound control connection, before asking Let's Encrypt to check it:
+
+| From | Message |
+|---|---|
+| Mac | `{"op":"acme_challenge","token":"<the challenge's token>","key_authorization":"<token>.<account key thumbprint>"}` |
+| relay | `{"op":"acme_challenge_stored","token":"<the challenge's token>"}` |
+
+- The token is base64url, 22 to 128 characters; the key authorization is the token, a dot and the 43 characters of the
+  ACME account key's SHA-256 thumbprint (RFC 8555 §8.1). Anything else, or the message on any other connection than an
+  inbound registration on a relay with an inbound domain, gets `bad_request`.
+- The relay keeps it in memory for 10 minutes, keyed by inbound name and token (8 tokens per name at most, the oldest
+  going first), and answers `GET http://<inbound name>.<inbound domain>/.well-known/acme-challenge/<token>` on its
+  plain HTTP listener with the key authorization, `200` and `text/plain`; `404` for any other token or path of these
+  names. The answer is public by nature.
+
 ### What a relay sees
 
 IP addresses, device ids, when and how much traffic passes. Never sound, text or notification contents: those
@@ -221,6 +284,10 @@ are encrypted by the end-to-end layer. The relay logs errors without device ids,
 
 In home mode, it also sees each delivery in clear: its path (with the source's secret), headers and body, and the
 caller's address. It logs deliveries without any of them: only their status, size and duration.
+
+With an inbound domain, it sees for each delivery the server name (so which Mac), the caller's address, when and how
+many bytes pass: never the secret or the text, which travel inside TLS. It logs them without the name or the address:
+why the connection ended, its bytes each way and its duration.
 
 ## 2. End-to-end layer (`openmae/1`)
 

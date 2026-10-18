@@ -7,7 +7,8 @@ import VoiceCore
 /// Still pictures of Settings › Received information (see `Snapshots`): its row in the settings, the panel without a
 /// home relay, with sources, with the relay connecting, unreachable or not in home mode, a source's page (with its log,
 /// without a relay, while a change of address or a removal waits for a yes), "Add a source", and the help for Home
-/// Assistant.
+/// Assistant; then the internet path: ready, getting its certificate (after a failure), not offered, unreachable, an
+/// internet source's page and adding one.
 extension Snapshots {
     private struct InboundScene {
         var name: String
@@ -15,6 +16,7 @@ extension Snapshots {
         var panel: WindowState.Panel = .inbound
         var page: InboundAccess.Page = .list
         var addingSource = false
+        var addingOrigin = InboundSource.Origin.home
         var confirming: InboundAccess.Confirmation?
         var height: CGFloat = 900
     }
@@ -78,6 +80,37 @@ extension Snapshots {
         var notHomeMode = connected
         notHomeMode.homeRelay = .notHomeMode
 
+        // The internet path, through the iPhones' relay.
+        let webhook = InboundSource(name: "Alerte du serveur", origin: .internet, mayBeUrgent: true,
+                                    created: ago(minutes: 2000))
+        var internet = connected
+        internet.publicRelayAddress = URL(string: "https://relay.openmae.com")!
+        internet.inboundDomain = "in.openmae.com"
+        internet.internetPath = .ready
+        internet.certificateExpiry = now.addingTimeInterval(80 * 86_400)
+        internet.sources = [homeAssistant, webhook, garage]
+        internet.addresses[webhook.id] = URL(string: "https://\(inboundName).in.openmae.com/in/\(secret(7))")!
+        internet.logs[webhook.id] = [
+            InboundLogEntry(date: ago(minutes: 12), path: .publicRelay, form: .json, result: .said, caller: "203.0.113.7",
+                            text: "La sauvegarde de cette nuit a réussi."),
+            InboundLogEntry(date: ago(minutes: 40), path: .homeRelay, form: .text, result: .wrongPath,
+                            caller: "192.168.1.20"),
+        ]
+        var gettingCertificate = internet
+        gettingCertificate.internetPath = .gettingCertificate
+        gettingCertificate.certificateExpiry = nil
+        gettingCertificate.certificateProblem = "refused: Fetching http://\(inboundName).in.openmae.com/.well-known/acme-challenge/…: 404"
+        var notOffered = internet
+        notOffered.internetPath = .notOffered
+        notOffered.inboundDomain = nil
+        notOffered.addresses[webhook.id] = nil
+        var internetUnreachable = internet
+        internetUnreachable.internetPath = .unreachable
+        var available = connected
+        available.publicRelayAddress = URL(string: "https://relay.openmae.com")!
+        available.inboundDomain = "in.openmae.com"
+        available.internetPath = .available
+
         let scenes = [
             InboundScene(name: "inbound-1-settings", status: connected, panel: .settings, height: 1300),
             InboundScene(name: "inbound-2-empty", status: empty, height: 700),
@@ -93,6 +126,14 @@ extension Snapshots {
             InboundScene(name: "inbound-11-remove", status: connected, page: .source(garage.id), confirming: .remove,
                          height: 1300),
             InboundScene(name: "inbound-12-connecting", status: connecting),
+            InboundScene(name: "inbound-13-internet-ready", status: internet, height: 1100),
+            InboundScene(name: "inbound-14-internet-certificate", status: gettingCertificate, height: 1150),
+            InboundScene(name: "inbound-15-internet-not-offered", status: notOffered, height: 1150),
+            InboundScene(name: "inbound-16-internet-unreachable", status: internetUnreachable, height: 1100),
+            InboundScene(name: "inbound-17-internet-source", status: internet, page: .source(webhook.id), height: 1500),
+            InboundScene(name: "inbound-18-add-internet-source", status: available, addingSource: true,
+                         addingOrigin: .internet, height: 1150),
+            InboundScene(name: "inbound-19-settings-internet", status: gettingCertificate, panel: .settings, height: 1300),
         ]
         for scene in scenes {
             let model = await scriptedModel(ready)
@@ -101,6 +142,7 @@ extension Snapshots {
             let inbound = InboundAccess(host: nil, status: scene.status)
             inbound.show(scene.page)
             inbound.addingSource = scene.addingSource
+            inbound.addingOrigin = scene.addingOrigin
             inbound.confirming = scene.confirming
             let window = WindowState()
             let view = ContentView(model: model, window: window)

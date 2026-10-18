@@ -21,11 +21,19 @@ public struct RelayInfo: Decodable, Sendable, Equatable {
         public var path: String
     }
 
+    /// A relay that passes deliveries from the internet through to the Macs, unopened: their names are
+    /// `<inbound name>.<domain>`.
+    public struct InboundInfo: Decodable, Sendable, Equatable {
+        public var domain: String
+    }
+
     public var versions: [Int]
     public var quic: QUICInfo?
     public var websocket: WebSocketInfo?
     /// Whether this relay sends push notifications (only the official one can).
     public var push: Bool?
+    /// Absent when the relay does not take deliveries from the internet.
+    public var inbound: InboundInfo?
 }
 
 public enum RelayError: Error, Equatable, Sendable {
@@ -292,16 +300,19 @@ final class WebSocketTransport: LinkTransport, @unchecked Sendable {
 /// The Mac's control connection to its relay: registered with its Ed25519 key, it hears of the iPhones asking for
 /// it. Reconnects on its own, waiting longer each time (1 s up to 30 s).
 ///
-/// An inbound registration (`inbound: true`) is the Mac's second one, with a relay in home mode on the home network:
-/// it hears only of deliveries of received information (`deliveries`), never of iPhones, and does not replace the
-/// Mac's ordinary registration, even on the same relay.
+/// An inbound registration (`inbound: true`) is one more, for received information: with a relay in home mode on the
+/// home network, or (`passthrough: true`) with the public relay, when it takes deliveries from the internet and passes
+/// their TLS through unopened. It hears only of deliveries (`deliveries`), never of iPhones, and does not replace the
+/// Mac's ordinary registration, even on the same relay. On the public relay it also leaves the answers to Let's
+/// Encrypt's HTTP-01 challenge (`depositChallenge`).
 public actor RelayRegistration {
     public enum Status: Sendable, Equatable {
         case connecting
         case registered
         /// The relay cannot be reached, or refused; it is tried again.
         case unreachable
-        /// An inbound registration on a relay that is not in home mode: tried again now and then.
+        /// An inbound registration on a relay that does not take that kind of deliveries (not in home mode, or without
+        /// an inbound domain for `passthrough`): tried again now and then.
         case inboundOff
     }
 
@@ -321,13 +332,19 @@ public actor RelayRegistration {
     private nonisolated let deliverySink: AsyncStream<Delivery>.Continuation
     public nonisolated let relay: URL
     public nonisolated let inbound: Bool
+    /// An inbound registration with the public relay, whose deliveries are TLS connections passed through.
+    public nonisolated let passthrough: Bool
     private let identity: DeviceIdentity
     private var loop: Task<Void, Never>?
+    /// The control connection while registered.
+    private var channel: ControlChannel?
+    private let stored = ChallengeAcks()
 
-    public init(relay: URL, identity: DeviceIdentity, inbound: Bool = false) {
+    public init(relay: URL, identity: DeviceIdentity, inbound: Bool = false, passthrough: Bool = false) {
         self.relay = relay
         self.identity = identity
-        self.inbound = inbound
+        self.inbound = inbound || passthrough
+        self.passthrough = passthrough
         (tubes, tubeSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(8))
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         (deliveries, deliverySink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(8))
@@ -352,15 +369,21 @@ public actor RelayRegistration {
             statusSink.yield(.connecting)
             do {
                 let channel = try await register()
+                self.channel = channel
                 statusSink.yield(.registered)
-                DebugLog.log("link: registered with the relay")
+                DebugLog.log("link: registered with the relay\(passthrough ? " for deliveries from the internet" : "")")
                 wait = 1
+                defer {
+                    self.channel = nil
+                    stored.failAll()
+                }
                 try await listen(channel)
             } catch is CancellationError {
                 return
             } catch RelayError.refused("inbound_off") {
                 // A relay that is not in home mode will not be one in a few seconds.
-                DebugLog.log("link: the home relay is not in home mode")
+                DebugLog.log(passthrough ? "link: the relay takes no deliveries from the internet"
+                                         : "link: the home relay is not in home mode")
                 statusSink.yield(.inboundOff)
                 try? await Task.sleep(for: .seconds(60))
                 continue
@@ -376,6 +399,9 @@ public actor RelayRegistration {
 
     private func register() async throws -> ControlChannel {
         let info = try await RelayClient.info(relay)
+        // Home deliveries come in clear, internet ones as TLS: each registration only with the relay that sends its
+        // kind (a relay with an inbound domain is never in home mode).
+        if inbound, (info.inbound != nil) != passthrough { throw RelayError.refused("inbound_off") }
         let channel: ControlChannel
         if info.quic != nil, !QUICBlocked.shared.isBlocked(relay),
            let quic = try? await ControlChannel.quic(relay: relay, info: info)
@@ -421,6 +447,7 @@ public actor RelayRegistration {
         let tubeSink = tubeSink
         let deliverySink = deliverySink
         let inbound = inbound
+        let stored = stored
         try await withThrowingTaskGroup(of: Void.self) { tasks in
             let lastHeard = Clock()
             tasks.addTask {
@@ -434,6 +461,8 @@ public actor RelayRegistration {
                         if let tube = message["tube"] as? String {
                             deliverySink.yield(Delivery(tube: tube, from: message["from"] as? String ?? ""))
                         }
+                    case "acme_challenge_stored":
+                        if let token = message["token"] as? String { stored.resolve(token) }
                     default:
                         break
                     }
@@ -449,6 +478,49 @@ public actor RelayRegistration {
             }
             defer { tasks.cancelAll() }
             try await tasks.next()
+        }
+    }
+
+    /// Leaves the answer to an HTTP-01 challenge with the relay (`passthrough` only), which serves it to Let's Encrypt
+    /// for 10 minutes; returns once the relay has it.
+    public func depositChallenge(token: String, keyAuthorization: String) async throws {
+        guard passthrough, let channel else { throw RelayError.unreachable("not registered") }
+        try await stored.wait(token, timeout: .seconds(10)) {
+            channel.send(["op": "acme_challenge", "token": token, "key_authorization": keyAuthorization])
+        }
+    }
+
+    /// The relay's acknowledgements of the challenges left with it, by token.
+    private final class ChallengeAcks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [String: CheckedContinuation<Void, Error>] = [:]
+
+        func wait(_ token: String, timeout: Duration, send: () -> Void) async throws {
+            let timer = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                if !Task.isCancelled { self?.fail(token, TransportError.timeout) }
+            }
+            defer { timer.cancel() }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.withLock { waiting[token] = continuation }
+                send()
+            }
+        }
+
+        func resolve(_ token: String) {
+            lock.withLock { waiting.removeValue(forKey: token) }?.resume()
+        }
+
+        func fail(_ token: String, _ error: Error) {
+            lock.withLock { waiting.removeValue(forKey: token) }?.resume(throwing: error)
+        }
+
+        func failAll() {
+            let all = lock.withLock {
+                defer { waiting = [:] }
+                return Array(waiting.values)
+            }
+            all.forEach { $0.resume(throwing: RelayError.unreachable("registration lost")) }
         }
     }
 

@@ -32,31 +32,35 @@ const (
 )
 
 // Server is a relay: an HTTP listener (discovery, WebSocket, health), a
-// QUIC listener and, in standalone mode, an HTTPS listener.
+// QUIC listener, in standalone mode an HTTPS listener and, with an inbound
+// domain, the listener for connections passed through to the Macs.
 type Server struct {
-	cfg        Config
-	lim        Limits
-	log        *slog.Logger
-	hub        *hub
-	attempts   *attempts
-	deliveries *deliveries // home mode
-	slots      slots
-	handlers   tracker
-	stats      counters
-	pin        string
-	info       []byte // the /v1/info document, fixed at start
+	cfg            Config
+	lim            Limits
+	log            *slog.Logger
+	hub            *hub
+	attempts       *attempts
+	deliveries     *deliveries // home mode and the inbound domain, per inbound name
+	passthroughIPs *attempts   // the inbound domain, per caller
+	challenges     *challenges // the inbound domain: answers to Let's Encrypt's HTTP-01 challenge
+	slots          slots
+	handlers       tracker
+	stats          counters
+	pin            string
+	info           []byte // the /v1/info document, fixed at start
 
 	tubesOpen   atomic.Int64
 	handshaking atomic.Int64 // QUIC handshakes in progress
 
-	udp      *net.UDPConn
-	quicTr   *quic.Transport
-	quicLn   *quic.Listener
-	httpLn   net.Listener
-	httpSrv  *http.Server
-	httpsLn  net.Listener
-	httpsSrv *http.Server
-	upgrader *websocket.Upgrader
+	udp       *net.UDPConn
+	quicTr    *quic.Transport
+	quicLn    *quic.Listener
+	httpLn    net.Listener
+	httpSrv   *http.Server
+	httpsLn   net.Listener
+	httpsSrv  *http.Server
+	inboundLn net.Listener // the inbound domain behind a proxy
+	upgrader  *websocket.Upgrader
 
 	ctx    context.Context // ends at shutdown
 	cancel context.CancelFunc
@@ -71,15 +75,29 @@ func New(cfg Config) (*Server, error) {
 		// would read deliveries from there in clear.
 		return nil, errors.New("home mode is for a relay on the home network: it cannot be combined with standalone mode")
 	}
+	if cfg.HomeInbound && cfg.InboundDomain != "" {
+		// A Mac's inbound registration would get deliveries in clear and
+		// encrypted ones alike, and could not tell them apart.
+		return nil, errors.New("home mode is for a relay on the home network: it cannot be combined with an inbound domain")
+	}
+	if cfg.InboundDomain != "" {
+		d, err := ParseInboundDomain(cfg.InboundDomain)
+		if err != nil {
+			return nil, fmt.Errorf("inbound domain: %w", err)
+		}
+		cfg.InboundDomain = d
+	}
 	s := &Server{
-		cfg:        cfg,
-		lim:        cfg.Limits,
-		log:        cfg.Logger,
-		hub:        newHub(cfg.Limits.TubesPerMac, cfg.Limits.MaxPendingTubes),
-		attempts:   newAttempts(cfg.Limits.AttemptsPerMinute, time.Minute, maxTrackedAddrs, nil),
-		deliveries: newDeliveries(cfg.Limits.InboundPerMinute, cfg.Limits.InboundAtOnce, maxTrackedNames, nil),
-		slots:      slots{max: int64(cfg.MaxConnections)},
-		upgrader:   newUpgrader(),
+		cfg:            cfg,
+		lim:            cfg.Limits,
+		log:            cfg.Logger,
+		hub:            newHub(cfg.Limits.TubesPerMac, cfg.Limits.MaxPendingTubes),
+		attempts:       newAttempts(cfg.Limits.AttemptsPerMinute, time.Minute, maxTrackedAddrs, nil),
+		deliveries:     newDeliveries(cfg.Limits.InboundPerMinute, cfg.Limits.InboundAtOnce, maxTrackedNames, nil),
+		passthroughIPs: newAttempts(cfg.Limits.PassthroughPerIP, time.Minute, maxTrackedAddrs, nil),
+		challenges:     newChallenges(challengeTTL, challengesPerName, maxTrackedNames, nil),
+		slots:          slots{max: int64(cfg.MaxConnections)},
+		upgrader:       newUpgrader(),
 	}
 	key, cert, err := loadQUICIdentity(cfg.DataDir, time.Now(), s.log)
 	if err != nil {
@@ -99,7 +117,7 @@ func New(cfg Config) (*Server, error) {
 	if port == 0 {
 		port = portOf(s.udp.LocalAddr())
 	}
-	s.info = infoDocument(port, pins, cfg.Limits, cfg.Pusher != nil)
+	s.info = infoDocument(port, pins, cfg.Limits, cfg.Pusher != nil, cfg.InboundDomain)
 	return s, nil
 }
 
@@ -131,6 +149,11 @@ func (s *Server) listen(key *ecdsa.PrivateKey, cert tls.Certificate) error {
 	}
 	s.httpSrv = newHTTPServer(s.routes(s.cfg.HomeInbound), errorLog)
 	if s.cfg.TLSDomain == "" {
+		if s.cfg.InboundDomain != "" {
+			if s.inboundLn, err = net.Listen("tcp", s.cfg.InboundAddr); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
@@ -141,13 +164,17 @@ func (s *Server) listen(key *ecdsa.PrivateKey, cert tls.Certificate) error {
 		HostPolicy: autocert.HostWhitelist(s.cfg.TLSDomain),
 		Cache:      autocert.DirCache(filepath.Join(s.cfg.DataDir, "acme")),
 	}
-	s.httpSrv.Handler = m.HTTPHandler(s.redirectToHTTPS())
+	s.httpSrv.Handler = s.inboundChallenges(m.HTTPHandler(s.redirectToHTTPS()))
 	tlsConf := m.TLSConfig()
 	// WebSocket needs HTTP/1.1: gorilla cannot upgrade HTTP/2 streams.
 	tlsConf.NextProtos = []string{"http/1.1", "acme-tls/1"}
 	tlsConf.MinVersion = tls.VersionTLS12
 	if s.httpsLn, err = net.Listen("tcp", s.cfg.HTTPSAddr); err != nil {
 		return err
+	}
+	if s.cfg.InboundDomain != "" {
+		// Names under the inbound domain go to the Macs, unopened.
+		s.httpsLn = s.newSortingListener(s.httpsLn)
 	}
 	s.httpsSrv = newHTTPServer(s.routes(false), errorLog)
 	s.httpsSrv.TLSConfig = tlsConf
@@ -190,16 +217,25 @@ func (s *Server) admitQUIC(ctx context.Context, _ *quic.ClientInfo) (context.Con
 // connection and the listeners. Clients connect again once the relay is
 // back.
 func (s *Server) Run(ctx context.Context) error {
-	errc := make(chan error, 3)
+	errc := make(chan error, 4)
 	go func() { errc <- s.serveQUIC() }()
 	go func() { errc <- s.httpSrv.Serve(s.httpLn) }()
 	if s.httpsSrv != nil {
 		go func() { errc <- s.httpsSrv.ServeTLS(s.httpsLn, "", "") }()
 	}
+	if s.inboundLn != nil {
+		go func() { errc <- s.serveInbound(s.inboundLn) }()
+	}
 	// Ports only: logs hold no IP address, not even the relay's own.
 	attrs := []any{"http_port", portOf(s.httpLn.Addr()), "quic_port", portOf(s.udp.LocalAddr()), "pin", s.pin}
 	if s.httpsLn != nil {
 		attrs = append(attrs, "https_port", portOf(s.httpsLn.Addr()), "domain", s.cfg.TLSDomain)
+	}
+	if s.inboundLn != nil {
+		attrs = append(attrs, "inbound_port", portOf(s.inboundLn.Addr()))
+	}
+	if s.cfg.InboundDomain != "" {
+		attrs = append(attrs, "inbound_domain", s.cfg.InboundDomain)
 	}
 	if s.cfg.HomeInbound {
 		attrs = append(attrs, "home_mode", true)
@@ -320,7 +356,7 @@ func (s *Server) closeListeners() {
 	if s.udp != nil {
 		_ = s.udp.Close()
 	}
-	for _, ln := range []net.Listener{s.httpLn, s.httpsLn} {
+	for _, ln := range []net.Listener{s.httpLn, s.httpsLn, s.inboundLn} {
 		if ln != nil {
 			_ = ln.Close()
 		}
@@ -337,7 +373,7 @@ func (s *Server) logStats() {
 		case <-t.C:
 			macs, inbound, pending := s.hub.counts()
 			attrs := []any{"macs", macs}
-			if s.cfg.HomeInbound {
+			if s.cfg.HomeInbound || s.cfg.InboundDomain != "" {
 				attrs = append(attrs, "macs_for_deliveries", inbound)
 			}
 			attrs = append(attrs, "tubes", s.tubesOpen.Load(), "pending", pending,
@@ -357,7 +393,7 @@ func portOf(a net.Addr) int {
 	return 0
 }
 
-func infoDocument(port int, pins []string, lim Limits, push bool) []byte {
+func infoDocument(port int, pins []string, lim Limits, push bool, inboundDomain string) []byte {
 	type quicInfo struct {
 		Port int      `json:"port"`
 		ALPN string   `json:"alpn"`
@@ -371,13 +407,17 @@ func infoDocument(port int, pins []string, lim Limits, push bool) []byte {
 		KbitPerTube       int `json:"kbit_per_tube"`
 		AttemptsPerMinute int `json:"attempts_per_minute"`
 	}
+	type inboundInfo struct {
+		Domain string `json:"domain"`
+	}
 	doc := struct {
-		Name      string     `json:"name"`
-		Versions  []int      `json:"versions"`
-		QUIC      quicInfo   `json:"quic"`
-		WebSocket wsInfo     `json:"websocket"`
-		Limits    limitsInfo `json:"limits"`
-		Push      bool       `json:"push"`
+		Name      string       `json:"name"`
+		Versions  []int        `json:"versions"`
+		QUIC      quicInfo     `json:"quic"`
+		WebSocket wsInfo       `json:"websocket"`
+		Limits    limitsInfo   `json:"limits"`
+		Push      bool         `json:"push"`
+		Inbound   *inboundInfo `json:"inbound,omitempty"`
 	}{
 		Name:      "OpenMaé relay",
 		Versions:  []int{protocolVersion},
@@ -389,6 +429,9 @@ func infoDocument(port int, pins []string, lim Limits, push bool) []byte {
 			AttemptsPerMinute: lim.AttemptsPerMinute,
 		},
 		Push: push,
+	}
+	if inboundDomain != "" {
+		doc.Inbound = &inboundInfo{Domain: inboundDomain}
 	}
 	b, _ := json.Marshal(doc) // cannot fail
 	return b
