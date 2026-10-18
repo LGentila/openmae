@@ -572,6 +572,14 @@ final class PhoneModel {
             }
             watchSilence()
             watchDimming()
+        case .partialTranscript(let text):
+            // What the user has said so far: in their line, still pending, until the whole sentence replaces it in place.
+            guard state == .userSpeaking else { break }
+            if let last = transcript.indices.last, transcript[last].speaker == .user, transcript[last].pending {
+                transcript[last].text = text
+            } else {
+                transcript.append(TranscriptEntry(speaker: .user, text: text, pending: true))
+            }
         case .userTranscript(let text, let language):
             answerIndex = nil
             if let i = transcript.lastIndex(where: { $0.speaker == .user && $0.pending }) {

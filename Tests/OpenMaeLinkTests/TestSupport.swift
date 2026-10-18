@@ -33,13 +33,16 @@ final class MemoryWire: Sendable {
     /// The datagrams (the voice) the Mac sent into this connection, carried or not.
     var datagramsFromMac: Int { line.datagrams(from: .mac) }
 
-    /// A session over this connection, both of its ends, with keys as a handshake would have agreed them.
-    func sessions(phoneKey: Data, macKey: Data) -> (mac: LinkSession, phone: LinkSession) {
+    /// A session over this connection, both of its ends, with keys as a handshake would have agreed them. `hello`: what
+    /// the iPhone said about itself when it opened it (nil: an app from before it said anything).
+    func sessions(phoneKey: Data, macKey: Data, hello: HandshakePayload.Session? = nil)
+        -> (mac: LinkSession, phone: LinkSession)
+    {
         let toPhone = SymmetricKey(size: .bits256)
         let toMac = SymmetricKey(size: .bits256)
         let macSide = LinkSession(transport: mac, inbox: FrameInbox(mac),
                                   keys: SessionKeys((send: NoiseCipher(key: toPhone), receive: NoiseCipher(key: toMac))),
-                                  peerKey: phoneKey, peerMac: nil)
+                                  peerKey: phoneKey, peerMac: nil, peerPhone: hello)
         let phoneSide = LinkSession(transport: phone, inbox: FrameInbox(phone),
                                     keys: SessionKeys((send: NoiseCipher(key: toMac), receive: NoiseCipher(key: toPhone))),
                                     peerKey: macKey, peerMac: HandshakePayload.Mac(name: "Mac de test"))

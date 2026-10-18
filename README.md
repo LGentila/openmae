@@ -104,6 +104,8 @@ microphone ─► voice activity ─► speech recognition ─► language model
 
 - The end of your turn is detected after a short silence. During a pause in the middle of a sentence, the
   answer is already prepared, and dropped if you go on.
+- While you speak, what you said so far is transcribed again about twice a second, so your words show under the orb;
+  once your turn is over, the whole sentence is transcribed again, as it would be without them.
 - Answers stream: each sentence goes to the voice as soon as it is written.
 - The conversation stays in the model's memory between turns, so each answer only has to read your last
   sentence.
@@ -267,7 +269,9 @@ conversation" in the app, and the time it takes is shown. `--wake-word` only ans
 « OK Maé », as the app's wake-word mode; add `--follow-up 0` so that every recording needs the phrase (no seconds of
 attention after an answer). `--no-voice-restart` keeps the voice going when its opening stays near-silent (the app
 starts it again after 1.2 s of near-silence), and `--racing-voices 2` starts each answer with two voices at once, the
-first one audible saying it (off in the app: 1.2 GB more memory).
+first one audible saying it (off in the app: 1.2 GB more memory). The words the user says so far are printed while
+each recording plays, as the app shows them; `--no-partials` turns that off, for comparison. `--talk-key` holds the
+talk key while each recording plays and releases it `--release-after` seconds later (0.25 by default), as ⌥ Space.
 
 The voice alone: how long it takes to make its first audible sound on typical first sentences, and the near-silence it
 produces before (Pocket TTS opens each sentence with a breath of random length). `--parallel 2` has two voices speak

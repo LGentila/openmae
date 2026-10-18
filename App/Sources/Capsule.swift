@@ -97,8 +97,8 @@ private struct CapsuleOrb: View {
     }
 }
 
-/// The status, over the end of the sentence in progress. The user's words only exist once their turn is over, so
-/// while Maé listens the status is alone.
+/// The status, over the end of the sentence in progress: the user's words as they speak (provisional, they may change
+/// as speech recognition hears more of the sentence), the same while Maé thinks, then Maé's answer.
 private struct CapsuleText: View {
     let model: AssistantModel
     let state: PipelineState
@@ -126,19 +126,26 @@ private struct CapsuleText: View {
         }
     }
 
-    /// What the user said while Maé thinks, then Maé's answer as she speaks it.
+    /// What the user says as they speak, and what they said while Maé thinks (the same line: the whole sentence replaces
+    /// their words so far in place), then Maé's answer as she speaks it.
     private var sentence: CapsuleSentence? {
         let exchange = model.currentExchange
         switch state {
+        case .userSpeaking:
+            // Only the line being heard, never the one before it (shown while the talk key is down, or while Maé is
+            // awake in the wake-word mode, before anyone speaks).
+            guard let user = exchange.user, user.pending, !user.text.isEmpty else { return nil }
+            return CapsuleSentence(id: user.id, words: TranscriptWords.split(user.text), tintsRecentWords: true,
+                                   pace: 0.07)
         case .thinking:
-            guard let user = exchange.user, !user.pending, !user.text.isEmpty else { return nil }
+            guard let user = exchange.user, !user.text.isEmpty else { return nil }
             return CapsuleSentence(id: user.id, words: TranscriptWords.split(user.text), tintsRecentWords: false,
                                    pace: 0.035)
         case .speaking:
             guard let answer = exchange.answer else { return nil }
             return CapsuleSentence(id: answer.id, words: TranscriptWords.split(answer.text), tintsRecentWords: true,
                                    pace: 0.26)
-        case .listening, .userSpeaking:
+        case .listening:
             return nil
         }
     }
@@ -149,7 +156,8 @@ private struct CapsuleSentence {
     var words: [String]
     /// The two most recent words are tinted.
     var tintsRecentWords: Bool
-    /// Seconds between two words. Maé's text comes ahead of her voice: it is shown at the pace of speech.
+    /// Seconds between two words. Maé's text comes ahead of her voice: it is shown at the pace of speech. The user's
+    /// words come a little after their voice, a few at a time: they follow one another quickly.
     var pace: Double
 }
 
@@ -177,9 +185,10 @@ private struct CapsuleWords: View {
                 Text(verbatim: "…").foregroundStyle(Palette.inkMuted)
             }
             ForEach(first..<count, id: \.self) { i in
+                let tinted = sentence.tintsRecentWords && i >= count - 2
                 Text(verbatim: sentence.words[i])
-                    .foregroundStyle(sentence.tintsRecentWords && i >= count - 2 ? deep : Palette.ink)
-                    .animation(Easing.animation(Easing.ease, 0.7), value: i >= count - 2)
+                    .foregroundStyle(tinted ? deep : Palette.ink)
+                    .animation(Easing.animation(Easing.ease, 0.7), value: tinted)  // also when Maé starts thinking
                     .transition(.asymmetric(
                         insertion: .modifier(active: WordArrival(amount: 1), identity: WordArrival(amount: 0))
                             .animation(Easing.animation(Easing.rise, Timing.word)),
@@ -193,12 +202,13 @@ private struct CapsuleWords: View {
         .padding(.vertical, 4)  // room for a word coming up, blurred
         .clipped()
         .padding(.vertical, -4)
-        .task(id: [sentence.id.uuidString, String(sentence.words.count)]) { await reveal() }
+        .task(id: [sentence.id.uuidString, String(sentence.words.count), String(sentence.pace)]) { await reveal() }
     }
 
     private func reveal() async {
         guard stillFrame == nil else { return }
         if shown.sentence != sentence.id { shown = Shown(sentence: sentence.id) }
+        shown.count = min(shown.count, sentence.words.count)  // the user's words so far may lose one
         while shown.count < sentence.words.count {
             shown.count += 1
             try? await Task.sleep(for: .seconds(sentence.pace))

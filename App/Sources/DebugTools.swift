@@ -78,7 +78,8 @@ enum Snapshots {
     static func render(to folder: URL) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
-        let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0)]
+        let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0),
+                                               .partialTranscript(Demo.questionSoFar)]
         let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
         let speaking: [AssistantEvent] = thinking
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
@@ -271,7 +272,8 @@ enum Snapshots {
     @MainActor
     private static func renderPresence(to folder: URL) async {
         let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
-        let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0)]
+        let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0),
+                                               .partialTranscript(Demo.questionSoFar)]
         let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
         let speaking: [AssistantEvent] = thinking
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
@@ -539,6 +541,20 @@ enum Demo {
     static var startsWithSetup: Bool { ProcessInfo.processInfo.arguments.contains("-demo-setup") }
 
     static let question = "Maé, rappelle-moi d’appeler Camille demain matin à dix heures, pour parler du voyage."
+    /// What speech recognition has heard of it so far, as in the design's listening state.
+    static let questionSoFar = "Maé, rappelle-moi d’appeler Camille demain matin à dix"
+
+    /// The user's words so far, `seconds` after they started the question, as speech recognition gives them while they
+    /// speak: nothing for the first second, then two more words about every 0.6 s, the first one heard otherwise until
+    /// more of the sentence is heard.
+    static func question(after seconds: Double) -> String? {
+        guard seconds >= 1 else { return nil }
+        let words = question.split(separator: " ").map(String.init)
+        let count = min(words.count, 2 + 2 * Int((seconds - 1) / 0.6))
+        var heard = Array(words.prefix(count))
+        if count <= 4 { heard[0] = "Mais," }
+        return heard.joined(separator: " ")
+    }
     static let answer = ["C’est noté ! Demain à 10 h, je te rappelle d’appeler Camille.",
                          "Tu veux que je note aussi les idées du voyage ?"]
 
@@ -597,7 +613,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     private var talkScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
         { sink in
             sink.yield(.state(.userSpeaking))
-            _ = await Self.voice(sink, seconds: 120, input: true)
+            _ = await Self.voice(sink, seconds: 120, input: true, words: true)
         }
     }
 
@@ -665,7 +681,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
                 sink.yield(.state(.listening))
                 guard await Self.wait(2.2) else { return }
                 sink.yield(.state(.userSpeaking))
-                guard await Self.voice(sink, seconds: 5.8, input: true) else { return }
+                guard await Self.voice(sink, seconds: 5.8, input: true, words: true) else { return }
                 sink.yield(.userTranscript(Demo.question, .french))
                 sink.yield(.state(.thinking))
                 guard await Self.wait(2) else { return }
@@ -677,15 +693,20 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
         }
     }
 
-    /// A voice-like level, twenty times per second.
-    private static func voice(_ sink: AsyncStream<AssistantEvent>.Continuation, seconds: Double, input: Bool) async
-        -> Bool
+    /// A voice-like level, twenty times per second. `words`: the user's words so far come with it (`Demo.question`).
+    private static func voice(_ sink: AsyncStream<AssistantEvent>.Continuation, seconds: Double, input: Bool,
+                              words: Bool = false) async -> Bool
     {
         let steps = Int(seconds * 20)
+        var shown: String?
         for i in 0..<steps {
             let t = Double(i) / 20
             let level = Float(max(0, 0.55 + 0.25 * sin(t * 9) * sin(t * 2.3) + 0.1 * sin(t * 23)))
             sink.yield(.levels(input: input ? level : 0, output: input ? 0 : level))
+            if words, let heard = Demo.question(after: t), heard != shown {
+                shown = heard
+                sink.yield(.partialTranscript(heard))
+            }
             guard await wait(0.05) else { return false }
         }
         sink.yield(.levels(input: 0, output: 0))

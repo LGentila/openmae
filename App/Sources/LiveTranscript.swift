@@ -35,13 +35,14 @@ struct LiveTranscript: View {
         var count = 0
     }
 
-    /// The sentence being shown: the user's while Maé thinks, then Maé's answer as it is spoken.
+    /// The sentence being shown: the user's as they speak and while Maé thinks, then Maé's answer as it is spoken.
     private struct Sentence {
         var id: UUID
         var words: [String]
         /// The two most recent words are tinted.
         var tintsRecentWords: Bool
-        /// Seconds between two words. Maé's text comes ahead of the voice: it is shown at the pace of speech.
+        /// Seconds between two words. Maé's text comes ahead of the voice: it is shown at the pace of speech. The user's
+        /// words come a little after their voice, a few at a time: they follow one another quickly, as in the design.
         var pace: Double
     }
 
@@ -70,16 +71,27 @@ struct LiveTranscript: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, layout.horizontalPadding)
         .animation(Easing.animation(Easing.rise, Timing.rise), value: state == .listening)
-        .task(id: [sentence?.id.uuidString ?? "", String(sentence?.words.count ?? 0)]) { await reveal() }
+        .task(id: [sentence?.id.uuidString ?? "", String(sentence?.words.count ?? 0), String(sentence?.pace ?? 0)]) {
+            await reveal()
+        }
     }
 
+    /// While the user speaks, their words so far (they may change as speech recognition hears more of the sentence);
+    /// while Maé thinks, the same line, whose whole sentence replaces them in place: the words that stay do not move.
     private var sentence: Sentence? {
         switch state {
+        case .userSpeaking:
+            // Only the line being heard, never the one before it.
+            user.flatMap { user in
+                user.pending
+                    ? Sentence(id: user.id, words: TranscriptWords.split(user.text), tintsRecentWords: true, pace: 0.07)
+                    : nil
+            }
         case .thinking:
             user.map { Sentence(id: $0.id, words: TranscriptWords.split($0.text), tintsRecentWords: false, pace: 0.035) }
         case .speaking:
             answer.map { Sentence(id: $0.id, words: TranscriptWords.split($0.text), tintsRecentWords: true, pace: 0.26) }
-        case .listening, .userSpeaking:
+        case .listening:
             nil
         }
     }
@@ -92,10 +104,11 @@ struct LiveTranscript: View {
         return WordFlow(spacing: 0.28 * style.size, lineHeight: style.lineHeight, maxLines: 3,
                         maxWidth: layout.wordsWidth) {
             ForEach(0..<count, id: \.self) { i in
+                let tinted = sentence.tintsRecentWords && i >= count - 2
                 Text(verbatim: sentence.words[i])
                     .textStyle(style)
-                    .foregroundStyle(sentence.tintsRecentWords && i >= count - 2 ? deep : Palette.ink)
-                    .animation(.easeInOut(duration: 0.7), value: i >= count - 2)
+                    .foregroundStyle(tinted ? deep : Palette.ink)
+                    .animation(.easeInOut(duration: 0.7), value: tinted)  // also when Maé starts thinking
                     .fixedSize()
                     .transition(.modifier(active: BlurredRise(amount: 1), identity: BlurredRise(amount: 0))
                         .animation(Easing.animation(Easing.rise, Timing.word)))
@@ -113,6 +126,8 @@ struct LiveTranscript: View {
     private func reveal() async {
         guard let sentence, stillFrame == nil else { return }
         if shown.sentence != sentence.id { shown = Shown(sentence: sentence.id) }
+        // Speech recognition may hear fewer words as it hears more of the sentence ("Okay, my" → "OK Maé").
+        shown.count = min(shown.count, sentence.words.count)
         while shown.count < sentence.words.count {
             shown.count += 1  // only the new word moves: the others jump to their new place
             try? await Task.sleep(for: .seconds(sentence.pace))

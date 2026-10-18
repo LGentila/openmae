@@ -9,8 +9,8 @@ import VoiceCore
 /// (`ScreenshotFrame`), for a picture to turn back: an app that follows any window size cannot turn the iPad's window
 /// itself, and this Xcode has no Simulator window to turn.
 ///
-/// Screens: `conversation` (Maé answers), `conversation-rest`, `station` (at rest), `station-speaking` (a timer
-/// rings on it), `settings`.
+/// Screens: `conversation` (Maé answers), `conversation-listening` (the user's words as they speak),
+/// `conversation-rest`, `station` (at rest), `station-speaking` (a timer rings on it), `settings`.
 enum PhoneScreenshots {
     static var requested: String? {
         let arguments = ProcessInfo.processInfo.arguments
@@ -32,6 +32,11 @@ enum PhoneScreenshots {
             model.talkMode = .tap
             model.showForScreenshot(mac: mac, link: .connected(.direct), state: .speaking, open: true,
                                     transcript: [question, answer])
+        case "conversation-listening":
+            model.talkMode = .tap
+            let soFar = TranscriptEntry(speaker: .user, text: "Mets un minuteur de dix", pending: true)
+            model.showForScreenshot(mac: mac, link: .connected(.direct), state: .userSpeaking, open: true,
+                                    transcript: [soFar])
         case "conversation-rest":
             model.talkMode = .tap
             model.showForScreenshot(mac: mac, link: .connected(.direct), state: .listening, open: true,

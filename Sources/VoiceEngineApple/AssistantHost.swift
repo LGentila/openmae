@@ -694,6 +694,7 @@ public actor AssistantHost: AssistantConnection {
             adjustOtherApps()
             keepAwakeDuringExchange(state != .listening)
             emit.yield(.state(state))
+        case .partialTranscript(let text): emit.yield(.partialTranscript(text))
         case .userTranscript(let text, let language):
             DebugLog.log("user [\(language.rawValue)]: \(text)")
             emit.yield(.userTranscript(text, language))

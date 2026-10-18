@@ -9,7 +9,8 @@ struct TranscriptEntry: Identifiable, Equatable {
     let speaker: Speaker
     var text: String
     var language: SpeechLanguage?
-    /// The user is speaking and their words are not transcribed yet.
+    /// The user is speaking: their words are not transcribed yet, or only provisionally (`text` holds what they have
+    /// said so far, replaced once their turn is over).
     var pending = false
     /// The assistant was cut off.
     var interrupted = false
@@ -295,6 +296,8 @@ final class AssistantModel {
             self.state = state
             updateTranscript(for: state)
             if state == .listening, !talkKeyDown { isShortcutExchange = false }
+        case .partialTranscript(let text):
+            setPartialUserText(text)
         case .userTranscript(let text, let language):
             setUserText(text, language: language)
         case .assistantPiece(let piece):
@@ -338,12 +341,24 @@ final class AssistantModel {
                 transcript.append(TranscriptEntry(speaker: .user, text: "", pending: true))
             }
         case .listening:
-            // Speech that turned out to be noise (nothing was transcribed).
+            // Speech that turned out to be noise (nothing was transcribed), or that ended without a turn (« OK Maé »
+            // alone): its provisional words go too.
             while let last = transcript.last, last.speaker == .user, last.pending { transcript.removeLast() }
             // What Maé says next on her own (a timer that rang) is a new line, not the end of her last answer.
             answerIndex = nil
         case .thinking, .speaking:
             break
+        }
+    }
+
+    /// What the user has said so far, while they speak: in their line, still pending (the history shows "…" for it),
+    /// until the whole sentence replaces it in place.
+    private func setPartialUserText(_ text: String) {
+        guard state == .userSpeaking else { return }
+        if let last = transcript.indices.last, transcript[last].speaker == .user, transcript[last].pending {
+            transcript[last].text = text
+        } else {
+            transcript.append(TranscriptEntry(speaker: .user, text: text, pending: true))
         }
     }
 

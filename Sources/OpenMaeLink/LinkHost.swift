@@ -499,13 +499,14 @@ public actor LinkHost: AssistantConnection {
                     try? await Task.sleep(for: .seconds(2))
                     transport.close()
                 }
-            case .session(let keys, let key):
+            case .session(let keys, let key, let phone):
                 guard let device = state.devices.first(where: { $0.publicKey == key }) else {
                     transport.close()
                     return
                 }
                 deadline.cancel()
-                let session = LinkSession(transport: transport, inbox: inbox, keys: keys, peerKey: key, peerMac: nil)
+                let session = LinkSession(transport: transport, inbox: inbox, keys: keys, peerKey: key, peerMac: nil,
+                                          peerPhone: phone)
                 await open(session, device: device)
             }
         } catch let HandshakeFailure.refused(code) {
@@ -826,7 +827,11 @@ public actor LinkHost: AssistantConnection {
         default: break
         }
         guard let relayed = RemoteCommandPolicy.relayed(event), !sessions.isEmpty else { return }
-        for peer in sessions.values { peer.session.send(.event(relayed)) }
+        // An optional event only to the devices that understand it: one from before it would close the session on it.
+        let feature = RemoteCommandPolicy.neededFeature(relayed)
+        for peer in sessions.values where feature.map({ peer.session.peerPhone?.understands($0) == true }) ?? true {
+            peer.session.send(.event(relayed))
+        }
     }
 }
 

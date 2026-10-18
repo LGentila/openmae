@@ -132,7 +132,7 @@ public enum PhoneHandshake {
     {
         var noise = try NoiseHandshake(pattern: .IK, initiator: true, prologue: Prologue.session,
                                        localStatic: identity.agreementKey, remoteStaticKey: macKey)
-        let hello = HandshakePayload.encode(HandshakePayload.Session())
+        let hello = HandshakePayload.encode(HandshakePayload.Session.current)
         transport.send(Frame.encode(Data([HandshakeKind.session.rawValue]) + (try noise.writeMessage(payload: hello))))
         let second = try await answer(inbox)
         let mac = HandshakePayload.decode(HandshakePayload.Mac.self, try noise.readMessage(second))
@@ -155,8 +155,8 @@ public enum PhoneHandshake {
 public enum HostHandshakeOutcome: Sendable {
     /// A new iPhone, paired: its key and what it said about itself. The connection is to be closed.
     case paired(publicKey: Data, phone: HandshakePayload.Phone)
-    /// A paired iPhone opened a session.
-    case session(SessionKeys, publicKey: Data)
+    /// A paired iPhone opened a session, and what it said about itself (nil when it could not be read).
+    case session(SessionKeys, publicKey: Data, phone: HandshakePayload.Session?)
 }
 
 public enum HostHandshake {
@@ -198,12 +198,13 @@ public enum HostHandshake {
         case .session:
             var noise = try NoiseHandshake(pattern: .IK, initiator: false, prologue: Prologue.session,
                                            localStatic: identity.agreementKey)
-            _ = try noise.readMessage(first.dropFirst())
+            let hello = try noise.readMessage(first.dropFirst())
             guard let phoneKey = noise.remoteStaticKey, await isPaired(phoneKey) else {
                 try refuse(transport, "unknown_device")
             }
             transport.send(Frame.encode(try noise.writeMessage(payload: macPayload)))
-            return .session(SessionKeys(try noise.split()), publicKey: phoneKey)
+            return .session(SessionKeys(try noise.split()), publicKey: phoneKey,
+                            phone: HandshakePayload.decode(HandshakePayload.Session.self, hello))
         }
     }
 

@@ -56,6 +56,12 @@ public struct PipelineConfig: Sendable {
     public var toolCallFiller = true
     /// With actions on, every conversation starts with `ActionCatalog.examples` (see `ActionCatalog.showsExamples`).
     public var actionExamples = false
+    /// While the user speaks to Maé, what they said so far is transcribed again with the same speech recognition, once
+    /// this much of their audio (seconds) has come after the previous pass ended, so that their words show as they speak
+    /// (`PipelineEvent.partialTranscript`). It reads a 3–5 s phrase in 0.1–0.15 s on the reference Mac. nil = never.
+    public var partialTranscriptSeconds: Double? = 0.5
+    /// The first pass waits for this much of the utterance: speech recognition pads anything shorter with silence.
+    public var partialTranscriptMinSeconds: Double = 1
     public init() {}
 }
 
@@ -90,6 +96,9 @@ public struct TurnMetrics: Sendable, Codable {
 
 public enum PipelineEvent: Sendable {
     case state(PipelineState)
+    /// What the user has said so far, while they speak to Maé: replaced by the next one, then by `userTranscript` once
+    /// their turn is over. Display only: never in the history.
+    case partialTranscript(String)
     case userTranscript(String, SpeechLanguage)
     case assistantPiece(String)
     case turnFinished(TurnMetrics)
@@ -114,6 +123,10 @@ public enum PipelineEvent: Sendable {
 /// transcribed and read by the `WakeWordDetector`. A candidate that starts with the phrase becomes the user's turn
 /// (and silences Maé if she was speaking); the others are dropped. After the phrase alone, and after each answer,
 /// Maé is *awake* for a few seconds: any voice then starts a turn, as in the hands-free mode.
+///
+/// While the user speaks to Maé, what they said so far is transcribed again about every half second, to show their words
+/// as they speak (`partialTranscript`). Those passes are for the screen only: the turn transcribes the whole utterance
+/// again, as it would without them.
 public actor VoicePipeline {
     public nonisolated let events: AsyncStream<PipelineEvent>
     private let emit: AsyncStream<PipelineEvent>.Continuation
@@ -147,6 +160,28 @@ public actor VoicePipeline {
     private var voicedRunStart: ContinuousClock.Instant?
     /// Level (dB) of the last chunks, to tell the user's voice from an echo of the assistant's.
     private var recentLevels: [Float] = []
+    /// Chunks heard since the last one with speech (0: the last one has speech).
+    private var quietChunks = 0
+    private var partials = Partials()
+    private var partialPasses = 0
+
+    /// The passes over what the user said so far (`partialTranscriptSeconds`), for the utterance being heard.
+    private struct Partials {
+        /// The pass running: one at a time.
+        var pass: Task<Void, Never>?
+        /// The running pass's number: a result whose number is no longer this one is dropped (its utterance is over,
+        /// or starts again).
+        var passID = 0
+        /// The next pass starts once `utterance` is this long.
+        var nextAt = 0
+        /// How much of the utterance the last pass that ended had read.
+        var readUpTo = 0
+        /// With the talk key: how far into the utterance the user last spoke.
+        var speechUpTo = 0
+        /// How much of the utterance the words shown come from, and the words: an older result never replaces them.
+        var shownSamples = 0
+        var shown = ""
+    }
 
     // Wake-word mode.
     /// The utterance being heard is meant for Maé: always outside the wake-word mode; in it, when it began while she
@@ -409,6 +444,7 @@ public actor VoicePipeline {
         // What the turn detector was following belongs to the other mode: a sentence half-heard is dropped.
         turnDetector.reset()
         inPause = false
+        resetPartials()
         if !utteranceAddressed { dropCandidate() }
         utteranceWhileAwake = false
         if wasWakeWord { fallAsleep() }  // tells the interface that the wake-word mode's attention is over
@@ -429,6 +465,7 @@ public actor VoicePipeline {
         warmTask?.cancel()
         warmTask = nil
         candidate.check?.cancel()
+        resetPartials()
         awakeTimer?.cancel()
         emit.finish()
     }
@@ -436,6 +473,7 @@ public actor VoicePipeline {
     /// Forget the conversation (new session). The model starts again from the beginning it keeps.
     public func resetConversation() async throws {
         await cancelTurn(stopAudio: true)
+        resetPartials()  // the interface cleared the conversation: words found for it before are not shown
         conversation.clear()
         await tools?.resetConversation()
         try await model.prefillBeginning(conversation.beginning)
@@ -468,6 +506,7 @@ public actor VoicePipeline {
         } else if p < config.turn.silenceThreshold {
             voicedRunStart = nil
         }
+        quietChunks = p >= config.turn.speechThreshold ? 0 : quietChunks + 1
 
         recentLevels.append(Self.loudnessDB(chunk))
         if recentLevels.count > 16 { recentLevels.removeFirst() }
@@ -476,7 +515,11 @@ public actor VoicePipeline {
         if preRoll.count > preRollMax { preRoll.removeFirst(preRoll.count - preRollMax) }
 
         if config.listening == .pushToTalk || talkKeyPressed {
-            if talkKeyPressed { utterance += chunk }
+            if talkKeyPressed {
+                utterance += chunk
+                if quietChunks == 0 { partials.speechUpTo = utterance.count }
+                transcribeSoFarIfDue()
+            }
             return
         }
 
@@ -534,6 +577,7 @@ public actor VoicePipeline {
             DebugLog.log("wake phrase heard in the sound")
             await promoteCandidate(request: nil)
         }
+        transcribeSoFarIfDue()
     }
 
     private func userStartedSpeaking() async {
@@ -558,6 +602,7 @@ public actor VoicePipeline {
             utterance += preRoll
         }
         utteranceOpen = true
+        resetPartials()  // the interfaces show these words in a new line
         setState(.userSpeaking)
     }
 
@@ -573,6 +618,7 @@ public actor VoicePipeline {
         if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
             utterance = []
             utteranceOpen = turnDetector.isInUtterance
+            resetPartials()
         }
         setState(someoneSpeaksToMae ? .userSpeaking : .listening)
     }
@@ -585,6 +631,8 @@ public actor VoicePipeline {
         pendingSamples = []
         preRoll = []
         voicedRunStart = nil
+        quietChunks = 0
+        resetPartials()
         if !utteranceAddressed { dropCandidate() }
         if turn == nil {
             utterance = []
@@ -622,6 +670,7 @@ public actor VoicePipeline {
             inPause = false
             utterance = preRoll
             utteranceOpen = true
+            resetPartials()
             setState(.userSpeaking)
         } else {
             lastSpeechEnd = clock.now
@@ -784,6 +833,7 @@ public actor VoicePipeline {
         utterance = []
         utteranceOpen = false
         utteranceAddressed = true
+        resetPartials()
     }
 
     /// The phrase alone, or a request to be quiet (unless it answers an action waiting for its "oui"): the turn ends
@@ -831,10 +881,80 @@ public actor VoicePipeline {
         emit.yield(.awake(false))
     }
 
+    // MARK: - The user's words as they speak
+
+    /// While the user speaks to Maé, transcribes what they said so far now and then (`partialTranscriptSeconds`), to
+    /// show their words as they come. One pass at a time; none while they pause, nor once they have been quiet for a
+    /// moment: their turn may be about to end, and its transcription would wait for the pass. With the talk key, their
+    /// last words get one more pass as soon as they stop, since nothing else would show them before the key goes up
+    /// (hands-free, the answer prepared at the pause transcribes them, and they show then).
+    private func transcribeSoFarIfDue() {
+        guard config.partialTranscriptSeconds != nil, partials.pass == nil, state == .userSpeaking, utteranceOpen,
+              utteranceAddressed, turn == nil, !inPause,
+              utterance.count >= Int(config.partialTranscriptMinSeconds * EngineAudio.inputSampleRate)
+        else { return }
+        if quietChunks < 2 {
+            guard utterance.count >= partials.nextAt else { return }
+        } else {
+            let talkKey = config.listening == .pushToTalk || talkKeyPressed
+            guard talkKey, quietChunks <= 4, partials.speechUpTo > partials.readUpTo else { return }
+        }
+        partialPasses += 1
+        let id = partialPasses
+        let audio = utterance
+        partials.passID = id
+        partials.pass = Task { [transcriber, clock] in
+            let start = clock.now
+            let heard = (try? await transcriber.transcribe(audio)) ?? ""
+            await self.partialPassEnded(id, heard: heard, samples: audio.count, took: clock.now - start)
+        }
+    }
+
+    private func partialPassEnded(_ id: Int, heard: String, samples: Int, took: Duration) {
+        guard partials.passID == id, partials.pass != nil else { return }  // its utterance is over, or started again
+        partials.pass = nil
+        partials.readUpTo = samples
+        partials.nextAt = utterance.count + Int((config.partialTranscriptSeconds ?? 0) * EngineAudio.inputSampleRate)
+        DebugLog.log("partial transcript: \(Int(Double(samples) / EngineAudio.inputSampleRate * 1000)) ms of audio"
+                     + " read in \(Int(ms(took))) ms")
+        var text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        if config.listening == .wakeWord { text = wakeWord.request(in: text) ?? text }  // as in the turn's transcript
+        showPartial(text, samples: samples)
+    }
+
+    /// Shows the user's words so far, read from `samples` of the utterance: not when the words shown come from as much of
+    /// it or more (a pass that ended late), nor once the utterance is over or has become a turn.
+    private func showPartial(_ text: String, samples: Int) {
+        guard config.partialTranscriptSeconds != nil, state == .userSpeaking, utteranceOpen, utteranceAddressed,
+              turn?.committed != true, samples > partials.shownSamples, text.contains(where: \.isLetter)
+        else { return }
+        partials.shownSamples = samples
+        guard text != partials.shown else { return }
+        partials.shown = text
+        emit.yield(.partialTranscript(text))
+    }
+
+    /// Stops the pass running, if any, and drops what it finds. A transcription that needs the speech recognition now
+    /// (the turn's) does not wait for it to the end: it stops at its next step.
+    private func stopPartialPass() {
+        partials.pass?.cancel()
+        partials.pass = nil
+        partials.passID = 0
+    }
+
+    /// The utterance being heard is over, or starts again: a pass running is stopped, and the words shown start again
+    /// from nothing.
+    private func resetPartials() {
+        stopPartialPass()
+        partials = Partials()
+    }
+
     // MARK: - Turns
 
     private func startTurn(committed: Bool, request: String? = nil) {
         guard utteranceOpen, !utterance.isEmpty else { return }
+        // The turn's transcription would wait for it: it stops at its next step, and what it found is not needed.
+        stopPartialPass()
         nextTurnID += 1
         let turn = Turn(id: nextTurnID, output: output)
         turn.speechEnd = lastSpeechEnd
@@ -903,7 +1023,12 @@ public actor VoicePipeline {
             turn.language = lang
             metrics.userText = text
             metrics.language = lang
-            if turn.committed { emit.yield(.userTranscript(text, lang)) }
+            if turn.committed {
+                emit.yield(.userTranscript(text, lang))
+            } else if self.turn === turn {
+                // Prepared during a pause: the user may go on speaking, these are their words so far.
+                showPartial(text, samples: audio.count)
+            }
             let now = Date()
             turn.userMessage = Conversation.userMessage(
                 text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now))
@@ -1295,6 +1420,7 @@ public actor VoicePipeline {
         if utteranceAddressed {  // a sentence still being checked for the wake phrase goes on
             utterance = []
             utteranceOpen = turnDetector.isInUtterance
+            resetPartials()
         }
         // After an answer, Maé listens a few seconds more without the wake phrase.
         if config.listening == .wakeWord, metrics != nil { stayAwake() }
@@ -1333,6 +1459,7 @@ public actor VoicePipeline {
         if utteranceAddressed {
             utterance = []
             utteranceOpen = turnDetector.isInUtterance
+            resetPartials()
         }
         if wakes {
             DebugLog.log("the wake phrase alone → listening")
@@ -1447,6 +1574,8 @@ public actor VoicePipeline {
 
     private func setState(_ newState: PipelineState) {
         guard newState != state else { return }
+        // The interfaces show the user's words in a new line each time they speak, until their turn is over.
+        if newState == .userSpeaking || state == .userSpeaking { resetPartials() }
         state = newState
         // Back at rest after the few seconds of attention: Maé waits for the phrase again.
         if newState == .listening, let awakeUntil, clock.now >= awakeUntil { fallAsleep() }

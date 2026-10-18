@@ -255,13 +255,18 @@ paired), `busy`.
 (iPhone → Mac) `{"name":"<iPhone name>","model":"<model identifier>"}`. The iPhone checks that the Mac's static key
 is the one of the pairing link. The Mac then sends a transport message `{"type":"paired"}` and closes.
 
-**Session payloads**: first message `{"v":1}`; second message
+**Session payloads**: first message `{"v":1,"features":["partialTranscript"]}`; second message
 `{"name":"<Mac name>","relay":"<relay URL>","features":["device"]}`. The Mac accepts only iPhone static keys of its
 paired list.
 
-`features` lists the optional messages the Mac understands (today `device`, below); it is left out by Macs from
-before it. The iPhone sends an optional message only to a Mac that lists it: a Mac from before closed the session on a
-message of a type it did not know. From this version on, both sides skip such a message and keep the session.
+In the second message, `features` lists the optional messages the Mac understands (today `device`, below); it is left
+out by Macs from before it. The iPhone sends an optional message only to a Mac that lists it: a Mac from before closed
+the session on a message of a type it did not know. From this version on, both sides skip such a message and keep the
+session.
+
+In the first message, `features` lists the optional events the iPhone (or iPad) understands (today
+`partialTranscript`: the user's words while they speak); it is left out by apps from before it, and the Mac sends them
+no such event, for the same reason.
 
 `relay` is the relay the Mac is registered with, left out when it has none (reachable at home only). The iPhone
 keeps it for its next connections: it follows the relay its Mac chose, whatever the pairing link said.
@@ -273,7 +278,7 @@ Each transport message is one JSON object with a `"type"`:
 | Type | Direction | Meaning |
 |---|---|---|
 | `command` | iPhone → Mac | `{"type":"command","command":…}`: an assistant command. The Mac accepts `stopSpeaking`, `newConversation`, `talkKey` and, from `updateSettings`, only `pushToTalk`. |
-| `event` | Mac → iPhone | `{"type":"event","event":…}`: an assistant event (state, transcript, answer, readiness, problems). |
+| `event` | Mac → iPhone | `{"type":"event","event":…}`: an assistant event (state, transcript, answer, readiness, problems). The user's words while they speak (`partialTranscript`, about twice a second) only go to an iPhone whose `features` list them. |
 | `audio` | both | audio control, see below |
 | `removed` | Mac → iPhone | this iPhone was removed from the Mac's settings; the session closes |
 | `mac` | Mac → iPhone | `{"type":"mac","name":…,"relay":…}`: the Mac's name or relay changed (as in the handshake) |

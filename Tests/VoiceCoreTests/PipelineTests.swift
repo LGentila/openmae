@@ -385,8 +385,10 @@ struct PipelineTests {
     }
 
     @Test func talkKeyDecidesTheTurnInHandsFreeMode() async throws {
+        var config = PipelineConfig()
+        config.partialTranscriptSeconds = nil  // only the turn's transcription (the words shown: PartialTranscriptTests)
         let (model, stt, speaker) = (ScriptedModel(), CountingTranscriber(), FakeSpeaker())
-        let pipeline = make(model, stt, speaker)  // hands-free
+        let pipeline = make(model, stt, speaker, config: config)  // hands-free
         let log = EventRecorder()
         Task { for await event in pipeline.events { await log.record(event) } }
         try await pipeline.start()

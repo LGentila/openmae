@@ -10,6 +10,8 @@ public final class LinkSession: @unchecked Sendable {
     public let peerKey: Data
     /// What the Mac said about itself in the handshake (its name and relay), for the iPhone.
     public let peerMac: HandshakePayload.Mac?
+    /// What the iPhone said about itself when it opened the session (the optional events it understands), for the Mac.
+    public let peerPhone: HandshakePayload.Session?
     public let messages: AsyncStream<LinkMessage>
     public let audio: AsyncStream<AudioPacket>
     private let messageSink: AsyncStream<LinkMessage>.Continuation
@@ -24,11 +26,12 @@ public final class LinkSession: @unchecked Sendable {
     private var tasks: [Task<Void, Never>] = []
 
     init(transport: any LinkTransport, inbox: FrameInbox, keys: SessionKeys, peerKey: Data,
-         peerMac: HandshakePayload.Mac?) {
+         peerMac: HandshakePayload.Mac?, peerPhone: HandshakePayload.Session? = nil) {
         self.transport = transport
         self.keys = keys
         self.peerKey = peerKey
         self.peerMac = peerMac
+        self.peerPhone = peerPhone
         path = transport.path
         (messages, messageSink) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (audio, audioSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(100))

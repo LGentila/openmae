@@ -390,6 +390,9 @@ public enum AssistantEvent: Sendable, Codable {
     case loading(LoadingStep)
     case ready(EngineInfo)
     case state(PipelineState)
+    /// What the user has said so far, while they speak (about twice a second): shown in place of the words before it,
+    /// until `userTranscript` replaces it. Never kept in the history.
+    case partialTranscript(String)
     /// What the user said (sent once their turn is over).
     case userTranscript(String, SpeechLanguage)
     /// A piece of the answer, sent when it goes to the voice.

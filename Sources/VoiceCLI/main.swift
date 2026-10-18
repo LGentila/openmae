@@ -38,6 +38,9 @@
 //   --voice-restart-after <s> seconds of near-silent opening before the voice starts again (default 1.2)
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
 //   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
+//   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
+//   --talk-key               conversation: the talk key is held while each phrase is said, released after it
+//   --release-after <s>      with --talk-key: seconds between the end of the recording and the release (default 0.25)
 //   --out <folder>           where reports and audio go (default ./measurements)
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
@@ -63,6 +66,11 @@ struct Options {
     var actions = false
     var wakeWord = false
     var followUp: Double?
+    /// The user's words are not transcribed while they speak (`PipelineConfig.partialTranscriptSeconds`).
+    var noPartials = false
+    /// conversation: the talk key held while each phrase is said (as ⌥ Space in the app), released this long after it.
+    var talkKey = false
+    var releaseAfter = 0.25
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
     /// voice-onset: 3 by default; dialogue-bench: 10.
@@ -114,6 +122,9 @@ struct Options {
             case "--actions": o.actions = true
             case "--wake-word": o.wakeWord = true
             case "--follow-up": o.followUp = Double(it.next() ?? "")
+            case "--no-partials": o.noPartials = true
+            case "--talk-key": o.talkKey = true
+            case "--release-after": o.releaseAfter = Double(it.next() ?? "") ?? o.releaseAfter
             case "--out": o.out = URL(fileURLWithPath: it.next() ?? "measurements")
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
@@ -151,6 +162,8 @@ actor EventLog {
     var bargeIns: [(stopMs: Double, detectionMs: Double)] = []
     var state = PipelineState.listening
     var failures: [String] = []
+    /// The user's words shown while they spoke, in all.
+    var partials = 0
 
     func record(_ event: PipelineEvent) async {
         switch event {
@@ -160,6 +173,9 @@ actor EventLog {
                 let p = await model.lastPrefill
                 print("  · model: \(p.reused) tokens reused, \(p.computed) computed in \(fmt(p.ms))")
             }
+        case .partialTranscript(let text):
+            partials += 1
+            print("  …  \(text)")
         case .userTranscript(let text, let language):
             print("  🗣  [\(language.rawValue)] \(text)")
         case .assistantPiece(let piece):
@@ -251,6 +267,7 @@ func buildEngine(_ o: Options) async throws -> Engine {
     if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
+    if o.noPartials { config.partialTranscriptSeconds = nil }
     let speaker = SimulatedSpeaker()
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: synthesizer, output: speaker,
@@ -295,7 +312,14 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
     for (i, file) in o.files.enumerated() {
         print("■ turn \(i + 1) — \(file.lastPathComponent)")
         let before = await e.log.completedTurns
-        await mic.say(try WAV.read16kMono(file))
+        if o.talkKey {
+            await e.pipeline.setTalkKey(pressed: true)
+            await mic.say(try WAV.read16kMono(file))
+            await mic.silence(o.releaseAfter)
+            await e.pipeline.setTalkKey(pressed: false)
+        } else {
+            await mic.say(try WAV.read16kMono(file))
+        }
         // With the wake word, a sentence without the phrase gets no answer: no need to wait a minute for one.
         await waitForAnswer(e, mic: mic, after: before, timeout: o.wakeWord ? 20 : 60)
         if await e.log.completedTurns == before { print("  (no answer)") }
@@ -317,6 +341,7 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
     {
         print("  \(label): median \(fmt(median(values)))")
     }
+    print("the user's words shown while they spoke: \(await e.log.partials)")
     print(String(format: "memory: %.2f GB · cache rebuilds: %d · back to a snapshot: %d",
                  ProcessMemory.footprintGB, await e.model.cacheRebuilds, await e.model.snapshotRestores))
     try save(turns, name: "conversation", options: o)
