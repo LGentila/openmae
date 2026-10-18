@@ -247,14 +247,35 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard start < tokens.count else { return 0 }
         let clock = ContinuousClock()
         let t0 = clock.now
-        let input = LMInput(tokens: MLXArray(tokens[start...].map { Int32($0) }))
-        // Creating the iterator processes the whole prompt into the cache (it also samples one token,
-        // which we ignore).
-        _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+        // The iterator also samples one token, which we ignore.
+        _ = try readPrompt(tokens, from: start)
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
         return tokens.count - start
+    }
+
+    /// Processes `tokens[start...]` into the cache, which holds `tokens[..<start]`, and returns the iterator that then
+    /// gives the answer's tokens.
+    ///
+    /// mlx-swift-lm reads more than 512 new tokens in chunks, and between two it stops if the request was cancelled: the
+    /// chunks read stay in the cache. So when it throws, `cachedTokens` is brought in step with the cache first. Left
+    /// behind, the next request trusted it and was computed from the wrong place (its tokens at the wrong positions, after
+    /// the abandoned chunks), and every later one built on that: a summing up cancelled after 353 of its 706 new tokens
+    /// (the user speaking over the waiting phrase) left the cache with 353 tokens more than the model counted, with Gemma 4
+    /// 26B, until a request went back to a snapshot or a new conversation started.
+    private func readPrompt(_ tokens: [Int], from start: Int, components: GenerationComponents = .init()) throws
+        -> TokenIterator
+    {
+        let input = LMInput(tokens: MLXArray(tokens[start...].map { Int32($0) }))
+        do {
+            return try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
+                                     components: components)
+        } catch {
+            cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
+            DebugLog.log("LLM: stopped after \(cachedTokens.count - start) of \(tokens.count - start) new tokens: \(error)")
+            throw error
+        }
     }
 
     /// The conversation as the model reads it, special tokens included (for checking the prompt).
@@ -356,7 +377,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                 turnSnapshot = (Array(prompt[..<start]), cache.map { $0.copy() })
             }
         }
-        let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
         let chances = ToolCallWatch.Chances()
         let upcoming = UpcomingToken.Box()
         var components = GenerationComponents()
@@ -366,8 +386,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if !tools.isEmpty {
             components = components.appendingLogitProcessor { UpcomingToken(box: upcoming) }
         }
-        var iterator = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
-                                         components: components)
+        var iterator = try readPrompt(prompt, from: start, components: components)
         let d = clock.now - t0
         lastPrefill = (reused, prompt.count - reused,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
@@ -577,8 +596,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard let user = conversation.lastIndex(where: { $0.role == .user }), user > 0 else { return start }
         let earlier = try render(Array(conversation[..<user]), generationPrompt: false)
         guard earlier.count > start, commonPrefix(earlier, prompt) == earlier.count else { return start }
-        let input = LMInput(tokens: MLXArray(earlier[start...].map { Int32($0) }))
-        _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+        _ = try readPrompt(earlier, from: start)
         eval(cache.flatMap(\.state))
         cachedTokens = Array(earlier.prefix(cachedTokenCount(upTo: earlier.count)))
         return cachedTokens.count
