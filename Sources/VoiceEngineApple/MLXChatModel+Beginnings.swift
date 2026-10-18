@@ -7,12 +7,14 @@ import VoiceCore
 // system prompt with its tools, and the example exchanges when there are), computed in several ways and compared with a
 // float32 reference: the caches layer by layer, and the first token the model gives each request of a corpus from each.
 //
-// Why: the same beginning, computed at load (on the warm-up's first 2 tokens) or again from scratch (when the tools
-// change), made the model decide differently afterwards. Measured with Gemma 4 26B: no way of computing it is wrong, but
-// every one in bfloat16 drifts from the float32 computation, the same amount whichever way: tiny roundings at first
-// (3e-4 in layer 1), a third of the keys and values in the last layers. The requests the model hesitates on follow that
-// drift ("Cherche-moi une recette de crumble aux pommes": a search at 100 % from the state at load, 5 % from the one
-// computed from scratch, 100 % in float32); the other 227 of 228 requests of the corpora kept their decision.
+// Why: the same beginning, computed in bfloat16 at load (on the warm-up's first 2 tokens) or again from scratch (when the
+// tools change), made the model decide differently afterwards. Measured with Gemma 4 26B: no way of computing it is
+// wrong, but every one in bfloat16 drifts from the float32 computation, the same amount whichever way: tiny roundings at
+// first (3e-4 in layer 1), a third of the keys and values in the last layers. The requests the model hesitates on follow
+// that drift ("Cherche-moi une recette de crumble aux pommes": a search at 100 % from the state at load, 5 % from the one
+// computed from scratch, 100 % in float32); the other 227 of 228 requests of the corpora kept their decision. So the app
+// computes it in float32 and rounds it (`MLXChatModel.beginningCache`): the comparison checks that its states, at load and
+// after a tools change, are the reference's own computation, rounded.
 
 extension MLXChatModel {
     /// A beginning as one way of computing it left the model's memory.
@@ -54,6 +56,9 @@ extension MLXChatModel {
         public var names: [String]
         /// Every pair of states (a before b), layer by layer.
         public var pairs: [(a: Int, b: Int, layers: [LayerDifference])]
+        /// The app's way before its rounding, against the reference, layer by layer: the same float32 computation,
+        /// whether every weight is in float32 or only what `beginningCache` converts.
+        public var unrounded: [LayerDifference]
         /// For each request, for each state: its first token.
         public var firstTokens: [[FirstToken]]
     }
@@ -67,11 +72,13 @@ extension MLXChatModel {
         beginning.map { BeginningState(name: name, tokens: $0.tokens, cache: $0.cache.map { $0.copy() }) }
     }
 
-    /// Computes the given states' beginning in other ways, each in a new cache: from scratch again (as the app does; it
-    /// must match the app's own from-scratch state exactly), its first 2 tokens on their own then the rest (the chunks of
-    /// the computation at load, without the warm-up), in chunks of 256 tokens, in one pass, and in float32 (the
-    /// reference, also rounded to the usual precision). Then compares every pair of caches, and reads each request's
-    /// first token from every state: in float32 from the reference, as usual from the others.
+    /// Computes the given states' beginning in other ways, each in a new cache: in bfloat16 as the app computed it before
+    /// (from scratch, as when the tools changed; its first 2 tokens on their own then the rest, the chunks of the
+    /// computation at load, without the warm-up), in chunks of 256 tokens and in one pass, in float32 with every weight
+    /// converted (the reference, also rounded to the usual precision), and the app's way again (`beginningCache`), which
+    /// is also compared with the reference before its rounding. Then compares every pair of caches, and reads each
+    /// request's first token from every state: in float32 from the reference, as usual from the others (once for states
+    /// that are identical).
     public func compareBeginnings(_ given: [BeginningState], requests: [[ChatMessage]]) throws -> BeginningsComparison {
         guard let tokens = given.first?.tokens, given.allSatisfy({ $0.tokens == tokens }), tokens.count > 2 else {
             throw BeginningsError(description: "no beginning to compare, or different ones")
@@ -82,28 +89,33 @@ extension MLXChatModel {
             return BeginningState(name: name, tokens: tokens, cache: cache)
         }
         var states = given
-        states.append(try computed("from scratch again") { try feed(tokens[...], into: $0) })
-        states.append(try computed("2 tokens, then the rest") {
+        states.append(try computed("bfloat16, from scratch") { try feed(tokens[...], into: $0) })
+        states.append(try computed("bfloat16, 2 tokens, then the rest") {
             try feed(tokens[..<2], into: $0)
             try feed(tokens[2...], into: $0)
         })
         var small = parameters
         small.prefill.stepSize = 256
-        states.append(try computed("chunks of 256") { try feed(tokens[...], into: $0, parameters: small) })
+        states.append(try computed("bfloat16, chunks of 256") { try feed(tokens[...], into: $0, parameters: small) })
         var whole = parameters
         whole.prefill.chunking = .unchunked
-        states.append(try computed("one pass") { try feed(tokens[...], into: $0, parameters: whole) })
+        states.append(try computed("bfloat16, one pass") { try feed(tokens[...], into: $0, parameters: whole) })
 
         let halfTypes = enterFloat32()
         let reference: BeginningState
         let referenceLogProbs: [MLXArray]
         do {
             defer { leaveFloat32(halfTypes) }
-            reference = try computed("float32 (reference)") { try feed(tokens[...], into: $0) }
+            reference = try computed("float32, every weight converted (reference)") { try feed(tokens[...], into: $0) }
             referenceLogProbs = try requests.map { try firstTokenLogProbs($0, from: reference) }
         }
+        let appWay = try beginningCache(tokens, rounded: false)
+        let unrounded = compare(appWay, reference.cache)
+        roundToMemoryType(appWay)
+        states.append(BeginningState(name: "float32 activations, rounded, again (the app's way)", tokens: tokens,
+                                     cache: appWay))
         states.append(rounded(reference, to: given[0].cache.first?.state.first?.dtype ?? .bfloat16,
-                              name: "float32, rounded"))
+                              name: "float32, every weight converted, rounded"))
         states.append(reference)
 
         var pairs: [(a: Int, b: Int, layers: [LayerDifference])] = []
@@ -112,16 +124,25 @@ extension MLXChatModel {
                 pairs.append((a, b, compare(states[a].cache, states[b].cache)))
             }
         }
+        // A state identical to an earlier one gives the same first tokens: they are read once.
+        let readFrom = states.indices.map { b in
+            pairs.first { pair in
+                pair.b == b && pair.layers.count == states[b].cache.count
+                    && pair.layers.allSatisfy { $0.firstDifference == nil }
+            }?.a ?? b
+        }
         var firstTokens: [[FirstToken]] = []
         for (request, referenceRow) in zip(requests, referenceLogProbs) {
             var row: [FirstToken] = []
-            for state in states.dropLast() {
-                row.append(reading(try firstTokenLogProbs(request, from: state), reference: referenceRow))
+            for (index, state) in states.dropLast().enumerated() {
+                row.append(readFrom[index] < index ? row[readFrom[index]]
+                    : reading(try firstTokenLogProbs(request, from: state), reference: referenceRow))
             }
             row.append(reading(referenceRow, reference: referenceRow))
             firstTokens.append(row)
         }
-        return BeginningsComparison(names: states.map(\.name), pairs: pairs, firstTokens: firstTokens)
+        return BeginningsComparison(names: states.map(\.name), pairs: pairs, unrounded: unrounded,
+                                    firstTokens: firstTokens)
     }
 
     /// Processes `tokens` into `cache` as `prefill` does.

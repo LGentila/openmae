@@ -27,8 +27,9 @@
 // case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
 // --addendum <file> replaces the actions part of the system prompt (experiments without rebuilding).
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
-// as computed at load and computed again from scratch (as when the tools change), and other ways of computing it,
-// with a float32 reference: the model's memory layer by layer, and each request's chance of a call at its first token.
+// as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
+// before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
+// layer by layer, and each request's chance of a call at its first token.
 
 import Foundation
 import VoiceCore
@@ -428,10 +429,10 @@ private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, cor
     return history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
 }
 
-/// --compare-beginnings: the beginning computed at load (after the warm-up's rewind) and again from scratch (the tools
-/// changed and changed back, as in the app), other ways of computing it and a float32 reference (see
-/// `MLXChatModel.compareBeginnings`): every pair of caches, then each request's chance of a call at its first token from
-/// each, and the requests whose first-token decision (a call or not, the more likely of the two) changes.
+/// --compare-beginnings: the beginning computed at load and again when the tools changed and changed back, as in the app,
+/// other ways of computing it and a float32 reference (see `MLXChatModel.compareBeginnings`): every pair of caches, then
+/// each request's chance of a call at its first token from each, and the requests whose first-token decision (a call or
+/// not, the more likely of the two) changes.
 private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
                                model: MLXChatModel, options o: Options) async throws
 {
@@ -453,6 +454,10 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
     let names = comparison.names
     let reference = names.count - 1
     for (index, name) in names.enumerated() { print("  [\(index)] \(name)") }
+    let unroundedFirst = comparison.unrounded.compactMap(\.firstDifference).min()
+    print("\nthe app's way before its rounding ↔ the reference [\(reference)]: "
+          + (unroundedFirst.map { "largest ‖a − b‖ / ‖b‖ " + scientific(comparison.unrounded.map(\.relative).max())
+              + ", first difference at position \($0)" } ?? "identical in every layer"))
 
     print("\nthe model's memory, pair by pair (‖a − b‖ / ‖b‖, largest over the layers; first position that differs):")
     for pair in comparison.pairs {
@@ -463,7 +468,9 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
               + "  full " + scientific(full.map(\.relative).max()) + " (\(span(full)))  "
               + (first.map { "first difference at position \($0)" } ?? "identical"))
     }
-    if let pair = comparison.pairs.first(where: { $0.a == 0 && $0.b == 1 }) {
+    if let pair = comparison.pairs.first(where: { $0.a == 0 && $0.b == 1 }),
+       pair.layers.contains(where: { $0.firstDifference != nil })
+    {
         print("\n[0] ↔ [1] layer by layer (over all positions; median position; positions over 0.5):")
         for layer in pair.layers {
             print("  layer \(layer.layer) \(layer.sliding ? "sliding" : "full")  " + scientific(layer.relative) + "; "
@@ -492,9 +499,10 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
         let far = calls.filter { abs($0[index] - $0[reference]) >= 0.2 }.count
         let tops = comparison.firstTokens.filter { $0[index].top != $0[reference].top }.count
         let divergences = comparison.firstTokens.map { $0[index].divergence }
+        let offBy = calls.map { abs($0[index] - $0[reference]) }.reduce(0, +)
         print("  [\(index)] decision changed: \(flips) · call chance 20 points or more away: \(far) · other first token: "
-              + "\(tops) · divergence median " + scientific(median(divergences)) + ", max "
-              + scientific(divergences.max()) + " nats")
+              + "\(tops) · call chance off by " + String(format: "%.2f", offBy) + " in all · divergence median "
+              + scientific(median(divergences)) + ", max " + scientific(divergences.max()) + " nats")
     }
     let moved = zip(corpus.cases, calls).filter { abs($0.1[0] - $0.1[1]) >= 0.2 }
     let flipped = calls.filter { decides($0[0]) != decides($0[1]) }.count
@@ -531,16 +539,20 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
         var corpus: String
         var states: [String]
         var pairs: [Pair]
+        /// The app's way before its rounding, against the reference.
+        var unrounded: [Layer]
         var requests: [Request]
+    }
+    func layers(_ layers: [MLXChatModel.LayerDifference]) -> [Layer] {
+        layers.map {
+            Layer(layer: $0.layer, sliding: $0.sliding, positions: [$0.positions.lowerBound, $0.positions.upperBound],
+                  relative: $0.relative, typical: $0.typical, far: $0.far, firstDifference: $0.firstDifference)
+        }
     }
     let report = Report(
         model: o.llm ?? "", corpus: o.corpus ?? "", states: names,
-        pairs: comparison.pairs.map { pair in
-            Pair(a: pair.a, b: pair.b, layers: pair.layers.map {
-                Layer(layer: $0.layer, sliding: $0.sliding, positions: [$0.positions.lowerBound, $0.positions.upperBound],
-                      relative: $0.relative, typical: $0.typical, far: $0.far, firstDifference: $0.firstDifference)
-            })
-        },
+        pairs: comparison.pairs.map { Pair(a: $0.a, b: $0.b, layers: layers($0.layers)) },
+        unrounded: layers(comparison.unrounded),
         requests: zip(corpus.cases, comparison.firstTokens).map { item, row in
             Request(phrase: item.phrase, expected: item.expected?.tool ?? "aucun", callChances: row.map(\.callChance),
                     tops: row.map(\.top), divergences: row.map(\.divergence))

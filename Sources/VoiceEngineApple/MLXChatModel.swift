@@ -3,6 +3,7 @@ import Hub
 import MLX
 import MLXLLM
 import MLXLMCommon
+import MLXNN
 import Tokenizers
 import VoiceCore
 
@@ -61,7 +62,19 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// 26B, 3 s with E4B). It is restored instead (10 ms), and so is it for a request that nothing else in memory can
     /// serve, and to prepare a shortened history. It shares the cache's memory until the cache moves on, then holds its
     /// own, for good: 0.24 GB with Gemma 4 26B and the actions, 0.04 GB with E4B.
+    ///
+    /// It is computed in float32, in a new cache, then rounded to the model's own type (`beginningCache`); the
+    /// conversations are computed in bfloat16 on it. Computed in bfloat16 like them, it drifted far from the model's exact
+    /// computation (a third of the keys and values in Gemma 4 26B's last layers), differently at load (after the warm-up)
+    /// and when the tools changed, and the requests the model hesitates on followed that draw: "Cherche-moi une recette de
+    /// crumble aux pommes" opened a search at its first token 100 % of the time from the beginning computed at load, 5 %
+    /// from the one computed when the tools changed, 100 % from a float32 computation. In float32 it took less time on the
+    /// reference Mac (Gemma 4 26B: 5.0 s instead of 5.4 s at load; E4B: 2.6 s instead of 3.0 s), but more GPU memory
+    /// while it lasts (0.8 GB more with Gemma 4 26B, 0.4 to 0.5 GB with E4B, 0.6 to 0.8 GB with E2B).
     private(set) var beginning: (tokens: [Int], cache: [KVCache])?
+    /// The type of the model's memory as it computes a conversation (that of Gemma 4's weights: bfloat16), read after the
+    /// warm-up: the beginning, computed in float32, is rounded to it.
+    private var memoryType = DType.bfloat16
     /// The user's message the last request answered.
     private var lastTurn: Turn?
 
@@ -100,7 +113,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
     /// holds (its offset). They differ only when something left the cache without saying so.
     public var cacheCounts: (counted: Int, held: Int) { (cachedTokens.count, cache.first?.offset ?? 0) }
-    /// Diagnostics of the last `prefillBeginning` that computed something: tokens computed, time to compute them, and the
+    /// Diagnostics of the last `prefillBeginning` that computed a beginning: tokens computed, time to compute them, and the
     /// GPU memory peak meanwhile (GB, the weights included).
     public private(set) var lastBeginning: (computed: Int, ms: Double, peakGB: Double)?
     /// Benchmark diagnostics, off in the app (reading a probability at every token slows generation a little).
@@ -230,22 +243,85 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         try prefill(tokens: try render(conversation, generationPrompt: false))
     }
 
+    /// A new beginning is computed in a new cache, in float32 (see `beginning`); the cache then starts from it, as from the
+    /// one kept when the beginning is the same. Every new conversation, and a change of tools, comes through here: the
+    /// snapshots, which hold the conversation that ends, go.
     /// `async` like the protocol's default (see `useTools`): called on the model itself (voice-cli), a synchronous
     /// version lost to that default, which keeps nothing.
     public func prefillBeginning(_ conversation: [ChatMessage]) async throws {
         logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
-        if beginning?.tokens != tokens { beginning = nil }  // another beginning: the old one's memory goes first
-        let clock = ContinuousClock()
-        let t0 = clock.now
-        GPU.resetPeakMemory()
-        let computed = try prefill(tokens: tokens)
-        if computed > 0 {
+        snapshot = nil
+        turnSnapshot = nil
+        if beginning?.tokens != tokens {
+            // Another beginning: the old one's memory goes first, and the conversation's.
+            beginning = nil
+            cache = try context.model.newCache(parameters: parameters)
+            cachedTokens = []
+            let clock = ContinuousClock()
+            let t0 = clock.now
+            GPU.resetPeakMemory()
+            beginning = (tokens, try beginningCache(tokens))
             let d = clock.now - t0
-            lastBeginning = (computed, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
+            lastBeginning = (tokens.count, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
                              Double(Memory.peakMemory) / 1e9)
+            DebugLog.log("LLM: computed the conversations' beginning (\(tokens.count) tokens) in float32 in \(d)")
         }
-        beginning = (tokens, cache.map { $0.copy() })
+        guard let beginning else { return }
+        cache = beginning.cache.map { $0.copy() }  // a copy: the beginning stays for the conversations to come
+        cachedTokens = beginning.tokens
+    }
+
+    /// The model's memory of a beginning, computed in a new cache with float32 activations (`withFloat32Activations`),
+    /// then rounded to the model's own type, layer by layer (`rounded: false`: left in float32, for diagnostics). The
+    /// buffers of that computation go back to macOS.
+    func beginningCache(_ tokens: [Int], rounded: Bool = true) throws -> [KVCache] {
+        let cache = try context.model.newCache(parameters: parameters)
+        try withFloat32Activations {
+            let input = LMInput(tokens: MLXArray(tokens.map { Int32($0) }))
+            _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+            eval(cache.flatMap(\.state))
+        }
+        if rounded { roundToMemoryType(cache) }
+        Memory.clearCache()
+        return cache
+    }
+
+    /// Rounds a float32 memory to the model's own type, one layer after the other (the float32 layer goes before the next
+    /// one is rounded: the memory peak stays that of the float32 memory).
+    func roundToMemoryType(_ cache: [KVCache]) {
+        for var layer in cache {
+            let state = layer.state.map { $0.asType(memoryType) }
+            eval(state)
+            layer.state = state
+        }
+    }
+
+    /// Runs `body` with the model computing in float32: its quantized embedding tables give their rows dequantized in
+    /// float32 (`Float32Rows`), and its small half-precision weights (norm weights, scalars, the router's scales: a few MB)
+    /// are in float32. Its other weights stay as they are: a quantized layer computes in the type of what it is given,
+    /// converting its scales on the fly, so every activation and the cache are float32 from the embeddings on, as when
+    /// every weight is in float32 (2.7 GB more with Gemma 4 26B). Back as they were afterwards (a float32 made from a
+    /// half-precision value goes back to it exactly).
+    private func withFloat32Activations<T>(_ body: () throws -> T) rethrows -> T {
+        let model = context.model
+        let tables = model.leafModules().flattened().compactMap { key, module -> (String, QuantizedEmbedding)? in
+            guard let table = module as? QuantizedEmbedding, table.mode == .affine else { return nil }
+            return (key, table)
+        }
+        let small = model.parameters().flattened().filter { _, array in
+            array.ndim <= 1 && (array.dtype == .bfloat16 || array.dtype == .float16)
+        }
+        let types = small.map(\.1.dtype)  // before the update, which changes these arrays in place
+        model.update(modules: ModuleChildren.unflattened(tables.map { ($0.0, Float32Rows($0.1)) }))
+        model.update(parameters: ModuleParameters.unflattened(small.map { ($0.0, $0.1.asType(.float32)) }))
+        defer {
+            let restored = zip(small, types).map { ($0.0.0, $0.0.1.asType($0.1)) }
+            model.update(parameters: ModuleParameters.unflattened(restored))
+            eval(restored.map(\.1))
+            model.update(modules: ModuleChildren.unflattened(tables.map { ($0.0, $0.1 as Module) }))
+        }
+        return try body()
     }
 
     /// Once the history no longer matches the cache (an answer cut off: " […]", or kept otherwise than the model wrote
@@ -765,6 +841,24 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private func warmUp() throws {
         // First call compiles the Metal kernels; do it at load time, not during the first answer.
         try generate([ChatMessage(.user, "Bonjour")], maxTokens: 8) { _ in }
+        if let type = cache.first?.state.first?.dtype { memoryType = type }
+    }
+}
+
+/// A quantized embedding table that gives its rows dequantized in float32, as float32 scales would, without converting
+/// the whole table to float32 (Gemma 4 E2B and E4B's per-layer one has 147 and 176 MB of scales and biases).
+private final class Float32Rows: QuantizedEmbedding {
+    init(_ table: QuantizedEmbedding) {
+        super.init(weight: table.weight, scales: table.scales, biases: table.biases, groupSize: table.groupSize,
+                   bits: table.bits, mode: table.mode, globalScale: table.globalScale)
+        freeze()
+    }
+
+    override func callAsFunction(_ x: MLXArray) -> MLXArray {
+        let shape = x.shape
+        let x = x.flattened()
+        return dequantized(weight[x], scales: scales[x].asType(.float32), biases: biases?[x].asType(.float32),
+                           groupSize: groupSize, bits: bits, mode: mode).reshaped(shape + [-1])
     }
 }
 
