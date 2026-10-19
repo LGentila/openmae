@@ -93,17 +93,20 @@ enum MemoryResidency {
     struct Count {
         var bytes = 0
         var resident = 0
+        /// Pages macOS compressed or wrote to swap. A page neither in RAM nor there was never written.
+        var pagedOut = 0
         /// Pages macOS counts as used since it last looked (what decides which memory it compresses first).
         var referenced = 0
 
         var text: String {
-            func share(_ part: Int) -> Double { bytes > 0 ? 100 * Double(part) / Double(bytes) : 100 }
-            return String(format: "%.0f%% of %.2f GB in RAM, %.0f%% used lately", share(resident), Double(bytes) / 1e9,
-                          share(referenced))
+            func share(_ part: Int, empty: Double = 100) -> Double { bytes > 0 ? 100 * Double(part) / Double(bytes) : empty }
+            return String(format: "%.0f%% of %.2f GB in RAM, %.0f%% compressed or in swap, %.0f%% used lately",
+                          share(resident), Double(bytes) / 1e9, share(pagedOut, empty: 0), share(referenced))
         }
     }
 
-    /// How many of the pages are in RAM, and how many macOS counts as used lately (`mincore`).
+    /// How many of the pages are in RAM, how many macOS compressed or wrote to swap, and how many it counts as used lately
+    /// (`mincore`).
     static func count(_ ranges: [Range<UInt>]) -> Count {
         var total = Count()
         for range in ranges {
@@ -112,6 +115,7 @@ enum MemoryResidency {
             total.bytes += range.count
             for flag in flags {
                 if Int32(flag) & MINCORE_INCORE != 0 { total.resident += Int(page) }
+                if Int32(flag) & MINCORE_PAGED_OUT != 0 { total.pagedOut += Int(page) }
                 if Int32(flag) & MINCORE_REFERENCED != 0 { total.referenced += Int(page) }
             }
         }

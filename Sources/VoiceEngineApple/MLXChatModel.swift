@@ -280,6 +280,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             lastBeginning = (tokens.count, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
                              Double(Memory.peakMemory) / 1e9)
             DebugLog.log("LLM: computed the conversations' beginning (\(tokens.count) tokens) in float32 in \(d)")
+            logResidency("after the conversations' beginning")
         }
         guard let beginning else { return }
         cache = beginning.cache.map { $0.copy() }  // a copy: the beginning stays for the conversations to come
@@ -475,14 +476,22 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// since the last pass comes back, and the pages count as used again (see `MemoryResidency`). Then reads every
     /// weight once on the GPU (a sum per tensor: ≈ 0.35 s of GPU for 15 GB); running a few tokens through the model
     /// would not do: a mixture-of-experts model only touches the experts those tokens are routed to.
+    ///
+    /// The conversation's memory is read on the GPU too: the GPU alone ever wrote it, and the reads from the CPU did not
+    /// always bring it back. In the app, on the reference Mac under memory pressure, the conversations' beginning stayed 93%
+    /// out of RAM through every keep-warm pass between loading and the first request (the weights came back at each pass),
+    /// and that request read its 47 new tokens in 1.28 s instead of about 0.5 s; once a request had read it on the GPU, it
+    /// stayed in RAM. Its 0.25 to 0.75 GB (Gemma 4 26B) cost nothing measurable: the GPU part of a pass stayed at 0.24 to
+    /// 0.36 s.
     public func keepWarm() {
         guard backgroundAllowed else { return }
         logResidency("before keep-warm")
         let clock = ContinuousClock()
         let start = clock.now
-        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversationMemory), threads: 4)
+        let conversation = conversationMemory
+        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversation), threads: 4)
         let touched = clock.now
-        eval(context.model.parameters().flattened().map { $0.1.sum() })
+        eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
     }
 
@@ -504,14 +513,18 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             .flatMap { $0.flatMap(\.state) }
     }
 
-    /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): how much of the weights and of the conversation's memory is in RAM.
+    /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): how much of the weights and of the conversation's memory is in RAM, and of
+    /// the conversations' beginning and the cache on their own (they share their memory until the cache moves on).
     private func logResidency(_ moment: String) {
         guard MemoryResidency.enabled else { return }
         let clock = ContinuousClock()
         let t0 = clock.now
         let weights = MemoryResidency.count(weightPages)
         let conversation = MemoryResidency.count(MemoryResidency.ranges(conversationMemory))
-        DebugLog.log("LLM memory \(moment): weights \(weights.text), conversation \(conversation.text); "
+        let kept = MemoryResidency.count(MemoryResidency.ranges(beginning?.cache.flatMap(\.state) ?? []))
+        let current = MemoryResidency.count(MemoryResidency.ranges(cache.flatMap(\.state)))
+        DebugLog.log("LLM memory \(moment): weights \(weights.text), conversation \(conversation.text) (beginning: "
+            + "\(kept.text); cache: \(current.text)); "
             + String(format: "MLX free buffers %.2f GB", Double(Memory.cacheMemory) / 1e9) + " (read in \(clock.now - t0))")
     }
 
