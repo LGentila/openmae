@@ -169,7 +169,7 @@ private final class ScriptedEngine: AssistantConnection, RemoteAudioRouting, @un
         if case .talkKey(pressed: false) = command { Task { await answer() } }
     }
 
-    func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
+    func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput, bargeIn: BargeInProfile) async {
         lock.withLock {
             _remoteRoutes += 1
             self.output = output

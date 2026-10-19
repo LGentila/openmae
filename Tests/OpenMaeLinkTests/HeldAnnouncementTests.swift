@@ -330,13 +330,27 @@ final class FakePhone: @unchecked Sendable {
         session?.session.send(.audio(.stop))
     }
 
+    /// What its microphone sends from now on: a 220 Hz tone that loud (peak amplitude), or silence (0). With
+    /// `PipelineEngine.iPhoneUserSpeaks`, a voice into the iPhone at that level.
+    func microphoneTone(amplitude: Float) {
+        lock.withLock { tone = amplitude }
+    }
+
+    private var tone: Float = 0
+
     func takeTheConversation() {
         let encoder = try? OpusEncoder(sampleRate: LinkAudio.microphoneRate, bitRate: LinkAudio.microphoneBitRate)
         let stream = StreamNumber.now
         let microphone = Task { [weak self] in
-            let frame = [Float](repeating: 0, count: Int(LinkAudio.microphoneRate * 0.02))
+            let samples = Int(LinkAudio.microphoneRate * 0.02)
             var sequence: UInt32 = 0
+            var phase = 0
             while !Task.isCancelled {
+                let amplitude = self.map { phone in phone.lock.withLock { phone.tone } } ?? 0
+                let frame = (0..<samples).map {
+                    amplitude * Float(sin(2 * .pi * 220 * Double(phase + $0) / LinkAudio.microphoneRate))
+                }
+                phase += samples
                 for payload in encoder?.encode(frame) ?? [] {
                     self?.current?.session.send(AudioPacket(stream: stream, sequence: sequence, payload: payload))
                     sequence &+= 1
@@ -533,6 +547,7 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
     private var counts = (remoteRoutes: 0, localRoutes: 0, remotePlayed: 0, stationPlayed: 0)
     private var reachabilityTold: [Bool] = []
     private var announcementsTold: [Bool?] = []
+    private var bargeInsTold: [BargeInProfile] = []
     private var finished: [String] = []
     private var interrupted: [String] = []
     private var bargeIns = 0
@@ -593,6 +608,8 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
     var announcements: [Bool?] { lock.withLock { announcementsTold } }
     /// Times the user's voice interrupted Maé.
     var interruptions: Int { lock.withLock { bargeIns } }
+    /// The barge-in profiles the link gave with the devices that took the conversation, in order.
+    var bargeInProfiles: [BargeInProfile] { lock.withLock { bargeInsTold } }
     /// The commands it got, in order.
     var commands: [AssistantCommand] { lock.withLock { received } }
     /// The conversation's states, in order.
@@ -629,7 +646,7 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
         }
     }
 
-    func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
+    func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput, bargeIn: BargeInProfile) async {
         let feed = Task { [pipeline] in
             for await chunk in microphone { await pipeline.push(chunk) }
         }
@@ -637,10 +654,12 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
             counts.remoteRoutes += 1
             self.feed?.cancel()
             self.feed = feed
+            bargeInsTold.append(bargeIn)
         }
         await router.use(CountingOutput(output: output) { [weak self] samples in
             self?.lock.withLock { self?.counts.remotePlayed += samples }
         })
+        await pipeline.setBargeIn(bargeIn)
         await pipeline.resetAudioInput()
         await pipeline.voiceOutputChanged()
         await pipeline.setOutputReachable(true)
@@ -670,6 +689,7 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
             feed = nil
         }
         await router.use(speakers)
+        await pipeline.setBargeIn(.mac)
         await pipeline.interrupt()
         await pipeline.resetAudioInput()
         await pipeline.voiceOutputChanged()

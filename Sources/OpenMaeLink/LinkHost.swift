@@ -780,7 +780,7 @@ public actor LinkHost: AssistantConnection {
         lastUsed[key] = .now
         state.hand = LinkStatus.Hand(device: peer.device, path: peer.session.path)
         DebugLog.log("link: the iPhone has the conversation")
-        await audio?.useRemoteAudio(microphone: microphone.samples, output: output)
+        await audio?.useRemoteAudio(microphone: microphone.samples, output: output, bargeIn: peer.device.kind.bargeIn)
         sendEngineSettings()
         publish()
         await updateAnnouncements()

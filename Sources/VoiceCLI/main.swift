@@ -46,6 +46,8 @@
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
 //   --talk-key               conversation: the talk key is held while each phrase is said, released after it
 //   --release-after <s>      with --talk-key: seconds between the end of the recording and the release (default 0.25)
+//   --barge-in mac|iphone    what it takes to interrupt Maé: the Mac's (default), or an iPhone's as the app has it while
+//                            an iPhone has the conversation (BargeInProfile; VOICE_BARGE_IN_IPHONE_DB/_MS apply)
 //   --out <folder>           where reports and audio go (default ./measurements)
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
@@ -76,6 +78,8 @@ struct Options {
     /// conversation: the talk key held while each phrase is said (as ⌥ Space in the app), released this long after it.
     var talkKey = false
     var releaseAfter = 0.25
+    /// What it takes to interrupt Maé (`PipelineConfig.bargeIn`).
+    var bargeIn = BargeInProfile.mac
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
     /// voice-onset: 3 by default; dialogue-bench: 10.
@@ -135,6 +139,12 @@ struct Options {
             case "--no-partials": o.noPartials = true
             case "--talk-key": o.talkKey = true
             case "--release-after": o.releaseAfter = Double(it.next() ?? "") ?? o.releaseAfter
+            case "--barge-in":
+                switch it.next() {
+                case "mac": o.bargeIn = .mac
+                case "iphone": o.bargeIn = BargeInProfile.iPhone.adjusted(prefix: "VOICE_BARGE_IN_IPHONE")
+                default: return nil
+                }
             case "--out": o.out = URL(fileURLWithPath: it.next() ?? "measurements")
             case "--voices": o.voices = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--temperatures": o.temperatures = (it.next() ?? "").split(separator: ",").compactMap { Float($0) }
@@ -283,6 +293,8 @@ func buildEngine(_ o: Options, voice: (PocketSpeechSynthesizer) -> any SpeechSyn
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     if o.noPartials { config.partialTranscriptSeconds = nil }
+    config.bargeIn = o.bargeIn
+    print("barge-in: \(o.bargeIn.summary) to interrupt Maé")
     let speaker = SimulatedSpeaker()
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
@@ -611,7 +623,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
     print("""
         usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
                          [--no-speculative] [--silence-ms 500] [--minutes 10] [--new-conversation-every n]
-                         [--out folder] files.wav…
+                         [--barge-in mac|iphone] [--out folder] files.wav…
                voice-cli download [--tier minimum|standard|comfort|max]
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]

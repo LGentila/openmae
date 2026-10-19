@@ -6,11 +6,9 @@ public struct TurnDetectorConfig: Sendable, Codable {
     public var speechThreshold: Float = 0.5
     /// Probability below which a chunk counts as silence (between the two: "no change", like Silero).
     public var silenceThreshold: Float = 0.35
-    /// Speech shorter than this is ignored (clicks, breath, a cough).
+    /// Speech shorter than this is ignored (clicks, breath, a cough). While the assistant is talking it takes more,
+    /// as much as the barge-in profile of the device that has the conversation says (`BargeInProfile.minSpeechMs`).
     public var minSpeechMs: Double = 160
-    /// The same while the assistant is talking: leftovers of its own voice that echo cancellation
-    /// misses come in short bursts (170–260 ms measured in the app), so interrupting it takes a bit more.
-    public var bargeInMinSpeechMs: Double = 224
     /// After this much silence the engine starts working on an answer *speculatively*: transcription
     /// and the first words of the answer are prepared, but nothing is played yet.
     public var speculativeSilenceMs: Double = 200
@@ -52,9 +50,9 @@ public struct TurnDetector: Sendable {
 
     public mutating func reset() { state = .idle(voicedMs: 0) }
 
-    /// Feed one chunk's probability; returns at most one event. `assistantSpeaking` raises the bar for
-    /// speech to start (see `bargeInMinSpeechMs`).
-    public mutating func process(probability p: Float, assistantSpeaking: Bool = false) -> TurnEvent? {
+    /// Feed one chunk's probability; returns at most one event. `bargeInMinSpeechMs`: the assistant is talking, and
+    /// speech must last this long to start, rather than `minSpeechMs` (`BargeInProfile.minSpeechMs`).
+    public mutating func process(probability p: Float, bargeInMinSpeechMs: Double? = nil) -> TurnEvent? {
         let isSpeech = p >= config.speechThreshold
         let isSilence = p < config.silenceThreshold
         switch state {
@@ -64,7 +62,7 @@ public struct TurnDetector: Sendable {
                 return nil
             }
             let total = voicedMs + config.chunkMs
-            if total >= (assistantSpeaking ? config.bargeInMinSpeechMs : config.minSpeechMs) {
+            if total >= (bargeInMinSpeechMs ?? config.minSpeechMs) {
                 state = .speaking(silenceMs: 0, paused: false)
                 return .speechStarted
             }

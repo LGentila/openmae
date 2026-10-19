@@ -35,8 +35,8 @@ public actor AssistantHost: AssistantConnection {
     private var restartingAudio = false
     /// The voice's output: the Mac's speakers, or an iPhone's (see `useRemoteAudio`).
     private var router: AudioRouter?
-    /// While an iPhone has the conversation: its microphone and its voice output.
-    private var remote: (microphone: AsyncStream<[Float]>, output: any AudioOutput)?
+    /// While an iPhone has the conversation: its microphone, its voice output, and what it takes to interrupt Maé there.
+    private var remote: (microphone: AsyncStream<[Float]>, output: any AudioOutput, bargeIn: BargeInProfile)?
     /// Whether that iPhone hears the voice right now (see `setRemoteAudioReachable`).
     private var remoteReachable = true
     private var remoteFeed: Task<Void, Never>?
@@ -680,6 +680,7 @@ public actor AssistantHost: AssistantConnection {
         guard stage == .running, let remote, let pipeline, let router else { return }  // applied once running
         await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
         audio?.stop()  // the Mac's microphone and speakers are free again
+        await pipeline.setBargeIn(remote.bargeIn)  // its echo is not the Mac's
         await pipeline.resetAudioInput()
         await pipeline.voiceOutputChanged()  // what waited for another iPhone out of reach is not said to this one
         await pipeline.setOutputReachable(remoteReachable)  // a pipeline loaded while the iPhone was out of reach
@@ -749,10 +750,10 @@ public actor AssistantHost: AssistantConnection {
 /// An iPhone can take the conversation (OpenMaeLink): the engine then hears its microphone and speaks through it,
 /// and releases the Mac's microphone and speakers.
 extension AssistantHost: RemoteAudioRouting {
-    public func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput) async {
+    public func useRemoteAudio(microphone: AsyncStream<[Float]>, output: any AudioOutput, bargeIn: BargeInProfile) async {
         remoteFeed?.cancel()
         remoteFeed = nil
-        remote = (microphone, output)
+        remote = (microphone, output, bargeIn)
         remoteReachable = true
         await attachRemote()
     }
@@ -772,6 +773,7 @@ extension AssistantHost: RemoteAudioRouting {
         remoteFeed = nil
         guard stage == .running, let audio, let router else { return }
         await router.use(audio)
+        if remote == nil { await pipeline?.setBargeIn(.mac) }  // unless another iPhone took the conversation meanwhile
         await restartAudio()  // the Mac's microphone and speakers again, with the current settings
         // What waited for the iPhone (a timer that rang while it was out of reach) is said here, now that the speakers
         // are back; unless another iPhone took the conversation meanwhile (`attachRemote` told the pipeline then). Not

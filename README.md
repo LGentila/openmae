@@ -259,6 +259,18 @@ Interruptions (speaking over the assistant):
 .build/xcode/Build/Products/Release/voice-cli interruption measurements/audio/10-histoire.wav measurements/audio/11-stop.wav
 ```
 
+What it takes to interrupt Maé depends on the device that has the conversation, since her echo is not as loud on each
+one (`BargeInProfile`): on the Mac, a voice over hers must reach -38 dB for 224 ms; on an iPhone, -30 dB for 288 ms (an
+iPad keeps the Mac's values for now). `--barge-in iphone` measures the interruptions with the iPhone's. With
+`VOICE_DEBUG=1`, the app's log says how each voice heard over hers was judged ("speech started (level … dB, over the
+assistant…)" or "ignored while the assistant talks…") and, after each answer, what was heard over her voice: how many
+bursts, the longest, the loudest. To try other values on an iPhone without building the app again, launch it with
+`VOICE_BARGE_IN_IPHONE_DB` (the level) and `VOICE_BARGE_IN_IPHONE_MS` (the duration):
+
+```bash
+open --env VOICE_DEBUG=1 --env VOICE_BARGE_IN_IPHONE_DB=-28 --env VOICE_BARGE_IN_IPHONE_MS=320 --stderr /tmp/openmae.log .build/app/Build/Products/Release/OpenMae.app
+```
+
 Memory over time (here 10 minutes):
 
 ```bash

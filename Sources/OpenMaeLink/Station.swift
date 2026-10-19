@@ -9,6 +9,17 @@ public enum DeviceKind: String, Sendable, Equatable {
     public init(model: String) {
         self = model.hasPrefix("iPad") ? .iPad : .iPhone
     }
+
+    /// What it takes to interrupt Maé while a device of this kind has the conversation: its echo is not the Mac's
+    /// (`BargeInProfile`). On an iPhone, other values can be tried without building the Mac app again:
+    /// `VOICE_BARGE_IN_IPHONE_DB` and `VOICE_BARGE_IN_IPHONE_MS` in its environment, as `VOICE_DEBUG`.
+    public var bargeIn: BargeInProfile {
+        switch self {
+        case .iPhone: BargeInProfile.iPhone.adjusted(prefix: "VOICE_BARGE_IN_IPHONE")
+        // Not measured on an iPad yet: the Mac's, as before.
+        case .iPad: .mac
+        }
+    }
 }
 
 /// How the user talks to Maé on an iPhone or an iPad.

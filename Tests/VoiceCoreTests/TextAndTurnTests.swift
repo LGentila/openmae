@@ -24,6 +24,12 @@ struct TurnDetectorTests {
         #expect(events(pattern) == [.speechStarted, .pause, .resumed, .pause, .endOfTurn])
     }
 
+    @Test func overTheAssistantSpeechMustLastTheBargeInDuration() {
+        var detector = TurnDetector()
+        for _ in 0..<8 { #expect(detector.process(probability: 0.9, bargeInMinSpeechMs: 288) == nil) }  // 256 ms
+        #expect(detector.process(probability: 0.9, bargeInMinSpeechMs: 288) == .speechStarted)
+    }
+
     @Test func inBetweenProbabilitiesDoNotCountAsSilence() {
         var detector = TurnDetector()
         for _ in 0..<5 { _ = detector.process(probability: 0.9) }

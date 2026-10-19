@@ -44,9 +44,10 @@ public struct PipelineConfig: Sendable {
     /// Pauses of the voice longer than this (between sentences, each one starting with near-silence)
     /// are shortened to it. nil = keep them.
     public var maxVoicePauseMs: Double? = 300
-    /// While the assistant talks, speech quieter than this at the microphone (dB, after echo
-    /// cancellation) is taken for an echo of its own voice and does not interrupt it. nil = no check.
-    public var bargeInMinLevelDB: Float? = -38
+    /// What it takes for a voice heard while Maé talks to interrupt her rather than be taken for her echo, on the device
+    /// that has the conversation (`BargeInProfile`): the Mac's at first; `VoicePipeline.setBargeIn` changes it while
+    /// another device has the conversation (an iPhone).
+    public var bargeIn = BargeInProfile.mac
     /// While nobody speaks, the models are used briefly every this many seconds so that macOS keeps
     /// them in memory (see `KeepsWarm`). 0 = never.
     public var keepWarmSeconds: Double = 30
@@ -166,6 +167,24 @@ public actor VoicePipeline {
     private var voicedRunStart: ContinuousClock.Instant?
     /// Level (dB) of the last chunks, to tell the user's voice from an echo of the assistant's.
     private var recentLevels: [Float] = []
+    private var overVoice = OverVoice()
+
+    /// For the debug log: the voice heard over Maé's while an answer plays where the conversation is (her echo, unless
+    /// someone interrupts her), what the barge-in profile is checked against (`BargeInProfile`). Said once the answer is
+    /// over: its bursts of voice (chunks taken for speech in a row), however short.
+    private struct OverVoice {
+        /// The turn whose voice plays (nil: none).
+        var turn: Int?
+        var since: ContinuousClock.Instant?
+        /// The levels (dB) of the burst being heard, chunk by chunk.
+        var burst: [Float] = []
+        var bursts = 0
+        var longestMs = 0.0
+        /// The loudest burst's mean level.
+        var loudestDB: Float?
+        /// Bursts long enough to be judged, and taken for her echo by their level (each one in the log too).
+        var ignored = 0
+    }
     /// Chunks heard since the last one with speech (0: the last one has speech).
     private var quietChunks = 0
     private var partials = Partials()
@@ -641,6 +660,15 @@ public actor VoicePipeline {
         if state == .userSpeaking { setState(.listening) }
     }
 
+    /// What it takes to interrupt Maé from now on: the barge-in profile of the device that has the conversation (an
+    /// iPhone's while it has it, the Mac's again once it lets go). A voice being heard over her is judged by it from its
+    /// next chunk.
+    public func setBargeIn(_ profile: BargeInProfile) {
+        guard profile != config.bargeIn else { return }
+        config.bargeIn = profile
+        DebugLog.log("barge-in: \(profile.summary) to interrupt Maé")
+    }
+
     /// Stops for good, before the models are released (another tier chosen, or the models deleted).
     public func stop() async {
         await cancelTurn(stopAudio: true, forgetting: true)
@@ -720,8 +748,9 @@ public actor VoicePipeline {
         }
         quietChunks = p >= config.turn.speechThreshold ? 0 : quietChunks + 1
 
-        recentLevels.append(Self.loudnessDB(chunk))
-        if recentLevels.count > 16 { recentLevels.removeFirst() }
+        let chunkLevel = Self.loudnessDB(chunk)
+        recentLevels.append(chunkLevel)
+        if recentLevels.count > 64 { recentLevels.removeFirst() }
         preRoll += chunk
         let preRollMax = Int(config.preRollMs / 1000 * EngineAudio.inputSampleRate)
         if preRoll.count > preRollMax { preRoll.removeFirst(preRoll.count - preRollMax) }
@@ -736,22 +765,30 @@ public actor VoicePipeline {
         }
 
         let assistantSpeaking = turn?.audioStarted == true
-        var event = turnDetector.process(probability: p, assistantSpeaking: assistantSpeaking)
+        let bargeIn = config.bargeIn
+        watchOverVoice(assistantSpeaking && turn?.elsewhere != true ? turn?.id : nil,
+                       voiced: p >= config.turn.speechThreshold, level: chunkLevel)
+        var event = turnDetector.process(probability: p,
+                                         bargeInMinSpeechMs: assistantSpeaking ? bargeIn.minSpeechMs : nil)
         if event == .speechStarted {
-            let chunks = Int(config.turn.bargeInMinSpeechMs / config.turn.chunkMs)
-            let level = recentLevels.suffix(chunks).reduce(0, +) / Float(min(chunks, recentLevels.count))
+            // The mean level of the chunks that made the voice start, all of them taken for speech.
+            let needed = assistantSpeaking ? bargeIn.minSpeechMs : config.turn.minSpeechMs
+            let chunks = min(max(Int((needed / config.turn.chunkMs).rounded(.up)), 1), recentLevels.count)
+            let level = recentLevels.suffix(chunks).reduce(0, +) / Float(max(chunks, 1))
+            let heard = "level " + String(format: "%.1f", level) + " dB"
             if turn?.elsewhere == true {
                 // An announcement plays on a home station, maybe in this very room: its voice is not the user's.
-                DebugLog.log("ignored while an announcement plays on the home station (level \(Int(level)) dB)")
+                DebugLog.log("ignored while an announcement plays on the home station (\(heard))")
                 turnDetector.reset()
                 event = nil
-            } else if assistantSpeaking, let floor = config.bargeInMinLevelDB, level < floor {
-                DebugLog.log("ignored while the assistant talks: probably its echo (level \(Int(level)) dB)")
+            } else if assistantSpeaking, let floor = bargeIn.minLevelDB, level < floor {
+                overVoice.ignored += 1
+                DebugLog.log("ignored while the assistant talks: probably its echo (\(heard); \(bargeIn.summary))")
                 turnDetector.reset()
                 event = nil
             } else {
-                let over = assistantSpeaking ? ", over the assistant" : ""
-                DebugLog.log("speech started (level \(Int(level)) dB\(over))")
+                let over = assistantSpeaking ? ", over the assistant; \(bargeIn.summary)" : ""
+                DebugLog.log("speech started (\(heard)\(over))")
                 wakeModelsUp()
             }
         }
@@ -799,10 +836,10 @@ public actor VoicePipeline {
             if turn.audioStarted {
                 // Barge-in: the assistant is talking and the user speaks over it.
                 DebugLog.log("barge-in: speech detected while the assistant talks")
+                overVoice.burst = []  // the user's voice, not her echo
                 let detected = clock.now
                 await interruptAssistant()
-                let onset = voicedRunStart ?? detected
-                emit.yield(.bargeIn(stopMs: ms(clock.now - onset), detectionMs: ms(detected - onset)))
+                reportBargeIn(onset: voicedRunStart ?? detected, detected: detected)
                 utterance = preRoll
             } else {
                 // The user resumed before we answered: drop the answer, keep listening to the same utterance.
@@ -817,6 +854,59 @@ public actor VoicePipeline {
         utteranceOpen = true
         resetPartials()  // the interfaces show these words in a new line
         setState(.userSpeaking)
+    }
+
+    /// A voice that started at `onset` was taken for the user's at `detected`, and Maé's voice has just been stopped.
+    private func reportBargeIn(onset: ContinuousClock.Instant, detected: ContinuousClock.Instant) {
+        let stopMs = ms(clock.now - onset)
+        let detectionMs = ms(detected - onset)
+        DebugLog.log("barge-in: voice cut \(Int(stopMs)) ms after the start of speech (detection: \(Int(detectionMs)) ms)")
+        emit.yield(.bargeIn(stopMs: stopMs, detectionMs: detectionMs))
+    }
+
+    // MARK: - What is heard over Maé's voice (debug log)
+
+    /// Follows the voice heard over Maé's (`OverVoice`), chunk by chunk. `turnID`: the turn whose voice plays where the
+    /// conversation is, nil when none does; once it changes, what was heard over the previous one goes to the log.
+    private func watchOverVoice(_ turnID: Int?, voiced: Bool, level: Float) {
+        guard DebugLog.enabled else { return }
+        if turnID != overVoice.turn {
+            endOverVoiceBurst()
+            logOverVoice()
+            overVoice = OverVoice(turn: turnID, since: turnID == nil ? nil : clock.now)
+        }
+        guard turnID != nil else { return }
+        if voiced {
+            overVoice.burst.append(level)
+        } else {
+            endOverVoiceBurst()
+        }
+    }
+
+    private func endOverVoiceBurst() {
+        guard !overVoice.burst.isEmpty else { return }
+        let level = overVoice.burst.reduce(0, +) / Float(overVoice.burst.count)
+        overVoice.bursts += 1
+        overVoice.longestMs = max(overVoice.longestMs, Double(overVoice.burst.count) * config.turn.chunkMs)
+        overVoice.loudestDB = max(overVoice.loudestDB ?? level, level)
+        overVoice.burst = []
+    }
+
+    /// "turn 13: heard over Maé's voice in 11.6 s: 4 bursts, the longest 320 ms, the loudest -33.2 dB; ignored 1 time
+    /// as her echo (iPhone, -30 dB for 288 ms)": a burst's level is its mean; a burst is judged by its level once it
+    /// lasts as long as the profile asks, then again after as long, and each time it is too quiet it is ignored (also
+    /// in the log, as "ignored while the assistant talks").
+    private func logOverVoice() {
+        guard let turn = overVoice.turn, let since = overVoice.since else { return }
+        let seconds = String(format: "%.1f", ms(clock.now - since) / 1000)
+        guard let loudest = overVoice.loudestDB else {
+            DebugLog.log("turn \(turn): nothing heard over Maé's voice in \(seconds) s (\(config.bargeIn.summary))")
+            return
+        }
+        let (bursts, ignored) = (overVoice.bursts, overVoice.ignored)
+        DebugLog.log("turn \(turn): heard over Maé's voice in \(seconds) s: \(bursts) burst\(bursts > 1 ? "s" : ""), "
+                     + "the longest \(Int(overVoice.longestMs)) ms, the loudest " + String(format: "%.1f", loudest)
+                     + " dB; ignored \(ignored) time\(ignored > 1 ? "s" : "") as her echo (\(config.bargeIn.summary))")
     }
 
     /// Silences the assistant on request (click on the indicator, Escape key). What it already said
@@ -843,6 +933,7 @@ public actor VoicePipeline {
         preRoll = []
         voicedRunStart = nil
         quietChunks = 0
+        overVoice.burst = []  // heard by the microphone before
         resetPartials()
         if !utteranceAddressed { dropCandidate() }
         if turn == nil {
@@ -1020,9 +1111,10 @@ public actor VoicePipeline {
         if let turn {
             if turn.audioStarted {
                 DebugLog.log("barge-in: the wake phrase while the assistant talks")
+                overVoice.burst = []  // the user's voice, not her echo
                 let detected = clock.now
                 await interruptAssistant(askedForQuiet: onlyStops)
-                emit.yield(.bargeIn(stopMs: ms(clock.now - onset), detectionMs: ms(detected - onset)))
+                reportBargeIn(onset: onset, detected: detected)
             } else {
                 await cancelTurn(stopAudio: false)
             }
