@@ -164,11 +164,12 @@ private actor CacheCheck {
 
     /// One turn as the pipeline runs it: the answer goes into the history the way the pipeline records it (pieces cut
     /// and cleaned for the voice, `SpeakableText.record`); a call succeeds, after one refusal and a second try with
-    /// `refuse`, and the app then says "C'est noté." (and that it does one thing at a time, when the model asked for
-    /// more than one); with `summarize`, the call gets that result and the model sums it up (as after a web search or an
-    /// agent's report). `record: false`: the turn is dropped (the user spoke again before any voice); `interrupted`: the
-    /// answer is recorded as cut off. `cancelSumming`: the summing up is cancelled while the model reads the result
-    /// (`cancelledRequest`). `wentBackBefore`: see `request`. `catchingUp: false`: recorded without catching up.
+    /// `refuse`, and the app then says "C'est noté."; with `summarize`, the call gets that result and the model sums it
+    /// up (as after a web search or an agent's report). Either way, when the model asked for more than one call in the
+    /// turn, the app then says that it does one thing at a time. `record: false`: the turn is dropped (the user spoke
+    /// again before any voice); `interrupted`: the answer is recorded as cut off. `cancelSumming`: the summing up is
+    /// cancelled while the model reads the result (`cancelledRequest`). `wentBackBefore`: see `request`.
+    /// `catchingUp: false`: recorded without catching up.
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
               stopAfter: Int? = nil, interrupted: Bool = false, cancelSumming: Bool = false,
               wentBackBefore: WentBack? = nil, catchingUp: Bool = true) async throws
@@ -184,6 +185,7 @@ private actor CacheCheck {
         }
         var secondTry = false
         var summing = false
+        var askedForMore = false
         while true {
             let pass = summing ? " (summing up)" : secondTry ? " (second try)" : ""
             if summing, cancelSumming {
@@ -194,7 +196,14 @@ private actor CacheCheck {
                                                 wentBackBefore: pass.isEmpty ? wentBackBefore : nil)
             chunker.pieces(adding: filter.push(output.text)).forEach(send)
             chunker.pieces(adding: filter.flush()).forEach(send)
-            guard !summing, let call = output.calls.first else { break }  // a call written while summing up: ignored
+            if !summing, output.moreCalls { askedForMore = true }
+            guard !summing, let call = output.calls.first else {  // a call written while summing up: ignored
+                if summing, askedForMore {
+                    chunker.remainingPieces().forEach(send)
+                    SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer)
+                }
+                break
+            }
             chunker.remainingPieces().forEach(send)
             if refuse, !secondTry {
                 steps += [.call(call), .result(of: call, ["erreur": .string(
@@ -211,7 +220,7 @@ private actor CacheCheck {
             }
             steps += [.call(call), .result(of: call, ["ok": .bool(true), "id": .string("r\(self.steps.count)")])]
             SpeakableText.record("C'est noté.", in: &answer)
-            if output.moreCalls { SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer) }
+            if askedForMore { SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer) }
             break
         }
         chunker.remainingPieces().forEach(send)

@@ -1267,6 +1267,11 @@ public actor VoicePipeline {
                 /// Set once a call is refused for its arguments and the model gets its second try: what the app asks
                 /// the user about that refusal (`ToolRefusal.spoken`), said if the second try says nothing.
                 var refusalQuestion: String?
+                /// The model asked for more than one call (two calls written, or `ModelOutput.moreToolCalls`), on its
+                /// first try or its second. Only one call is handled per turn: however that call ends the turn (the
+                /// app's sentence, the model's summary, a question after a refusal), the user then hears, once, that
+                /// the app does one thing at a time.
+                var askedForMore = false
                 var fillerSaid = false
                 /// Summing up a text that came from outside (an agent's report, search results, see
                 /// `ToolOutcome.modelSpeaks`): what the model writes is said, but no call it writes then is carried
@@ -1309,9 +1314,12 @@ public actor VoicePipeline {
                         }
                     }
                     chunker.pieces(adding: filter.flush()).forEach(send)
+                    // Calls are only read outside a summing up (see above), so only those passes count.
+                    if calls.count > 1 || moreCalls { askedForMore = true }
                     if let fallback = summing {
                         chunker.remainingPieces().forEach(send)
                         if turn.answer == answered { say(fallback, to: turn) }
+                        if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
                         break
                     }
                     guard let tools, !calls.isEmpty || unreadable else {
@@ -1323,6 +1331,8 @@ public actor VoicePipeline {
                                 DebugLog.log("turn \(turn.id): the second try said nothing, the app asks")
                                 say(question, to: turn)
                             }
+                            // The first call was handled (refused): the rest of the request was not carried out either.
+                            if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
                         }
                         break
                     }
@@ -1352,7 +1362,7 @@ public actor VoicePipeline {
                         continue
                     }
                     say(reply.spoken, to: turn)
-                    if calls.count > 1 || moreCalls { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
+                    if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
                     break
                 }
             }

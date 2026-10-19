@@ -218,6 +218,9 @@ private struct Talk {
             /// As the app: the question of the refusal that gave the model its second try, said if that try says
             /// nothing.
             var refusalQuestion: String?
+            /// As the app: the model asked for more than one call in this turn, which then ends saying that the app
+            /// does one thing at a time.
+            var askedForMore = false
             var summing: String?
             while true {
                 var pass = Pass(text: "")
@@ -242,10 +245,12 @@ private struct Talk {
                     result.firstCallChance = chances.first
                     result.bestCallChance = chances.best
                 }
+                if calls.count > 1 || moreCalls { askedForMore = true }
                 if let fallback = summing {
                     result.passes.append(pass)
                     chunker.remainingPieces().forEach(send)
                     if answer == answered { say(fallback) }
+                    if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
                     break
                 }
                 guard !calls.isEmpty || pass.unreadable != nil else {
@@ -253,6 +258,7 @@ private struct Talk {
                     if let question = refusalQuestion {
                         chunker.remainingPieces().forEach(send)
                         if answer == answered { say(question) }
+                        if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
                     }
                     break
                 }
@@ -285,7 +291,7 @@ private struct Talk {
                     continue
                 }
                 say(reply.spoken)
-                if calls.count > 1 || moreCalls { say(ActionPhrases.oneThingAtATime(.french)) }
+                if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
                 break
             }
             chunker.remainingPieces().forEach(send)

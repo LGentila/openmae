@@ -473,6 +473,23 @@ actor CheckedCalendar: ToolProvider {
     }
 }
 
+/// A search whose results the model sums up (`ToolOutcome.modelSpeaks`), as the web search's.
+actor SummedSearch: ToolProvider {
+    nonisolated let identifier = "summed"
+    static let fallback = "Je n’ai rien trouvé de clair."
+    private(set) var queries: [String] = []
+
+    func tools() -> [ToolSpec] {
+        [ToolSpec(name: "chercher", description: "Cherche.",
+                  parameters: [ToolParameter("requete", .string, "Quoi.", required: true)], risk: .read)]
+    }
+
+    func perform(_ call: ToolCall, context: ToolContext) throws -> ToolOutcome {
+        queries.append(call.text("requete") ?? "")
+        return ToolOutcome(spoken: Self.fallback, forModel: ["resultats": "Beau temps demain à Paris."], modelSpeaks: true)
+    }
+}
+
 @Suite("Tool runner")
 struct ToolRunnerTests {
     @Test func sensitiveActionWaitsForYes() async {
@@ -617,13 +634,13 @@ struct PipelineActionTests {
     }
 
     func make(_ model: ScriptedModel, _ transcriber: any Transcriber, _ speaker: FakeSpeaker, _ tools: RecordingTools,
-              filler: Bool = false) -> VoicePipeline
+              filler: Bool = false, others: [any ToolProvider] = []) -> VoicePipeline
     {
         var config = PipelineConfig()
         config.toolCallFiller = filler
         return VoicePipeline(detector: LoudnessDetector(), transcriber: transcriber, model: model,
-                             synthesizer: FakeSynthesizer(), output: speaker, tools: ToolRunner(providers: [tools]),
-                             config: config)
+                             synthesizer: FakeSynthesizer(), output: speaker,
+                             tools: ToolRunner(providers: [tools] + others), config: config)
     }
 
     static let note: [ModelOutput] = [.toolCallStarted, .toolCall(ToolCall(name: "noter", arguments: ["titre": "Pain"]))]
@@ -675,6 +692,94 @@ struct PipelineActionTests {
         #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
         #expect(history[2].toolCalls.first?.name == "noter")
         #expect(history[3].toolResult == ["id": "n1"])
+    }
+
+    /// Two actions asked at once, the first one's result summed up by the model (a search's results, an agent's
+    /// report): the turn still ends saying that the app does one thing at a time, once, after the model's summary or
+    /// after the app's own sentence when the model says nothing. The history keeps the call, its result and what the
+    /// user heard.
+    @Test(arguments: [true, false])
+    func oneActionPerTurnWhenTheFirstIsSummedUp(modelSums: Bool) async throws {
+        let ask: [ModelOutput] = [.toolCallStarted,
+                                  .toolCall(ToolCall(name: "chercher", arguments: ["requete": "météo demain Paris"])),
+                                  .moreToolCalls]
+        let summary: [ModelOutput] = modelSums ? [.text("Demain, il fera beau à Paris.")] : []
+        let thanks: [ModelOutput] = [.text("Avec plaisir, à ton service.")]
+        let (model, speaker, tools, search) = (ScriptedModel(scripts: [ask, summary, thanks]), FakeSpeaker(),
+                                               RecordingTools(), SummedSearch())
+        let pipeline = make(model, ScriptedTranscriber(["Cherche la météo de demain à Paris et mets un minuteur",
+                                                        "Merci beaucoup"]),
+                            speaker, tools, others: [search])
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await search.queries == ["météo demain Paris"])
+        #expect(await model.requests.count == 2)
+        let oneThing = ActionPhrases.oneThingAtATime(.french)
+        let summed = modelSums ? "Demain, il fera beau à Paris." : SummedSearch.fallback
+        let heard = await log.pieces.joined(separator: " ")
+        #expect(heard == summed + " " + oneThing)
+        #expect(heard.components(separatedBy: oneThing).count == 2)  // said once
+        #expect(await log.finished.first?.assistantText == summed + " " + oneThing)
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 3 }
+        let history = try #require(await model.requests.last)
+        #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
+        #expect(history[2].toolCalls.first?.name == "chercher")
+        #expect(history[3].toolResult == ["resultats": "Beau temps demain à Paris."])
+        #expect(history[4].content == summed + " " + oneThing)
+        #expect(await tools.performed.isEmpty)
+    }
+
+    /// Two actions asked at once, the first one refused for its arguments: the model's second try writes the corrected
+    /// call alone. It is carried out, and the app still says, once, that it does one thing at a time.
+    @Test func oneActionPerTurnAfterASecondTry() async throws {
+        let bad: [ModelOutput] = [.toolCall(ToolCall(name: "noter")), .moreToolCalls]
+        let thanks: [ModelOutput] = [.text("Avec plaisir, à ton service.")]
+        let (model, speaker, tools) = (ScriptedModel(scripts: [bad, Self.note, thanks]), FakeSpeaker(), RecordingTools())
+        let pipeline = make(model, ScriptedTranscriber(["Note le pain et mets un minuteur", "Merci beaucoup"]), speaker,
+                            tools)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await model.requests.count == 2)
+        #expect(await tools.performed.map { $0.text("titre") } == ["Pain"])
+        let oneThing = ActionPhrases.oneThingAtATime(.french)
+        let heard = await log.pieces.joined(separator: " ")
+        #expect(heard == "C’est noté\(nb): Pain. " + oneThing)
+        #expect(heard.components(separatedBy: oneThing).count == 2)  // said once
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 3 }
+        // The turn as the model then sees it: the refused call, why, the corrected call, its result, what was said.
+        let history = try #require(await model.requests.last)
+        #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .tool, .assistant, .user])
+        #expect(history[6].content == "C’est noté\(nb): Pain. " + oneThing)
+    }
+
+    /// Two actions asked at once, the first one refused for its arguments, and the model's second try writes no call:
+    /// after the app's question (or what the model says itself), the user also hears that the app does one thing at a
+    /// time, since the second action was not done either.
+    @Test(arguments: ["", "Que veux-tu que je note ?"])
+    func oneActionPerTurnWhenTheSecondTryWritesNoCall(says text: String) async throws {
+        let bad: [ModelOutput] = [.toolCall(ToolCall(name: "noter")), .moreToolCalls]
+        let secondTry: [ModelOutput] = text.isEmpty ? [] : [.text(text)]
+        let (model, speaker, tools) = (ScriptedModel(scripts: [bad, secondTry]), FakeSpeaker(), RecordingTools())
+        let pipeline = make(model, ScriptedTranscriber(["Note et mets un minuteur"]), speaker, tools)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await model.requests.count == 2)
+        let answer = text.isEmpty ? ActionPhrases.missingTitle(.french) : text
+        #expect(await log.pieces.joined(separator: " ") == answer + " " + ActionPhrases.oneThingAtATime(.french))
+        #expect(await tools.performed.isEmpty)
     }
 
     @Test func examplesOpenTheConversationButAreNotTheUsers() async throws {
