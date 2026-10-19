@@ -1810,6 +1810,24 @@ public actor VoicePipeline {
         emit.yield(.turnFinished(metrics))
     }
 
+    /// The turn's announcement was stopped and is not said again. Once its words may have been heard, the history keeps
+    /// it as an answer cut off, after its note: the model knows what happened (a timer rang) and that the user may not
+    /// have heard all of it. Stopped during its chime (asked to be quiet), none of its words was heard: the history does
+    /// not keep it. Either way, what the interfaces showed of it is reported cut off.
+    private func dropAnnouncement(_ turn: Turn, wordsHeard: Bool) {
+        guard let announcement = turn.announcement, !turn.answer.isEmpty else { return }  // nothing shown or said
+        DebugLog.log("turn \(turn.id): the announcement is stopped, not said again")
+        if wordsHeard, let message = turn.userMessage {
+            conversation.record(user: message, steps: [], assistant: turn.answer, interrupted: true)
+            letModelCatchUp()  // the model never wrote it: it computes it once nobody speaks
+        }
+        var metrics = TurnMetrics()
+        metrics.language = announcement.language
+        metrics.assistantText = turn.answer
+        metrics.interrupted = true
+        emit.yield(.turnFinished(metrics))
+    }
+
     private func finish(_ turn: Turn, metrics: TurnMetrics?) {
         guard self.turn === turn, !turn.interrupted else { return }
         voiceIsAudible()  // never leave the model paused
@@ -1884,7 +1902,8 @@ public actor VoicePipeline {
     /// Barge-in: silence the assistant immediately, keep what it already said in the history. An announcement whose
     /// words were not heard yet (its chime plays) is said after the user's turn, unless they asked to be quiet
     /// (`askedForQuiet`: the stop button, « OK Maé, stop »); one said while the voice's output was out of reach is
-    /// said again either way.
+    /// said again either way. One that is not said again goes into the history cut off, once its words may have been
+    /// heard (`dropAnnouncement`).
     private func interruptAssistant(askedForQuiet: Bool = false) async {
         guard let turn else { return }
         let wordsHeard = wordsMayBeHeard(turn)
@@ -1902,6 +1921,8 @@ public actor VoicePipeline {
                 sayAgainLater(turn, retried: true)
             } else if !wordsHeard, !askedForQuiet {
                 sayAgainLater(turn)
+            } else {
+                dropAnnouncement(turn, wordsHeard: wordsHeard)
             }
         }
         if !turn.userText.isEmpty, let message = turn.userMessage {

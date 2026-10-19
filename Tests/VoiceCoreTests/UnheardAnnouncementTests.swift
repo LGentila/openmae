@@ -3,11 +3,14 @@ import Testing
 
 @testable import VoiceCore
 
-/// What becomes of an announcement (a timer that rang) that the user did not hear: said again later, or not.
+/// What becomes of an announcement (a timer that rang) that the user did not hear, or not all of it: said again later,
+/// or kept in the history cut off.
 @Suite("Announcements not heard", .serialized)
 struct UnheardAnnouncementTests {
     static let sentence = "Ton minuteur de 10 minutes est terminé."
     static let note = "(Le minuteur a sonné.)"
+    /// The sentence as the history keeps it once it was stopped after its words could be heard.
+    static let cutOff = sentence + " […]"
     /// The chime, then the sentence, as the fake voice plays them (1 sample = 1 ms).
     static let samples = Chime.samples(sampleRate: 1000).count + 500
 
@@ -148,7 +151,8 @@ struct UnheardAnnouncementTests {
         try await Task.sleep(for: .milliseconds(1500))
         #expect(await log.pieces == [Self.sentence])
         #expect(await speaker.played == Self.samples)
-        #expect(await model.catchUps.isEmpty)
+        #expect(await model.catchUps.isEmpty)  // none of its words was heard: not in the history
+        #expect(await log.finished.map(\.interrupted) == [true])  // the interfaces showed it: cut off
     }
 
     /// The user speaks over the sentence, once it could be heard: it is not said again.
@@ -166,6 +170,84 @@ struct UnheardAnnouncementTests {
         try await Task.sleep(for: .milliseconds(1500))
         #expect(await log.pieces == [Self.sentence, "Oui ?"])
         #expect(await log.bargeIns == 1)
+    }
+
+    /// The user speaks over the sentence once it could be heard (« Attends, lequel ? »): the model's next request, and
+    /// the history after it, hold the note and the sentence cut off before the user's message, so it knows the timer
+    /// rang; the interfaces show the sentence cut off.
+    @Test func spokenOverAfterItsWordsKeptCutOff() async throws {
+        let (model, speaker) = (ScriptedModel(answer: ["Oui ?"]), FakeSpeaker())
+        let pipeline = make(model, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await announce(pipeline)
+        await waitFor { await speaker.played == Self.samples }
+        try await Task.sleep(for: .milliseconds(900))  // the chime is over: the sentence plays
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await recorded(model) == [Self.cutOff, "Oui ?"] }
+        await waitFor { await log.finished.count == 2 }
+        try await Task.sleep(for: .milliseconds(300))
+        let requests = await model.requests
+        #expect(!requests.isEmpty)
+        for request in requests {  // the user's turn (and any answer prepared during a pause)
+            #expect(request.map(\.role) == [.system, .user, .assistant, .user])
+            #expect(request.dropFirst().prefix(2).map(\.content) == [Self.note, Self.cutOff])
+        }
+        let history = try #require(await model.catchUps.last)
+        #expect(history.map(\.role) == [.system, .user, .assistant, .user, .assistant])
+        #expect(history.dropFirst().prefix(2).map(\.content) == [Self.note, Self.cutOff])
+        let finished = await log.finished
+        #expect(finished.map(\.interrupted) == [true, false])  // the announcement, cut off; then the user's turn
+        #expect(finished.first?.assistantText == Self.sentence)
+        #expect(finished.first?.userText == "")
+        #expect(await log.pieces == [Self.sentence, "Oui ?"])
+        #expect(await log.bargeIns == 1)
+    }
+
+    /// A typed turn once the sentence could be heard: the request holds the note and the sentence cut off, then the
+    /// typed words.
+    @Test func typedTurnAfterItsWordsKeepsItCutOff() async throws {
+        let (model, speaker) = (ScriptedModel(answer: ["Celui de 10 minutes."]), FakeSpeaker())
+        let pipeline = make(model, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await announce(pipeline)
+        await waitFor { await speaker.played == Self.samples }
+        try await Task.sleep(for: .milliseconds(900))
+        await pipeline.submit(text: "Lequel ?")
+        await waitFor { await recorded(model) == [Self.cutOff, "Celui de 10 minutes."] }
+        let request = try #require(await model.requests.last)
+        #expect(request.dropFirst().map(\.content) == [Self.note, Self.cutOff, "Lequel ?"])
+        #expect(await log.pieces == [Self.sentence, "Celui de 10 minutes."])
+        await waitFor { await log.finished.count == 2 }
+        #expect(await log.finished.map(\.interrupted) == [true, false])
+    }
+
+    /// Asked to be quiet once the sentence could be heard (the stop button, « OK Maé, stop »): not said again, and the
+    /// history keeps it cut off, in its language.
+    @Test func stopAfterItsWordsKeptCutOff() async throws {
+        let (model, speaker) = (ScriptedModel(), FakeSpeaker())
+        let pipeline = make(model, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        let sentence = "Your timer is done."
+        await pipeline.announce(sentence, note: Self.note, language: .english)
+        await waitFor { await speaker.played == Self.samples }
+        try await Task.sleep(for: .milliseconds(900))
+        await pipeline.interrupt()
+        await waitFor { await recorded(model) == [sentence + " […]"] }
+        try await Task.sleep(for: .milliseconds(1500))  // not said again
+        #expect(await speaker.played == Self.samples)
+        #expect(await log.pieces == [sentence])
+        let history = try #require(await model.catchUps.last)
+        #expect(history.dropFirst().map(\.content) == [Self.note, sentence + " […]"])
+        let finished = await log.finished
+        #expect(finished.map(\.interrupted) == [true])
+        #expect(finished.first?.assistantText == sentence)
+        #expect(finished.first?.language == .english)
     }
 }
 
