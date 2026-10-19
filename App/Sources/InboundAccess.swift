@@ -3,8 +3,9 @@ import Observation
 import OpenMaeLink
 import VoiceCore
 
-/// Received information, as the Mac's settings show it: the home relay and its state, the sources with their secret
-/// addresses and their logs. Built from OpenMaeLink.InboundHost's status.
+/// Received information, as the Mac's settings show it: the home path (the home relay, or OpenMaé's internal door) and
+/// its state, the internet path, the sources with their secret addresses and their logs. Built from
+/// OpenMaeLink.InboundHost's status.
 @MainActor
 @Observable
 final class InboundAccess {
@@ -30,7 +31,7 @@ final class InboundAccess {
         status.sources.first { $0.id == id }
     }
 
-    /// What the user typed for the home relay; false when it cannot be an address.
+    /// What the user typed for the home relay, which becomes the home path; false when it cannot be an address.
     @discardableResult
     func setHomeRelay(_ text: String) -> Bool {
         guard let url = InboundHost.homeRelayURL(from: text) else { return false }
@@ -38,8 +39,25 @@ final class InboundAccess {
         return true
     }
 
-    func removeHomeRelay() {
-        Task { await host?.setHomeRelay(nil) }
+    /// No home path, or back to the home relay already set. The door opens with `openDoor`.
+    func setHomePath(_ path: InboundStatus.HomePath) {
+        Task { await host?.setHomePath(path) }
+    }
+
+    /// "Open the door", once its warning is read: the internal door becomes the home path, and this network becomes
+    /// the home network. False when this Mac sees no network to record (then nothing changed).
+    func openDoor() async -> Bool {
+        guard let host else { return false }
+        return await host.openDoor() == .opened
+    }
+
+    /// A desktop's "home network" safeguard; false when it could not be turned on (no network to record).
+    func setDoorSafeguard(_ on: Bool) async -> Bool {
+        await host?.setDoorSafeguard(on) ?? false
+    }
+
+    func setDoorPort(_ port: UInt16) {
+        Task { await host?.setDoorPort(port) }
     }
 
     /// A new source; its id once added.

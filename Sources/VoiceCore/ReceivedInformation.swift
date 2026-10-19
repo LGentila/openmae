@@ -14,9 +14,9 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
     /// Where the source sends from. It decides the path its deliveries must come by (`accepts`); changing it changes
     /// the source's address.
     public enum Origin: String, Codable, Sendable, CaseIterable {
-        /// The home network: through the home relay (or OpenMaé's internal door, a later step).
+        /// The home network: through the home relay or OpenMaé's internal door, whichever is the home path.
         case home
-        /// The internet: through the public relay, which cannot read the deliveries (a later step).
+        /// The internet: through the public relay, which cannot read the deliveries.
         case internet
     }
 
@@ -65,9 +65,9 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
 public enum InboundPath: String, Codable, Sendable, CaseIterable {
     /// A relay on the home network, in home mode: it passes the delivery to the Mac on the Mac's own connection.
     case homeRelay
-    /// The public relay, without reading: TLS goes through it to a certificate the Mac holds (a later step).
+    /// The public relay, without reading: TLS goes through it to a certificate the Mac holds.
     case publicRelay
-    /// OpenMaé's own door on the home network (a later step).
+    /// OpenMaé's own door: the Mac listens on the home network itself.
     case internalDoor
 }
 

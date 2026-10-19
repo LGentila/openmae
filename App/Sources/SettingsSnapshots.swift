@@ -95,6 +95,7 @@ extension Snapshots {
                             caller: "192.168.1.35", text: "La porte du garage est restée ouverte."),
         ]
         var connected = InboundStatus()
+        connected.homePath = .relay
         connected.homeRelayAddress = relay
         connected.homeRelay = .connected
         connected.inboundName = inboundName
@@ -132,6 +133,43 @@ extension Snapshots {
         notOffered.addresses[webhook.id] = nil
         var internetDown = internet
         internetDown.internetPath = .unreachable
+
+        // OpenMaé's internal door: on a desktop (a Mac mini, what it is meant for), then on a laptop
+        let doorAddress = URL(string: "http://192.168.1.42:47321")!
+        var doorOpen = connected
+        doorOpen.homePath = .door
+        doorOpen.homeRelay = .none
+        doorOpen.homeRelayAddress = nil
+        doorOpen.door = .open
+        doorOpen.doorAddress = doorAddress
+        for (i, source) in doorOpen.sources.enumerated() {
+            doorOpen.addresses[source.id] = doorAddress.appending(path: "in").appending(path: secret(i))
+        }
+        doorOpen.logs[homeAssistant.id] = homeAssistantLog.map { entry in
+            var entry = entry
+            if entry.path != nil { entry.path = .internalDoor }
+            return entry
+        }
+        var doorSafeguard = doorOpen
+        doorSafeguard.doorSafeguard = true
+        var doorLaptop = doorOpen
+        doorLaptop.isLaptop = true
+        doorLaptop.doorSafeguard = true
+        var doorAway = doorLaptop
+        doorAway.door = .notHome
+        doorAway.doorAddress = nil
+        doorAway.addresses = [:]
+        var doorTaken = doorOpen
+        doorTaken.door = .portTaken
+        doorTaken.doorAddress = nil
+        doorTaken.addresses = [:]
+        var noHomePath = connected
+        noHomePath.homePath = .none
+        noHomePath.homeRelay = .none
+        noHomePath.homeRelayAddress = nil
+        noHomePath.addresses = [:]
+        var relayOnLaptop = connected
+        relayOnLaptop.isLaptop = true
 
         // Connected tools (not reachable yet: their pages are drawn for whoever builds them)
         func action(_ id: String, _ title: String, reads: Bool = false, on: Bool = true) -> ConnectedTool.Action {
@@ -333,6 +371,28 @@ extension Snapshots {
                               inbound.sheet = .homeAssistant(homeAssistant.id)
                           },
                           minHeight: 1250),
+            SettingsScene(name: "RgInfos-aucun-chemin", page: .inbound, inbound: noHomePath),
+            SettingsScene(name: "RgInfos-porte-avertissement-portable", page: .inbound, inbound: relayOnLaptop,
+                          prepare: { _, _, inbound in inbound.sheet = .door }),
+            SettingsScene(name: "RgInfos-porte-avertissement-bureau", page: .inbound, inbound: connected,
+                          prepare: { _, _, inbound in inbound.sheet = .door }),
+            SettingsScene(name: "RgInfos-porte-ouverte", page: .inbound, inbound: doorOpen),
+            SettingsScene(name: "RgInfos-porte-bureau-garde-fou", page: .inbound, inbound: doorSafeguard),
+            SettingsScene(name: "RgInfos-porte-portable", page: .inbound, inbound: doorLaptop),
+            SettingsScene(name: "RgInfos-porte-fermee", page: .inbound, inbound: doorAway),
+            SettingsScene(name: "RgInfos-porte-occupee", page: .inbound, inbound: doorTaken),
+            SettingsScene(name: "RgInfos-source-porte", page: .inbound, inbound: doorOpen,
+                          prepare: { _, _, inbound in inbound.page = .source(homeAssistant.id) }),
+            SettingsScene(name: "RgInfos-source-porte-fermee", page: .inbound, inbound: doorAway,
+                          prepare: { _, _, inbound in inbound.page = .source(homeAssistant.id) }),
+            SettingsScene(name: "RgInfos-relais-depuis-porte", page: .inbound, inbound: doorOpen,
+                          prepare: { _, _, inbound in inbound.sheet = .homeRelay }),
+            SettingsScene(name: "RgInfos-aide-home-assistant-porte", page: .inbound, inbound: doorOpen,
+                          prepare: { _, _, inbound in
+                              inbound.page = .source(homeAssistant.id)
+                              inbound.sheet = .homeAssistant(homeAssistant.id)
+                          },
+                          minHeight: 1300),
             // Advanced
             SettingsScene(name: "RgAvance", page: .advanced, events: [bigStorage], settings: wakeWordLog),
             SettingsScene(name: "RgAvanceTelechargement", page: .advanced, events: setup, settings: wakeWordLog,
@@ -347,6 +407,7 @@ extension Snapshots {
                           prepare: { navigation, _, _ in navigation.sheet = .changeTier(.forced(.standard)) }),
             SettingsScene(name: "RgAvance-palier-montre", page: .advanced, events: [bigStorage],
                           prepare: { navigation, _, _ in navigation.pointAtTier() }),
+            SettingsScene(name: "RgAvance-porte", page: .advanced, events: [bigStorage], inbound: doorOpen),
         ]
 
         for scene in scenes {

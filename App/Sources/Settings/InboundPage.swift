@@ -4,11 +4,12 @@ import SwiftUI
 import VoiceCore
 
 /// Settings › Received information: short texts that other systems (Home Assistant, a script, a service on the
-/// internet…) send Maé to say. The page shows the two paths their deliveries take to this Mac (the home relay, and the
-/// internet path through the iPhones' relay, which cannot read them) and the sources; a source's page shows its secret
-/// address, what Maé does with what it sends and its last deliveries. Adding a source, changing its address, removing
-/// it, the home relay's address and how to send from Home Assistant go through sheets. The design draws the home path
-/// only: the internet path takes the same form. OpenMaé's internal door comes in a later step.
+/// internet…) send Maé to say. The page shows the paths their deliveries take to this Mac (at home, the home relay or
+/// OpenMaé's internal door, one at a time; from the internet, the iPhones' relay, which cannot read them) and the
+/// sources; a source's page shows its secret address, what Maé does with what it sends and its last deliveries. Adding
+/// a source, changing its address, removing it, the home relay's address, turning the door on (after its warning) and
+/// how to send from Home Assistant go through sheets. The design draws the home relay only: the internet path and the
+/// door take the same form.
 struct InboundPage: View {
     let inbound: InboundAccess
     @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
@@ -24,7 +25,7 @@ struct InboundPage: View {
             PageIntro("Other systems, at home like Home Assistant or on the internet, can send Maé a sentence to say. It only informs her: it never triggers an action.")
             if let note = InboundWords.note(status) { note.padding(.top, 16) }
             PageSection("At home")
-            SettingsCard { HomeRelayRows(inbound: inbound) }
+            SettingsCard { HomePathRows(inbound: inbound) { navigation?.show(.advanced) } }
             PageSection("Over the internet")
             SettingsCard {
                 InternetPathRows(status: status) { navigation?.show(.devices) }
@@ -56,8 +57,8 @@ struct InboundPage: View {
             SourceItem(source: source, last: status.logs[source.id]?.first?.date) { inbound.show(.source(source.id)) }
             Hairline()
         }
-        if status.homeRelayAddress == nil, status.sources.contains(where: { $0.origin == .home }) {
-            Caption("A home source gets its address once the home relay is set.")
+        if status.homePath == .none, status.sources.contains(where: { $0.origin == .home }) {
+            Caption("A home source gets its address once a home relay or the internal door is chosen.")
                 .padding(.top, 18)
         }
         ActionRow(top: 12, bottom: 12) {
@@ -88,6 +89,8 @@ extension InboundAccess {
     enum Sheet: Hashable {
         case addSource
         case homeRelay
+        /// Turning OpenMaé's internal door on: its warning first.
+        case door
         case changeAddress(InboundSource.ID)
         case remove(InboundSource.ID)
         /// How to send from Home Assistant, with the address of the source it was opened from.
@@ -103,7 +106,51 @@ extension InboundAccess {
 
 // MARK: - The paths
 
-/// "Home relay": its address in a menu (change it, or none), and what it is for.
+/// "Go through": how home sources reach this Mac, one way at a time (the home relay, OpenMaé's internal door, or
+/// none), then the rows of the chosen one.
+private struct HomePathRows: View {
+    let inbound: InboundAccess
+    let openAdvanced: () -> Void
+
+    private var status: InboundStatus { inbound.status }
+
+    var body: some View {
+        SettingRow("Go through") {
+            PopUpMenu(title: InboundWords.homePath(status.homePath), label: Text("At home")) {
+                Button(action: chooseRelay) {
+                    status.homeRelayAddress == nil ? Text("Home relay…") : Text("Home relay")
+                }
+                Button { inbound.sheet = .door } label: { Text("OpenMaé’s internal door…") }
+                Divider()
+                Button { inbound.setHomePath(.none) } label: { Text("None") }
+            }
+        }
+        if status.homePath != .none, status.sources.contains(where: { $0.origin == .home }) {
+            Caption("One way at a time. Changing it changes the addresses of your home sources: paste them again in the other systems.")
+        }
+        switch status.homePath {
+        case .none:
+            Caption("A home relay is best: this Mac then opens no port. OpenMaé’s internal door suits a Mac that stays at home.")
+        case .relay:
+            Hairline()
+            HomeRelayRows(inbound: inbound)
+        case .door:
+            Hairline()
+            DoorRows(inbound: inbound, openAdvanced: openAdvanced)
+        }
+    }
+
+    /// Back to the home relay already set, else its address first.
+    private func chooseRelay() {
+        if status.homeRelayAddress == nil {
+            inbound.sheet = .homeRelay
+        } else {
+            inbound.setHomePath(.relay)
+        }
+    }
+}
+
+/// "Home relay": its address in a menu (to change it), and what it is for.
 private struct HomeRelayRows: View {
     let inbound: InboundAccess
 
@@ -117,16 +164,62 @@ private struct HomeRelayRows: View {
                 Button { inbound.sheet = .homeRelay } label: {
                     address == nil ? Text("Set the address…") : Text("Change the address…")
                 }
-                if address != nil {
-                    Divider()
-                    Button { inbound.removeHomeRelay() } label: { Text("None") }
-                }
             }
         }
-        if address == nil {
-            Caption("The OpenMaé relay, run in home mode on a machine at home (a NAS, a Raspberry Pi…). It passes on what your systems send: this Mac opens no port.")
+        Caption("What your systems send goes through it to this Mac, which opens no port. Never make it reachable from the internet.")
+    }
+}
+
+/// "Internal door": open or closed, why, the address to reserve, and the "home network" safeguard (a switch on a
+/// desktop; always on for a laptop).
+private struct DoorRows: View {
+    let inbound: InboundAccess
+    let openAdvanced: () -> Void
+    /// The safeguard could not be turned on: no network to record.
+    @State private var safeguardRefused = false
+
+    private var status: InboundStatus { inbound.status }
+
+    var body: some View {
+        SettingRow("Internal door") {
+            let badge = InboundWords.doorBadge(status.door)
+            StatusPill(text: badge.text, style: .dot(badge.tone))
+        }
+        switch status.door {
+        case .open:
+            if let host = status.doorAddress?.host() {
+                Caption(Text("Reserve this Mac’s address (\(host)) in your router, so that it never changes. Use it rather than a .local name, which often fails from Docker."))
+            }
+        case .notHome:
+            Caption("Door closed: you are not on your home network. A new router at home? Choose the internal door again, from home.")
+        case .noNetwork:
+            Caption("Door closed: this Mac is not connected to a network.")
+        case .portTaken:
+            Caption(Text("Port \(String(status.doorPort)) is taken."), tone: .error)
+            ActionRow {
+                Button(action: openAdvanced) { IconLabel("Open Advanced", icon: .arrowRight) }
+                    .buttonStyle(WindowButtonStyle())
+            }
+        case .failed(let reason):
+            Caption(Text("The door cannot open: \(reason)"), tone: .error)
+        case .opening, .off:
+            Caption("Opening the door…")
+        }
+        Hairline()
+        SwitchRow("Only on the home network", isOn: Binding(
+            get: { status.doorSafeguard },
+            set: { on in
+                Task { safeguardRefused = !(await inbound.setDoorSafeguard(on)) }
+            }))
+            .disabled(status.isLaptop)
+        if status.isLaptop {
+            Caption("Always on for a laptop: the door only opens on the network where you turned it on.")
+        } else if safeguardRefused {
+            Caption("This Mac is not connected to a network: connect it to your home network, then try again.", tone: .error)
+        } else if status.doorSafeguard {
+            Caption("The door stays closed on any other network, or with a new router: then turn this off and on again.")
         } else {
-            Caption("What your systems send goes through it to this Mac, which opens no port. Never make it reachable from the internet.")
+            Caption("Off, the door opens on any network this Mac joins. On, only on the one it is on now.")
         }
     }
 }
@@ -237,9 +330,7 @@ struct InboundSourcePage: View {
                 let badge = InboundWords.badge(of: source, status)
                 StatusPill(text: badge.text, style: .dot(badge.tone))
             }
-            if let note = source.origin == .home ? InboundWords.homeNote(status.homeRelay)
-                : InboundWords.internetNote(status)
-            {
+            if let note = source.origin == .home ? InboundWords.homeNote(status) : InboundWords.internetNote(status) {
                 note.padding(.top, 16)
             }
             PageSection("Address")
@@ -284,16 +375,31 @@ struct InboundSourcePage: View {
                 Caption("The address appears once your relay answers.")
                     .padding(.top, 20)
             }
-        } else if status.homeRelayAddress == nil {
-            Caption("The address appears once the home relay is set.")
-                .padding(.top, 20)
-            ActionRow {
-                Button("Set the home relay") { inbound.sheet = .homeRelay }
-                    .buttonStyle(WindowButtonStyle(kind: .link))
-            }
         } else {
-            Caption("The address is not ready yet.")
-                .padding(.top, 20)
+            switch status.homePath {
+            case .none:
+                Caption("The address appears once a home relay or the internal door is chosen.")
+                    .padding(.top, 20)
+                ActionRow {
+                    Button("Choose…") { inbound.show(.list) }
+                        .buttonStyle(WindowButtonStyle(kind: .link))
+                }
+            case .relay:
+                Caption("The address is not ready yet.")
+                    .padding(.top, 20)
+            case .door:
+                switch status.door {
+                case .notHome:
+                    Caption("The address appears when this Mac is on your home network.")
+                        .padding(.top, 20)
+                case .noNetwork:
+                    Caption("The address appears once this Mac is connected to your home network.")
+                        .padding(.top, 20)
+                default:
+                    Caption("The address appears once the door is open.")
+                        .padding(.top, 20)
+                }
+            }
         }
         Hairline()
         NavigationLine(title: Text("Send from Home Assistant")) { inbound.sheet = .homeAssistant(source.id) }
@@ -431,7 +537,11 @@ struct AddSourceSheet: View {
                 }
                 Group {
                     if origin == .home {
-                        Caption("From your home network, through the home relay.")
+                        switch inbound.status.homePath {
+                        case .relay: Caption("From your home network, through the home relay.")
+                        case .door: Caption("From your home network, through OpenMaé’s internal door.")
+                        case .none: Caption("From your home network, through a home relay or the internal door, to choose on the page.")
+                        }
                     } else {
                         Caption("From the internet, through your relay, which cannot read what is sent.")
                     }
@@ -487,6 +597,9 @@ struct HomeRelaySheet: View {
             if isRefused {
                 Caption("This is not an address. Type it like 192.168.1.10:8080.", tone: .error)
                     .padding(.top, 4)
+            } else if inbound.status.homePath == .door, inbound.status.sources.contains(where: { $0.origin == .home }) {
+                Caption("The internal door closes, and the addresses of your home sources change: paste them again in the other systems.")
+                    .padding(.top, 4)
             }
         } footer: {
             Button("Cancel") { inbound.sheet = nil }
@@ -510,6 +623,60 @@ struct HomeRelaySheet: View {
             return
         }
         inbound.sheet = nil
+    }
+}
+
+/// "Turn on OpenMaé's internal door?": the warning for this Mac (a laptop goes along to other networks; on a desktop,
+/// the network's devices can knock, and deliveries are not encrypted), then "Turn on", which records this network as
+/// the home network. Choosing the door again, at home with a new router, records the new one.
+struct DoorSheet: View {
+    let inbound: InboundAccess
+    @State private var isTurningOn = false
+    /// This Mac sees no network to record.
+    @State private var noNetwork = false
+
+    private var status: InboundStatus { inbound.status }
+
+    /// Home sources had addresses through the home relay: they change.
+    private var addressesChange: Bool {
+        status.homePath == .relay && status.sources.contains { $0.origin == .home }
+    }
+
+    var body: some View {
+        SheetCard(width: 520, title: Text("Turn on OpenMaé’s internal door?"), text: InboundWords.doorWarning(status)) {
+            VStack(alignment: .leading, spacing: 0) {
+                if addressesChange {
+                    Caption("The addresses of your home sources change: paste them again in the other systems.")
+                }
+                Caption("If the macOS firewall is on, it asks once whether OpenMaé may receive connections: accept.")
+                if noNetwork {
+                    Caption("This Mac is not connected to a network: connect it to your home network, then try again.",
+                            tone: .error)
+                }
+            }
+            .padding(.top, 22)
+        } footer: {
+            Button("Cancel") { inbound.sheet = nil }
+                .buttonStyle(WindowButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Button("Turn on", action: turnOn)
+                .buttonStyle(WindowButtonStyle(kind: .main))
+                .keyboardShortcut(.defaultAction)
+                .disabled(isTurningOn)
+        }
+    }
+
+    private func turnOn() {
+        guard !isTurningOn else { return }
+        isTurningOn = true
+        Task {
+            if await inbound.openDoor() {
+                inbound.sheet = nil
+            } else {
+                noNetwork = true
+            }
+            isTurningOn = false
+        }
     }
 }
 
@@ -596,6 +763,9 @@ struct HomeAssistantSheet: View {
                 CodeBlock(code: HomeAssistantExample.test)
                 Caption("Maé says it right away. Then call the same action from any automation.")
                     .padding(.top, 16)
+                if inbound.status.homePath == .door {
+                    Caption("Through the internal door: if the macOS firewall is on, it asks once whether OpenMaé may receive connections. Accept, or nothing will arrive.")
+                }
             }
             .padding(.top, -6)
         } footer: {
@@ -678,18 +848,62 @@ enum InboundWords {
         let tone: StatusTone
     }
 
-    /// The page's head: the home relay's state, or the internet path's when only internet sources are there.
+    /// The page's head: the home path's state, or the internet path's when only internet sources are there.
     static func badge(_ status: InboundStatus) -> Badge {
-        if status.sources.isEmpty, status.homeRelayAddress == nil { return Badge(text: Text("No source"), tone: .off) }
+        if status.sources.isEmpty, status.homePath == .none { return Badge(text: Text("No source"), tone: .off) }
         let internetOnly = !status.sources.isEmpty && status.sources.allSatisfy { $0.origin == .internet }
-        guard internetOnly, status.homeRelayAddress == nil else { return homeBadge(status.homeRelay) }
+        guard internetOnly, status.homePath == .none else { return homePathBadge(status) }
         return internetBadge(status)
     }
 
     /// A source's head: paused, or the state of the path it sends by.
     static func badge(of source: InboundSource, _ status: InboundStatus) -> Badge {
         if source.paused { return Badge(text: Text("Paused"), tone: .off) }
-        return source.origin == .home ? homeBadge(status.homeRelay) : internetBadge(status)
+        return source.origin == .home ? homePathBadge(status) : internetBadge(status)
+    }
+
+    /// The state of the way home sources come by: the home relay's, the door's, or neither chosen.
+    static func homePathBadge(_ status: InboundStatus) -> Badge {
+        switch status.homePath {
+        case .none: Badge(text: Text("No relay or door"), tone: .off)
+        case .relay: homeBadge(status.homeRelay)
+        case .door:
+            switch status.door {
+            case .open: Badge(text: Text("Door open"), tone: .on)
+            case .opening, .off: Badge(text: Text("Opening the door…"), tone: .info)
+            case .notHome, .noNetwork: Badge(text: Text("Door closed"), tone: .off)
+            case .portTaken, .failed: Badge(text: Text("Door blocked"), tone: .error)
+            }
+        }
+    }
+
+    /// The door's own row: open or closed.
+    static func doorBadge(_ door: InboundStatus.Door) -> Badge {
+        switch door {
+        case .open: Badge(text: Text("Open"), tone: .on)
+        case .opening, .off: Badge(text: Text("Opening…"), tone: .info)
+        case .notHome, .noNetwork: Badge(text: Text("Closed"), tone: .off)
+        case .portTaken, .failed: Badge(text: Text("Blocked"), tone: .error)
+        }
+    }
+
+    /// What turning the door on means on this Mac, as the user wrote it.
+    static func doorWarning(_ status: InboundStatus) -> Text {
+        switch status.doorWarning {
+        case .laptop:
+            Text("Your Mac is a laptop: away from home, this door would also open on other networks (work, café, hotel). Prefer a home relay. If you turn it on anyway, it will only open on this network.")
+        case .desktop:
+            Text("The devices on your network will be able to knock on this door. They will need the secret address, and what they send will travel unencrypted on your network.")
+        }
+    }
+
+    /// The home path in its menu.
+    static func homePath(_ path: InboundStatus.HomePath) -> Text {
+        switch path {
+        case .none: Text("None")
+        case .relay: Text("Home relay")
+        case .door: Text("Internal door")
+        }
     }
 
     static func homeBadge(_ relay: InboundStatus.HomeRelay) -> Badge {
@@ -715,14 +929,31 @@ enum InboundWords {
         }
     }
 
-    /// What the page's head says: the home relay's trouble, else the internet path's when an internet source waits.
+    /// What the page's head says: the home path's trouble, else the internet path's when an internet source waits.
     static func note(_ status: InboundStatus) -> Note? {
-        if status.sources.contains(where: { $0.origin == .home }) || status.homeRelayAddress != nil,
-           let note = homeNote(status.homeRelay)
-        {
-            return note
-        }
+        if let note = homeNote(status) { return note }
         return internetNote(status)
+    }
+
+    /// Why nothing arrives from home: the home relay does not pass deliveries on (it is tried again meanwhile), or the
+    /// door cannot open. A door closed away from home is not a trouble: its row says so.
+    static func homeNote(_ status: InboundStatus) -> Note? {
+        switch status.homePath {
+        case .none:
+            return nil
+        case .relay:
+            return homeNote(status.homeRelay)
+        case .door:
+            switch status.door {
+            case .portTaken:
+                return Note(Text("The internal door cannot open: port \(String(status.doorPort)) is already used by another program of this Mac. Choose another one in Advanced."),
+                            tone: .error)
+            case .failed:
+                return Note("The internal door cannot open. I keep trying.", tone: .error)
+            default:
+                return nil
+            }
+        }
     }
 
     /// Why nothing arrives, when the home relay does not pass deliveries on. It is tried again meanwhile.

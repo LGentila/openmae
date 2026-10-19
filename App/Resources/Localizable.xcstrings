@@ -31,6 +31,16 @@
         }
       }
     },
+    "%@ by default. Changing it changes the addresses of your home sources: paste them again in the other systems.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ par défaut. Si tu le changes, les adresses de tes sources de la maison changent : tu devras les recoller dans les autres systèmes."
+          }
+        }
+      }
+    },
     "%@ does not answer for now. Next try in a few seconds.": {
       "localizations": {
         "fr": {
@@ -211,12 +221,22 @@
         }
       }
     },
-    "A home source gets its address once the home relay is set.": {
+    "A home relay is best: this Mac then opens no port. OpenMaé’s internal door suits a Mac that stays at home.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Une source de la maison reçoit son adresse une fois le relais maison réglé."
+            "value": "Le mieux est un relais maison : ce Mac n’ouvre alors aucun port. La porte interne d’OpenMaé convient à un Mac qui reste chez toi."
+          }
+        }
+      }
+    },
+    "A home source gets its address once a home relay or the internal door is chosen.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source de la maison reçoit son adresse quand tu choisis un relais maison ou la porte interne."
           }
         }
       }
@@ -237,6 +257,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Une notification sur ce Mac, avec le nom de la source. Maé ne dit rien."
+          }
+        }
+      }
+    },
+    "A port is a number from 1024 to 65535.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un port est un nombre de 1024 à 65535."
           }
         }
       }
@@ -521,6 +551,16 @@
         }
       }
     },
+    "Always on for a laptop: the door only opens on the network where you turned it on.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toujours activé sur un portable : la porte ne s’ouvre que sur le réseau où tu l’as activée."
+          }
+        }
+      }
+    },
     "An action that changes something (turn on, create, delete) asks for your “yes”, unless you choose otherwise for that tool.": {
       "localizations": {
         "fr": {
@@ -691,6 +731,16 @@
         }
       }
     },
+    "Blocked": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bloquée"
+          }
+        }
+      }
+    },
     "Brave API key": {
       "localizations": {
         "fr": {
@@ -851,6 +901,16 @@
         }
       }
     },
+    "Choose…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir…"
+          }
+        }
+      }
+    },
     "Chosen in the settings (Advanced). Recommended tier for this Mac: %@.": {
       "localizations": {
         "fr": {
@@ -917,6 +977,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude Code s’est arrêté sans donner de résultat."
+          }
+        }
+      }
+    },
+    "Closed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermée"
           }
         }
       }
@@ -1271,6 +1341,56 @@
         }
       }
     },
+    "Door blocked": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte bloquée"
+          }
+        }
+      }
+    },
+    "Door closed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte fermée"
+          }
+        }
+      }
+    },
+    "Door closed: this Mac is not connected to a network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte fermée : ce Mac n’est connecté à aucun réseau."
+          }
+        }
+      }
+    },
+    "Door closed: you are not on your home network. A new router at home? Choose the internal door again, from home.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte fermée : tu n’es pas sur le réseau de ta maison. Une nouvelle box ? Choisis de nouveau la porte interne, depuis chez toi."
+          }
+        }
+      }
+    },
+    "Door open": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte ouverte"
+          }
+        }
+      }
+    },
     "Download (%@)": {
       "localizations": {
         "fr": {
@@ -1551,6 +1671,26 @@
         }
       }
     },
+    "From your home network, through OpenMaé’s internal door.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Depuis le réseau de ta maison, par la porte interne d’OpenMaé."
+          }
+        }
+      }
+    },
+    "From your home network, through a home relay or the internal door, to choose on the page.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Depuis le réseau de ta maison, par un relais maison ou la porte interne, à choisir sur la page."
+          }
+        }
+      }
+    },
     "From your home network, through the home relay.": {
       "localizations": {
         "fr": {
@@ -1711,6 +1851,16 @@
         }
       }
     },
+    "Home relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais maison…"
+          }
+        }
+      }
+    },
     "Home station, connected": {
       "localizations": {
         "fr": {
@@ -1807,6 +1957,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Au repos"
+          }
+        }
+      }
+    },
+    "If the macOS firewall is on, it asks once whether OpenMaé may receive connections: accept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si le pare-feu de macOS est activé, il demande une fois si OpenMaé peut recevoir des connexions : accepte."
           }
         }
       }
@@ -2701,6 +2861,16 @@
         }
       }
     },
+    "No relay or door": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ni relais ni porte"
+          }
+        }
+      }
+    },
     "No shortcut yet. Put some in an “OpenMaé” folder of the Shortcuts app: Maé will be able to run them.": {
       "localizations": {
         "fr": {
@@ -2931,6 +3101,16 @@
         }
       }
     },
+    "Off, the door opens on any network this Mac joins. On, only on the one it is on now.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé, la porte s’ouvre sur tout réseau que ce Mac rejoint. Activé, seulement sur celui où il est maintenant."
+          }
+        }
+      }
+    },
     "On": {
       "localizations": {
         "fr": {
@@ -2991,6 +3171,36 @@
         }
       }
     },
+    "One way at a time. Changing it changes the addresses of your home sources: paste them again in the other systems.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un seul passage à la fois. Si tu en changes, les adresses de tes sources de la maison changent : tu devras les recoller dans les autres systèmes."
+          }
+        }
+      }
+    },
+    "Only on the home network": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seulement sur le réseau de la maison"
+          }
+        }
+      }
+    },
+    "Open": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouverte"
+          }
+        }
+      }
+    },
     "Open %@": {
       "localizations": {
         "fr": {
@@ -3007,6 +3217,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ouvrir Actions"
+          }
+        }
+      }
+    },
+    "Open Advanced": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir Avancé"
           }
         }
       }
@@ -3087,6 +3307,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Relais OpenMaé"
+          }
+        }
+      }
+    },
+    "OpenMaé’s internal door…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porte interne d’OpenMaé…"
+          }
+        }
+      }
+    },
+    "Opening the door…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouverture de la porte…"
+          }
+        }
+      }
+    },
+    "Opening…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouverture…"
           }
         }
       }
@@ -3237,6 +3487,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Autorisations"
+          }
+        }
+      }
+    },
+    "Port": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Port"
+          }
+        }
+      }
+    },
+    "Port %@ is taken.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le port %@ est pris."
+          }
+        }
+      }
+    },
+    "Port of the internal door": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Port de la porte interne"
           }
         }
       }
@@ -3521,6 +3801,16 @@
         }
       }
     },
+    "Reserve this Mac’s address (%@) in your router, so that it never changes. Use it rather than a .local name, which often fails from Docker.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réserve l’adresse de ce Mac (%@) dans ta box, pour qu’elle ne change jamais. Utilise-la plutôt qu’un nom en .local, qui échoue souvent depuis Docker."
+          }
+        }
+      }
+    },
     "Result": {
       "localizations": {
         "fr": {
@@ -3707,16 +3997,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choisir l’adresse…"
-          }
-        }
-      }
-    },
-    "Set the home relay": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Régler le relais maison"
           }
         }
       }
@@ -4111,12 +4391,12 @@
         }
       }
     },
-    "The OpenMaé relay, run in home mode on a machine at home (a NAS, a Raspberry Pi…). It passes on what your systems send: this Mac opens no port.": {
+    "The address appears once a home relay or the internal door is chosen.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le relais OpenMaé, lancé en mode maison sur une machine de la maison (un NAS, un Raspberry Pi…). Il transmet ce que tes systèmes envoient : ce Mac n’ouvre aucun port."
+            "value": "L’adresse apparaît quand tu as choisi un relais maison ou la porte interne."
           }
         }
       }
@@ -4131,12 +4411,22 @@
         }
       }
     },
-    "The address appears once the home relay is set.": {
+    "The address appears once the door is open.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’adresse apparaît une fois le relais maison réglé."
+            "value": "L’adresse apparaît une fois la porte ouverte."
+          }
+        }
+      }
+    },
+    "The address appears once this Mac is connected to your home network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’adresse apparaît une fois ce Mac connecté au réseau de ta maison."
           }
         }
       }
@@ -4147,6 +4437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’adresse apparaît dès que ton relais répond."
+          }
+        }
+      }
+    },
+    "The address appears when this Mac is on your home network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’adresse apparaît quand ce Mac est sur le réseau de ta maison."
           }
         }
       }
@@ -4167,6 +4467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’adresse de la source est secrète : elle reste dans secrets.yaml."
+          }
+        }
+      }
+    },
+    "The addresses of your home sources change: paste them again in the other systems.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les adresses de tes sources de la maison changent : tu devras les recoller dans les autres systèmes."
           }
         }
       }
@@ -4241,6 +4551,36 @@
         }
       }
     },
+    "The devices on your network will be able to knock on this door. They will need the secret address, and what they send will travel unencrypted on your network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les appareils de ton réseau pourront frapper à cette porte. Il leur faudra l’adresse secrète, et les envois passeront en clair sur ton réseau."
+          }
+        }
+      }
+    },
+    "The door cannot open: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La porte ne peut pas s’ouvrir : %@"
+          }
+        }
+      }
+    },
+    "The door stays closed on any other network, or with a new router: then turn this off and on again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La porte reste fermée sur tout autre réseau, ou avec une nouvelle box : désactive puis réactive alors ce réglage."
+          }
+        }
+      }
+    },
     "The engine did not start": {
       "localizations": {
         "fr": {
@@ -4267,6 +4607,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Le relais maison ne répond pas : ce que tes systèmes envoient ne peut pas arriver jusqu’à Maé. Je réessaie toute seule."
+          }
+        }
+      }
+    },
+    "The internal door cannot open. I keep trying.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La porte interne ne peut pas s’ouvrir. Je réessaie toute seule."
+          }
+        }
+      }
+    },
+    "The internal door cannot open: port %@ is already used by another program of this Mac. Choose another one in Advanced.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La porte interne ne peut pas s’ouvrir : le port %@ est déjà pris par un autre programme de ce Mac. Choisis-en un autre dans Avancé."
+          }
+        }
+      }
+    },
+    "The internal door closes, and the addresses of your home sources change: paste them again in the other systems.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La porte interne se ferme, et les adresses de tes sources de la maison changent : tu devras les recoller dans les autres systèmes."
           }
         }
       }
@@ -4451,6 +4821,16 @@
         }
       }
     },
+    "This Mac is not connected to a network: connect it to your home network, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce Mac n’est connecté à aucun réseau : connecte-le au réseau de ta maison, puis réessaie."
+          }
+        }
+      }
+    },
     "This Mac is not supported": {
       "localizations": {
         "fr": {
@@ -4557,6 +4937,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ceux qui sont allumés ci-dessous demandent d’abord : Maé dit lequel elle va lancer et attend ton « oui »."
+          }
+        }
+      }
+    },
+    "Through the internal door: if the macOS firewall is on, it asks once whether OpenMaé may receive connections. Accept, or nothing will arrive.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Par la porte interne : si le pare-feu de macOS est activé, il demande une fois si OpenMaé peut recevoir des connexions. Accepte, sinon rien n’arrivera."
           }
         }
       }
@@ -4701,6 +5091,16 @@
         }
       }
     },
+    "Turn on": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer"
+          }
+        }
+      }
+    },
     "Turn on %@": {
       "localizations": {
         "fr": {
@@ -4717,6 +5117,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Activer Claude Code"
+          }
+        }
+      }
+    },
+    "Turn on OpenMaé’s internal door?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer la porte interne d’OpenMaé ?"
           }
         }
       }
@@ -5197,6 +5607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton Mac a coupé son micro et ses haut-parleurs."
+          }
+        }
+      }
+    },
+    "Your Mac is a laptop: away from home, this door would also open on other networks (work, café, hotel). Prefer a home relay. If you turn it on anyway, it will only open on this network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton Mac est un portable : hors de chez toi, cette porte s’ouvrirait aussi sur les autres réseaux (travail, café, hôtel). Préfère un relais de maison. Si tu l’actives quand même, elle ne s’ouvrira que sur ce réseau."
           }
         }
       }

@@ -1,12 +1,14 @@
 #if os(macOS)
 import CryptoKit
 import Foundation
+import Network
 import Security
 import VoiceCore
 
-// Received information, the Mac's side: the sources and their secret addresses, the home relay registration, the
-// internet path (the public relay passing TLS through to the Mac's own certificate, InboundInternet.swift), the
-// deliveries' HTTP exchange, and what becomes of them (said, notified, ignored), with a log per source.
+// Received information, the Mac's side: the sources and their secret addresses, the home path (the home relay
+// registration, or OpenMaé's internal door, InboundDoor.swift), the internet path (the public relay passing TLS through
+// to the Mac's own certificate, InboundInternet.swift), the deliveries' HTTP exchange, and what becomes of them (said,
+// notified, ignored), with a log per source.
 
 /// A delivery in its source's log: when, by which path, in which form, what became of it, from which address, and
 /// its text, cleaned. Never the body as it came.
@@ -61,6 +63,34 @@ public struct InboundLogEntry: Codable, Sendable, Equatable, Identifiable {
 
 /// What the Mac's "Received information" settings show.
 public struct InboundStatus: Sendable, Equatable {
+    /// How home sources reach this Mac: one way at a time. Changing it changes their addresses.
+    public enum HomePath: String, Codable, Sendable, CaseIterable {
+        case none
+        /// The OpenMaé relay in home mode, on a machine at home: this Mac opens no port.
+        case relay
+        /// OpenMaé's internal door: this Mac listens on the home network itself.
+        case door
+    }
+
+    /// OpenMaé's internal door.
+    public enum Door: Sendable, Equatable {
+        /// It is not the home path.
+        case off
+        /// Looking at the network, then opening.
+        case opening
+        /// Listening on the home network.
+        case open
+        /// The "home network" safeguard keeps it closed: this Mac is not on the network where the door was turned on
+        /// (its router is another).
+        case notHome
+        /// This Mac has no Wi-Fi or Ethernet network.
+        case noNetwork
+        /// Another program of this Mac listens on its port.
+        case portTaken
+        /// It cannot listen, for another reason (as the system gives it).
+        case failed(String)
+    }
+
     public enum HomeRelay: Sendable, Equatable {
         /// No home relay set.
         case none
@@ -88,8 +118,20 @@ public struct InboundStatus: Sendable, Equatable {
         case ready
     }
 
+    public var homePath = HomePath.none
+    /// The home relay's address; kept while another home path is chosen, for coming back to it.
     public var homeRelayAddress: URL?
+    /// The home relay's state; `.none` when it is not the home path.
     public var homeRelay = HomeRelay.none
+    public var door = Door.off
+    public var doorPort = InboundHost.defaultDoorPort
+    /// The door's address on the home network while it is open: `http://<this Mac's IPv4>:<port>`.
+    public var doorAddress: URL?
+    /// The "home network" safeguard: always on for a laptop; a desktop's choice, off by default.
+    public var doorSafeguard = false
+    /// This Mac has an internal battery. Its warning before the door opens, and its safeguard, follow.
+    public var isLaptop = false
+    public var doorWarning: InboundDoorWarning { InboundDoorWarning(isLaptop: isLaptop) }
     /// The relay the iPhones use, which is the internet path's; nil when none is chosen.
     public var publicRelayAddress: URL?
     public var internetPath = InternetPath.notOffered
@@ -102,8 +144,8 @@ public struct InboundStatus: Sendable, Equatable {
     /// The Mac's inbound name, once its keys exist.
     public var inboundName: String?
     public var sources: [InboundSource] = []
-    /// Each source's secret address, when it has one (a home source needs the home relay, an internet source a relay
-    /// with an inbound domain).
+    /// Each source's secret address, when it has one (a home source needs its home path: the home relay, or the door
+    /// while it is open; an internet source a relay with an inbound domain).
     public var addresses: [UUID: URL] = [:]
     /// The last deliveries of each source, newest first.
     public var logs: [UUID: [InboundLogEntry]] = [:]
@@ -173,11 +215,14 @@ public final class MemoryInboundSecrets: InboundSecretStore, @unchecked Sendable
 // MARK: - The host
 
 /// Received information on the Mac. It keeps the sources (a file next to the link's) and their secrets (keychain),
-/// stays registered with the home relay when one is set (an inbound registration, apart from the iPhones' relay),
-/// answers each delivery at once, then has Maé say it (`Announcing`) or shows a notification.
+/// stays registered with the home relay when it is the home path (an inbound registration, apart from the iPhones'
+/// relay) or keeps the internal door open on the home network when the door is, answers each delivery at once, then has
+/// Maé say it (`Announcing`) or shows a notification.
 public actor InboundHost {
     /// 64 KB of body at most, sent within 10 seconds.
     public static let maxBody = 64 * 1024
+    /// The internal door's port, unless changed in Advanced.
+    public static let defaultDoorPort: UInt16 = 47321
     /// Log entries kept per source, and for how long.
     public static let logLength = 20
     public static let logAge: TimeInterval = 7 * 86_400
@@ -219,14 +264,24 @@ public actor InboundHost {
     private var certificateFailures = 0
     private nonisolated let tlsServer: InboundTLSServer
 
+    // The internal door.
+    private let network: any InboundNetwork
+    nonisolated let door: InboundDoor
+    private var doorSettings = DoorSettings()
+    /// One look at the network at a time; another asked meanwhile runs right after.
+    private var doorWork: Task<Void, Never>?
+    private var doorDirty = false
+    /// Follows the network's changes while the door is the home path.
+    private var networkTask: Task<Void, Never>?
+
     /// `announcer`: the engine (nil: notifications only). `storeURL`: nil keeps everything in memory (tests).
-    /// `keys`: the internet path's keys (nil: in memory). `acme`: where its certificate comes from.
-    /// `requestTime`: how long a caller has to send its request. `expiryUnit`: one second of an announcement's expiry
-    /// (the tests shorten both).
+    /// `keys`: the internet path's keys (nil: in memory). `acme`: where its certificate comes from. `network`: this Mac
+    /// and its network, for the internal door (nil: the real ones). `requestTime`: how long a caller has to send its
+    /// request. `expiryUnit`: one second of an announcement's expiry (the tests shorten both).
     public init(announcer: (any Announcing)?, identityStore: any IdentityStore, secrets: any InboundSecretStore,
                 storeURL: URL?, keys: (any InboundKeyStore)? = nil, acme: ACMEServer = .letsEncrypt,
-                requestTime: Duration = .seconds(10), expiryUnit: Duration = .seconds(1),
-                now: @escaping @Sendable () -> Date = { Date() })
+                network: (any InboundNetwork)? = nil, requestTime: Duration = .seconds(10),
+                expiryUnit: Duration = .seconds(1), now: @escaping @Sendable () -> Date = { Date() })
     {
         self.announcer = announcer
         self.identityStore = identityStore
@@ -234,13 +289,22 @@ public actor InboundHost {
         self.storeURL = storeURL
         self.keys = keys ?? MemoryInboundKeys()
         self.acme = acme
+        let network = network ?? SystemInboundNetwork()
+        self.network = network
         self.requestTime = requestTime
         self.expiryUnit = expiryUnit
         self.now = now
+        var initial = InboundStatus()
+        initial.isLaptop = network.isLaptop
+        initial.doorSafeguard = initial.isLaptop
+        state = initial
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         let host = HostReference()
         tlsServer = InboundTLSServer { transport, caller in
             Task { await host.value?.serve(transport, from: caller, path: .publicRelay) }
+        }
+        door = InboundDoor { transport, caller in
+            Task { await host.value?.serve(transport, from: caller, path: .internalDoor) }
         }
         host.value = self
         Task { await self.load() }
@@ -271,14 +335,94 @@ public actor InboundHost {
 
     // MARK: - Settings
 
+    /// The home relay at this address becomes the home path; nil forgets it (no home path then, if it was the one).
     public func setHomeRelay(_ address: URL?) {
-        guard address != state.homeRelayAddress else { return }
-        state.homeRelayAddress = address
+        if let address {
+            guard address != state.homeRelayAddress || state.homePath != .relay else { return }
+            state.homeRelayAddress = address
+            state.homePath = .relay
+        } else {
+            guard state.homeRelayAddress != nil || state.homePath == .relay else { return }
+            state.homeRelayAddress = nil
+            if state.homePath == .relay { state.homePath = .none }
+        }
+        homePathChanged()
+    }
+
+    /// No home path, or back to the home relay already set (nothing without one). The internal door opens with
+    /// `openDoor`, which records the home network.
+    public func setHomePath(_ path: InboundStatus.HomePath) {
+        switch path {
+        case .door: return
+        case .relay: guard state.homeRelayAddress != nil else { return }
+        case .none: break
+        }
+        guard path != state.homePath else { return }
+        state.homePath = path
+        homePathChanged()
+    }
+
+    private func homePathChanged() {
         save()
         stopRegistration()
         updateRegistration()
+        checkDoor()
         publish()
     }
+
+    public enum DoorOpening: Sendable, Equatable {
+        case opened
+        /// The safeguard needs the home network's router, and this Mac sees none: it is on no network (or the router's
+        /// hardware address is not known yet).
+        case noHomeNetwork
+    }
+
+    /// "Turn the door on": the internal door becomes the home path. The router's hardware address is recorded now:
+    /// with the safeguard (always on a laptop), the door only opens where that router is. Choosing the door again
+    /// records it again (a new router).
+    public func openDoor() async -> DoorOpening {
+        let router = await network.links().first?.routerHardware
+        if safeguardOn, router == nil { return .noHomeNetwork }
+        if let router { doorSettings.router = router }
+        if state.homePath != .door {
+            state.homePath = .door
+            homePathChanged()
+        } else {
+            save()
+            checkDoor()
+        }
+        return .opened
+    }
+
+    /// A desktop's "home network" safeguard (a laptop's is always on). Turning it on records the router now; false when
+    /// this Mac sees none.
+    @discardableResult
+    public func setDoorSafeguard(_ on: Bool) async -> Bool {
+        guard !state.isLaptop else { return true }
+        if on {
+            guard let router = await network.links().first?.routerHardware else { return false }
+            doorSettings.router = router
+        }
+        doorSettings.safeguard = on
+        state.doorSafeguard = on
+        save()
+        checkDoor()
+        publish()
+        return true
+    }
+
+    /// The door's port (1024 to 65535). It changes the addresses of the home sources.
+    public func setDoorPort(_ port: UInt16) {
+        guard port >= 1024, port != doorSettings.port else { return }
+        doorSettings.port = port
+        state.doorPort = port
+        save()
+        checkDoor()
+        publish()
+    }
+
+    /// The safeguard applies: always on a laptop, by choice on a desktop.
+    private var safeguardOn: Bool { state.isLaptop || doorSettings.safeguard }
 
     /// The relay the iPhones use (Settings › iPhone and iPad), which is also the internet path's; nil when none is chosen.
     public func setPublicRelay(_ address: URL?) {
@@ -355,8 +499,8 @@ public actor InboundHost {
 
     // MARK: - Deliveries
 
-    /// One delivery, over a tube the home relay opened (or, later, the public relay or the internal door): reads the
-    /// request, answers at once, then has the information said or notified.
+    /// One delivery, over a tube the home relay opened, a connection piped from the public relay, or a connection to
+    /// the internal door: reads the request, answers at once, then has the information said or notified.
     public func serve(_ transport: any LinkTransport, from caller: String, path: InboundPath) async {
         DebugLog.log("received information: a delivery arrives (\(path.rawValue))")
         let exchange = Exchange(transport)
@@ -572,7 +716,7 @@ public actor InboundHost {
     // MARK: - Home relay
 
     private func updateRegistration() {
-        guard let relay = state.homeRelayAddress else {
+        guard state.homePath == .relay, let relay = state.homeRelayAddress else {
             stopRegistration()
             return
         }
@@ -629,6 +773,80 @@ public actor InboundHost {
         }
         state.inboundName = identity.map { InboundName.make(signingKey: $0.signingKey.publicKey.rawRepresentation) }
         return identity
+    }
+
+    // MARK: - Internal door
+
+    /// Opens or closes the door after a look at the network; one look at a time, another asked meanwhile right after.
+    private func checkDoor() {
+        doorDirty = true
+        guard doorWork == nil else { return }
+        doorWork = Task { await self.runDoorChecks() }
+    }
+
+    private func runDoorChecks() async {
+        while doorDirty {
+            doorDirty = false
+            await updateDoor()
+        }
+        doorWork = nil
+    }
+
+    /// The door listens while it is the home path, and, with the safeguard, while this Mac is on the network where it
+    /// was turned on (the same router). It answers at this Mac's address on that Wi-Fi or Ethernet network.
+    private func updateDoor() async {
+        guard state.homePath == .door else {
+            networkTask?.cancel()
+            networkTask = nil
+            door.close()
+            setDoor(.off, address: nil)
+            return
+        }
+        followNetwork()
+        let links = await network.links()
+        guard state.homePath == .door else {
+            doorDirty = true
+            return
+        }
+        let link = safeguardOn ? links.first { $0.routerHardware != nil && $0.routerHardware == doorSettings.router }
+            : links.first
+        guard let link else {
+            door.close()
+            setDoor(links.isEmpty ? .noNetwork : .notHome, address: nil)
+            return
+        }
+        let port = doorSettings.port
+        if state.door != .open || door.port != port { setDoor(.opening, address: nil) }
+        do {
+            try await door.open(port: port, address: link.address)
+            setDoor(.open, address: URL(string: "http://\(link.address):\(port)"))
+        } catch {
+            DebugLog.log("received information: the internal door cannot open on port \(port) (\(error))")
+            if case NWError.posix(.EADDRINUSE) = error {
+                setDoor(.portTaken, address: nil)
+            } else {
+                setDoor(.failed("\(error)"), address: nil)
+            }
+        }
+    }
+
+    private func setDoor(_ door: InboundStatus.Door, address: URL?) {
+        guard door != state.door || address != state.doorAddress else { return }
+        state.door = door
+        state.doorAddress = address
+        publish()
+    }
+
+    /// Looks again at each change of the network (and now and then), while the door is the home path.
+    private func followNetwork() {
+        guard networkTask == nil else { return }
+        let changes = network.changes()
+        networkTask = Task { [weak self] in
+            for await _ in changes {
+                guard let self else { return }
+                await self.checkDoor()
+            }
+        }
     }
 
     // MARK: - Internet path
@@ -947,6 +1165,9 @@ public actor InboundHost {
 
     private struct Stored: Codable {
         var homeRelay: URL?
+        /// Nil in files from before the internal door: the home relay when one is set.
+        var homePath: InboundStatus.HomePath?
+        var door: DoorSettings?
         var sources: [InboundSource] = []
         var logs: [UUID: [InboundLogEntry]] = [:]
         /// The internet path's certificate (public; its key is in the keychain).
@@ -958,6 +1179,10 @@ public actor InboundHost {
            let stored = try? JSONDecoder().decode(Stored.self, from: data)
         {
             state.homeRelayAddress = stored.homeRelay
+            state.homePath = stored.homePath ?? (stored.homeRelay == nil ? .none : .relay)
+            doorSettings = stored.door ?? DoorSettings()
+            state.doorPort = doorSettings.port
+            state.doorSafeguard = state.isLaptop || doorSettings.safeguard
             state.sources = stored.sources
             state.logs = stored.logs.mapValues { Self.pruned($0, now: now()) }
             certificate = stored.certificate
@@ -976,14 +1201,15 @@ public actor InboundHost {
             state.inboundName = InboundName.make(signingKey: existing.signingKey.publicKey.rawRepresentation)
         }
         updateRegistration()
+        checkDoor()
         updateInternetPath()
         publish()
     }
 
     private func save() {
         guard let storeURL else { return }
-        let stored = Stored(homeRelay: state.homeRelayAddress, sources: state.sources, logs: state.logs,
-                            certificate: certificate)
+        let stored = Stored(homeRelay: state.homeRelayAddress, homePath: state.homePath, door: doorSettings,
+                            sources: state.sources, logs: state.logs, certificate: certificate)
         do {
             try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
@@ -1003,10 +1229,16 @@ public actor InboundHost {
 
     private func publish() {
         state.addresses = [:]
-        if let relay = state.homeRelayAddress, let name = state.inboundName {
+        // `http://<home relay>/<inbound name>/in/<secret>`, or `http://<this Mac>:<port>/in/<secret>` at the door.
+        let home: URL? = switch state.homePath {
+        case .relay: state.inboundName.flatMap { name in state.homeRelayAddress?.appending(path: name) }
+        case .door: state.doorAddress
+        case .none: nil
+        }
+        if let home {
             for source in state.sources where source.origin == .home {
                 guard let secret = known[source.id] else { continue }
-                state.addresses[source.id] = relay.appending(path: name).appending(path: "in").appending(path: secret)
+                state.addresses[source.id] = home.appending(path: "in").appending(path: secret)
             }
         }
         if let host = internetHost {
@@ -1017,6 +1249,24 @@ public actor InboundHost {
         }
         state.certificateExpiry = certificate?.domain == internetHost ? certificate?.validity?.until : nil
         statusSink.yield(state)
+    }
+}
+
+/// The internal door's settings, kept with the sources.
+struct DoorSettings: Codable, Sendable, Equatable {
+    var port = InboundHost.defaultDoorPort
+    /// A desktop's "home network" safeguard (a laptop's is always on).
+    var safeguard = false
+    /// The hardware address of the home network's router, recorded when the door (or its safeguard) was turned on.
+    var router: String?
+
+    init() {}
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        port = try values.decodeIfPresent(UInt16.self, forKey: .port) ?? InboundHost.defaultDoorPort
+        safeguard = try values.decodeIfPresent(Bool.self, forKey: .safeguard) ?? false
+        router = try values.decodeIfPresent(String.self, forKey: .router)
     }
 }
 

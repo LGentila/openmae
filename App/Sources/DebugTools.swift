@@ -66,12 +66,21 @@ enum DebugCommands {
 /// Draws the screens in typical states into PNG files, with a scripted engine instead of the real one, so
 /// the layout can be checked without clicking through a 17 GB download.
 ///
-///   OpenMae.app/Contents/MacOS/OpenMae -snapshots <folder> [-AppleLanguages '(en)']
+///   OpenMae.app/Contents/MacOS/OpenMae -snapshots <folder> [-snapshots-only RgInfos,RgAvance] [-AppleLanguages '(en)']
+///
+/// `-snapshots-only`: only the pictures whose names start with one of these (comma-separated).
 enum Snapshots {
     static var folder: URL? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let i = arguments.firstIndex(of: "-snapshots"), i + 1 < arguments.count else { return nil }
         return URL(fileURLWithPath: arguments[i + 1])
+    }
+
+    /// Whether a picture is wanted (`-snapshots-only`).
+    static func wanted(_ name: String) -> Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let i = arguments.firstIndex(of: "-snapshots-only"), i + 1 < arguments.count else { return true }
+        return arguments[i + 1].split(separator: ",").contains { name.hasPrefix($0) }
     }
 
     /// Draws every picture once, then quits. Called when the app has finished launching.
@@ -246,6 +255,7 @@ enum Snapshots {
 
     @MainActor
     static func save(_ view: some View, size: CGSize, to url: URL, then prepare: () -> Void = {}) async {
+        guard wanted(url.deletingPathExtension().lastPathComponent) else { return }
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

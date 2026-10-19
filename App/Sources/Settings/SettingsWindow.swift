@@ -364,6 +364,7 @@ private struct SettingsSheetLayer: View {
                                                                                             source: source)),
                                                           top: 24)
             case .homeRelay: return Shown(view: AnyView(HomeRelaySheet(inbound: inbound)), top: 120)
+            case .door: return Shown(view: AnyView(DoorSheet(inbound: inbound)), top: 120)
             }
         }
         return nil

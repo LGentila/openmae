@@ -6,6 +6,10 @@
 // voice-cli inbound --public-relay <relay> [--acme <directory URL> [--acme-root <PEM file>]] — the same through the
 // internet path: an internet source, the relay's inbound domain, a certificate (Let's Encrypt's staging server by
 // default, or the given ACME server, such as Pebble with its root), and the deliveries passed through.
+//
+// voice-cli inbound --door [--port 47321] — the same through OpenMaé's internal door: this Mac listens on its home
+// network itself (a laptop records the network it is on as its home network, as the app does when the door is turned
+// on), and prints the address to post to.
 
 import Foundation
 import OpenMaeLink
@@ -45,8 +49,9 @@ func runInbound(_ arguments: [String]) async throws {
     }
     let homeRelay = value("--relay").flatMap(InboundHost.homeRelayURL(from:))
     let publicRelay = value("--public-relay").flatMap(InboundHost.homeRelayURL(from:))
-    guard let relay = homeRelay ?? publicRelay else {
-        throw CLIError("--relay <home relay address> or --public-relay <relay address> is required, e.g. --relay 127.0.0.1:8080")
+    let door = arguments.contains("--door")
+    guard homeRelay != nil || publicRelay != nil || door else {
+        throw CLIError("--relay <home relay address>, --public-relay <relay address> or --door is required, e.g. --relay 127.0.0.1:8080")
     }
     var acme = ACMEServer.letsEncryptStaging
     if let directory = value("--acme").flatMap(URL.init(string:)) {
@@ -59,12 +64,23 @@ func runInbound(_ arguments: [String]) async throws {
                            secrets: MemoryInboundSecrets(), storeURL: nil, keys: MemoryInboundKeys(), acme: acme)
     if let homeRelay { await host.setHomeRelay(homeRelay) }
     if let publicRelay { await host.setPublicRelay(publicRelay) }
+    if door {
+        if let port = value("--port").flatMap(UInt16.init) { await host.setDoorPort(port) }
+        guard await host.openDoor() == .opened else {
+            throw CLIError("this Mac sees no network to record as its home network")
+        }
+    }
     let source = await host.addSource(name: value("--name") ?? "Essai", origin: publicRelay != nil ? .internet : .home)
-    print("listening for \(Int(seconds)) s through the \(publicRelay != nil ? "public" : "home") relay \(relay.absoluteString)")
+    if let relay = homeRelay ?? publicRelay {
+        print("listening for \(Int(seconds)) s through the \(publicRelay != nil ? "public" : "home") relay \(relay.absoluteString)")
+    } else {
+        print("listening for \(Int(seconds)) s through the internal door (laptop: \(SystemInboundNetwork().isLaptop))")
+    }
 
     await withTaskGroup(of: Void.self) { tasks in
         tasks.addTask {
             var relayState: InboundStatus.HomeRelay?
+            var doorState: InboundStatus.Door?
             var internetState: InboundStatus.InternetPath?
             var problem: String?
             var address: URL?
@@ -73,6 +89,10 @@ func runInbound(_ arguments: [String]) async throws {
                 if homeRelay != nil, status.homeRelay != relayState {
                     relayState = status.homeRelay
                     print("home relay: \(status.homeRelay)")
+                }
+                if door, status.door != doorState {
+                    doorState = status.door
+                    print("internal door: \(status.door)")
                 }
                 if publicRelay != nil, status.internetPath != internetState {
                     internetState = status.internetPath
@@ -100,5 +120,6 @@ func runInbound(_ arguments: [String]) async throws {
         tasks.cancelAll()
     }
     await host.setHomeRelay(nil)
+    await host.setHomePath(.none)
     await host.setPublicRelay(nil)
 }

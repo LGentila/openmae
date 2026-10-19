@@ -1,3 +1,4 @@
+import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
@@ -12,12 +13,14 @@ enum TierChoice: Hashable {
     }
 }
 
-/// Settings › Advanced: the tier, the models on this Mac and their deletion, and the log of « OK Maé » in that mode.
-/// The tier is locked, and the deletions disabled, while the models load or download.
+/// Settings › Advanced: the tier, the models on this Mac and their deletion, the log of « OK Maé » in that mode, and the
+/// port of OpenMaé's internal door while it is the home path. The tier is locked, and the deletions disabled, while the
+/// models load or download.
 struct AdvancedPage: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
     @State private var wakeLogExists = WakeLog.exists
+    @Environment(InboundAccess.self) private var inbound: InboundAccess?
 
     private var isBusy: Bool { model.isLoading || model.isDownloading }
 
@@ -37,6 +40,10 @@ struct AdvancedPage: View {
             if model.listensForWakeWord {
                 PageSection("“OK Maé” log")
                 SettingsCard { wakeLog }
+            }
+            if let inbound, inbound.status.homePath == .door {
+                PageSection("Internal door")
+                SettingsCard { DoorPortRows(inbound: inbound) }
             }
         }
         .onChange(of: navigation.sheet) { wakeLogExists = WakeLog.exists }
@@ -129,6 +136,52 @@ struct AdvancedPage: View {
                 .buttonStyle(WindowButtonStyle())
         }
         .disabled(!wakeLogExists)
+    }
+}
+
+/// The port OpenMaé's internal door listens on (Settings › Received information): 47321 unless changed here.
+private struct DoorPortRows: View {
+    let inbound: InboundAccess
+    @State private var text = ""
+    @State private var isRefused = false
+
+    private var current: UInt16 { inbound.status.doorPort }
+
+    /// What was typed, when it is a port the door may take.
+    private var typed: UInt16? {
+        UInt16(text.trimmingCharacters(in: .whitespaces)).flatMap { $0 >= 1024 ? $0 : nil }
+    }
+
+    var body: some View {
+        SettingRow("Port") {
+            HStack(spacing: 10) {
+                TextField(text: $text, prompt: placeholder(Text(verbatim: String(InboundHost.defaultDoorPort)))) {
+                    Text("Port of the internal door")
+                }
+                .windowField(mono: true, isRefused: isRefused)
+                .frame(width: 104)
+                .onSubmit(save)
+                Button("Save", action: save)
+                    .buttonStyle(WindowButtonStyle())
+                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || typed == current)
+            }
+        }
+        .onAppear { text = String(current) }
+        .onChange(of: current) { _, port in text = String(port) }
+        if isRefused {
+            Caption("A port is a number from 1024 to 65535.", tone: .error)
+        } else {
+            Caption(Text("\(String(InboundHost.defaultDoorPort)) by default. Changing it changes the addresses of your home sources: paste them again in the other systems."))
+        }
+    }
+
+    private func save() {
+        guard let port = typed else {
+            isRefused = true
+            return
+        }
+        isRefused = false
+        inbound.setDoorPort(port)
     }
 }
 

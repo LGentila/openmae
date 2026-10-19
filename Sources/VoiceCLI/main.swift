@@ -24,8 +24,10 @@
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
 //   voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
 //   voice-cli inbound --public-relay <relay> [--acme <directory> [--acme-root <PEM>]] [--name Essai] [--seconds 600]
-//                                                       received information through a home relay, printed instead
-//                                                       of said (no model; see InboundListen.swift)
+//   voice-cli inbound --door [--port 47321] [--name Essai] [--seconds 600]
+//                                                       received information through a home relay, the internet
+//                                                       path or the internal door, printed instead of said (no model;
+//                                                       see InboundListen.swift)
 // Options:
 //   --tier <name>            minimum, standard, comfort or max (default: this Mac's tier)
 //   --llm <folder>           another language model folder (default: the tier's)
@@ -600,6 +602,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                   [--follow-up "…"] [--stop-after seconds]
                voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
                voice-cli inbound --public-relay <relay> [--acme <directory> [--acme-root <PEM>]] [--name Essai] [--seconds 600]
+               voice-cli inbound --door [--port 47321] [--name Essai] [--seconds 600]
         """)
     exit(2)
 }

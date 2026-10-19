@@ -282,11 +282,15 @@ final class StreamTransport: LinkTransport, @unchecked Sendable {
     private let connection: NWConnection
     private let lock = NSLock()
     private var isClosed = false
+    private let onClose: (@Sendable () -> Void)?
 
     /// `started`: the connection is already started and ready (the pipe's own side); otherwise it is ready too, and
-    /// this only starts reading it.
-    init(_ connection: NWConnection, queue: DispatchQueue, started: Bool = false) {
+    /// this only starts reading it. `onClose`: once, when it ends.
+    init(_ connection: NWConnection, queue: DispatchQueue, started: Bool = false,
+         onClose: (@Sendable () -> Void)? = nil)
+    {
         self.connection = connection
+        self.onClose = onClose
         (incoming, sink) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -334,6 +338,7 @@ final class StreamTransport: LinkTransport, @unchecked Sendable {
         connection.cancel()
         sink.yield(.closed(reason))
         sink.finish()
+        onClose?()
     }
 }
 #endif

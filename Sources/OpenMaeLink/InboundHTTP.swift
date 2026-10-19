@@ -164,6 +164,7 @@ enum HTTPResponse {
         case 200: "OK"
         case 202: "Accepted"
         case 400: "Bad Request"
+        case 403: "Forbidden"
         case 404: "Not Found"
         case 405: "Method Not Allowed"
         case 408: "Request Timeout"
