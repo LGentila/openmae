@@ -5,6 +5,10 @@
 //                                                       talks over the assistant; time to silence it
 //   voice-cli endurance --minutes N [--new-conversation-every N] [options] <phrase.wav>...
 //                                                       loops a conversation; memory after every turn
+//   voice-cli announce-drop [--repeats 5] [--mute-first | --mute-station] [options]
+//                                                       an announcement cut by a home station's drop, said again
+//                                                       on the Mac; the pace of each utterance of the voice, and
+//                                                       the gaps after the chime (see AnnounceDrop.swift)
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1] [--with-llm]
 //                                                       silence the voice produces before speaking
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>]
@@ -82,6 +86,11 @@ struct Options {
     var withLLM = false
     /// voice-onset --with-llm: the voice's session made before the language model writes, as the pipeline does.
     var earlySession = false
+    /// announce-drop: the Mac's first utterance of the announcement taken for near-silence, so that the voice starts
+    /// it again.
+    var muteFirst = false
+    /// announce-drop: the same for the station's first utterance of it, which then starts again after the drop.
+    var muteStation = false
     /// Voices racing for each answer's first sound (`PipelineConfig.racingVoices`).
     var racingVoices: Int?
     /// The voice is never started again after a long near-silent opening (`PipelineConfig.voiceRestartAfterSeconds`).
@@ -133,6 +142,8 @@ struct Options {
             case "--parallel": o.parallel = max(1, Int(it.next() ?? "") ?? 1)
             case "--with-llm": o.withLLM = true
             case "--early-session": o.earlySession = true
+            case "--mute-first": o.muteFirst = true
+            case "--mute-station": o.muteStation = true
             case "--racing-voices": o.racingVoices = Int(it.next() ?? "")
             case "--no-voice-restart": o.noVoiceRestart = true
             case "--voice-restart-after": o.voiceRestartAfter = Double(it.next() ?? "")
@@ -227,7 +238,10 @@ struct Engine {
     let model: MLXChatModel
 }
 
-func buildEngine(_ o: Options) async throws -> Engine {
+/// `voice`: what the pipeline gets of the voice (announce-drop measures it).
+func buildEngine(_ o: Options, voice: (PocketSpeechSynthesizer) -> any SpeechSynthesizer = { $0 }) async throws
+    -> Engine
+{
     let hw = HardwareProfile.current
     let tier = try tierOption(o)
     print("Mac: \(hw.chipName), \(Int(hw.memoryGiB.rounded())) GB → tier “\(tier.rawValue)”"
@@ -271,7 +285,7 @@ func buildEngine(_ o: Options) async throws -> Engine {
     if o.noPartials { config.partialTranscriptSeconds = nil }
     let speaker = SimulatedSpeaker()
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
-                                 synthesizer: synthesizer, output: speaker,
+                                 synthesizer: voice(synthesizer), output: speaker,
                                  tools: o.actions ? ToolRunner(providers: [DryActions()]) : nil, config: config)
     let log = EventLog()
     await log.attach(model)
@@ -578,6 +592,21 @@ if let options = Options.parse(CommandLine.arguments),
     }
     exit(0)
 }
+if let options = Options.parse(CommandLine.arguments), options.command == "announce-drop" {
+    do {
+        var measuring: MeasuringSynthesizer?
+        let engine = try await buildEngine(options) { voice in
+            let wrapped = MeasuringSynthesizer(voice)
+            measuring = wrapped
+            return wrapped
+        }
+        try await runAnnounceDrop(options, engine, voice: measuring!)
+    } catch {
+        print("ERROR: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
 guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty else {
     print("""
         usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
@@ -587,6 +616,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]
+               voice-cli announce-drop [--tier tier] [--repeats 5] [--mute-first | --mute-station]
+                                       [--voice-restart-after s]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--compare-beginnings]

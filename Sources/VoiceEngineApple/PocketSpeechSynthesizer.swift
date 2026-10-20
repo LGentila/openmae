@@ -57,11 +57,12 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
     {
         let session = try await manager.makeSession(voice: voices[language])
         let trace = DebugLog.enabled ? VoiceTrace(label: "TTS kept warm") : nil
+        trace?.began()
+        defer { trace?.ended() }
         trace?.enqueued(text)
         session.enqueue(text)
         session.finish()
         for try await frame in session.frames { trace?.received(frame) }
-        trace?.ended()
     }
 
     private func manager(for language: SpeechLanguage) async throws -> PocketTtsManager {
@@ -92,6 +93,7 @@ struct PocketStream: SynthesisStream {
         self.texts = texts
         audio = AsyncThrowingStream { continuation in
             let task = Task {
+                trace?.began()
                 do {
                     for try await frame in session.frames {
                         trace?.received(frame)
@@ -145,9 +147,30 @@ final class TextNumbers: @unchecked Sendable {
 
 /// Diagnostics (VOICE_DEBUG=1): for each sentence the voice speaks, how long its first frame took, how many near-silent
 /// frames came before the first audible one and how fast the frames came; or that it stayed silent from start to end.
+/// At the end of each utterance, how fast all its frames came, and how many other utterances ran meanwhile (they share
+/// the GPU and the CPU: each one's frames come slower).
 final class VoiceTrace: @unchecked Sendable {
     /// Quieter than this (dB) is near-silence, as for the pipeline (`PipelineConfig.leadingSilenceThresholdDB`).
     static let audibleDB: Float = PipelineConfig().leadingSilenceThresholdDB ?? -45
+    /// The utterances that produce frames now (between `began` and `ended`).
+    private static let running = Counter()
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func add(_ n: Int) -> Int { lock.withLock { value += n; return value } }
+        var count: Int { lock.withLock { value } }
+    }
+
+    /// The whole utterance, for its summary.
+    private struct Utterance {
+        var frames = 0
+        var first: ContinuousClock.Instant?
+        var last: ContinuousClock.Instant?
+        var slowest = Duration.zero
+        /// The most other utterances running at once, from its start to its end.
+        var others = 0
+    }
 
     private struct Sentence {
         var index: Int
@@ -169,8 +192,20 @@ final class VoiceTrace: @unchecked Sendable {
     private var given: [(words: Int, at: ContinuousClock.Instant)] = []
     private var current: Sentence?
     private var stopped = false
+    private var utterance = Utterance()
+    /// Counted among the utterances running (`began`, until `ended`).
+    private var counted = false
 
     init(label: String = "TTS") { self.label = label }
+
+    /// The utterance starts producing frames.
+    func began() {
+        let others = Self.running.add(1) - 1
+        lock.withLock {
+            counted = true
+            utterance.others = max(utterance.others, others)
+        }
+    }
 
     func enqueued(_ text: String) {
         // FluidAudio skips the texts that are only white space, and counts the others.
@@ -182,7 +217,13 @@ final class VoiceTrace: @unchecked Sendable {
     func received(_ frame: PocketTtsSynthesizer.AudioFrame) {
         let now = clock.now
         let level = Self.loudnessDB(frame.samples)
+        let others = Self.running.count - 1
         lock.withLock {
+            utterance.frames += 1
+            if let last = utterance.last { utterance.slowest = max(utterance.slowest, now - last) }
+            if utterance.first == nil { utterance.first = now }
+            utterance.last = now
+            utterance.others = max(utterance.others, others)
             let index = frame.utteranceIndex ?? 0
             if current?.index != index {
                 let previousEnd = current?.lastFrame
@@ -213,7 +254,26 @@ final class VoiceTrace: @unchecked Sendable {
         }
     }
 
-    func ended() { lock.withLock { close() } }
+    func ended() {
+        let wasCounted = lock.withLock {
+            close()
+            summarize()
+            defer { counted = false }
+            return counted
+        }
+        if wasCounted { _ = Self.running.add(-1) }
+    }
+
+    /// Reports how fast the utterance's frames came. Called with `lock` held.
+    private func summarize() {
+        let u = utterance
+        guard let first = u.first, let last = u.last else { return }
+        let pace = u.frames > 1 ? Self.ms(last - first) / Double(u.frames - 1) : 0
+        DebugLog.log(String(
+            format: "%@: utterance %@ after %d frames: %.0f ms per frame after the first, slowest %.0f ms;"
+                + " other voices at once: %d",
+            label, stopped ? "stopped" : "over", u.frames, pace, Self.ms(u.slowest), u.others))
+    }
 
     /// Stopped before its end (an interruption, or another voice audible sooner).
     func cancelled() { lock.withLock { stopped = true } }

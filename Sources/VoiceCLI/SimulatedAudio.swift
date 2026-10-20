@@ -11,11 +11,19 @@ actor SimulatedSpeaker: AudioOutput {
     private(set) var recorded: [Float] = []
     private(set) var sampleRate = 24_000.0
     private(set) var lastStop: ContinuousClock.Instant?
+    /// Between the first sound of an answer (or of an announcement's chime) and its end: running out of sound then is a
+    /// gap, as the app's speakers log it (`audio: gap of … in the voice`).
+    private var playing = false
+    /// The gaps since the last `takeGaps()`, in seconds, in order.
+    private var gaps: [Double] = []
 
     func play(_ samples: [Float], sampleRate: Double) {
         self.sampleRate = sampleRate
         recorded += samples
-        let start = max(clock.now, playhead ?? clock.now)
+        let now = clock.now
+        if playing, let end = playhead, end < now { gaps.append((now - end).seconds) }
+        playing = true
+        let start = max(now, playhead ?? now)
         playhead = start + .seconds(Double(samples.count) / sampleRate)
     }
 
@@ -24,11 +32,13 @@ actor SimulatedSpeaker: AudioOutput {
         while let end = playhead, end > clock.now {
             try? await clock.sleep(until: min(end, clock.now + .milliseconds(20)))
         }
+        playing = false
         return .confirmed
     }
 
     func stopImmediately() {
         playhead = nil
+        playing = false
         lastStop = clock.now
     }
 
@@ -38,6 +48,15 @@ actor SimulatedSpeaker: AudioOutput {
         defer { recorded = [] }
         return recorded
     }
+
+    func takeGaps() -> [Double] {
+        defer { gaps = [] }
+        return gaps
+    }
+}
+
+extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
 }
 
 /// Stands in for the microphone: sends audio to the pipeline at the pace of real speech.

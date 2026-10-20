@@ -283,7 +283,19 @@ language model write an answer meanwhile, paused once its first sentence is writ
 ```
 
 With `VOICE_DEBUG=1`, every engine command also logs, for each sentence the voice says, how long its first frame took,
-how many near-silent frames came before the first audible one and how fast the frames came.
+how many near-silent frames came before the first audible one and how fast the frames came; and at the end of each
+utterance, how fast all its frames came, its slowest frame, and how many other utterances of the voice ran at the same
+time.
+
+An announcement cut by a home station's drop (the iPad unplugged 0.6 s into the chime), said again at once on the
+Mac, as the app does; each try reports the pace of every utterance of the voice, and the gaps in the Mac's sound after
+its chime. `--mute-first` takes the Mac's first utterance of it for near-silence, so that the voice would start it
+again after 1.2 s of its audio;
+`--mute-station` does the same on the station, whose voice then starts again just after the drop:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli announce-drop --repeats 6 --mute-station
+```
 
 Check that the language model picks the right action, with the right date. Text only, nothing is created: the
 French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a
