@@ -9,8 +9,9 @@
 // (`MemoryCalendar`), which gives the model the results and the user the sentences the app would. The history keeps
 // each turn as the app records it, and the next sentence follows, until the dialogue's goal is reached (the item the
 // user wanted is saved) or its sentences run out. The model samples its answers: each dialogue runs --repeats times
-// (default 10), and the report counts, turn by turn, what the model did, how many answers said nothing to the user and
-// how often the goal was reached.
+// (default 10), and the report counts, turn by turn, what the model did, how many answers said nothing to the user, how
+// many second tries answered in words that say it was done (« C'est noté », with nothing saved) and how often the goal
+// was reached.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web]
@@ -355,6 +356,19 @@ private func folded(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
 }
 
+/// Whether the model's words say an item was saved or changed: « C'est noté », « C'est fait », « J'ai ajouté… », « Je
+/// l'ai mis… », « … est enregistré ». Said in a pass without a call, nothing was.
+private func saysItWasDone(_ text: String) -> Bool {
+    let done = "(ajouté|créé|utilisé|mis|enregistré|noté|programmé|placé|calé|planifié|réservé|inscrit|déplacé|décalé"
+        + "|modifié|changé)"
+    let saved = "(noté|fait|enregistré|ajouté|programmé|créé|planifié|réservé|calé|mis|inscrit)"
+    let patterns = [#"\bc'est (bien |donc )?"# + saved + #"\b"#, #"\bj'ai (bien |donc )?"# + done,
+                    #"\bje (te |t')?l'ai (bien |donc )?"# + done, #"\btu as (bien )?noté\b"#,
+                    #"\b(est|sont) (bien |maintenant |désormais )?"# + saved]
+    let text = text.replacingOccurrences(of: "’", with: "'")
+    return patterns.contains { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
+}
+
 private func show(_ turn: TurnResult, index: Int) {
     let chance = turn.bestCallChance.map {
         String(format: "  (call chance %.0f %% first, %.0f %% at most)", (turn.firstCallChance ?? 0) * 100, $0 * 100)
@@ -397,8 +411,8 @@ extension JSONValue {
 }
 
 /// Per dialogue: how often the goal was reached and at which turn; per turn, what the model did at its first pass and at
-/// its second try ("nothing said": no call and not a word), over the runs that got that far, and how many answers left
-/// the user in silence.
+/// its second try ("nothing said": no call and not a word), over the runs that got that far, how many second tries after
+/// a refused call answered in words that say it was done, and how many answers left the user in silence.
 private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
     func outcome(_ pass: Pass) -> String {
         guard let call = pass.call else {
@@ -431,6 +445,11 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             print("  first pass: " + counts(turns.map { $0.passes.first.map(outcome) ?? "answered by the app" }))
             let second = turns.compactMap { $0.passes.count > 1 ? $0.passes[1] : nil }
             if !second.isEmpty { print("  second pass: " + counts(second.map(outcome))) }
+            // The second tries after a refused call that answered in words: how many say it was done.
+            let worded = turns.filter { $0.passes.first?.refused == true && $0.passes.count > 1 }.map { $0.passes[1] }
+                .filter { outcome($0) == "no call" }
+            let claiming = worded.filter { saysItWasDone($0.text) }.count
+            if !worded.isEmpty { print("  second tries in words that say it was done: \(claiming) / \(worded.count)") }
             let silent = turns.filter { $0.answer.isEmpty }.count
             if silent > 0 { print("  silent answers (nothing said to the user): \(silent)") }
             let chances = turns.compactMap(\.firstCallChance)

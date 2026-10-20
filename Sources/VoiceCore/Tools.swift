@@ -215,6 +215,34 @@ public struct ToolRefusal: Error, Sendable {
         self.spoken = spoken
         self.retryable = retryable
     }
+
+    /// What the model reads of the refused call, in the history: why, and when it may correct its call, what the app
+    /// waits for (`secondTry`).
+    public func result(for call: ToolCall) -> JSONValue {
+        ["erreur": .string(retryable ? forModel + " " + Self.secondTry(call.name) : forModel)]
+    }
+
+    /// Said to the model after the reason of a refusal it may correct, for a call to `tool`: nothing was done, so not to
+    /// say it was, and what the app waits for: another call, or the user's answer to its question. For a creation, also
+    /// to write it again once the user answers, not a change of an item that does not exist, as after a moment gone
+    /// (`DateCheck`).
+    ///
+    /// Without it, Gemma 4 26B began most of its second tries with « C'est noté… » or « C'est fait… » for an item never
+    /// saved, then asked about it (« … le 22 octobre tombe un jeudi. Veux-tu que je le programme pour le dimanche
+    /// 25 ? »): in voice-cli dialogue-bench, 8 of 10 on a weekday that does not match the date, 9 of 12 on words it
+    /// cannot place in time; with it, 1 of 42 in all. Told only that nothing was created, still 5 of 10. Naming the
+    /// creation to write once the user answers made the user's answer save the item (a calendar that does not exist: 9 of
+    /// 10 instead of 4); the model then also writes a creation refused for a list that does not exist again, as it was,
+    /// so the app asks the user which list rather than the model choosing one.
+    public static func secondTry(_ tool: String) -> String {
+        guard [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(tool) else {
+            return "Rien n'est créé ni changé : ne dis pas que c'est noté ou fait. Écris un nouvel appel, ou pose ta "
+                + "question à l'utilisateur."
+        }
+        return "Rien n'est créé : ne dis pas que c'est noté ou fait. Écris un nouvel appel, ou pose ta question à "
+            + "l'utilisateur ; quand il répond, appelle de nouveau \(tool) (pas \(ActionCatalog.changeItem.name) : rien "
+            + "n'existe encore)."
+    }
 }
 
 /// The circumstances of a call.

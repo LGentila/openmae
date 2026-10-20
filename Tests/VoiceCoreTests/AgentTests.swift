@@ -340,7 +340,8 @@ struct DelegationTests {
         let reply = await runner.handle(ToolCall(name: AgentCatalog.statusName, arguments: ["reference": "les photos"]),
                                         context: context())
         #expect(reply.retryable)  // the model sees the list of tasks…
-        #expect(reply.forModel == ["erreur": "Aucune tâche ne correspond à « les photos ». Tâches : d1 « site de la boulangerie »."])
+        #expect(reply.forModel == ["erreur": .string("Aucune tâche ne correspond à « les photos ». Tâches : d1 « site de la "
+                                                     + "boulangerie ». " + ToolRefusal.secondTry(AgentCatalog.statusName))])
         #expect(reply.spoken == AgentPhrases.unknownTask(.french))  // …or the user is asked
     }
 

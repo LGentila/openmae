@@ -731,8 +731,46 @@ struct ToolRunnerTests {
         // Too far from any tool: refused, and the model is told the real names for its second try.
         let unknown = await runner.handle(ToolCall(name: "effacer", arguments: ["titre": "Pain"]), context: context())
         #expect(unknown.retryable)
-        #expect(unknown.forModel == ["erreur": "Outil inconnu : effacer. Les outils existants sont : noter, lancer."])
+        #expect(unknown.forModel == ["erreur": .string("Outil inconnu : effacer. Les outils existants sont : noter, lancer. "
+                                                       + ToolRefusal.secondTry("effacer"))])
         #expect(await tools.performed.count == 1)
+    }
+
+    /// A call refused for its arguments: the model reads why, that nothing was created or changed, and what the app waits
+    /// for: another call, or the user's answer. Without it, Gemma 4 26B began most of its second tries with « C'est
+    /// noté… » for an item never saved. A creation's also says that nothing exists to change yet. A refusal asked to the
+    /// user at once (no second try) keeps its own words.
+    @Test func refusalTellsTheModelNothingWasDone() async {
+        let creation = ToolRefusal.secondTry("creer_evenement")
+        #expect(creation.hasPrefix("Rien n'est créé : ") && creation.contains("appelle de nouveau creer_evenement (pas "
+                                                                               + "modifier_element : rien n'existe encore)"))
+        let change = ToolRefusal.secondTry("modifier_element")
+        #expect(change.hasPrefix("Rien n'est créé ni changé : ") && !change.contains("rien n'existe encore"))
+        #expect(ToolRefusal.secondTry("creer_rappel").contains("pas modifier_element"))
+        #expect(ToolRefusal.secondTry("lire_agenda") == change)
+
+        let runner = ToolRunner(providers: [CheckedCalendar()])
+        _ = await runner.tools()
+        func event(_ when: String) -> ToolCall {
+            ToolCall(name: "creer_evenement", arguments: ["titre": "Kiné", "quand": .string(when)])
+        }
+        let weekday = await runner.handle(event("dimanche 22 octobre à 10 h"), context: context())
+        #expect(weekday.retryable)
+        #expect(weekday.forModel == ["erreur": .string("« dimanche 22 octobre à 10 h » : le 22 octobre est un jeudi. "
+                                                       + creation)])
+        #expect(weekday.spoken == "Le 22 octobre tombe un jeudi. Tu peux me redire la date\(nb)?")
+        let noReference = await runner.handle(ToolCall(name: "modifier_element", arguments: ["quand": "à 16 h"]),
+                                              context: context())
+        #expect(noReference.retryable)
+        #expect(noReference.forModel == ["erreur": .string("Il manque « reference ». " + change)])
+        // Asked to the user at once: no second try, and the refusal's own words.
+        for when in ["hier à 15 h", "lundi à 3 h"] {
+            let refused = await runner.handle(event(when), context: context())
+            #expect(!refused.retryable)
+            #expect(refused.forModel["erreur"]?.text?.contains(creation) == false, "\(when)")
+        }
+        let past = await runner.handle(event("hier à 15 h"), context: context())
+        #expect(past.forModel["erreur"]?.text?.contains("Rien n'est créé : l'app demande un autre moment") == true)
     }
 }
 
@@ -1045,6 +1083,7 @@ struct PipelineActionTests {
         #expect(await model.requests.count == 2)
         let second = try #require(await model.requests.last)
         #expect(second.suffix(2).map(\.role) == [.assistant, .tool])  // the model sees why it was refused
+        #expect(second.last?.toolResult == ["erreur": .string("Il manque « titre ». " + ToolRefusal.secondTry("noter"))])
         #expect(await log.pieces.joined(separator: " ") == ActionPhrases.missingTitle(.french))
         #expect(await tools.performed.isEmpty)
     }
@@ -1111,6 +1150,8 @@ struct PipelineActionTests {
         #expect(turn[1].toolCalls.first?.arguments["titre"] == "Dentiste")
         guard case .object(let result)? = turn[2].toolResult else { Issue.record("no result"); return }
         #expect(result["erreur"]?.text?.contains("déjà passé") == true)
+        // No second try: the refusal's own words.
+        #expect(result["erreur"]?.text?.contains(ToolRefusal.secondTry("creer_evenement")) == false)
         #expect(turn[3].content == ActionPhrases.datePassed(.french))
     }
 

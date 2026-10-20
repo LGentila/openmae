@@ -157,17 +157,15 @@ public actor ToolRunner {
         await dropPending()  // a new request replaces an action still waiting for its "oui"
         let call = named(call)
         guard let provider = byName[call.name] else {
-            return Reply(spoken: ActionPhrases.notUnderstood(context.language),
-                         forModel: ["erreur": .string(ToolNames.unknown(call.name, among: names))], retryable: true)
+            return Reply(ToolRefusal(forModel: ToolNames.unknown(call.name, among: names),
+                                     spoken: ActionPhrases.notUnderstood(context.language)), of: call)
         }
         do {
             try await provider.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)],
-                         retryable: refusal.retryable)
+            return Reply(refusal, of: call)
         } catch {
-            return Reply(spoken: ActionPhrases.notUnderstood(context.language),
-                         forModel: ["erreur": .string("\(error)")], retryable: true)
+            return Reply(ToolRefusal(forModel: "\(error)", spoken: ActionPhrases.notUnderstood(context.language)), of: call)
         }
         let risk = await provider.risk(of: call)
         if risk == .sensitive {
@@ -194,8 +192,7 @@ public actor ToolRunner {
             return Reply(spoken: outcome.spoken, forModel: outcome.forModel, retryable: false,
                          modelSpeaks: outcome.modelSpeaks)
         } catch let refusal as ToolRefusal {
-            return Reply(spoken: refusal.spoken, forModel: ["erreur": .string(refusal.forModel)],
-                         retryable: refusal.retryable)
+            return Reply(refusal, of: call)
         } catch {
             DebugLog.log("tool \(call.name) failed: \(error)")
             return Reply(spoken: ActionPhrases.saveFailed(context.language),
@@ -221,5 +218,12 @@ public actor ToolRunner {
         await dropPending()
         last = nil
         for provider in providers { await provider.resetConversation() }
+    }
+}
+
+extension ToolRunner.Reply {
+    /// A refused call: the refusal's question for the user, and its result for the model (`ToolRefusal.result`).
+    init(_ refusal: ToolRefusal, of call: ToolCall) {
+        self.init(spoken: refusal.spoken, forModel: refusal.result(for: call), retryable: refusal.retryable)
     }
 }

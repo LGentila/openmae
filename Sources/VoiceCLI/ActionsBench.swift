@@ -333,7 +333,7 @@ func runActionsBench(_ o: Options) async throws {
             secondPass = true
             var retried: ToolCall?
             var said = ""
-            for try await output in model.reply(to: request + [.call(call), .result(of: call, ["erreur": .string(refusal.forModel)])]) {
+            for try await output in model.reply(to: request + [.call(call), .result(of: call, refusal.result(for: call))]) {
                 if case .toolCall(let made) = output, retried == nil { retried = made }
                 if case .text(let piece) = output, retried == nil { said += piece }
             }
