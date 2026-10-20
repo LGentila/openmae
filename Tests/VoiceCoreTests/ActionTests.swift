@@ -490,6 +490,51 @@ actor SummedSearch: ToolProvider {
     }
 }
 
+/// What the timers told the app, in the order they told it (from inside the timers' actor, as the app gets it).
+private final class TimerReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var runningReports: [Bool] = []
+    private var finishedTexts: [String] = []
+    var running: [Bool] { lock.withLock { runningReports } }
+    var finished: [String] { lock.withLock { finishedTexts } }
+    func record(running: Bool) { lock.withLock { runningReports.append(running) } }
+    func record(finished: String) { lock.withLock { finishedTexts.append(finished) } }
+}
+
+@Suite("Timers")
+struct TimerToolTests {
+    func waitFor(_ condition: () -> Bool) async {
+        for _ in 0..<400 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    func timer(seconds: Int) -> ToolCall { ToolCall(name: "minuteur", arguments: ["duree_secondes": .int(seconds)]) }
+
+    /// The app keeps the Mac awake from the start of the first timer to the end of the last one.
+    @Test func saysWhileATimerRuns() async throws {
+        let timers = TimerTools()
+        let reports = TimerReports()
+        await timers.observe(onFinish: { reports.record(finished: $0.text) }, onRunning: { reports.record(running: $0) })
+        #expect(reports.running.isEmpty)
+        _ = try await timers.perform(timer(seconds: 1), context: context())
+        let long = try await timers.perform(timer(seconds: 600), context: context())
+        #expect(reports.running == [true])  // once, for both
+        await waitFor { reports.finished.count == 1 }
+        #expect(reports.running == [true])  // the short one rang, the long one still runs
+        // Through the protocol, as the app does: called on the actor itself, an async caller would get the protocol's
+        // default implementation instead of the timers' own (which is synchronous).
+        let provider: any ToolProvider = timers
+        _ = try await provider.undo(try #require(long.undo), context: context())
+        #expect(reports.running == [true, false])  // "annule": none runs any more
+        #expect(await timers.count == 0)
+
+        _ = try await timers.perform(timer(seconds: 1), context: context())
+        #expect(reports.running == [true, false, true])
+        await waitFor { reports.running.count == 4 }
+        #expect(reports.running == [true, false, true, false])  // it rang
+        #expect(reports.finished.count == 2)
+    }
+}
+
 @Suite("Tool runner")
 struct ToolRunnerTests {
     @Test func sensitiveActionWaitsForYes() async {

@@ -153,6 +153,14 @@ actor TaskLog {
     var current: [AgentTask] { lists.last ?? [] }
 }
 
+/// What `onRunning` was told, in order (it is called from inside the tools' actor, as the app gets it).
+private final class RunningReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reports: [Bool] = []
+    var values: [Bool] { lock.withLock { reports } }
+    func record(_ running: Bool) { lock.withLock { reports.append(running) } }
+}
+
 @Suite("Delegation", .serialized)
 struct DelegationTests {
     let delegation = ToolCall(name: AgentCatalog.delegateName, arguments: [
@@ -256,6 +264,47 @@ struct DelegationTests {
         #expect(await agent.followUps == ["Ajoute une page avec les prix."])
         #expect(await log.current.first?.status == .running)
         #expect(await log.ended.isEmpty)  // the task is not over: no notification yet
+    }
+
+    /// The app keeps the Mac awake while a task runs: from its start to the end of its run, the follow-ups queued
+    /// meanwhile included, or until it is stopped.
+    @Test func saysWhileATaskRuns() async throws {
+        let folder = scratchFolder()
+        let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
+                               workspace: folder.appending(path: "OpenMae"))
+        let agent = FakeAgent()
+        let reports = RunningReports()
+        await tools.observe(onChange: { _ in }, onRunning: { reports.record($0) })
+        await tools.configure(agents: [AgentTools.Agent(connector: agent, review: false)], folders: [])
+        let runner = ToolRunner(providers: [tools])
+        _ = await runner.tools()
+        #expect(reports.values.isEmpty)
+
+        _ = await runner.handle(delegation, context: context())  // no read-back: sent at once
+        await waitFor { await agent.started.count == 1 }
+        #expect(reports.values == [true])
+        let id = try #require(await agent.started.first?.id)
+        await agent.report(.session("session-1"), to: id)
+        let more = ToolCall(name: AgentCatalog.followUpName, arguments: ["reference": "boulangerie",
+                                                                         "message": "Ajoute une page avec les prix."])
+        _ = await runner.handle(more, context: context())
+        _ = try #require(await runner.resolve(.confirm, context: context()))
+        await agent.end(id, with: AgentResult(text: "Le site est prêt."))
+        await waitFor { await agent.followUps.count == 1 }
+        #expect(reports.values == [true])  // the follow-up went on from there: no break
+        await agent.end(id, with: AgentResult(text: "La page des prix est faite."))
+        await waitFor { reports.values.count == 2 }
+        #expect(reports.values == [true, false])
+
+        let recipes = ToolCall(name: AgentCatalog.delegateName, arguments: [
+            "titre": "carnet de recettes", "consigne": "Crée un carnet de recettes en HTML, une page par recette.",
+        ])
+        _ = await runner.handle(recipes, context: context())
+        await waitFor { await agent.started.count == 2 }
+        #expect(reports.values == [true, false, true])
+        await tools.stop(try #require(await agent.started.last?.id))  // the Stop button
+        #expect(reports.values == [true, false, true, false])
+        #expect(await tools.hasRunningTask == false)
     }
 
     @Test func cancelStopsTheRunWithoutANotification() async throws {

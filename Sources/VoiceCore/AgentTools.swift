@@ -53,6 +53,9 @@ public actor AgentTools: ToolProvider {
     private var onChange: @Sendable ([AgentTask]) -> Void = { _ in }
     private var onEnd: @Sendable (AgentTask) -> Void = { _ in }
     private var onFirstTask: @Sendable () async -> Void = {}
+    private var onRunning: @Sendable (Bool) -> Void = { _ in }
+    /// What `onRunning` was last told.
+    private var reportedRunning = false
     private var startedOne = false
 
     public init(store: TaskStore = TaskStore(), workspace: URL = AppIdentity.agentWorkspace,
@@ -67,13 +70,19 @@ public actor AgentTools: ToolProvider {
     /// `onChange`: the tasks to show (the most recent last). `onEnd`: a task finished or failed on its own (the app
     /// shows a notification; a task the user stopped gets none). `onFirstTask`: once, when the first task starts
     /// (the app asks for notifications then; not awaited, so macOS's dialog does not hold up the answer).
+    /// `onRunning`: true when a first task starts running, false once none runs any more (each ended, failed or was
+    /// stopped), in that order; a task that goes on with a follow-up queued meanwhile does not end in between. The app
+    /// keeps the Mac awake meanwhile: an agent's run pauses while the Mac sleeps.
     public func observe(onChange: @escaping @Sendable ([AgentTask]) -> Void,
                         onEnd: @escaping @Sendable (AgentTask) -> Void = { _ in },
-                        onFirstTask: @escaping @Sendable () async -> Void = {})
+                        onFirstTask: @escaping @Sendable () async -> Void = {},
+                        onRunning: @escaping @Sendable (Bool) -> Void = { _ in })
     {
         self.onChange = onChange
         self.onEnd = onEnd
         self.onFirstTask = onFirstTask
+        self.onRunning = onRunning
+        reportedRunning = false
         publish()
     }
 
@@ -401,7 +410,7 @@ public actor AgentTools: ToolProvider {
     private func runEnded(_ id: UUID, error: Error?) {
         runs[id] = nil
         let stopped = stopping.remove(id) != nil
-        guard var task = task(id) else { return }
+        guard var task = task(id) else { return reportRunning() }
         let date = now()
         if stopped {  // no notification: the user asked for it
             if task.status == .running {
@@ -504,6 +513,16 @@ public actor AgentTools: ToolProvider {
 
     private func publish() {
         onChange(visibleTasks)
+        reportRunning()
+    }
+
+    /// Tells `onRunning` when it changed. An agent's run is over once its process has ended (`runEnded`), a little
+    /// after the task got its result.
+    private func reportRunning() {
+        let running = hasRunningTask || !runs.isEmpty
+        guard running != reportedRunning else { return }
+        reportedRunning = running
+        onRunning(running)
     }
 
     private func describeForModel(_ task: AgentTask) -> [String: JSONValue] {

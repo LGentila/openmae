@@ -52,6 +52,11 @@ public actor AssistantHost: AssistantConnection {
     private let agentTools: AgentTools
     /// Searching the internet: with the actions, or on its own when they are off.
     private let webSearchTools = WebSearchTools()
+    /// The Mac stays awake, on battery too, while a timer runs (it would ring late, once the Mac wakes up) and while an
+    /// agent works on a task (its run would pause). A timer that rang still holds it a few seconds: its announcement
+    /// keeps the Mac awake in turn, as an exchange, once it has started.
+    private let timersAwake = StayAwake(reason: "OpenMaé: a timer is running", linger: .seconds(5))
+    private let tasksAwake = StayAwake(reason: "OpenMaé: an agent is working on a task")
     private var actionsStatus: ActionsStatus?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
@@ -82,15 +87,18 @@ public actor AssistantHost: AssistantConnection {
     public static let notificationFolderKey = Notifier.folderKey
 
     private func observeTimers() async {
+        let awake = timersAwake
         await timerTools.observe(
             onFinish: { [weak self] finished in
                 Task { await self?.timerFinished(finished) }
             },
-            onFirstTimer: { await Notifier.requestPermission() })
+            onFirstTimer: { await Notifier.requestPermission() },
+            onRunning: { awake.set($0) })
     }
 
     private func observeTasks() async {
         let emit = emit
+        let awake = tasksAwake
         await agentTools.observe(
             onChange: { emit.yield(.tasks($0)) },
             onEnd: { task in
@@ -98,7 +106,8 @@ public actor AssistantHost: AssistantConnection {
                 let notification = AgentPhrases.notification(for: task)
                 Notifier.post(title: notification.title, body: notification.body, folder: task.folder)
             },
-            onFirstTask: { await Notifier.requestPermission() })
+            onFirstTask: { await Notifier.requestPermission() },
+            onRunning: { awake.set($0) })
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
@@ -249,7 +258,8 @@ public actor AssistantHost: AssistantConnection {
         ]
         // Keep macOS from slowing the app down when its window is in the background (App Nap), but let the Mac go to
         // sleep on its own as usual: `.userInitiated` would also keep it awake, on battery too, as long as the models
-        // are loaded. The Mac stays awake only through a `KeepAwake` (iPhone access, the wake-word mode), on mains.
+        // are loaded. The Mac stays awake only during an exchange, while a timer or an agent's task runs, and through a
+        // `KeepAwake` (iPhone access, the wake-word mode), on mains.
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Conversation vocale")
         emit.yield(.ready(EngineInfo(

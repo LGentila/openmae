@@ -15,17 +15,24 @@ public actor TimerTools: ToolProvider {
 
     private var onFinish: @Sendable (Finished) -> Void = { _ in }
     private var onFirstTimer: @Sendable () async -> Void = {}
-    private var running: [String: Task<Void, Never>] = [:]
+    private var onRunning: @Sendable (Bool) -> Void = { _ in }
+    private var running: [String: Task<Void, Never>] = [:] {
+        didSet { if running.isEmpty != oldValue.isEmpty { onRunning(!running.isEmpty) } }
+    }
     private var nextID = 0
 
     public init() {}
 
-    /// `onFirstTimer` runs once, when the first timer starts (the app asks for notifications then).
+    /// `onFirstTimer` runs once, when the first timer starts (the app asks for notifications then). `onRunning`: true
+    /// when the first timer starts, false once none runs any more (the last one rang or was undone), in that order (the
+    /// app keeps the Mac awake meanwhile, or a timer would ring late, once it wakes up).
     public func observe(onFinish: @escaping @Sendable (Finished) -> Void,
-                        onFirstTimer: @escaping @Sendable () async -> Void = {})
+                        onFirstTimer: @escaping @Sendable () async -> Void = {},
+                        onRunning: @escaping @Sendable (Bool) -> Void = { _ in })
     {
         self.onFinish = onFinish
         self.onFirstTimer = onFirstTimer
+        self.onRunning = onRunning
     }
 
     public func tools() -> [ToolSpec] { [ActionCatalog.timer] }

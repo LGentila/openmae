@@ -35,12 +35,14 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   calendars (every account macOS knows: iCloud, Google, Exchange…), reads you what is planned, sets timers and
   runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
   out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
-  set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars.
+  set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars. While a timer runs, the Mac
+  does not go to sleep on its own, on battery too (the display still goes off), so that it rings on time.
 - **Long tasks handed to Claude Code (optional).** With the actions on, switch on Claude Code in Settings ›
   Agents, then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
   Maé reads the task back, waits for your “oui”, and hands it to the Claude Code installed and signed in on
   your Mac, which works on its own in a new folder of `~/OpenMae` (or in a folder you allowed). Ask “où en est
   le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
+  While Claude Code works, the Mac does not go to sleep on its own, on battery too (the task would pause).
   By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
   What you hand to Claude Code leaves your Mac — that is the point of handing it over.
 - **Searching the internet (optional).** Switch on Settings › Search the internet and choose where
