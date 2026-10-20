@@ -117,6 +117,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var snapshotRestores = 0
     /// Diagnostics: how many times a request went back to the conversations' beginning (see `beginning`).
     public private(set) var beginningRestores = 0
+    /// Diagnostics: answers stopped because they went round in circles (`RepetitionGuard`).
+    public private(set) var loopsStopped = 0
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, time to compute them, and how long
     /// it waited for the model before (another computation under way: the history computed ahead, a keep-warm pass).
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0, waitedMs: 0.0)
@@ -645,6 +647,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var produced: [Int] = []
         var callTokens: [Int]?  // inside a tool call
         var callNamed = false
+        /// An answer that goes round in circles ends there, rather than at the token limit after the voice read it all.
+        var repetition = RepetitionGuard()
         defer {
             // The iterator feeds each token back into the cache *before* returning it, so the cache
             // holds the prompt plus every token returned. Its offset is the ground truth.
@@ -695,6 +699,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                     }
                 }
                 continue
+            }
+            if repetition.add(token) {
+                loopsStopped += 1
+                DebugLog.log("LLM: the answer goes round in circles, stopped after \(produced.count) tokens: "
+                             + tokenTrace(produced.suffix(12)))
+                break
             }
             detokenizer.append(token: token)
             if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
