@@ -37,8 +37,8 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
   set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars. While a timer runs, the Mac
   does not go to sleep on its own, on battery too (the display still goes off), so that it rings on time.
-- **Long tasks handed to Claude Code (optional).** With the actions on, switch on Claude Code in Settings ›
-  Agents, then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
+- **Long tasks handed to Claude Code (optional).** Switch on Claude Code in Settings › Agents (the actions may
+  stay off), then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
   Maé reads the task back, waits for your “oui”, and hands it to the Claude Code installed and signed in on
   your Mac, which works on its own in a new folder of `~/OpenMae` (or in a folder you allowed). Ask “où en est
   le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
@@ -343,6 +343,14 @@ that must not be, and questions about a task already handed over):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
+```
+
+With `--no-actions`, the actions are left out (their tools, their part of the prompt, their example exchanges), as the
+app has Claude Code, the web search or the built-in sources when the actions are off; a request for an action then
+expects no call:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions
 ```
 
 Searching the internet: requests that need a search, requests that do not (traps included), research for an agent,

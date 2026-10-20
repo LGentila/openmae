@@ -45,12 +45,6 @@ struct AgentsPage: View {
             }
             if let note = state.note {
                 note.padding(.top, 14)
-                if state == .actionsOff {
-                    ActionRow(top: 10, bottom: 0) {
-                        Button { navigation.show(.actions) } label: { IconLabel("Open Actions", icon: .arrowRight) }
-                            .buttonStyle(WindowButtonStyle())
-                    }
-                }
             }
         }
     }
@@ -71,18 +65,16 @@ struct AgentsPage: View {
 
 /// Where Claude Code stands, in a word and a colour.
 enum ClaudeCodeState: Equatable {
-    case ready, off, notInstalled, notSignedIn, actionsOff, checking
+    case ready, off, notInstalled, notSignedIn, checking
 
-    /// Whether it is installed and signed in is only known while the actions are on (the engine checks it with them).
+    /// Whatever the actions: the engine checks whether it is installed, and, once it is on, whether it is signed in.
     @MainActor
     init(_ model: AssistantModel) {
-        let availability = model.actions?.claudeCode
+        let availability = model.claudeCode
         if availability == .notInstalled {
             self = .notInstalled
         } else if !model.settings.claudeCode.enabled {
             self = .off
-        } else if !model.settings.actionsEnabled {
-            self = .actionsOff
         } else if availability == .notLoggedIn {
             self = .notSignedIn
         } else if availability == nil {
@@ -98,7 +90,6 @@ enum ClaudeCodeState: Equatable {
         case .off: Text("Off")
         case .notInstalled: Text("Not installed")
         case .notSignedIn: Text("Sign-in needed")
-        case .actionsOff: Text("Actions off")
         case .checking: Text("Checking…")
         }
     }
@@ -107,7 +98,7 @@ enum ClaudeCodeState: Equatable {
         switch self {
         case .ready: .on
         case .off: .off
-        case .notInstalled, .notSignedIn, .actionsOff: .warn
+        case .notInstalled, .notSignedIn: .warn
         case .checking: .info
         }
     }
@@ -120,8 +111,6 @@ enum ClaudeCodeState: Equatable {
             Note("Claude Code isn’t installed on this Mac. Once it is, Maé can hand it long tasks.")
         case .notSignedIn:
             Note("Claude Code isn’t signed in. Open it once in Terminal to sign in.", tone: .warn)
-        case .actionsOff:
-            Note("Maé hands tasks to an agent only while the actions are on.", tone: .warn)
         case .ready, .off, .checking:
             nil
         }
@@ -155,11 +144,6 @@ struct ClaudeCodePage: View {
                     ActionRow(top: 10, bottom: 0) {
                         Button("How to install it") { openURL(AgentsPage.installPage) }
                             .buttonStyle(WindowButtonStyle(kind: .link))
-                    }
-                } else if state == .actionsOff {
-                    ActionRow(top: 10, bottom: 0) {
-                        Button { navigation.show(.actions) } label: { IconLabel("Open Actions", icon: .arrowRight) }
-                            .buttonStyle(WindowButtonStyle())
                     }
                 }
             }

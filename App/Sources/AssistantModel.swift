@@ -56,8 +56,11 @@ final class AssistantModel {
     private(set) var inputLevel: Float = 0
     private(set) var outputLevel: Float = 0
     private(set) var lastWarning: String?
-    /// What the actions can use (access to the calendar and reminders, shortcuts, Claude Code); nil while they are off.
+    /// What the actions can use (access to the calendar and reminders, shortcuts); nil while they are off.
     private(set) var actions: ActionsStatus?
+    /// Whether Claude Code is installed and signed in, whatever the actions; nil until the engine checked it, and while
+    /// Claude Code is off but installed (only whether it is installed is looked at then).
+    private(set) var claudeCode: AgentAvailability?
     /// The tasks handed to Claude Code, the most recent last.
     private(set) var tasks: [AgentTask] = []
     /// What the web search's "Test" button found; nil before a test, or after a change of its settings.
@@ -207,10 +210,11 @@ final class AssistantModel {
         answerIndex = nil
     }
 
-    /// The app is in front again: a shortcut may have been added, an access granted in System Settings; or the web
-    /// search's key or password was just saved.
+    /// The app is in front again: a shortcut may have been added, an access granted in System Settings, Claude Code
+    /// installed or signed in (on or off: switched off, it can only be switched on once installed); or the web search's
+    /// key or password was just saved.
     func refreshActions() {
-        guard isReady, settings.actionsEnabled || settings.webSearch.enabled else { return }
+        guard isReady else { return }
         connection.send(.refreshActions)
     }
 
@@ -317,8 +321,8 @@ final class AssistantModel {
         case .wakeDecision(let decision):
             if settings.wakeLog { WakeLog.append(decision) }
         case .conversationCleared:
-            // The engine started a new conversation (the actions, or on their own the web search or the built-in
-            // sources, switched on or off): the screen no longer shows what the model no longer has.
+            // The engine started a new conversation (the actions, or on their own Claude Code, the web search or the
+            // built-in sources, switched on or off): the screen no longer shows what the model no longer has.
             clearTranscript()
         case .levels(let input, let output):
             inputLevel = input
@@ -327,6 +331,8 @@ final class AssistantModel {
             self.diagnostics = diagnostics
         case .actions(let status):
             actions = status
+        case .claudeCode(let availability):
+            claudeCode = availability
         case .tasks(let tasks):
             self.tasks = tasks
         case .webSearchTested(let test):

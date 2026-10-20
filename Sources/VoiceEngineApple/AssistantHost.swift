@@ -48,7 +48,8 @@ public actor AssistantHost: AssistantConnection {
     private let calendarTools: CalendarTools
     private let timerTools = TimerTools()
     private let shortcutTools = ShortcutTools()
-    /// Tasks handed to Claude Code: they go on across a change of tier or with the actions off, until the app quits.
+    /// Tasks handed to Claude Code, with the actions or on its own when they are off: they go on across a change of
+    /// tier, or with Claude Code or the actions switched off, until the app quits.
     private let agentTools: AgentTools
     /// Searching the internet: with the actions, or on its own when they are off.
     private let webSearchTools = WebSearchTools()
@@ -63,6 +64,8 @@ public actor AssistantHost: AssistantConnection {
     private let quoteTools = QuoteTools()
     private let travelTools: TravelTimeTools
     private var actionsStatus: ActionsStatus?
+    /// Counts the checks of Claude Code (`reportClaudeCode`): only the last one's answer goes to the app.
+    private var claudeCodeChecks = 0
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
     /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
@@ -277,6 +280,7 @@ public actor AssistantHost: AssistantConnection {
         await reportDiagnostics()
         reportStorage()
         reportActions()
+        reportClaudeCode()
         if remote != nil { await attachRemote() }  // an iPhone took the conversation while the models loaded
         if announcements.output != nil {  // a home station connected while the models loaded
             await pipeline.announceThrough(announcements.output, reachable: announcements.reachable)
@@ -462,28 +466,31 @@ public actor AssistantHost: AssistantConnection {
         if new.shortcutsToConfirm != old.shortcutsToConfirm {
             await shortcutTools.setNeedingConfirmation(Set(new.shortcutsToConfirm))
         }
+        // A change the model sees (Claude Code switched on or off, a folder added; the search or the sources switched on
+        // or off) means new instructions.
+        var agentsChanged = false
         if new.claudeCode != old.claudeCode {
             DebugLog.log("agents: Claude Code \(new.claudeCode.enabled ? "on" : "off")")
-            // A change the model sees (Claude Code switched on or off, a folder added) means new instructions;
-            // the conversation goes on.
-            if await configureAgents(), new.actionsEnabled, new.actionsEnabled == old.actionsEnabled {
-                do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
-            }
+            agentsChanged = await configureAgents()
+            if new.claudeCode.enabled != old.claudeCode.enabled, stage == .running { reportClaudeCode() }
         }
         var searchChanged = false
         if new.webSearch != old.webSearch { searchChanged = await configureWebSearch() }
         var sourcesChanged = false
         if new.builtInSources != old.builtInSources { sourcesChanged = await configureSources() }
-        if searchChanged || sourcesChanged, new.actionsEnabled == old.actionsEnabled {
+        if agentsChanged || searchChanged || sourcesChanged, new.actionsEnabled == old.actionsEnabled {
             if searchChanged {
                 DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
             }
             if sourcesChanged { DebugLog.log("built-in sources: \(new.builtInSources ? "on" : "off")") }
-            // With the actions, its tool comes or goes and the conversation goes on. On their own, the search and the
-            // sources are the only tools: the tools come or go, and a new conversation starts, as when the actions are
-            // switched on or off (the app clears its transcript on the pipeline's `conversationCleared`).
+            // With the actions, a tool comes or goes and the conversation goes on. On their own, Claude Code, the search
+            // and the sources are the only tools: when one of them comes or goes, the tools are set again and a new
+            // conversation starts, as when the actions are switched on or off (the app clears its transcript on the
+            // pipeline's `conversationCleared`). A folder added for Claude Code only changes its tool: the conversation
+            // goes on.
+            let comeOrGo = searchChanged || sourcesChanged || new.claudeCode.enabled != old.claudeCode.enabled
             do {
-                if new.actionsEnabled {
+                if new.actionsEnabled || !comeOrGo {
                     try await pipeline?.toolsChanged()
                 } else {
                     try await pipeline?.setTools(await toolRunner())
@@ -507,19 +514,22 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Actions
 
-    /// The tools for a new pipeline or conversation: the actions when they are on, the web search and the built-in
-    /// sources when they are; nil when all are off.
+    /// The tools for a new pipeline or conversation: the actions when they are on; Claude Code, the web search and the
+    /// built-in sources when they are, with the actions or on their own; nil when all are off.
     private func toolRunner() async -> ToolRunner? {
         await configureWebSearch()
         await configureSources()
+        await configureAgents()
         let sources: [any ToolProvider] = [weatherTools, quoteTools, travelTools]
         guard settings.actionsEnabled else {
-            let on = (settings.webSearch.isReady ? [webSearchTools] : []) + (sourcesOn ? sources : [])
+            // In the same order as with the actions.
+            let agents: [any ToolProvider] = settings.claudeCode.enabled ? [agentTools] : []
+            let search: [any ToolProvider] = settings.webSearch.isReady ? [webSearchTools] : []
+            let on = agents + search + (sourcesOn ? sources : [])
             return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
-        await configureAgents()
         return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources)
     }
 
@@ -596,9 +606,10 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// The app is in front again: a shortcut may have been added to the folder, an access granted, the web search's
-    /// key or password saved.
+    /// key or password saved, Claude Code installed or signed in.
     private func refreshActions() async {
         guard stage == .running else { return }
+        reportClaudeCode()
         if await configureWebSearch() {
             // The keychain decided otherwise than the settings (a key saved again after it was lost, or removed from it
             // elsewhere): the search's tool comes or goes, the conversation goes on.
@@ -608,20 +619,35 @@ public actor AssistantHost: AssistantConnection {
         if await shortcutTools.refresh() {
             do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
         }
-        reportActions(checkingClaudeCode: true)
+        reportActions()
     }
 
-    /// `checkingClaudeCode`: ask Claude Code again whether it is installed and signed in (about a second, in the
-    /// background), instead of the last answer.
-    private func reportActions(checkingClaudeCode: Bool = false) {
+    /// What the actions can use, while they are on.
+    private func reportActions() {
         guard settings.actionsEnabled else { return }
         Task {
-            var claudeCode = actionsStatus?.claudeCode
-            if checkingClaudeCode || claudeCode == nil { claudeCode = await ClaudeCodeConnector().availability() }
             let status = ActionsStatus(calendar: Self.access(CalendarTools.access(to: .event)),
                                        reminders: Self.access(CalendarTools.access(to: .reminder)),
-                                       shortcuts: await shortcutTools.names, claudeCode: claudeCode)
+                                       shortcuts: await shortcutTools.names)
             self.send(status)
+        }
+    }
+
+    /// Tells the app whether Claude Code is installed and signed in, whatever the actions. Switched on, Claude Code
+    /// itself is asked (about a second, in the background); switched off, only whether it is installed is looked at,
+    /// which runs nothing (nil when it is).
+    private func reportClaudeCode() {
+        claudeCodeChecks += 1
+        let check = claudeCodeChecks
+        guard settings.claudeCode.enabled else {
+            emit.yield(.claudeCode(ClaudeCodeConnector.command() == nil ? .notInstalled : nil))
+            return
+        }
+        Task {
+            let availability = await ClaudeCodeConnector().availability()
+            // Switched off, or asked again, meanwhile: the later check answers instead.
+            guard check == claudeCodeChecks else { return }
+            emit.yield(.claudeCode(availability))
         }
     }
 

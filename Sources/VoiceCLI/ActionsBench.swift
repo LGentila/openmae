@@ -33,6 +33,9 @@
 // case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
 // --addendum <file> replaces the actions part of the system prompt, --web-addendum <file> the web search's
 // (experiments without rebuilding).
+// --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
+// has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then only
+// says what the date line is, and a request whose tool is not offered expects no call.
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -210,12 +213,17 @@ func runActionsBench(_ o: Options) async throws {
     let model = try await MLXChatModel.load(directory: folder)
     print("loaded in \(clock.now - loadStart)")
 
+    let actions = !o.noActions
     let agents = corpus.agents == true
     let web = corpus.web == true || o.web
     let sources = corpus.sources == true || o.sources
+    if !actions {
+        guard o.addendum == nil else { throw CLIError("--addendum replaces the actions part: not with --no-actions") }
+        print("the actions left out, as in the app when they are off")
+    }
     // In the app's order: the actions, the agents, the web search, the built-in sources.
-    let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
-        + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
+    let tools = (actions ? ActionCatalog.calendarTools + [ActionCatalog.timer]
+        + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : [])
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
         + (web ? [WebSearchCatalog.search] : [])
@@ -248,12 +256,20 @@ func runActionsBench(_ o: Options) async throws {
     await model.watchToolCalls(o.watchCalls)
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
-    conversation.systemAddenda = [try o.addendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
-        ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (agents ? [AgentCatalog.promptAddendum] : [])
+    // As `VoicePipeline` puts it together: the actions' part, or without them what the date line is; then the tools'.
+    let actionsPart: String
+    if !actions {
+        actionsPart = ActionCatalog.dateLineRule
+    } else if let file = o.addendum {
+        actionsPart = try String(contentsOfFile: file, encoding: .utf8)
+    } else {
+        actionsPart = ActionCatalog.promptAddendum(exampleCall: exampleCall)
+    }
+    conversation.systemAddenda = [actionsPart] + (agents ? [AgentCatalog.promptAddendum] : [])
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
-    let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
+    let examples = o.examples ?? (actions && ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
@@ -307,7 +323,9 @@ func runActionsBench(_ o: Options) async throws {
         let written = call?.name
         call = call.map(named)
 
-        let expectedTool = item.expected?.tool ?? "aucun"
+        var expectedTool = item.expected?.tool ?? "aucun"
+        // Without the actions, a request for one of them expects no call: no tool does it.
+        if !actions, !tools.contains(where: { $0.name == expectedTool }) { expectedTool = "aucun" }
         let chosen = call?.name ?? (unreadable != nil ? "illisible" : "aucun")
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,

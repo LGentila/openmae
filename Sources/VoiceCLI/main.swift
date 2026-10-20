@@ -80,6 +80,8 @@ struct Options {
     var newConversationEvery: Int?
     var historyBudget: Int?
     var actions = false
+    /// actions-bench: the actions left out, as the app has Claude Code, the web search or the sources on their own.
+    var noActions = false
     var wakeWord = false
     var followUp: Double?
     /// The user's words are not transcribed while they speak (`PipelineConfig.partialTranscriptSeconds`).
@@ -156,6 +158,7 @@ struct Options {
             case "--new-conversation-every": o.newConversationEvery = Int(it.next() ?? "")
             case "--history-budget": o.historyBudget = Int(it.next() ?? "")
             case "--actions": o.actions = true
+            case "--no-actions": o.noActions = true
             case "--wake-word": o.wakeWord = true
             case "--follow-up": o.followUp = Double(it.next() ?? "")
             case "--no-partials": o.noPartials = true

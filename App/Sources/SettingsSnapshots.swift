@@ -32,11 +32,10 @@ extension Snapshots {
         let now = Date()
         func ago(minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         let shortcuts = ["Allumer le salon", "Mode concentration"]
-        func actions(_ access: ActionsStatus.Access, shortcuts: [String] = shortcuts,
-                     claudeCode: AgentAvailability? = .ready(version: "2.1.206")) -> AssistantEvent
-        {
-            .actions(ActionsStatus(calendar: access, reminders: access, shortcuts: shortcuts, claudeCode: claudeCode))
+        func actions(_ access: ActionsStatus.Access, shortcuts: [String] = shortcuts) -> AssistantEvent {
+            .actions(ActionsStatus(calendar: access, reminders: access, shortcuts: shortcuts))
         }
+        let claudeCodeReady = AssistantEvent.claudeCode(.ready(version: "2.1.206"))
 
         // iPhone and iPad
         let added = ISO8601DateFormatter().date(from: "2026-10-15T10:00:00Z") ?? now
@@ -241,18 +240,20 @@ extension Snapshots {
                               s.shortcutsToConfirm = shortcuts
                           }),
             // Agents
-            SettingsScene(name: "RgAgents", page: .agents, events: [actions(.granted)],
+            SettingsScene(name: "RgAgents", page: .agents, events: [actions(.granted), claudeCodeReady],
                           settings: claudeCode(review: true, mode: .acceptEdits)),
-            SettingsScene(name: "RgAgentsAbsent", page: .agents, events: [actions(.granted, claudeCode: .notInstalled)],
+            SettingsScene(name: "RgAgentsAbsent", page: .agents, events: [actions(.granted), .claudeCode(.notInstalled)],
                           settings: { $0.actionsEnabled = true }),
             SettingsScene(name: "RgAgents-a-connecter", page: .agents,
-                          events: [actions(.granted, claudeCode: .notLoggedIn)],
+                          events: [actions(.granted), .claudeCode(.notLoggedIn)],
                           settings: claudeCode(review: true, mode: .acceptEdits)),
-            SettingsScene(name: "RgAgents-actions-eteintes", page: .agents, settings: { $0.claudeCode.enabled = true }),
-            SettingsScene(name: "RgAgentFiche", page: .agents, events: [actions(.granted)],
+            // Claude Code does without the actions: on, it is ready with them off.
+            SettingsScene(name: "RgAgents-actions-eteintes", page: .agents, events: [claudeCodeReady],
+                          settings: { $0.claudeCode.enabled = true }),
+            SettingsScene(name: "RgAgentFiche", page: .agents, events: [actions(.granted), claudeCodeReady],
                           settings: claudeCode(review: true, mode: .acceptEdits),
                           prepare: { navigation, _, _ in navigation.showsAgent = true }),
-            SettingsScene(name: "RgAgentFicheSeul", page: .agents, events: [actions(.granted)],
+            SettingsScene(name: "RgAgentFicheSeul", page: .agents, events: [actions(.granted), claudeCodeReady],
                           settings: claudeCode(review: false, mode: .auto),
                           prepare: { navigation, _, _ in navigation.showsAgent = true }),
             // Internet search
@@ -391,7 +392,7 @@ extension Snapshots {
 
         // The quick panel, in the conversation and on the first-launch screen.
         for (name, events, settings) in [
-            ("RgRapides", ready + [actions(.granted)], claudeCode(review: true, mode: .acceptEdits)),
+            ("RgRapides", ready + [actions(.granted), claudeCodeReady], claudeCode(review: true, mode: .acceptEdits)),
             ("RgRapides-premier-lancement", [AssistantEvent.setupNeeded(Demo.setup)],
              { (_: inout AssistantSettings) in }),
         ] as [(String, [AssistantEvent], (inout AssistantSettings) -> Void)] {

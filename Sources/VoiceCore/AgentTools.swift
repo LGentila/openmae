@@ -7,8 +7,8 @@ import Foundation
 /// stops the task). An agent's own requests for permission are never granted here: Claude Code refuses what its
 /// permission mode does not allow, and the refusals are reported at the end.
 ///
-/// Kept for the app's whole life, like the timers: a task goes on when the actions are switched off or the tier
-/// changes, and only stops when the app quits.
+/// Offered with the actions or without them. Kept for the app's whole life, like the timers: a task goes on when
+/// Claude Code or the actions are switched off or the tier changes, and only stops when the app quits.
 public actor AgentTools: ToolProvider {
     public nonisolated let identifier = "agents"
 

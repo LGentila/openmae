@@ -351,16 +351,6 @@
         }
       }
     },
-    "Actions off": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Actions désactivées"
-          }
-        }
-      }
-    },
     "Add": {
       "localizations": {
         "fr": {
@@ -2301,16 +2291,6 @@
         }
       }
     },
-    "Maé hands tasks to an agent only while the actions are on.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maé ne confie de tâche à un agent que si les actions sont activées."
-          }
-        }
-      }
-    },
     "Maé is answering": {
       "localizations": {
         "fr": {
@@ -3017,16 +2997,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ouvrir %@"
-          }
-        }
-      }
-    },
-    "Open Actions": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ouvrir Actions"
           }
         }
       }

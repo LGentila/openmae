@@ -29,7 +29,8 @@ public actor ToolRunner {
 
     private let providers: [any ToolProvider]
     /// The built-in actions are among the providers (reminders and calendar, timers, shortcuts): the system prompt gets
-    /// their part, and the smallest model their example exchanges. False for the web search on its own.
+    /// their part, and the smallest model their example exchanges. False for the tools offered without them (Claude
+    /// Code, the web search, the built-in sources).
     public nonisolated let offersActions: Bool
     private var byName: [String: any ToolProvider] = [:]
     /// The tools' names, in the providers' order.

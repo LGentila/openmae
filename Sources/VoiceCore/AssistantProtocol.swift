@@ -40,7 +40,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var actionsEnabled = false
     /// Shortcuts (of the "OpenMaé" folder) that Maé reads out and runs only after the user's "oui".
     public var shortcutsToConfirm: [String] = []
-    /// Handing long tasks to Claude Code (with the actions on).
+    /// Handing long tasks to Claude Code (with the actions on or off).
     public var claudeCode = AgentSettings()
     /// Searching the internet, through Brave Search or the user's SearXNG (with the actions on or off).
     public var webSearch = WebSearchSettings()
@@ -193,8 +193,8 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case deleteModels
     /// Delete the language models of the tiers not in use.
     case deleteUnusedModels
-    /// Look again at what actions can use (the app came back to the front: a shortcut may have been added
-    /// to the folder, a permission granted in System Settings, Claude Code signed in).
+    /// Look again at what actions can use, and at Claude Code (the app came back to the front: a shortcut may have
+    /// been added to the folder, a permission granted in System Settings, Claude Code installed or signed in).
     case refreshActions
     /// Stop a task handed to an agent (the Stop button of the task list).
     case stopTask(UUID)
@@ -319,14 +319,11 @@ public struct ActionsStatus: Sendable, Codable, Equatable {
     public var reminders: Access
     /// The shortcuts of the "OpenMaé" folder of the Shortcuts app.
     public var shortcuts: [String]
-    /// Whether Claude Code is installed and signed in; nil until it was checked.
-    public var claudeCode: AgentAvailability?
 
-    public init(calendar: Access, reminders: Access, shortcuts: [String], claudeCode: AgentAvailability? = nil) {
+    public init(calendar: Access, reminders: Access, shortcuts: [String]) {
         self.calendar = calendar
         self.reminders = reminders
         self.shortcuts = shortcuts
-        self.claudeCode = claudeCode
     }
 }
 
@@ -410,8 +407,8 @@ public enum AssistantEvent: Sendable, Codable {
     /// Wake-word mode: what Maé made of a sentence she heard.
     case wakeDecision(WakeDecision)
     /// The engine started a new conversation on its own because the tools came or went: the actions switched on or off,
-    /// or, with them off, the web search or the built-in sources (only when the model sees the change: not for the
-    /// sources on a tier that does not offer them, nor for a search without its key). The interface clears its
+    /// or, with them off, Claude Code, the web search or the built-in sources (only when the model sees the change: not
+    /// for the sources on a tier that does not offer them, nor for a search without its key). The interface clears its
     /// transcript, whose exchanges the model no longer has; nothing of them comes after this event. Not sent when the
     /// interface asked for it (`newConversation`). Not relayed to the iPhone (`RemoteCommandPolicy.isRelayed`).
     case conversationCleared
@@ -420,6 +417,10 @@ public enum AssistantEvent: Sendable, Codable {
     case diagnostics(EngineDiagnostics)
     /// What the actions can use; sent when the actions are on and whenever it changes.
     case actions(ActionsStatus)
+    /// Whether Claude Code is installed and signed in, whatever the actions; sent while the engine runs: once it is
+    /// ready, when the app comes back to the front, and when Claude Code is switched on or off. Switched off, only
+    /// whether it is installed is looked at: nil when it is.
+    case claudeCode(AgentAvailability?)
     /// The tasks handed to agents, the most recent last; sent at start-up and at every change.
     case tasks([AgentTask])
     /// What `.testWebSearch` found.

@@ -511,4 +511,56 @@ struct PipelineAgentTests {
         await waitFor { await model.requests.count == 2 }
         #expect(await model.requests.last?.first?.content.contains("deleguer_tache") == true)
     }
+
+    /// With the actions off, Claude Code on its own, as the app offers it then: its tools only, the date line and its part
+    /// of the prompt but nothing of the actions, not even their example exchanges. A task asked for is read back, and the
+    /// user's "oui" hands it over, without the model.
+    @Test func withoutTheActionsATaskIsReadBackThenHandedOver() async throws {
+        let folder = scratchFolder()
+        let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
+                               workspace: folder.appending(path: "OpenMae"))
+        let agent = FakeAgent()
+        await tools.configure(agents: [AgentTools.Agent(connector: agent)], folders: [])  // read back first, by default
+        let delegation = ToolCall(name: AgentCatalog.delegateName, arguments: [
+            "titre": "site de la boulangerie",
+            "consigne": "Crée un site vitrine pour la boulangerie de ma sœur, avec les horaires.",
+        ])
+        let model = ScriptedModel(scripts: [[.toolCallStarted, .toolCall(delegation)]])
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        config.actionExamples = true  // as on the smallest tier: still none without the actions
+        let transcriber = ScriptedTranscriber(["Lance le développement d’un site pour la boulangerie de ma sœur",
+                                               "Oui, vas-y"])
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: transcriber, model: model,
+                                     synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+                                     tools: ToolRunner(providers: [tools], actions: false), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        #expect(await model.tools.map(\.name) == [AgentCatalog.delegateName, AgentCatalog.statusName,
+                                                  AgentCatalog.followUpName, AgentCatalog.cancelName])
+
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        let review = AgentPhrases.review(agent: "Claude Code", title: "site de la boulangerie", folder: nil, .french)
+        await waitFor { await log.pieces.joined(separator: " ") == review }
+        #expect(await log.pieces.joined(separator: " ") == review)
+        #expect(await agent.started.isEmpty)  // nothing is sent before the "oui"
+        let request = try #require(await model.requests.first)
+        #expect(request.count == 2)  // the system prompt and the request: no example exchanges
+        let system = request[0].content
+        #expect(system.hasSuffix(ActionCatalog.dateLineRule + " " + AgentCatalog.promptAddendum))
+        #expect(!system.contains("rappels, calendrier, minuteurs"))
+        #expect(request[1].content.contains("\n(Nous sommes le "))
+
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await agent.started.count == 1 }
+        #expect(await agent.started.first?.title == "site de la boulangerie")
+        #expect(await agent.started.first?.instruction.contains("les horaires") == true)
+        let heard = review + " " + AgentPhrases.started(.french)
+        await waitFor { await log.pieces.joined(separator: " ") == heard }
+        #expect(await log.pieces.joined(separator: " ") == heard)
+        #expect(await model.requests.count == 1)  // the "oui" went to the app, not to the model
+        #expect(await tools.hasRunningTask)
+    }
 }
