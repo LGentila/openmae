@@ -4,7 +4,8 @@ import Foundation
 // Received information: other systems (Home Assistant, Gladys, Apple Shortcuts, a script, any tool that can post to
 // Slack, Discord or ntfy) send short texts to Maé at a secret address. This file is the part that needs no network:
 // the sources, the paths a delivery may come by, reading what was sent, cleaning it for the voice, and the rules that
-// decide whether Maé says it, shows it in a notification or ignores it. The HTTP side is in OpenMaeLink.
+// decide whether Maé says it, keeps it for later (the news, News.swift), shows it in a notification or ignores it. The
+// HTTP side is in OpenMaeLink.
 
 // MARK: - Sources and paths
 
@@ -23,7 +24,7 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
     public enum Mode: String, Codable, Sendable, CaseIterable {
         /// Said as soon as nobody speaks, after the chime.
         case sayNow
-        /// Kept for the news (a later step; not offered yet).
+        /// Kept for later, silently: the news, read when the user asks « Quoi de neuf ? ».
         case keepForLater
         /// A Mac notification only.
         case notifyOnly
@@ -88,7 +89,7 @@ public struct InboundMessage: Sendable, Equatable {
     public var urgent: Bool
     /// How long it may wait to be said, in seconds (10 to 3600); nil: `InboundRules.defaultExpiry`.
     public var expires: Int?
-    /// Read the news after the text (used by a later step).
+    /// The welcome home: the news after the text.
     public var news: Bool
     public var language: SpeechLanguage
 
@@ -293,7 +294,7 @@ public enum InboundText {
 public enum InboundOutcome: String, Codable, Sendable {
     /// Maé will say it: `202 {"status":"queued"}`.
     case queued
-    /// Kept for the news (a later step): `202 {"status":"kept"}`.
+    /// Kept for later, in the news: `202 {"status":"kept"}`.
     case kept
     /// A notification on the Mac: `202 {"status":"notified"}`.
     case notified
@@ -305,7 +306,7 @@ public struct InboundDecision: Sendable, Equatable {
     public var outcome: InboundOutcome
     /// Said at once: it may cut Maé's sentence, never the user's.
     public var urgent: Bool
-    /// Not said after this many seconds: it then becomes a notification, never said late.
+    /// Not said after this many seconds: it then goes to the news, never said late.
     public var expiresAfter: Int
 
     public init(outcome: InboundOutcome, urgent: Bool = false, expiresAfter: Int = InboundRules.defaultExpiry) {
@@ -315,13 +316,50 @@ public struct InboundDecision: Sendable, Equatable {
     }
 }
 
+/// The settings of received information that apply to every source.
+public struct InboundPreferences: Codable, Sendable, Equatable {
+    /// "Announcements": off, Maé says nothing on her own, everything she would have said goes to the news.
+    public var announcements: Bool
+    public var quietHours: QuietHours
+
+    public init(announcements: Bool = true, quietHours: QuietHours = QuietHours()) {
+        self.announcements = announcements
+        self.quietHours = quietHours
+    }
+}
+
+/// "Quiet hours": while they last, what a source would have Maé say right away is kept for later, except the urgent
+/// deliveries of the sources that may ask for them. Off by default; from 22:00 to 08:00 once switched on.
+public struct QuietHours: Codable, Sendable, Equatable {
+    public var enabled: Bool
+    /// Minutes after midnight, in the Mac's time zone.
+    public var start: Int
+    public var end: Int
+
+    public init(enabled: Bool = false, start: Int = 22 * 60, end: Int = 8 * 60) {
+        self.enabled = enabled
+        self.start = start
+        self.end = end
+    }
+
+    /// Whether `date` is in them (they may go past midnight).
+    public func contains(_ date: Date, calendar: Calendar = .current) -> Bool {
+        guard enabled, start != end else { return false }
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        return start < end ? (start..<end).contains(minute) : minute >= start || minute < end
+    }
+}
+
 /// What Maé does with a delivery, by its source's mode:
 /// - "Say right away": an announcement, as a timer that rings (it waits until nobody speaks, the chime, the text).
+/// - "Keep for later": the news, silently.
 /// - "Notification only": a Mac notification.
 /// - Urgent: said at once whatever the mode, if the source may ask for it; otherwise like the others.
-/// - Not said within 60 s (or its `expires`): never said late, a notification instead.
+/// - The announcements switched off, or the quiet hours (except for the urgent ones above): to the news instead.
+/// - Maé not ready (models loading, setup to finish): to the news instead.
+/// - Not said within 60 s (or its `expires`): never said late, the news instead (`InboundHost`).
 /// - The same text from the same source within 2 minutes: ignored.
-/// - Maé not ready (models loading, setup to finish): a notification.
 public struct InboundRules: Sendable {
     /// Seconds an announcement may wait to be said.
     public static let defaultExpiry = 60
@@ -332,24 +370,28 @@ public struct InboundRules: Sendable {
 
     public init() {}
 
-    /// `ready`: Maé can speak now (her models are loaded).
-    public mutating func decide(_ message: InboundMessage, from source: InboundSource, ready: Bool, now: Date = Date())
-        -> InboundDecision
+    /// `ready`: Maé can speak now (her models are loaded). `calendar`: the time zone the quiet hours are in.
+    public mutating func decide(_ message: InboundMessage, from source: InboundSource, ready: Bool,
+                                preferences: InboundPreferences = InboundPreferences(), now: Date = Date(),
+                                calendar: Calendar = .current) -> InboundDecision
     {
         var texts = (recent[source.id] ?? [:]).filter { now.timeIntervalSince($0.value) < Self.duplicateWindow }
         defer { recent[source.id] = texts }
         if texts[message.full] != nil { return InboundDecision(outcome: .duplicate) }
         texts[message.full] = now
-        let expiry = message.expires ?? Self.defaultExpiry
-        guard ready else { return InboundDecision(outcome: .notified) }
-        if message.urgent, source.mayBeUrgent {
-            return InboundDecision(outcome: .queued, urgent: true, expiresAfter: expiry)
+        let urgent = message.urgent && source.mayBeUrgent
+        if !urgent {
+            switch source.mode {
+            case .sayNow: break
+            case .keepForLater: return InboundDecision(outcome: .kept)
+            case .notifyOnly: return InboundDecision(outcome: .notified)
+            }
         }
-        switch source.mode {
-        case .sayNow: return InboundDecision(outcome: .queued, expiresAfter: expiry)
-        // Kept for later arrives with the news; until then it is not offered, and would be a notification.
-        case .notifyOnly, .keepForLater: return InboundDecision(outcome: .notified)
-        }
+        // Maé would say it now.
+        guard preferences.announcements else { return InboundDecision(outcome: .kept) }
+        if !urgent, preferences.quietHours.contains(now, calendar: calendar) { return InboundDecision(outcome: .kept) }
+        guard ready else { return InboundDecision(outcome: .kept) }
+        return InboundDecision(outcome: .queued, urgent: urgent, expiresAfter: message.expires ?? Self.defaultExpiry)
     }
 
     /// Forgets a source (removed, or its address changed).

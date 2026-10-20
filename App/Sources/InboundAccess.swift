@@ -42,6 +42,12 @@ final class InboundAccess {
         Task { await host?.setHomeRelay(nil) }
     }
 
+    /// The announcements switch and the quiet hours. Shown at once, saved by the host.
+    func setPreferences(_ preferences: InboundPreferences) {
+        status.preferences = preferences
+        Task { await host?.setPreferences(preferences) }
+    }
+
     /// A new source; its id once added.
     func addSource(name: String, origin: InboundSource.Origin = .home) async -> InboundSource.ID? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

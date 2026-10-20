@@ -396,6 +396,15 @@ writes what they answered; `--sources` offers these tools with the other corpora
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/sources-fr.json
 ```
 
+The news of received information (« Quoi de neuf ? », the tool `lire_nouvelles`, offered while a source exists):
+requests for the user's news, requests that must not use it (small talk, the news of the world, which is the web
+search's, actions with close words); `--news` offers it with the other corpora too, to check that it does not change
+their results:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/news-fr.json
+```
+
 Short conversations, as the app has them: the dialogues of `Tests/Fixtures/dialogues-fr.json` (here, a request for a
 moment already gone, then the user's new moment; or a request whose call the app refuses for the model's second try,
 then the user's answer to the app's question) are sent turn after turn, text only and with nothing created: each call

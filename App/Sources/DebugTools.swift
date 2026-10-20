@@ -650,7 +650,8 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
 }
 /// The demonstration engine announces too, so that received information can be tried end to end without loading the
 /// models (`-demo-idle` keeps it at rest): the chime, then the system's voice says the text, and it shows in the
-/// conversation. Announcements are never queued: the demo is always at rest.
+/// conversation. Announcements are never queued: the demo is always at rest. One that another one replaces before its
+/// end is stopped (the news keep it). It has no model, so no « Quoi de neuf ? » either.
 extension DemoConnection: Announcing {
     func canAnnounce() async -> Bool { true }
 
@@ -658,10 +659,12 @@ extension DemoConnection: Announcing {
         -> Bool
     {
         DebugLog.log("demo engine: announcement\(urgent ? " (urgent)" : ""): \(text)")
+        DemoAnnouncements.shared.set(id, .playing)
         play { sink in
             sink.yield(.state(.speaking))
             sink.yield(.assistantPiece(text))
             await DemoVoice.shared.say(text, language: language, chime: chime)
+            DemoAnnouncements.shared.set(id, Task.isCancelled ? .stopped : .said)
             sink.yield(.levels(input: 0, output: 0))
             sink.yield(.state(.listening))
         }
@@ -670,7 +673,9 @@ extension DemoConnection: Announcing {
 
     func withdrawAnnouncement(_ id: UUID) async -> Bool { false }
 
-    func announcementWaits(_ id: UUID) async -> Bool { false }
+    func announcementState(_ id: UUID) async -> AnnouncementState { DemoAnnouncements.shared.state(id) }
+
+    func useNews(_ news: NewsStore?) async {}
 
     func notify(title: String, body: String) async {
         DebugLog.log("demo engine: notification \(title): \(body)")
@@ -683,6 +688,21 @@ extension DemoConnection: Announcing {
 
     func requestNotificationPermission() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])
+    }
+}
+
+/// How the demonstration engine's announcements went.
+private final class DemoAnnouncements: @unchecked Sendable {
+    static let shared = DemoAnnouncements()
+    private let lock = NSLock()
+    private var states: [UUID: AnnouncementState] = [:]
+
+    func set(_ id: UUID, _ state: AnnouncementState) {
+        lock.withLock { states[id] = state }
+    }
+
+    func state(_ id: UUID) -> AnnouncementState {
+        lock.withLock { states[id] ?? .unknown }
     }
 }
 

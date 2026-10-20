@@ -322,6 +322,9 @@ public actor VoicePipeline {
         var recording: [VoiceAudio]?
     }
     private var announcements: [Announcement] = []
+    /// How the last announcements with an id ended (`announcementState`): said to their end, or stopped and not said
+    /// again. The 50 last.
+    private var announcementEnds: [(id: UUID, state: AnnouncementState)] = []
 
     /// A piece of an answer as the turn gave it to the voice (`deliver`): what it takes to say it again, and to record it.
     private struct SpokenPiece: Sendable {
@@ -611,6 +614,22 @@ public actor VoicePipeline {
     /// Whether an announcement is still waiting to be said (false once it has started).
     public func announcementWaits(_ id: UUID) -> Bool {
         announcements.contains { $0.id == id }
+    }
+
+    /// Where an announcement is: in the queue, being said, said to its end, or stopped before it and not said again
+    /// (received information: one the user did not hear is kept for later). `unknown` once taken back.
+    public func announcementState(_ id: UUID) -> AnnouncementState {
+        if announcements.contains(where: { $0.id == id }) { return .waiting }
+        if let turn, turn.announcement?.id == id { return .playing }
+        return announcementEnds.last { $0.id == id }?.state ?? .unknown
+    }
+
+    /// The turn's announcement is over: said to its end, or stopped and not said again.
+    private func announcementEnded(_ turn: Turn, _ state: AnnouncementState) {
+        guard let id = turn.announcement?.id else { return }
+        announcementEnds.removeAll { $0.id == id }
+        announcementEnds.append((id, state))
+        if announcementEnds.count > 50 { announcementEnds.removeFirst(announcementEnds.count - 50) }
     }
 
     /// Whether the voice's output reaches the user right now. The device that has the conversation (an iPhone) can be
@@ -2186,11 +2205,15 @@ public actor VoicePipeline {
             var metrics = TurnMetrics()
             metrics.language = announcement.language
             metrics.assistantText = turn.answer
+            announcementEnded(turn, .said)
             finish(turn, metrics: metrics)
         } catch is CancellationError {
         } catch {
             emit.yield(.failure("\(error)"))
-            if self.turn === turn { finish(turn, metrics: nil) }
+            if self.turn === turn {
+                announcementEnded(turn, .stopped)
+                finish(turn, metrics: nil)
+            }
         }
     }
 
@@ -2247,6 +2270,7 @@ public actor VoicePipeline {
         if retried { announcement.retried = true }
         if recorded, turn.voiceEnded, !turn.recording.isEmpty { announcement.recording = turn.recording }
         announcements.insert(announcement, at: 0)
+        announcementEnds.removeAll { $0.id == announcement.id && announcement.id != nil }
         DebugLog.log("turn \(turn.id): the announcement is said again later")
         guard !turn.answer.isEmpty else { return }
         var metrics = TurnMetrics()
@@ -2261,6 +2285,7 @@ public actor VoicePipeline {
     /// have heard all of it. Stopped during its chime (asked to be quiet), none of its words was heard: the history does
     /// not keep it. Either way, what the interfaces showed of it is reported cut off.
     private func dropAnnouncement(_ turn: Turn, wordsHeard: Bool) {
+        announcementEnded(turn, .stopped)
         guard let announcement = turn.announcement, !turn.answer.isEmpty else { return }  // nothing shown or said
         DebugLog.log("turn \(turn.id): the announcement is stopped, not said again")
         if wordsHeard, let message = turn.userMessage {
@@ -2395,7 +2420,11 @@ public actor VoicePipeline {
         self.turn = nil
         voiceIsAudible()  // never leave the model paused
         DebugLog.log("turn \(turn.id): cancelling")
-        if turn.isAnnouncement, !turn.audioStarted { sayAgainLater(turn) }  // nothing of it was heard yet
+        if turn.isAnnouncement, !turn.audioStarted {
+            sayAgainLater(turn)  // nothing of it was heard yet
+        } else if turn.isAnnouncement, !turn.interrupted {
+            announcementEnded(turn, .stopped)  // a new conversation, or the pipeline stops
+        }
         if !forgetting, !turn.interrupted, case .answer(let resume)? = turn.unheard { recordHeard(resume) }
         turn.task?.cancel()
         turn.player?.cancel()

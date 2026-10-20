@@ -6,7 +6,8 @@ import VoiceCore
 
 // Received information, the Mac's side: the sources and their secret addresses, the home relay registration, the
 // internet path (the public relay passing TLS through to the Mac's own certificate, InboundInternet.swift), the
-// deliveries' HTTP exchange, and what becomes of them (said, notified, ignored), with a log per source.
+// deliveries' HTTP exchange, and what becomes of them (said, kept for later in the news, notified, ignored), with a log
+// per source.
 
 /// A delivery in its source's log: when, by which path, in which form, what became of it, from which address, and
 /// its text, cleaned. Never the body as it came.
@@ -15,9 +16,11 @@ public struct InboundLogEntry: Codable, Sendable, Equatable, Identifiable {
         /// Waiting to be said.
         case queued
         case said
-        /// Not said in time: a notification instead.
+        /// Not said in time: kept for later (the news) instead.
         case expired
         case notified
+        /// Kept for later, in the news: by its source's mode, the quiet hours, the announcements switched off, Maé not
+        /// ready, or an announcement stopped before its end.
         case kept
         case duplicate
         /// Refused: the source is paused (answered 404).
@@ -102,6 +105,8 @@ public struct InboundStatus: Sendable, Equatable {
     /// The Mac's inbound name, once its keys exist.
     public var inboundName: String?
     public var sources: [InboundSource] = []
+    /// The announcements switch and the quiet hours, for every source.
+    public var preferences = InboundPreferences()
     /// Each source's secret address, when it has one (a home source needs the home relay, an internet source a relay
     /// with an inbound domain).
     public var addresses: [UUID: URL] = [:]
@@ -174,7 +179,9 @@ public final class MemoryInboundSecrets: InboundSecretStore, @unchecked Sendable
 
 /// Received information on the Mac. It keeps the sources (a file next to the link's) and their secrets (keychain),
 /// stays registered with the home relay when one is set (an inbound registration, apart from the iPhones' relay),
-/// answers each delivery at once, then has Maé say it (`Announcing`) or shows a notification.
+/// answers each delivery at once, then has Maé say it (`Announcing`), keeps it for later in the news (a file next to
+/// the sources', `NewsStore`), or shows a notification. While a source exists, the engine offers the news to the model
+/// (lire_nouvelles, « Quoi de neuf ? »).
 public actor InboundHost {
     /// 64 KB of body at most, sent within 10 seconds.
     public static let maxBody = 64 * 1024
@@ -204,6 +211,11 @@ public actor InboundHost {
     private var identity: DeviceIdentity?
     private var registration: RelayRegistration?
     private var registrationTasks: [Task<Void, Never>] = []
+    /// What Maé keeps for later.
+    public nonisolated let news: NewsStore
+    /// Whether the engine was last given the news (a source exists), and the hand-over under way.
+    private var newsOffered = false
+    private var newsHandOver: Task<Void, Never>?
 
     // The internet path.
     private let keys: any InboundKeyStore
@@ -232,6 +244,7 @@ public actor InboundHost {
         self.identityStore = identityStore
         self.secrets = secrets
         self.storeURL = storeURL
+        news = NewsStore(url: storeURL?.deletingLastPathComponent().appending(path: "news.json"), now: now)
         self.keys = keys ?? MemoryInboundKeys()
         self.acme = acme
         self.requestTime = requestTime
@@ -271,6 +284,14 @@ public actor InboundHost {
 
     // MARK: - Settings
 
+    /// The announcements switch and the quiet hours.
+    public func setPreferences(_ preferences: InboundPreferences) {
+        guard preferences != state.preferences else { return }
+        state.preferences = preferences
+        save()
+        publish()
+    }
+
     public func setHomeRelay(_ address: URL?) {
         guard address != state.homeRelayAddress else { return }
         state.homeRelayAddress = address
@@ -294,16 +315,16 @@ public actor InboundHost {
     /// Adds a source with a new secret address; returns its id.
     @discardableResult
     public func addSource(name: String, origin: InboundSource.Origin = .home, mode: InboundSource.Mode = .sayNow) -> UUID {
-        let first = state.sources.isEmpty
         let source = InboundSource(name: name, origin: origin, mode: mode, created: now())
         setSecret(InboundSecret.generate(), for: source.id)
         state.sources.append(source)
         save()
         updateRegistration()
         updateInternetPath()
+        offerNews()
         publish()
-        if first || mode == .notifyOnly {
-            // What a source sends may end in a notification (not said in time, Maé not ready).
+        if mode == .notifyOnly {
+            // Only these sources end in notifications: what is not said is kept for later, in the news.
             let announcer = announcer
             Task { await announcer?.requestNotificationPermission() }
         }
@@ -332,6 +353,7 @@ public actor InboundHost {
         rules.forget(id)
         save()
         updateInternetPath()
+        offerNews()
         publish()
     }
 
@@ -350,7 +372,10 @@ public actor InboundHost {
                                      language: .french)
         let entry = log(InboundLogEntry(date: now(), path: nil, form: .text, result: .queued, text: message.full),
                         for: source.id)
-        await say(message, from: source, entry: entry, urgent: false, expiresAfter: InboundRules.defaultExpiry)
+        let item = await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
+                                           language: message.language, state: .announcing))
+        await say(message, from: source, entry: entry, item: item, urgent: false,
+                  expiresAfter: InboundRules.defaultExpiry)
     }
 
     // MARK: - Deliveries
@@ -481,7 +506,7 @@ public actor InboundHost {
             message = read
         }
         let ready = await announcer?.canAnnounce() ?? false
-        let decision = rules.decide(message, from: source, ready: ready, now: now())
+        let decision = rules.decide(message, from: source, ready: ready, preferences: state.preferences, now: now())
         let result: InboundLogEntry.Result = switch decision.outcome {
         case .queued: .queued
         case .kept: .kept
@@ -494,48 +519,78 @@ public actor InboundHost {
         switch decision.outcome {
         case .duplicate:
             return HTTPResponse.json(200, ["status": "duplicate"])
-        case .notified, .kept:
+        case .notified:
             notify(message, from: source)
-            return HTTPResponse.json(202, ["status": decision.outcome.rawValue])
+            return HTTPResponse.json(202, ["status": "notified"])
+        case .kept:
+            await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
+                                    language: message.language))
+            return HTTPResponse.json(202, ["status": "kept"])
         case .queued:
-            Task { await self.say(message, from: source, entry: entry, urgent: decision.urgent,
+            // In the news from now on, as being announced: should it not be said to its end, it stays there.
+            let item = await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
+                                               language: message.language, state: .announcing))
+            Task { await self.say(message, from: source, entry: entry, item: item, urgent: decision.urgent,
                                   expiresAfter: decision.expiresAfter) }
             return HTTPResponse.json(202, ["status": "queued"])
         }
     }
 
-    /// Has Maé say it, after the chime, as soon as nobody speaks; if it is not said in time, a notification instead.
-    private func say(_ message: InboundMessage, from source: InboundSource, entry: UUID, urgent: Bool,
+    /// Has Maé say it, after the chime, as soon as nobody speaks; with "news": true (the welcome home), the news after it
+    /// (`NewsPhrases.whileAway`). Said to its end, its item in the news is marked said, and the news it read are taken
+    /// out. Not said in time (it is never said late), stopped before its end (the user spoke over it, the stop button…),
+    /// or Maé not ready: it stays in the news, unread, and so do the news it was to read.
+    private func say(_ message: InboundMessage, from source: InboundSource, entry: UUID, item: UUID, urgent: Bool,
                      expiresAfter: Int) async
     {
+        var text = message.spoken
+        var held: [UUID] = []
+        if message.news {
+            let (items, left) = await news.hold()
+            if let away = NewsPhrases.whileAway(items, left: left, now: now(), language: message.language) {
+                text += " " + away
+                held = items.map(\.id)
+            }
+        }
+        let news = news
+        func ended(said: Bool, _ result: InboundLogEntry.Result) async {
+            await news.set(item, to: said ? .said : .unread)
+            await news.release(held, said: said)
+            update(entry, of: source.id, to: result)
+        }
         guard let announcer, await announcer.canAnnounce() else {
-            notify(message, from: source)
-            update(entry, of: source.id, to: .notified)
+            await ended(said: false, .kept)
             return
         }
         let id = UUID()
         let note = InboundPhrases.note(source: source.name, receivedAt: now())
-        guard await announcer.announce(message.spoken, note: note, language: message.language, chime: true,
-                                       urgent: urgent, id: id)
+        guard await announcer.announce(text, note: note, language: message.language, chime: true, urgent: urgent, id: id)
         else {
-            notify(message, from: source)
-            update(entry, of: source.id, to: .notified)
+            await ended(said: false, .kept)
             return
         }
-        let deadline = ContinuousClock.now + expiryUnit * expiresAfter
-        while ContinuousClock.now < deadline {
-            try? await Task.sleep(for: min(.milliseconds(250), expiryUnit * expiresAfter))
-            if await !announcer.announcementWaits(id) {
-                update(entry, of: source.id, to: .said)
+        let wait = expiryUnit * expiresAfter
+        let deadline = ContinuousClock.now + wait
+        while true {
+            try? await Task.sleep(for: min(.milliseconds(250), wait))
+            switch await announcer.announcementState(id) {
+            case .waiting:
+                // Never said late. Taken back unless it has just started.
+                if ContinuousClock.now >= deadline, await announcer.withdrawAnnouncement(id) {
+                    DebugLog.log("received information: not said in time, kept for later")
+                    await ended(said: false, .expired)
+                    return
+                }
+            case .playing:
+                continue
+            case .said:
+                await ended(said: true, .said)
+                return
+            case .stopped, .unknown:
+                DebugLog.log("received information: stopped before its end, kept for later")
+                await ended(said: false, .kept)
                 return
             }
-        }
-        // Never said late.
-        if await announcer.withdrawAnnouncement(id) {
-            notify(message, from: source)
-            update(entry, of: source.id, to: .expired)
-        } else {
-            update(entry, of: source.id, to: .said)
         }
     }
 
@@ -951,6 +1006,8 @@ public actor InboundHost {
         var logs: [UUID: [InboundLogEntry]] = [:]
         /// The internet path's certificate (public; its key is in the keychain).
         var certificate: InboundCertificate?
+        /// Optional: a file written before the news has none.
+        var preferences: InboundPreferences?
     }
 
     private func load() {
@@ -960,6 +1017,7 @@ public actor InboundHost {
             state.homeRelayAddress = stored.homeRelay
             state.sources = stored.sources
             state.logs = stored.logs.mapValues { Self.pruned($0, now: now()) }
+            state.preferences = stored.preferences ?? InboundPreferences()
             certificate = stored.certificate
         }
         for source in state.sources {
@@ -977,13 +1035,26 @@ public actor InboundHost {
         }
         updateRegistration()
         updateInternetPath()
+        offerNews()
         publish()
+    }
+
+    /// The engine offers the news to the model while a source exists, paused or not; one hand-over after the other.
+    private func offerNews() {
+        let offered = !state.sources.isEmpty
+        guard offered != newsOffered else { return }
+        newsOffered = offered
+        let (previous, announcer, news) = (newsHandOver, announcer, news)
+        newsHandOver = Task {
+            await previous?.value
+            await announcer?.useNews(offered ? news : nil)
+        }
     }
 
     private func save() {
         guard let storeURL else { return }
         let stored = Stored(homeRelay: state.homeRelayAddress, sources: state.sources, logs: state.logs,
-                            certificate: certificate)
+                            certificate: certificate, preferences: state.preferences)
         do {
             try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)

@@ -29,7 +29,11 @@ private actor PrintingAnnouncer: Announcing {
     }
 
     func withdrawAnnouncement(_ id: UUID) -> Bool { false }
-    func announcementWaits(_ id: UUID) -> Bool { false }
+    func announcementState(_ id: UUID) -> AnnouncementState { .said }
+
+    func useNews(_ news: NewsStore?) {
+        print("\(stamp()) news \(news == nil ? "taken away" : "offered") (lire_nouvelles)")
+    }
 
     func notify(title: String, body: String) {
         print("\(stamp()) notification: \(title) — \(body)")

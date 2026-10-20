@@ -12,8 +12,8 @@
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
 //                           [--watch-calls] [--examples app|none|file] [--web] [--addendum file]
 //                           [--web-addendum file] [--searxng http://127.0.0.1:8888 [--searxng-user name]]
-//                           [--record file.json] [--compare-beginnings] [--compare-requests] [--bfloat16-prompts]
-//                           [--bfloat16-experts]
+//                           [--record file.json] [--sources] [--news] [--compare-beginnings] [--compare-requests]
+//                           [--bfloat16-prompts] [--bfloat16-experts]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -25,6 +25,9 @@
 // up what the corpus recorded for the request ("recordedSources", as the model reads it), or with --live-sources what
 // the real services answer (Open-Meteo, the ECB's rates, CoinGecko, Apple's maps; "here" is the corpus's "here"), timed;
 // --record-sources writes those answers, by request, in the corpus's shape.
+//
+// The news' tool, lire_nouvelles (a corpus with "news": true, or --news with any corpus, to check that it does not change
+// the choice of the other tools), takes no argument: choosing it is all there is to check. Tests/Fixtures/news-fr.json.
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -77,6 +80,8 @@ private struct Corpus: Decodable {
     var here: Place?
     /// What a source answered for a request (by its phrase), as the model reads it: summed up by the model.
     var recordedSources: [String: JSONValue]?
+    /// The news' tool is offered too (a source of received information exists).
+    var news: Bool?
 
     struct Case: Decodable {
         var phrase: String
@@ -251,13 +256,15 @@ func runActionsBench(_ o: Options) async throws {
         guard o.addendum == nil else { throw CLIError("--addendum replaces the actions part: not with --no-actions") }
         print("the actions left out, as in the app when they are off")
     }
-    // In the app's order: the actions, the agents, the web search, the built-in sources.
+    let news = corpus.news == true || o.news
+    // In the app's order: the actions, the agents, the web search, the built-in sources, the news.
     let tools = (actions ? ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : [])
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
         + (web ? [WebSearchCatalog.search] : [])
         + (sources ? BuiltInSources.tools : [])
+        + (news ? [NewsCatalog.read] : [])
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
         WeatherCatalog.name: WeatherTools(on: true, here: here),
@@ -306,6 +313,7 @@ func runActionsBench(_ o: Options) async throws {
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
+        + (news ? [NewsCatalog.promptAddendum] : [])
     let examples = o.examples ?? (actions && ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
@@ -438,6 +446,8 @@ func runActionsBench(_ o: Options) async throws {
                 result.refusal = refused.forModel
                 if result.toolOK, item.expected != nil { result.argumentsOK = false }
             }
+        } else if let call, call.name == NewsCatalog.readName {
+            // The news: no argument, nothing for the app to refuse; the app reads them itself.
         } else if let call, BuiltInSources.names.contains(call.name) {
             // A built-in source: whether the app accepts the call and reads it as the corpus expects, then the model's
             // summary of what the source answered (recorded, or asked for real).
@@ -1171,10 +1181,11 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
 
     // Expected / chosen.
     let optional = AgentCatalog.names.union([WebSearchCatalog.searchName]).union(BuiltInSources.names)
+        .union([NewsCatalog.readName])
     let tools = ["creer_evenement", "creer_rappel", "lire_agenda", "lister_rappels", "modifier_element",
                  "supprimer_element", "minuteur", "lancer_raccourci", AgentCatalog.delegateName, AgentCatalog.statusName,
                  AgentCatalog.followUpName, AgentCatalog.cancelName, WebSearchCatalog.searchName, WeatherCatalog.name,
-                 QuoteCatalog.name, TravelTimeCatalog.name, "aucun"]
+                 QuoteCatalog.name, TravelTimeCatalog.name, NewsCatalog.readName, "aucun"]
         .filter { name in !optional.contains(name) || results.contains { $0.expected == name || $0.chosen == name } }
     let others2 = Set(results.map(\.chosen)).subtracting(tools).sorted()
     let columns = tools + others2

@@ -184,13 +184,14 @@ struct ReceivedInformationTests {
         #expect(second.expiresAfter == InboundRules.defaultExpiry)
     }
 
-    @Test func notReadyBecomesANotification() {
+    /// Held while Maé is not ready (models loading, setup to finish): kept for later, in the news.
+    @Test func notReadyIsKeptForLater() {
         var rules = InboundRules()
         let m = InboundMessage(form: .text, title: nil, text: "Le courrier est arrivé", urgent: true)
         var urgentHome = home
         urgentHome.mayBeUrgent = true
         let decision = rules.decide(m, from: urgentHome, ready: false)
-        #expect(decision.outcome == .notified)
+        #expect(decision.outcome == .kept)
     }
 
     @Test func duplicatesWithinTwoMinutes() {

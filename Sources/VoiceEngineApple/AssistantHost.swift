@@ -66,6 +66,11 @@ public actor AssistantHost: AssistantConnection {
     private let weatherTools: WeatherTools
     private let quoteTools = QuoteTools()
     private let travelTools: TravelTimeTools
+    /// The news of received information (« Quoi de neuf ? »): offered while a source exists (`useNews`), with the
+    /// actions or without.
+    private let newsTools = NewsTools()
+    /// The news came or went while the models loaded: the tools are set again once they are loaded.
+    private var newsChangedWhileLoading = false
     private var actionsStatus: ActionsStatus?
     /// Counts the checks of Claude Code (`reportClaudeCode`): only the last one's answer goes to the app.
     private var claudeCodeChecks = 0
@@ -311,6 +316,9 @@ public actor AssistantHost: AssistantConnection {
         if restartWhenLoaded {
             restartWhenLoaded = false
             await restart()
+        } else if newsChangedWhileLoading {
+            newsChangedWhileLoading = false
+            await newsChanged()
         }
     }
 
@@ -538,8 +546,8 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Actions
 
-    /// The tools for a new pipeline or conversation: the actions when they are on; Claude Code, the web search and the
-    /// built-in sources when they are, with the actions or on their own; nil when all are off.
+    /// The tools for a new pipeline or conversation: the actions when they are on; Claude Code, the web search, the
+    /// built-in sources and the news when they are, with the actions or on their own; nil when all are off.
     private func toolRunner() async -> ToolRunner? {
         await configureWebSearch()
         await configureSources()
@@ -549,12 +557,13 @@ public actor AssistantHost: AssistantConnection {
             // In the same order as with the actions.
             let agents: [any ToolProvider] = settings.claudeCode.enabled ? [agentTools] : []
             let search: [any ToolProvider] = settings.webSearch.isReady ? [webSearchTools] : []
-            let on = agents + search + (sourcesOn ? sources : [])
+            let on = agents + search + (sourcesOn ? sources : []) + (await newsTools.isOn ? [newsTools] : [])
             return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
-        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources)
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources
+            + [newsTools])
     }
 
     /// The built-in sources are offered: switched on, on a tier whose model passed their benchmark.
@@ -876,8 +885,9 @@ extension AssistantHost: RemoteAudioRouting {
     }
 }
 
-/// Information received from other systems (OpenMaeLink's received information) is said like a timer that rings, or
-/// shown in a notification. Not an `AssistantCommand`: a paired iPhone cannot trigger it.
+/// Information received from other systems (OpenMaeLink's received information) is said like a timer that rings, kept
+/// for the news (read by lire_nouvelles), or shown in a notification. Not an `AssistantCommand`: a paired iPhone cannot
+/// trigger it.
 extension AssistantHost: Announcing {
     public func canAnnounce() async -> Bool {
         stage == .running && pipeline != nil
@@ -898,8 +908,33 @@ extension AssistantHost: Announcing {
         await pipeline?.withdrawAnnouncement(id) ?? false
     }
 
-    public func announcementWaits(_ id: UUID) async -> Bool {
-        await pipeline?.announcementWaits(id) ?? false
+    public func announcementState(_ id: UUID) async -> AnnouncementState {
+        await pipeline?.announcementState(id) ?? .unknown
+    }
+
+    /// The tool lire_nouvelles comes or goes with the first source added, or the last one removed. With the actions,
+    /// the system prompt is computed again and the conversation goes on; without them, the tools are set again and a
+    /// new conversation starts, as for the web search on its own.
+    public func useNews(_ news: NewsStore?) async {
+        guard await newsTools.configure(news) else { return }
+        DebugLog.log("news: lire_nouvelles \(news == nil ? "taken away" : "offered")")
+        await newsChanged()
+    }
+
+    private func newsChanged() async {
+        guard stage == .running, let pipeline else {
+            if stage == .loading { newsChangedWhileLoading = true }  // its tools may have been read before
+            return
+        }
+        do {
+            if settings.actionsEnabled {
+                try await pipeline.toolsChanged()
+            } else {
+                try await pipeline.setTools(await toolRunner())
+            }
+        } catch {
+            emit.yield(.warning("\(error)"))
+        }
     }
 
     public func notify(title: String, body: String) async {

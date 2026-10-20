@@ -5,10 +5,11 @@ import VoiceCore
 
 /// Settings › Received information: short texts that other systems (Home Assistant, a script, a service on the
 /// internet…) send Maé to say. The page shows the two paths their deliveries take to this Mac (the home relay, and the
-/// internet path through the iPhones' relay, which cannot read them) and the sources; a source's page shows its secret
-/// address, what Maé does with what it sends and its last deliveries. Adding a source, changing its address, removing
-/// it, the home relay's address and how to send from Home Assistant go through sheets. The design draws the home path
-/// only: the internet path takes the same form.
+/// internet path through the iPhones' relay, which cannot read them), the sources, and, once there is one, the
+/// announcements switch and the quiet hours (what is not said goes to the news, « Quoi de neuf ? »); a source's page
+/// shows its secret address, what Maé does with what it sends and its last deliveries. Adding a source, changing its
+/// address, removing it, the home relay's address and how to send from Home Assistant go through sheets. The design
+/// draws the home path only: the internet path and the announcements take the same form.
 struct InboundPage: View {
     let inbound: InboundAccess
     @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
@@ -47,6 +48,10 @@ struct InboundPage: View {
                 NavigationLine(title: Text("Send from Home Assistant")) { inbound.sheet = .homeAssistant(nil) }
             }
             .padding(.top, 14)
+            if !status.sources.isEmpty {
+                PageSection("Announcements")
+                SettingsCard { AnnouncementRows(inbound: inbound) }
+            }
         }
         .onAppear { inbound.checkInternetOffer() }
     }
@@ -170,6 +175,67 @@ private struct InternetPathRows: View {
             Caption("Your relay offers it, without being able to read what is sent. Add a source with the origin Internet to use it.")
         case .checking:
             Caption("Checking what your relay offers…")
+        }
+    }
+}
+
+// MARK: - Announcements
+
+/// "Announcements": whether Maé says on her own what the sources send, and the quiet hours. What she does not say is
+/// kept for later, in the news.
+private struct AnnouncementRows: View {
+    let inbound: InboundAccess
+
+    private var preferences: InboundPreferences { inbound.status.preferences }
+
+    var body: some View {
+        SwitchRow("On", isOn: binding(\.announcements))
+        if preferences.announcements {
+            Caption("Maé says what your sources send as it arrives, as each source’s mode says.")
+            Hairline()
+            SwitchRow("Quiet hours", isOn: binding(\.quietHours.enabled))
+            if preferences.quietHours.enabled {
+                SettingRow("Hours") {
+                    HStack(spacing: 8) {
+                        HourMenu(minutes: binding(\.quietHours.start), label: Text("Start of the quiet hours"))
+                        Text("to")
+                            .textStyle(.setting)
+                            .foregroundStyle(Palette.inkMuted)
+                        HourMenu(minutes: binding(\.quietHours.end), label: Text("End of the quiet hours"))
+                    }
+                }
+            }
+            Caption("Meanwhile, what should be said right away is kept for later. Urgent announcements are still said.")
+        } else {
+            Caption("Maé says nothing on her own: everything is kept for later. Ask her “What’s new?” to hear it.")
+        }
+    }
+
+    private func binding<Value>(_ key: WritableKeyPath<InboundPreferences, Value>) -> Binding<Value> {
+        Binding(get: { inbound.status.preferences[keyPath: key] }, set: { value in
+            var preferences = inbound.status.preferences
+            preferences[keyPath: key] = value
+            inbound.setPreferences(preferences)
+        })
+    }
+}
+
+/// An hour of the day, on the hour, in a pop-up menu.
+private struct HourMenu: View {
+    @Binding var minutes: Int
+    let label: Text
+
+    var body: some View {
+        PopUpMenu(title: Text(verbatim: InboundWords.hour(minutes)), label: label) {
+            Picker(selection: $minutes) {
+                ForEach(0..<24, id: \.self) { hour in
+                    Text(verbatim: InboundWords.hour(hour * 60)).tag(hour * 60)
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
     }
 }
@@ -303,17 +369,27 @@ struct InboundSourcePage: View {
 
     @ViewBuilder private var behaviour: some View {
         SettingRow("When information arrives") {
-            WindowSegmented(selection: Binding<InboundSource.Mode>(
-                get: { source.mode == .notifyOnly ? .notifyOnly : .sayNow },
-                set: { mode in change { $0.mode = mode } }),
-                            options: [(value: .sayNow, title: "Say right away"),
-                                      (value: .notifyOnly, title: "Notification only")],
-                            label: Text("What Maé does"))
+            PopUpMenu(title: Text(verbatim: InboundWords.mode(source.mode)), label: Text("When information arrives")) {
+                Picker(selection: Binding<InboundSource.Mode>(get: { source.mode },
+                                                              set: { mode in change { $0.mode = mode } }))
+                {
+                    ForEach(InboundSource.Mode.allCases, id: \.self) { mode in
+                        Text(verbatim: InboundWords.mode(mode)).tag(mode)
+                    }
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
         }
-        if source.mode == .notifyOnly {
+        switch source.mode {
+        case .sayNow:
+            Caption("After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it is kept for later.")
+        case .keepForLater:
+            Caption("Maé keeps it without a word, and reads it when you ask “What’s new?”.")
+        case .notifyOnly:
             Caption("A notification on this Mac, with the name of the source. Maé says nothing.")
-        } else {
-            Caption("After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it becomes a notification.")
         }
         Hairline()
         SwitchRow("May ask for an urgent announcement", isOn: binding(\.mayBeUrgent))
@@ -596,6 +672,13 @@ struct HomeAssistantSheet: View {
                 CodeBlock(code: HomeAssistantExample.test)
                 Caption("Maé says it right away. Then call the same action from any automation.")
                     .padding(.top, 16)
+                PageSection("Welcome home")
+                Text("With “news: true”, Maé says the text, then the news she kept for you. For example, when you come home:")
+                    .textStyle(.step)
+                    .foregroundStyle(Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 10)
+                CodeBlock(code: HomeAssistantExample.welcome)
             }
             .padding(.top, -6)
         } footer: {
@@ -616,7 +699,24 @@ private enum HomeAssistantExample {
                 url: !secret mae_address
                 method: post
                 content_type: "application/json"
-                payload: "{{ {'text': message} | to_json }}"
+                payload: "{{ {'text': message, 'news': news | default(false)} | to_json }}"
+            """)
+    }
+
+    /// An automation for coming home: the text, then the news.
+    static var welcome: String {
+        String(localized: """
+            automation:
+              - alias: "Back home: Maé welcomes you"
+                triggers:
+                  - trigger: state
+                    entity_id: person.<you>
+                    to: "home"
+                actions:
+                  - action: rest_command.notify_mae
+                    data:
+                      message: "Good evening, welcome back."
+                      news: true
             """)
     }
 
@@ -773,6 +873,13 @@ enum InboundWords {
         }
     }
 
+    /// "22:00": an hour of the quiet hours, `minutes` after midnight.
+    static func hour(_ minutes: Int) -> String {
+        let date = Calendar.current.date(bySettingHour: minutes / 60 % 24, minute: minutes % 60, second: 0, of: Date())
+            ?? Date()
+        return date.formatted(.dateTime.hour().minute().locale(TaskText.locale))
+    }
+
     /// "192.168.1.10:8080": the home relay's address as it is typed, without "http://".
     static func shortAddress(_ url: URL) -> String {
         let text = url.absoluteString
@@ -813,7 +920,7 @@ enum InboundWords {
         switch result {
         case .queued: Text("Waiting")
         case .said: Text("Said")
-        case .expired: Text("Too late: notified")
+        case .expired: Text("Too late: kept for later")
         case .notified: Text("Notified")
         case .kept: Text("Kept for later")
         case .duplicate: Text("Duplicate: ignored")

@@ -131,6 +131,21 @@ extension Snapshots {
         notOffered.addresses[webhook.id] = nil
         var internetDown = internet
         internetDown.internetPath = .unreachable
+        // The news: quiet hours, announcements off, a source kept for later.
+        var quiet = connected
+        quiet.preferences = InboundPreferences(quietHours: QuietHours(enabled: true))
+        var silent = connected
+        silent.preferences = InboundPreferences(announcements: false)
+        let gladys = InboundSource(name: "Gladys", mode: .keepForLater, created: ago(minutes: 4000))
+        var keeping = connected
+        keeping.sources = [homeAssistant, gladys, garage]
+        keeping.addresses[gladys.id] = relay.appending(path: inboundName).appending(path: "in").appending(path: secret(5))
+        keeping.logs[gladys.id] = [
+            InboundLogEntry(date: ago(minutes: 30), path: .homeRelay, form: .json, result: .kept, caller: "192.168.1.40",
+                            text: "Le linge est prêt."),
+            InboundLogEntry(date: ago(minutes: 140), path: .homeRelay, form: .json, result: .kept,
+                            caller: "192.168.1.40", text: "Le lave-vaisselle a fini."),
+        ]
 
         // Connected tools (not reachable yet: their pages are drawn for whoever builds them)
         func action(_ id: String, _ title: String, reads: Bool = false, on: Bool = true) -> ConnectedTool.Action {
@@ -339,7 +354,11 @@ extension Snapshots {
                               inbound.page = .source(homeAssistant.id)
                               inbound.sheet = .homeAssistant(homeAssistant.id)
                           },
-                          minHeight: 1250),
+                          minHeight: 1400),
+            SettingsScene(name: "RgInfos-heures-calmes", page: .inbound, inbound: quiet),
+            SettingsScene(name: "RgInfos-annonces-coupees", page: .inbound, inbound: silent),
+            SettingsScene(name: "RgInfosSource-garder", page: .inbound, inbound: keeping,
+                          prepare: { _, _, inbound in inbound.page = .source(gladys.id) }),
             // Advanced
             SettingsScene(name: "RgAvance", page: .advanced, events: [bigStorage], settings: wakeWordLog),
             SettingsScene(name: "RgAvanceTelechargement", page: .advanced, events: setup, settings: wakeWordLog,

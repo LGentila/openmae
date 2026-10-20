@@ -54,24 +54,42 @@ private actor FakeAnnouncer: Announcing {
     var ready = true
     /// Someone speaks: announcements wait.
     var holding = false
+    /// The user stops what is said before its end (speaks over it, Escape…).
+    var stopping = false
+    /// What the engine was asked to say (whether it was said to its end or not).
     private(set) var said: [Said] = []
     private(set) var notifications: [(title: String, body: String)] = []
-    private var waiting: Set<UUID> = []
+    private var states: [UUID: AnnouncementState] = [:]
+    /// The news, while the engine offers lire_nouvelles; and each time it was given or taken away.
+    private(set) var news: NewsStore?
+    private(set) var newsOffers: [Bool] = []
 
     func set(ready: Bool) { self.ready = ready }
     func set(holding: Bool) { self.holding = holding }
+    func set(stopping: Bool) { self.stopping = stopping }
 
     func canAnnounce() -> Bool { ready }
 
     func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID) -> Bool {
         guard ready else { return false }
         said.append(Said(text: text, note: note, urgent: urgent, language: language))
-        if holding { waiting.insert(id) }
+        states[id] = holding ? .waiting : stopping ? .stopped : .said
         return true
     }
 
-    func withdrawAnnouncement(_ id: UUID) -> Bool { waiting.remove(id) != nil }
-    func announcementWaits(_ id: UUID) -> Bool { waiting.contains(id) }
+    func withdrawAnnouncement(_ id: UUID) -> Bool {
+        guard states[id] == .waiting else { return false }
+        states[id] = nil
+        return true
+    }
+
+    func announcementState(_ id: UUID) -> AnnouncementState { states[id] ?? .unknown }
+
+    func useNews(_ news: NewsStore?) {
+        self.news = news
+        newsOffers.append(news != nil)
+    }
+
     func notify(title: String, body: String) { notifications.append((title, body)) }
     func requestNotificationPermission() {}
 }
@@ -277,14 +295,16 @@ struct InboundTests {
         #expect(await rig.announcer.said.count == 1)
     }
 
-    @Test func notReadyBecomesANotification() async {
+    @Test func notReadyIsKeptForLater() async {
         let rig = await makeRig()
         await rig.announcer.set(ready: false)
         let tube = await rig.post(#"{"title": "Garage", "text": "La porte est ouverte"}"#)
-        #expect(tube.json == ["status": "notified"])
-        #expect(await eventually { await rig.announcer.notifications.count == 1 })
-        #expect(await rig.announcer.notifications.first?.title == "Garage")
-        #expect(await rig.announcer.notifications.first?.body == "La porte est ouverte")
+        #expect(tube.json == ["status": "kept"])
+        #expect(await rig.log().first?.result == .kept)
+        #expect(await rig.host.news.unread.map(\.text) == ["Garage\u{00A0}: La porte est ouverte"])
+        #expect(await rig.host.news.unread.first?.source == "Home Assistant")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await rig.announcer.notifications.isEmpty)
         #expect(await rig.announcer.said.isEmpty)
     }
 
@@ -301,11 +321,117 @@ struct InboundTests {
         // 10 s at the least, here 10 × 20 ms.
         let tube = await rig.post(#"{"text": "Le bus passe dans deux minutes", "expires": 10}"#)
         #expect(tube.json == ["status": "queued"])
+        // Not news while it waits to be said.
+        #expect(await rig.host.news.unread.isEmpty)
         #expect(await eventually { await rig.log().first?.result == .expired })
-        // The notification is posted from a task of its own: the log may say expired before it arrives.
-        #expect(await eventually { await rig.announcer.notifications.first?.body == "Le bus passe dans deux minutes" })
-        // Taken back from the engine: it will not be said.
+        // Taken back from the engine: it will not be said; kept for later instead of a notification.
         #expect(await rig.announcer.said.count == 1)
+        #expect(await rig.host.news.unread.map(\.text) == ["Le bus passe dans deux minutes"])
+        #expect(await rig.announcer.notifications.isEmpty)
+    }
+
+    // MARK: - The news
+
+    @Test func keepForLaterSource() async {
+        let rig = await makeRig { $0.mode = .keepForLater }
+        let tube = await rig.post(#"{"text": "Le linge est prêt"}"#)
+        #expect(tube.status == 202 && tube.json == ["status": "kept"])
+        #expect(await rig.log().first?.result == .kept)
+        #expect(await rig.host.news.unread.map(\.text) == ["Le linge est prêt"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await rig.announcer.said.isEmpty)
+        #expect(await rig.announcer.notifications.isEmpty)
+    }
+
+    @Test func quietHoursAndTheAnnouncementsSwitch() async {
+        let rig = await makeRig()
+        // Quiet from an hour ago to an hour from now.
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: Date())
+        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        await rig.host.setPreferences(InboundPreferences(quietHours: QuietHours(enabled: true, start: (minute + 1380) % 1440,
+                                                                                end: (minute + 60) % 1440)))
+        let night = await rig.post(#"{"text": "La porte du garage est restée ouverte"}"#)
+        #expect(night.json == ["status": "kept"])
+        await rig.host.setPreferences(InboundPreferences(announcements: false))
+        let off = await rig.post(#"{"text": "Le courrier est arrivé"}"#)
+        #expect(off.json == ["status": "kept"])
+        #expect(await rig.host.news.unread.map(\.text) == ["La porte du garage est restée ouverte",
+                                                             "Le courrier est arrivé"])
+        #expect(await rig.host.current.preferences == InboundPreferences(announcements: false))
+        await rig.host.setPreferences(InboundPreferences())
+        #expect(await rig.post(#"{"text": "Le colis est arrivé"}"#).json == ["status": "queued"])
+    }
+
+    @Test func saidAnnouncementIsMarkedSaid() async {
+        let rig = await makeRig()
+        _ = await rig.post(#"{"text": "Le courrier est arrivé"}"#)
+        #expect(await eventually { await rig.log().first?.result == .said })
+        #expect(await eventually { await rig.host.news.all.first?.state == .said })
+        #expect(await rig.host.news.unread.isEmpty)  // never said again
+    }
+
+    @Test func interruptedAnnouncementIsKeptForLater() async {
+        let rig = await makeRig()
+        await rig.announcer.set(stopping: true)  // the user speaks over it
+        _ = await rig.post(#"{"text": "Le lave-vaisselle a fini"}"#)
+        #expect(await eventually { await rig.log().first?.result == .kept })
+        #expect(await rig.host.news.unread.map(\.text) == ["Le lave-vaisselle a fini"])
+        #expect(await rig.announcer.said.count == 1)
+    }
+
+    /// Two pieces of information kept for later, then the welcome home: its text, then the news, which are taken out
+    /// once said; then « Quoi de neuf ? » has nothing new.
+    @Test func welcomeHome() async throws {
+        let rig = await makeRig { $0.mode = .keepForLater }
+        _ = await rig.post(#"{"text": "La porte du garage est restée ouverte."}"#)
+        _ = await rig.post(#"{"text": "Le linge est prêt."}"#)
+        var source = try #require(await rig.host.current.sources.first)
+        source.mode = .sayNow
+        await rig.host.updateSource(source)
+        let tube = await rig.post(#"{"text": "Bonsoir, bon retour.", "news": true}"#)
+        #expect(tube.json == ["status": "queued"])
+        #expect(await eventually { await rig.log().first?.result == .said })
+        let said = try #require(await rig.announcer.said.last)
+        #expect(said.text.hasPrefix("Bonsoir, bon retour. Pendant ton absence, deux nouvelles. Home Assistant, à "))
+        #expect(said.text.contains(": la porte du garage est restée ouverte. Home Assistant, à "))
+        #expect(said.text.hasSuffix(": le linge est prêt."))
+        #expect(await eventually { await rig.host.news.unread.isEmpty })
+        let (items, left) = await rig.host.news.read()
+        #expect(items.isEmpty && left == 0)
+        #expect(NewsPhrases.reading(items, left: left, now: Date(), language: .french) == "Rien de neuf pour le moment.")
+    }
+
+    @Test func welcomeHomeWithoutNewsSaysTheTextAlone() async throws {
+        let rig = await makeRig()
+        _ = await rig.post(#"{"text": "Bonsoir, bon retour.", "news": true}"#)
+        #expect(await eventually { await rig.log().first?.result == .said })
+        #expect(await rig.announcer.said.last?.text == "Bonsoir, bon retour.")
+    }
+
+    @Test func welcomeHomeStoppedKeepsTheNews() async throws {
+        let rig = await makeRig { $0.mode = .keepForLater }
+        _ = await rig.post(#"{"text": "Le linge est prêt."}"#)
+        var source = try #require(await rig.host.current.sources.first)
+        source.mode = .sayNow
+        await rig.host.updateSource(source)
+        await rig.announcer.set(stopping: true)
+        _ = await rig.post(#"{"text": "Bonsoir, bon retour.", "news": true}"#)
+        #expect(await eventually { await rig.log().first?.result == .kept })
+        #expect(await rig.announcer.said.last?.text.contains("Pendant ton absence, une nouvelle.") == true)
+        #expect(await rig.host.news.unread.map(\.text) == ["Le linge est prêt.", "Bonsoir, bon retour."])
+    }
+
+    @Test func theNewsAreOfferedWhileASourceExists() async throws {
+        let rig = await makeRig()
+        #expect(await eventually { await rig.announcer.newsOffers == [true] })
+        #expect(await rig.announcer.news === rig.host.news)
+        let second = await rig.host.addSource(name: "Gladys")
+        await rig.host.removeSource(rig.source)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await rig.announcer.newsOffers == [true])  // a source still exists
+        await rig.host.removeSource(second)
+        #expect(await eventually { await rig.announcer.newsOffers == [true, false] })
+        #expect(await rig.announcer.news == nil)
     }
 
     @Test func urgentFromAnAllowedSource() async {

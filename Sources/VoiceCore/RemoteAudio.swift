@@ -28,8 +28,8 @@ public protocol RemoteAudioRouting: Sendable {
 /// from another system (Home Assistant, a script…, see ReceivedInformation.swift). Deliberately not an
 /// `AssistantCommand`: a paired iPhone must not be able to make Maé announce anything.
 public protocol Announcing: Sendable {
-    /// Whether Maé can speak now: her models are loaded and the setup is done. Otherwise what comes in becomes a
-    /// notification.
+    /// Whether Maé can speak now: her models are loaded and the setup is done. Otherwise what comes in is kept for later
+    /// (the news).
     func canAnnounce() async -> Bool
     /// Says `text` after the chime (when `chime`), as soon as nobody speaks (`VoicePipeline.announce`). `note` tells the
     /// model what happened; it stays in the history with what was said. `urgent`: it may cut Maé's sentence, never the
@@ -39,12 +39,29 @@ public protocol Announcing: Sendable {
         -> Bool
     /// Takes back an announcement that has not started yet. False when it has started, or is over.
     func withdrawAnnouncement(_ id: UUID) async -> Bool
-    /// Whether an announcement is still waiting to be said (false once it has started).
-    func announcementWaits(_ id: UUID) async -> Bool
+    /// Where an announcement is: waiting, being said, said to its end, or stopped before it.
+    func announcementState(_ id: UUID) async -> AnnouncementState
+    /// The news (`NewsStore`), which Maé reads when the user asks « Quoi de neuf ? » (the tool lire_nouvelles); nil
+    /// takes the tool away. Given while a source of received information exists.
+    func useNews(_ news: NewsStore?) async
     /// A notification on the Mac.
     func notify(title: String, body: String) async
     /// Asks for the permission to show notifications (when the first source that needs them is added).
     func requestNotificationPermission() async
+}
+
+/// What became of an announcement (`Announcing.announcementState`).
+public enum AnnouncementState: String, Sendable, Equatable {
+    /// In the queue, until nobody speaks; or back in it, the user having not heard it (`VoicePipeline.announce`).
+    case waiting
+    /// Being said.
+    case playing
+    /// Said to its end.
+    case said
+    /// Stopped before its end (the user spoke over it, the stop button, a new conversation…) and not said again.
+    case stopped
+    /// Not known: taken back, or the engine started again meanwhile (another tier). Never said.
+    case unknown
 }
 
 /// The voice's output, switchable while the pipeline runs (the pipeline keeps one output for its whole life). What

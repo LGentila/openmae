@@ -451,12 +451,12 @@
         }
       }
     },
-    "After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it becomes a notification.": {
+    "After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it is kept for later.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Après un carillon, Maé la dit dès que personne ne parle. Pas dite dans la minute, elle devient une notification."
+            "value": "Après un carillon, Maé la dit dès que personne ne parle. Pas dite dans la minute, elle est gardée pour plus tard."
           }
         }
       }
@@ -517,6 +517,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Une action qui change quelque chose (allumer, créer, supprimer) demande ton « oui », sauf si tu choisis autrement pour cet outil."
+          }
+        }
+      }
+    },
+    "Announcements": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annonces"
           }
         }
       }
@@ -1331,6 +1341,16 @@
         }
       }
     },
+    "End of the quiet hours": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fin des heures calmes"
+          }
+        }
+      }
+    },
     "Engine": {
       "localizations": {
         "fr": {
@@ -1717,6 +1737,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Station de la maison, connectée"
+          }
+        }
+      }
+    },
+    "Hours": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Horaires"
           }
         }
       }
@@ -2341,6 +2371,16 @@
         }
       }
     },
+    "Maé keeps it without a word, and reads it when you ask “What’s new?”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé la garde sans rien dire, et la lit quand tu demandes « Quoi de neuf ? »."
+          }
+        }
+      }
+    },
     "Maé looks up what she can’t know: the news, a score, opening hours, a price. What you search for goes to the chosen engine; the rest of the conversation stays on your Mac.": {
       "localizations": {
         "fr": {
@@ -2367,6 +2407,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé la dit tout de suite. Ensuite, appelle la même action depuis n’importe quelle automatisation."
+          }
+        }
+      }
+    },
+    "Maé says nothing on her own: everything is kept for later. Ask her “What’s new?” to hear it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé ne dit plus rien d’elle-même : tout est gardé pour plus tard. Demande-lui « Quoi de neuf ? » pour l’entendre."
+          }
+        }
+      }
+    },
+    "Maé says what your sources send as it arrives, as each source’s mode says.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé dit ce que tes sources envoient dès que ça arrive, selon le mode de chaque source."
           }
         }
       }
@@ -2437,6 +2497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé ne pourra plus s’en servir, et son journal est effacé. Tu pourras le rajouter plus tard."
+          }
+        }
+      }
+    },
+    "Meanwhile, what should be said right away is kept for later. Urgent announcements are still said.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pendant ces heures, ce qui devait être dit tout de suite est gardé pour plus tard. Les annonces urgentes sont quand même dites."
           }
         }
       }
@@ -3291,6 +3361,16 @@
         }
       }
     },
+    "Quiet hours": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heures calmes"
+          }
+        }
+      }
+    },
     "Quit": {
       "localizations": {
         "fr": {
@@ -3937,6 +4017,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Standard (16 à 24 Go)"
+          }
+        }
+      }
+    },
+    "Start of the quiet hours": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Début des heures calmes"
           }
         }
       }
@@ -4641,12 +4731,12 @@
         }
       }
     },
-    "Too late: notified": {
+    "Too late: kept for later": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Trop tard : notifiée"
+            "value": "Trop tard : gardée pour plus tard"
           }
         }
       }
@@ -4881,6 +4971,16 @@
         }
       }
     },
+    "Welcome home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour à la maison"
+          }
+        }
+      }
+    },
     "What Claude Code may do": {
       "localizations": {
         "fr": {
@@ -5057,6 +5157,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Avec mon compte"
+          }
+        }
+      }
+    },
+    "With “news: true”, Maé says the text, then the news she kept for you. For example, when you come home:": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avec « nouvelles: true », Maé dit le texte, puis les nouvelles qu’elle a gardées pour toi. Par exemple, quand tu rentres :"
           }
         }
       }
@@ -5371,6 +5481,16 @@
         }
       }
     },
+    "automation:\n  - alias: \"Back home: Maé welcomes you\"\n    triggers:\n      - trigger: state\n        entity_id: person.<you>\n        to: \"home\"\n    actions:\n      - action: rest_command.notify_mae\n        data:\n          message: \"Good evening, welcome back.\"\n          news: true": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation:\n  - alias: \"Retour à la maison : Maé accueille\"\n    triggers:\n      - trigger: state\n        entity_id: person.<toi>\n        to: \"home\"\n    actions:\n      - action: rest_command.prevenir_mae\n        data:\n          texte: \"Bonsoir, bon retour.\"\n          nouvelles: true"
+          }
+        }
+      }
+    },
     "end of speech → first sound": {
       "localizations": {
         "fr": {
@@ -5471,12 +5591,12 @@
         }
       }
     },
-    "rest_command:\n  notify_mae:\n    # the address copied from OpenMaé\n    url: !secret mae_address\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': message} | to_json }}\"": {
+    "rest_command:\n  notify_mae:\n    # the address copied from OpenMaé\n    url: !secret mae_address\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': message, 'news': news | default(false)} | to_json }}\"": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "rest_command:\n  prevenir_mae:\n    # l’adresse copiée depuis OpenMaé\n    url: !secret adresse_mae\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': texte} | to_json }}\""
+            "value": "rest_command:\n  prevenir_mae:\n    # l’adresse copiée depuis OpenMaé\n    url: !secret adresse_mae\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': texte, 'news': nouvelles | default(false)} | to_json }}\""
           }
         }
       }
@@ -5487,6 +5607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "testé"
+          }
+        }
+      }
+    },
+    "to": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "à"
           }
         }
       }

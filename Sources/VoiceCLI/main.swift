@@ -15,6 +15,7 @@
 //   voice-cli voice-gaps [--repeats 1] [options]        long answers to typed questions: the silence heard between
 //                                                       two sentences (see VoiceGaps.swift)
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
+//                           [--news]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
 //   voice-cli dialogue-bench [--repeats 10] [--corpus file.json]
@@ -183,6 +184,8 @@ struct Options {
     var sources = false
     var liveSources = false
     var recordSources: String?
+    /// actions-bench: the news' tool (lire_nouvelles) offered with any corpus.
+    var news = false
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -255,6 +258,7 @@ struct Options {
             case "--searxng-user": o.searxngUser = it.next()
             case "--record": o.record = it.next()
             case "--sources": o.sources = true
+            case "--news": o.news = true
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
@@ -763,8 +767,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--addendum file] [--web-addendum file] [--sources] [--live-sources]
-                                       [--record-sources file.json] [--compare-beginnings] [--compare-requests]
-                                       [--bfloat16-prompts] [--bfloat16-experts]
+                                       [--record-sources file.json] [--news] [--compare-beginnings]
+                                       [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]
