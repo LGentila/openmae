@@ -15,7 +15,8 @@
 services:
   relay:
     build: .
-    # Or a published image: image: <registry>/openmae-relay:<version>
+    # Or the published image (see "Published image" in README.md):
+    # image: ghcr.io/lgentila/openmae-relay:latest
     restart: unless-stopped
     environment:
       # Rate limiting needs the client address the proxy puts in

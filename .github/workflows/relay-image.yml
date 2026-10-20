@@ -1,0 +1,113 @@
+# Builds the relay's image (relay/Dockerfile) for linux/amd64 and linux/arm64
+# and publishes it as ghcr.io/lgentila/openmae-relay, for relays installed from
+# a registry (the home relay, for example).
+#
+# - Push to main that changes relay/ (documentation aside): tags "latest" and
+#   the commit's short hash.
+# - Git tag relay-v<version> (for example relay-v1.2.0): tags "<version>"
+#   (1.2.0) and the commit's short hash; "latest" stays with main.
+# - Pull request that changes relay/: tests and builds both platforms, publishes
+#   nothing.
+# - Run by hand (Actions > Relay image > Run workflow): on main, as a push.
+#
+# The image holds only the relay's binary, built from relay/. Publishing uses
+# the workflow's own GITHUB_TOKEN: no secret to set.
+
+name: Relay image
+
+on:
+  push:
+    branches: [main]
+    tags: ["relay-v*"]
+    paths:
+      - "relay/**"
+      - "!relay/**/*.md"
+      - ".github/workflows/relay-image.yml"
+  pull_request:
+    paths:
+      - "relay/**"
+      - "!relay/**/*.md"
+      - ".github/workflows/relay-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/lgentila/openmae-relay
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache-dependency-path: relay/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    # Only main and version tags publish; pull requests and other branches
+    # only build.
+    env:
+      PUBLISH: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/relay-v') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The Dockerfile builds for the platform it runs on (so that it also
+      # works with Docker's legacy builder): the other platform is emulated.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        env:
+          # The registry's package page reads a multi-arch image's description
+          # from its index.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+            type=match,pattern=^relay-v(.+)$,group=1
+          labels: |
+            org.opencontainers.image.title=OpenMaé relay
+            org.opencontainers.image.description=Relay that links the OpenMaé iPhone app to OpenMaé on the Mac; in home mode, it also passes deliveries from the home network.
+          annotations: |
+            org.opencontainers.image.title=OpenMaé relay
+            org.opencontainers.image.description=Relay that links the OpenMaé iPhone app to OpenMaé on the Mac; in home mode, it also passes deliveries from the home network.
+      - uses: docker/build-push-action@v7
+        with:
+          context: relay
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

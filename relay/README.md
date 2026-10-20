@@ -51,6 +51,25 @@ which UDP port to use (`quic.port`), so it can be any port.
 
 ## Running
 
+### Published image
+
+Each change to `relay/` on `main` (documentation aside) is built for `linux/amd64` and `linux/arm64` (Intel and AMD
+machines, Apple Silicon, a Raspberry Pi with a 64-bit system) and published as a public image, pulled without
+logging in:
+
+| Image | Relay |
+|---|---|
+| `ghcr.io/lgentila/openmae-relay:latest` | the latest one on `main` |
+| `ghcr.io/lgentila/openmae-relay:<short commit hash>`, for example `:26cf0b2` | the one built from that commit of `main` |
+| `ghcr.io/lgentila/openmae-relay:<version>`, for example `:1.2.0` | a version, published for a Git tag `relay-v<version>` |
+
+To use it instead of building the image: `image: ghcr.io/lgentila/openmae-relay:latest` instead of `build: .` in
+a Compose file, or that name instead of `openmae-relay` after `docker run`. To update: `docker compose pull`, then
+`docker compose up -d`. To stay on one relay, use a commit's short hash or a version instead of `latest`.
+
+The image holds only the relay's binary, built from this folder by
+[.github/workflows/relay-image.yml](../.github/workflows/relay-image.yml), which runs the tests first.
+
 ### With Docker behind a reverse proxy
 
 ```sh
@@ -153,13 +172,14 @@ deliveries are not encrypted end to end: the home relay reads them in clear. Hen
 - **A public relay must never turn home mode on**: it would receive deliveries in clear. The relay refuses to start
   in home mode together with standalone mode (`RELAY_TLS_DOMAIN`).
 
-With Docker Compose on the home machine, from the repository's `relay` folder:
+With Docker Compose on the home machine, from the [published image](#published-image), with no copy of the
+repository and no login: save this file as `compose.home.yaml`, in a folder of its own.
 
 ```yaml
 # A home relay: on the home network only.
 services:
   relay:
-    build: .
+    image: ghcr.io/lgentila/openmae-relay:latest
     restart: unless-stopped
     environment:
       RELAY_HOME_INBOUND: "true"
@@ -177,8 +197,13 @@ volumes:
 ```
 
 ```sh
-docker compose -f compose.home.yaml up -d --build   # the file above, saved as compose.home.yaml
+docker compose -f compose.home.yaml up -d
 ```
+
+Check it: `curl http://<home relay>:8080/healthz` answers `ok`, and `docker compose -f compose.home.yaml logs relay`
+shows a `relay started` line with `home_mode=true`. To update it later: `docker compose -f compose.home.yaml pull`,
+then `docker compose -f compose.home.yaml up -d` again. (From a copy of the repository instead, put the file in the
+`relay` folder, write `build: .` instead of `image: …`, and start it with `up -d --build`.)
 
 If the machine also has an interface on the internet, publish the ports on its home network address only, for
 example `"192.168.1.10:8080:8080/tcp"` and `"192.168.1.10:4433:4433/udp"`.
@@ -252,8 +277,9 @@ closed: nothing is kept.
 
 ## Deploying behind a reverse proxy
 
-For a relay at `relay.example.com`, built from `relay/Dockerfile` (build context `relay`), or as a Compose service
-from `relay/compose.yaml`, on a host whose reverse proxy already serves HTTPS:
+For a relay at `relay.example.com`, built from `relay/Dockerfile` (build context `relay`) or pulled as the
+[published image](#published-image), or as a Compose service from `relay/compose.yaml`, on a host whose reverse proxy
+already serves HTTPS:
 
 1. **Domain.** Route `relay.example.com` to container port **8080**, HTTPS on, certificate from Let's Encrypt. The
    proxy then serves HTTPS, `/v1/info` and the WebSocket fallback.
@@ -383,6 +409,10 @@ not define the messages that would use it yet.
 go vet ./...
 go test -race ./...
 ```
+
+[.github/workflows/relay-image.yml](../.github/workflows/relay-image.yml) runs the same checks, then builds the image
+for both platforms: on a pull request that changes `relay/`, without publishing it; on `main` and for a `relay-v*`
+tag, publishing it (see [Published image](#published-image)).
 
 The tests start the relay in-process on random local ports and drive it with test Macs and iPhones over QUIC and
 WebSocket: registration, tubes across every transport combination (bytes and datagrams both ways), every error
