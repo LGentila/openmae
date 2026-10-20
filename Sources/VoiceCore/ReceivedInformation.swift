@@ -14,9 +14,9 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
     /// Where the source sends from. It decides the path its deliveries must come by (`accepts`); changing it changes
     /// the source's address.
     public enum Origin: String, Codable, Sendable, CaseIterable {
-        /// The home network: through the home relay (or OpenMaé's internal door, a later step).
+        /// The home network: through the home relay.
         case home
-        /// The internet: through the public relay, which cannot read the deliveries (a later step).
+        /// The internet: through the public relay, which cannot read the deliveries.
         case internet
     }
 
@@ -51,24 +51,22 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
         self.created = created
     }
 
-    /// Compartmentalisation: a home source is only accepted through the home relay or the internal door, an internet
-    /// source only through the public relay. Through any other path its address answers like an unknown one.
+    /// Compartmentalisation: a home source is only accepted through the home relay, an internet source only through
+    /// the public relay. Through the other path its address answers like an unknown one.
     public func accepts(_ path: InboundPath) -> Bool {
         switch origin {
-        case .home: path == .homeRelay || path == .internalDoor
+        case .home: path == .homeRelay
         case .internet: path == .publicRelay
         }
     }
 }
 
-/// The way a delivery reached the Mac. The three paths are kept apart (`InboundSource.accepts`).
+/// The way a delivery reached the Mac. The two paths are kept apart (`InboundSource.accepts`).
 public enum InboundPath: String, Codable, Sendable, CaseIterable {
     /// A relay on the home network, in home mode: it passes the delivery to the Mac on the Mac's own connection.
     case homeRelay
-    /// The public relay, without reading: TLS goes through it to a certificate the Mac holds (a later step).
+    /// The public relay, without reading: TLS goes through it to a certificate the Mac holds.
     case publicRelay
-    /// OpenMaé's own door on the home network (a later step).
-    case internalDoor
 }
 
 // MARK: - What was sent

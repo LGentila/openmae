@@ -231,9 +231,9 @@ struct ReceivedInformationTests {
 
     @Test func compartmentalisation() {
         let homeSource = InboundSource(name: "HA", origin: .home)
-        #expect(homeSource.accepts(.homeRelay) && homeSource.accepts(.internalDoor) && !homeSource.accepts(.publicRelay))
+        #expect(homeSource.accepts(.homeRelay) && !homeSource.accepts(.publicRelay))
         let internet = InboundSource(name: "Shortcuts", origin: .internet)
-        #expect(internet.accepts(.publicRelay) && !internet.accepts(.homeRelay) && !internet.accepts(.internalDoor))
+        #expect(internet.accepts(.publicRelay) && !internet.accepts(.homeRelay))
     }
 
     // MARK: - Addresses

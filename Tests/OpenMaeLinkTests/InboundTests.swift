@@ -238,7 +238,7 @@ struct InboundTests {
         let rig = await makeRig()
         #expect(await rig.post(#"{"text": "Bonjour"}"#, path: .publicRelay).status == 404)
         #expect(await rig.log().first?.result == .wrongPath)
-        #expect(await rig.post(#"{"text": "Bonjour"}"#, path: .internalDoor).status == 202)
+        #expect(await rig.post(#"{"text": "Bonjour"}"#, path: .homeRelay).status == 202)
     }
 
     @Test func tooManyDeliveries() async {

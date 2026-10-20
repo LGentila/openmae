@@ -355,8 +355,8 @@ public actor InboundHost {
 
     // MARK: - Deliveries
 
-    /// One delivery, over a tube the home relay opened (or, later, the public relay or the internal door): reads the
-    /// request, answers at once, then has the information said or notified.
+    /// One delivery, over a tube the home relay or the public relay opened: reads the request, answers at once, then
+    /// has the information said or notified.
     public func serve(_ transport: any LinkTransport, from caller: String, path: InboundPath) async {
         DebugLog.log("received information: a delivery arrives (\(path.rawValue))")
         let exchange = Exchange(transport)

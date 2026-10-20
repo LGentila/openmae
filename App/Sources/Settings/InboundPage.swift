@@ -8,7 +8,7 @@ import VoiceCore
 /// internet path through the iPhones' relay, which cannot read them) and the sources; a source's page shows its secret
 /// address, what Maé does with what it sends and its last deliveries. Adding a source, changing its address, removing
 /// it, the home relay's address and how to send from Home Assistant go through sheets. The design draws the home path
-/// only: the internet path takes the same form. OpenMaé's internal door comes in a later step.
+/// only: the internet path takes the same form.
 struct InboundPage: View {
     let inbound: InboundAccess
     @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
@@ -797,7 +797,6 @@ enum InboundWords {
         switch path {
         case .homeRelay: String(localized: "Home relay")
         case .publicRelay: String(localized: "Public relay")
-        case .internalDoor: String(localized: "Internal door")
         case nil: String(localized: "Your test")
         }
     }
