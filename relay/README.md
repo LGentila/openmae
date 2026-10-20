@@ -60,7 +60,7 @@ logging in:
 | Image | Relay |
 |---|---|
 | `ghcr.io/lgentila/openmae-relay:latest` | the latest one on `main` |
-| `ghcr.io/lgentila/openmae-relay:<short commit hash>`, for example `:26cf0b2` | the one built from that commit of `main` |
+| `ghcr.io/lgentila/openmae-relay:<short commit hash>`, for example `:a1b2c3d` | the one built from that commit of `main` |
 | `ghcr.io/lgentila/openmae-relay:<version>`, for example `:1.2.0` | a version, published for a Git tag `relay-v<version>` |
 
 To use it instead of building the image: `image: ghcr.io/lgentila/openmae-relay:latest` instead of `build: .` in
