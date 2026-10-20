@@ -86,6 +86,17 @@ struct SearXNGTests {
         #expect(server.requests.last?.form["language"] == "en")
     }
 
+    /// The model may keep a site out of the results (`-site:`, see `WebSearchCatalog.promptAddendum`): SearXNG passes
+    /// it on to its engines, so it must reach SearXNG as written.
+    @Test func aSiteKeptOutReachesItAsWritten() async throws {
+        let server = FakeSearXNG()
+        try await server.start()
+        defer { server.stop() }
+        _ = try await SearXNGProvider(address: server.address, timeout: 2)
+            .search("cours action Apple -site:boursorama.com", language: .french)
+        #expect(server.requests.last?.form["q"] == "cours action Apple -site:boursorama.com")
+    }
+
     @Test func aCardWhenThereIsNoDirectAnswer() async throws {
         let server = FakeSearXNG()
         try await server.start()
@@ -385,6 +396,42 @@ struct PipelineWebSearchTests {
         let history = try #require(await model.requests.last)
         #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .user])
         #expect(history[4].content == "D'après le site de Cergy, la déchetterie ouvre à 9 heures. Elle ferme à 18 heures.")
+    }
+
+    /// Results that do not hold the answer: summing up, the model writes another search and nothing else. It is not
+    /// carried out; the model is told so and sums up once more, and the user hears that answer, not the app's sentence.
+    @Test func aSearchInsteadOfASummaryGetsOneMorePass() async throws {
+        let search = FakeSearch(match)
+        let ask: [ModelOutput] = [.toolCallStarted, .toolCallNamed(WebSearchCatalog.searchName),
+                                  .toolCall(ToolCall(name: WebSearchCatalog.searchName,
+                                                     arguments: ["requete": "horaires Leroy Merlin Cergy samedi"]))]
+        let again: [ModelOutput] = [.toolCallStarted, .toolCallNamed(WebSearchCatalog.searchName),
+                                    .toolCall(ToolCall(name: WebSearchCatalog.searchName,
+                                                       arguments: ["requete": "fermeture Leroy Merlin Cergy samedi"]))]
+        let answer: [ModelOutput] = [.text("Les résultats ne donnent pas l'heure de fermeture du samedi.")]
+        let model = ScriptedModel(scripts: [ask, again, answer])
+        let pipeline = VoicePipeline(
+            detector: LoudnessDetector(), transcriber: ScriptedTranscriber(["À quelle heure ferme le Leroy Merlin ?"]),
+            model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+            tools: ToolRunner(providers: [RecordingTools(), WebSearchTools(provider: search)]))
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("samedi") }
+        #expect(await log.pieces.joined(separator: " ") == WebSearchPhrases.searching(.french)
+                + " Les résultats ne donnent pas l'heure de fermeture du samedi.")
+        #expect(await search.queries == ["horaires Leroy Merlin Cergy samedi"])
+        #expect(await model.requests.count == 3)
+        let note = try #require(await model.requests.last?.last?.toolResult)
+        #expect(note["erreur"]?.text == ToolOutcome.noCallWhileSummingUp)
+        // The next question sees the turn as it went: the search and its results, the call not carried out and why,
+        // then the answer.
+        await waitFor { await log.states.last == .listening }
+        await pipeline.submit(text: "Et le dimanche ?")
+        await waitFor { await model.requests.count == 4 }
+        let history = try #require(await model.requests.last)
+        #expect(history.map(\.role) == [.system, .user, .assistant, .tool, .assistant, .tool, .assistant, .user])
     }
 
     /// Another tool's call, with the web search on: "Un instant…", once its name is read.

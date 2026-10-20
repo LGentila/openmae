@@ -1374,11 +1374,15 @@ public actor VoicePipeline {
                 /// `ToolOutcome.modelSpeaks`): what the model writes is said, but no call it writes then is carried
                 /// out, since that text could carry instructions of its own. Holds what to say if the model says nothing.
                 var summing: String?
+                /// The model, summing up, wrote a call and nothing else, and was told to sum up once more.
+                var summedUpAgain = false
                 while true {
                     var calls: [ToolCall] = []
                     /// The model went on to another call after the first (`ModelOutput.moreToolCalls`).
                     var moreCalls = false
                     var unreadable = false
+                    /// The first call written while summing up (not carried out).
+                    var ignored: ToolCall?
                     let answered = turn.answer
                     DebugLog.log("turn \(turn.id): LLM request")
                     for try await output in model.reply(to: request) {
@@ -1407,6 +1411,7 @@ public actor VoicePipeline {
                         case .toolCallStarted, .toolCallNamed, .moreToolCalls: break
                         case .toolCall(let call):
                             DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
+                            if ignored == nil { ignored = call }
                         case .unreadableToolCall: break
                         }
                     }
@@ -1415,6 +1420,17 @@ public actor VoicePipeline {
                     if calls.count > 1 || moreCalls { askedForMore = true }
                     if let fallback = summing {
                         chunker.remainingPieces().forEach(send)
+                        if turn.answer == answered, let ignored, !summedUpAgain {
+                            // A call instead of a summary (often another search, when the results do not hold the
+                            // answer): rather than the app's sentence, the model is told it is not carried out and
+                            // sums up once more, still without any call carried out.
+                            DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
+                            summedUpAgain = true
+                            turn.steps += [.call(ignored), .result(of: ignored,
+                                                                   ["erreur": .string(ToolOutcome.noCallWhileSummingUp)])]
+                            request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                            continue
+                        }
                         if turn.answer == answered { say(fallback, to: turn) }
                         if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
                         break

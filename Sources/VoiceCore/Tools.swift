@@ -186,6 +186,11 @@ public struct ToolOutcome: Sendable {
     /// `spoken` is then only said if the model gives nothing.
     public var modelSpeaks: Bool
 
+    /// Told the model when, summing up such a text, it writes a call and nothing else (no call is carried out then):
+    /// it gets one more pass to answer with what it has.
+    public static let noCallWhileSummingUp = "Appel non fait : plus aucun outil pour ce message. Réponds maintenant à "
+        + "l'utilisateur avec ce que tu as, et dis-le simplement si ça ne répond pas à sa question."
+
     public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil,
                 modelSpeaks: Bool = false)
     {
