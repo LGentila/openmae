@@ -221,10 +221,13 @@ public actor AssistantHost: AssistantConnection {
                 directory: store.folder(ModelCatalog.speechRecognition))
             emit.yield(.loading(.languageModel))
             MLXChatModel.releaseCachedMemory()  // what a previous tier's model may have left
-            model = try await MLXChatModel.load(directory: store.folder(languageModel))
+            model = try await MLXChatModel.load(directory: store.folder(languageModel), warmUp: false)
             emit.yield(.loading(.voice))
+            // The model's GPU kernels compile meanwhile: after an update, they may not be in macOS's cache yet.
+            async let kernels: Void = model.prepareKernels()
             let synthesizer = PocketSpeechSynthesizer(store: store)
             try await synthesizer.preload([.french, .english])
+            try await kernels
             if synthesizer.outputSampleRate != playbackSampleRate {
                 playbackSampleRate = synthesizer.outputSampleRate
                 route = try await startReliably(audio)

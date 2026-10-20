@@ -306,13 +306,17 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     let transcriber = try await ParakeetTranscriber.load(directory: store.folder(ModelCatalog.speechRecognition))
     print("loaded: voice detection + transcription in \(clock.now - t)")
     t = clock.now
-    let model = try await MLXChatModel.load(directory: llmURL)
+    let model = try await MLXChatModel.load(directory: llmURL, warmUp: false)
     print("loaded: \(llmURL.lastPathComponent) in \(clock.now - t)")
     t = clock.now
+    // As the app: the model's GPU kernels compile while the voice loads.
+    async let kernels = preparedKernels(model)
     let synthesizer = PocketSpeechSynthesizer(
         computeUnits: o.ttsOnCPU ? .uniform(.cpuOnly) : .avoidNeuralEngine, store: store)
     try await synthesizer.preload([.french, .english])
     print("loaded: voice (\(o.ttsOnCPU ? "CPU" : "GPU")) in \(clock.now - t)")
+    let kernelsTime = try await kernels
+    print("prepared: the model's GPU kernels, meanwhile, in \(kernelsTime)")
 
     var config = PipelineConfig()
     config.speculativeStart = o.speculative
@@ -342,6 +346,13 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     try await pipeline.start()
     print(String(format: "memory after loading: %.2f GB\n", ProcessMemory.footprintGB))
     return Engine(pipeline: pipeline, speaker: speaker, log: log, model: model)
+}
+
+/// `MLXChatModel.prepareKernels`, timed.
+private func preparedKernels(_ model: MLXChatModel) async throws -> Duration {
+    let start = ContinuousClock.now
+    try await model.prepareKernels()
+    return ContinuousClock.now - start
 }
 
 /// `--actions`: the app's actions as the model sees them (the same tools and instructions, the date line in the user's

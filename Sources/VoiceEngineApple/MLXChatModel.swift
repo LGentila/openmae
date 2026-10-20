@@ -160,7 +160,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         weightPages = MemoryResidency.ranges(context.model.parameters().flattened().map(\.1))
     }
 
-    /// Loads an MLX model folder (config.json, *.safetensors, tokenizer files, chat template).
     /// Gives back to macOS the GPU memory MLX keeps for reuse, once a model has been released (tier change,
     /// models deleted).
     public static func releaseCachedMemory() {
@@ -172,7 +171,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         Double(Memory.activeMemory) / 1e9
     }
 
-    public static func load(directory: URL, maxAnswerTokens: Int = 400) async throws -> MLXChatModel {
+    /// Loads an MLX model folder (config.json, *.safetensors, tokenizer files, chat template), and warms it up.
+    /// `warmUp: false` leaves the warm-up to the caller, which calls `prepareKernels()` (the warm-up, and more) while
+    /// something else loads.
+    public static func load(directory: URL, maxAnswerTokens: Int = 400, warmUp: Bool = true) async throws
+        -> MLXChatModel
+    {
         let context = try await LLMModelFactory.shared.load(from: directory, using: TokenizerLoaderBridge())
         let tokenizer = try await ModelTokenizer.load(from: directory)
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
@@ -182,8 +186,62 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                                      chatTemplate: template.map { GemmaTemplateFix.patched($0) ?? $0 },
                                      parameters: parameters)
         await model.bringWeightsBack()
-        try await model.warmUp()
+        if warmUp { try await model.warmUp() }
         return model
+    }
+
+    /// Compiles the GPU kernels that loading and the first requests need: the warm-up (`warmUp`, in bfloat16), then a
+    /// short pass shaped like the conversations' beginning (`float32Kernels`). After `load(…, warmUp: false)`; the app and
+    /// voice-cli run it while the voice loads.
+    ///
+    /// Why: MLX builds most of its GPU kernels from their Metal source the first time a computation needs them (its
+    /// library holds only a few: Gemma 4 26B's load and first request need about 95 others), and macOS keeps what it
+    /// compiled in its shader cache for the next launches. That cache is kept per app, and in it per folder the program
+    /// runs from (on macOS 27, a folder whose path has another length than those it ran from misses it); other sources
+    /// (a new MLX) or another compiler (a new macOS) miss it too. Then loading waited for the compilation, one kernel
+    /// after the other: with Gemma 4 26B on the reference Mac (M1 Pro), the warm-up took 5.6 to 6.5 s instead of 0.2 to
+    /// 0.8 s, and the beginning, computed in float32 with kernels of its own, 8.5 to 10.9 s instead of 5.8 to 6.4 s.
+    /// Done while the voice loads, that compilation took 13 to 14.5 s, half of it hidden by the voice's 7.6 s: ready
+    /// 26.0 to 26.8 s after launch instead of 31.8 to 33.4 s. With the kernels in the cache, the warm-up no longer waits
+    /// before the voice either: ready 17.7 to 19.9 s after launch instead of 18.5 to 21.4 s.
+    public func prepareKernels() throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        try warmUp()
+        let warm = clock.now
+        try float32Kernels()
+        DebugLog.log("LLM: kernels prepared in \(clock.now - start) (warm-up \(warm - start), float32 pass "
+            + "\(clock.now - warm))")
+    }
+
+    /// The beginning's computation (`beginningCache`) on 129 tokens, in a new cache dropped afterwards: two chunks of 64,
+    /// then the last token, from which a first token is drawn, as the beginning's 487-token chunks then its last token;
+    /// then the rounding to the model's type (which the warm-up read).
+    /// The kernels MLX picks depend on the shapes as well as on the types: 64 tokens is the fewest for which it computes
+    /// the experts of a mixture-of-experts model as in those chunks (one product per expert, over the tokens sorted by
+    /// expert, from 4 tokens per expert on average: 64 × 8 for 128 experts); with fewer, it computes them one token at a
+    /// time, with other kernels, as the warm-up does. After it, the beginning computed at load compiled 4 or 5 kernels of
+    /// its own instead of 26. With the kernels already compiled, it takes 0.75 s while the voice loads (Gemma 4 26B).
+    private func float32Kernels() throws {
+        let kept = Memory.cacheLimit
+        Memory.cacheLimit = Self.beginningBuffers
+        defer {
+            Memory.cacheLimit = kept
+            Memory.clearCache()
+        }
+        let sample = try render([ChatMessage(.user, "Bonjour")], generationPrompt: true)
+        let tokens = (0..<129).map { sample[$0 % sample.count] }
+        var pass = parameters
+        pass.prefill.stepSize = 64
+        pass.prefill.chunking = .balanced
+        pass.prefill.progress = nil
+        let cache = try context.model.newCache(parameters: pass)
+        try withFloat32Activations {
+            let input = LMInput(tokens: MLXArray(tokens.map { Int32($0) }))
+            _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: pass)
+            eval(cache.flatMap(\.state))
+        }
+        roundToMemoryType(cache)
     }
 
     /// Loading takes the Mac's free memory down for a moment, and macOS compresses the weights loaded first: by the end
