@@ -36,6 +36,9 @@ actor MemoryCalendar: ToolProvider {
     private var refusedCreation = RefusedCreation()
     /// Every item created, by reference, in order: what the bench checks a dialogue's goal against.
     private(set) var creations: [String] = []
+    /// Every item changed or deleted, by its title as it was, in order: what the bench checks an item that a dialogue
+    /// must leave as it was against.
+    private(set) var touched: [String] = []
 
     func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
 
@@ -156,6 +159,7 @@ actor MemoryCalendar: ToolProvider {
                 }
             }
             items[reference] = changed
+            touched.append(item.title)
             let moved = changed.date != item.date || changed.hasTime != item.hasTime
             let spoken = item.isEvent
                 ? ActionPhrases.eventChanged(title: changed.title, start: changed.date ?? context.now,
@@ -167,6 +171,7 @@ actor MemoryCalendar: ToolProvider {
         case ActionCatalog.deleteItem.name:
             let (reference, item) = try referenced(call, context)
             items[reference] = nil
+            touched.append(item.title)
             if lastCreated == reference { lastCreated = nil }
             return ToolOutcome(spoken: ActionPhrases.deleted(event: item.isEvent, title: item.title, context.language),
                                forModel: ["id": .string(reference), "statut": "supprimé"],

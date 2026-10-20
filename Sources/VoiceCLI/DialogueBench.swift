@@ -8,10 +8,11 @@
 // try says nothing, the app says its question); the actions are carried out on a calendar kept in memory
 // (`MemoryCalendar`), which gives the model the results and the user the sentences the app would. The history keeps
 // each turn as the app records it, and the next sentence follows, until the dialogue's goal is reached (the item the
-// user wanted is saved) or its sentences run out. The model samples its answers: each dialogue runs --repeats times
-// (default 10), and the report counts, turn by turn, what the model did, how many answers said nothing to the user, how
-// many second tries answered in words that say it was done (« C'est noté », with nothing saved) and how often the goal
-// was reached.
+// user wanted is saved, or changed) or its sentences run out. The model samples its answers: each dialogue runs
+// --repeats times (default 10), and the report counts, turn by turn, what the model did, which items its changes named
+// (« dernier », "r1"), how many answers said nothing to the user, how many second tries answered in words that say it
+// was done (« C'est noté », with nothing saved) and how often the goal was reached; and, for a dialogue that creates an
+// item on the way that its later sentences must leave as it was, how often that item was changed or deleted.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web]
@@ -41,10 +42,14 @@ private struct DialogueCorpus: Decodable {
         /// What the user says, in order; the next one only while the goal is not reached.
         var turns: [String]
         var goal: Goal
+        /// An item the dialogue creates on the way, which the user never asks to change: its title contains `keep`
+        /// (whatever the accents and case). The report counts the runs that changed or deleted it.
+        var keep: String?
     }
 
     /// The item the user wants saved: by this tool, its title containing `title` (whatever the accents and case), at
-    /// `when` ("2026-10-16T16:00", or the day alone).
+    /// `when` ("2026-10-16T16:00", or the day alone). With `modifier_element`, an item created earlier in the dialogue
+    /// that the user wants changed: the app changed it (it did not create it), its title and date as wanted.
     struct Goal: Decodable {
         var tool: String
         var title: String?
@@ -63,6 +68,8 @@ private struct Pass: Encodable {
     var refused: Bool?
     /// The app created an item for this call (a change of the item whose creation was just refused creates it).
     var created: Bool?
+    /// The app changed or deleted an item for this call: its title, as it was.
+    var touched: String?
     var moreCalls: Bool?
     var unreadable: String?
 }
@@ -85,6 +92,8 @@ private struct RunResult: Encodable {
     var turns: [TurnResult]
     /// The turn (from 1) at which the goal was reached.
     var goalAt: Int?
+    /// The turn (from 1) at which the item to keep (`Dialogue.keep`) was first changed or deleted.
+    var keptItemTouchedAt: Int?
 }
 
 func runDialogueBench(_ o: Options) async throws {
@@ -146,10 +155,18 @@ func runDialogueBench(_ o: Options) async throws {
                 turn.goalReached = turn.passes.contains { reaches($0, dialogue.goal) }
                 result.turns.append(turn)
                 show(turn, index: index + 1)
+                if let keep = dialogue.keep, result.keptItemTouchedAt == nil,
+                   turn.passes.contains(where: { $0.touched.map { folded($0).contains(folded(keep)) } ?? false })
+                {
+                    result.keptItemTouchedAt = index + 1
+                }
                 if turn.goalReached {
                     result.goalAt = index + 1
                     break
                 }
+            }
+            if let keep = dialogue.keep, let touchedAt = result.keptItemTouchedAt {
+                print("  ✗ « \(keep) » changed or deleted at turn \(touchedAt)")
             }
             print(result.goalAt.map { "  ✓ goal reached at turn \($0)\n" } ?? "  ✗ goal not reached\n")
             runs.append(result)
@@ -271,8 +288,11 @@ private struct Talk {
                 }
                 let call = await runner.named(written)
                 let creationsBefore = await calendar.creations.count
+                let touchedBefore = await calendar.touched.count
                 let reply = await runner.handle(call, context: context)
                 if await calendar.creations.count > creationsBefore { pass.created = true }
+                let touched = await calendar.touched
+                if touched.count > touchedBefore { pass.touched = touched.last }
                 steps += [.call(call), .result(of: call, reply.forModel)]
                 pass.call = call
                 pass.writtenName = written.name == call.name ? nil : written.name
@@ -336,10 +356,13 @@ private struct DryWebSearch: ToolProvider {
 
 /// Whether a pass saved the goal's item: an item of the goal's tool's kind (an event for creer_evenement, a reminder for
 /// creer_rappel) that the app created, its title and date as wanted. Whatever call the model wrote: a change of the item
-/// whose creation was just refused creates it.
+/// whose creation was just refused creates it. For modifier_element: an item that the app changed, not created.
 private func reaches(_ pass: Pass, _ goal: DialogueCorpus.Goal) -> Bool {
-    guard pass.created == true, pass.refused != true, case .object(let fields)? = pass.result, fields["id"] != nil,
-          (fields["liste"] != nil) == (goal.tool == ActionCatalog.createReminder.name)
+    let change = goal.tool == ActionCatalog.changeItem.name
+    let saved = change ? pass.call?.name == ActionCatalog.changeItem.name && pass.touched != nil && pass.created != true
+        : pass.created == true
+    guard saved, pass.refused != true, case .object(let fields)? = pass.result, fields["id"] != nil,
+          change || (fields["liste"] != nil) == (goal.tool == ActionCatalog.createReminder.name)
     else { return false }
     if let title = goal.title {
         guard let saved = fields["titre"]?.text, folded(saved).contains(folded(title)) else { return false }
@@ -378,8 +401,11 @@ private func show(_ turn: TurnResult, index: Int) {
     for (number, pass) in turn.passes.enumerated() {
         let label = number == 0 ? "→" : "then →"
         if let call = pass.call {
+            let deleted = call.name == ActionCatalog.deleteItem.name
+            let made = pass.created == true ? "created "
+                : pass.touched.map { (deleted ? "deleted" : "changed") + " « \($0) »: " } ?? ""
             let verdict = pass.refused == true ? "  [refused: \(pass.result?.objectText("erreur") ?? "")]"
-                : pass.result.map { "  = " + (pass.created == true ? "created " : "") + describe($0) } ?? ""
+                : pass.result.map { "  = " + made + describe($0) } ?? ""
             print("      \(label) \((pass.writtenName.map { "\($0) → " } ?? "") + describe(call))" + verdict
                   + (pass.moreCalls == true ? "  [then another call, not carried out]" : ""))
             if !pass.text.isEmpty { print("        (before the call: “\(pass.text)”)") }
@@ -410,9 +436,10 @@ extension JSONValue {
     }
 }
 
-/// Per dialogue: how often the goal was reached and at which turn; per turn, what the model did at its first pass and at
-/// its second try ("nothing said": no call and not a word), over the runs that got that far, how many second tries after
-/// a refused call answered in words that say it was done, and how many answers left the user in silence.
+/// Per dialogue: how often the goal was reached and at which turn, and how often the item to keep was changed or
+/// deleted; per turn, what the model did at its first pass and at its second try ("nothing said": no call and not a
+/// word), over the runs that got that far, which items its changes and deletions named, how many second tries after a
+/// refused call answered in words that say it was done, and how many answers left the user in silence.
 private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
     func outcome(_ pass: Pass) -> String {
         guard let call = pass.call else {
@@ -430,14 +457,22 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             .map { ($0.key, $0.value) }
         return sorted.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
     }
+    /// "at turn 2: 9, at turn 3: 1".
+    func byTurn(_ turns: [Int]) -> String {
+        var atTurn: [Int: Int] = [:]
+        for turn in turns { atTurn[turn, default: 0] += 1 }
+        return atTurn.keys.sorted().map { "at turn \($0): \(atTurn[$0] ?? 0)" }.joined(separator: ", ")
+    }
     for dialogue in corpus.dialogues {
         let mine = runs.filter { $0.dialogue == dialogue.name }
         let reached = mine.compactMap(\.goalAt)
         print("\n=== \(dialogue.name) — \(mine.count) runs ===")
-        var atTurn: [Int: Int] = [:]
-        for turn in reached { atTurn[turn, default: 0] += 1 }
-        let detail = atTurn.keys.sorted().map { "at turn \($0): \(atTurn[$0] ?? 0)" }.joined(separator: ", ")
-        print("goal reached: \(reached.count) / \(mine.count)" + (reached.isEmpty ? "" : " (\(detail))"))
+        print("goal reached: \(reached.count) / \(mine.count)" + (reached.isEmpty ? "" : " (\(byTurn(reached)))"))
+        if let keep = dialogue.keep {
+            let touched = mine.compactMap(\.keptItemTouchedAt)
+            print("« \(keep) » changed or deleted: \(touched.count) / \(mine.count)"
+                  + (touched.isEmpty ? "" : " (\(byTurn(touched)))"))
+        }
         for (index, sentence) in dialogue.turns.enumerated() {
             let turns = mine.compactMap { $0.turns.count > index ? $0.turns[index] : nil }
             guard !turns.isEmpty else { continue }
@@ -445,6 +480,19 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             print("  first pass: " + counts(turns.map { $0.passes.first.map(outcome) ?? "answered by the app" }))
             let second = turns.compactMap { $0.passes.count > 1 ? $0.passes[1] : nil }
             if !second.isEmpty { print("  second pass: " + counts(second.map(outcome))) }
+            // The items the changes and deletions named, at any pass: « dernier », or an id, shown by its letter ("r…":
+            // the ids go on from one run to the next, as from one conversation to the next in the app).
+            let named = turns.flatMap(\.passes).compactMap { pass -> String? in
+                guard let call = pass.call,
+                      [ActionCatalog.changeItem.name, ActionCatalog.deleteItem.name].contains(call.name)
+                else { return nil }
+                var reference = call.text("reference") ?? "none"
+                if reference.range(of: #"^[a-z]\d+$"#, options: .regularExpression) != nil {
+                    reference = String(reference.prefix(1)) + "…"
+                }
+                return reference + (call.name == ActionCatalog.deleteItem.name ? " (deletion)" : "")
+            }
+            if !named.isEmpty { print("  items named by changes: " + counts(named)) }
             // The second tries after a refused call that answered in words: how many say it was done.
             let worded = turns.filter { $0.passes.first?.refused == true && $0.passes.count > 1 }.map { $0.passes[1] }
                 .filter { outcome($0) == "no call" }
