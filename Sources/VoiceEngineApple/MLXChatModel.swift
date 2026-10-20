@@ -290,7 +290,19 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// The model's memory of a beginning, computed in a new cache with float32 activations (`withFloat32Activations`),
     /// then rounded to the model's own type, layer by layer (`rounded: false`: left in float32, for diagnostics). The
     /// buffers of that computation go back to macOS.
+    ///
+    /// Meanwhile MLX keeps at most `beginningBuffers` of the buffers it frees. It keeps them to give them to a later
+    /// computation of the same size (by default up to most of the Mac's memory), but here what one chunk of the prompt
+    /// frees is never of the size the next one asks for: the sliding layers' keys and values grow from chunk to chunk,
+    /// and the attention's buffers with them. With Gemma 4 26B and the actions' 1,462 tokens, MLX held 2.9 GB of them by
+    /// the end, and the process's memory went from 17.1 to 19.1 GB (the bfloat16 computation before left 1.6 GB). At
+    /// load, that came right after macOS had compressed most of the weights to load the voice, while the beginning brought
+    /// them back: when the Mac was short of memory, it compressed them again meanwhile. Limited, the process's memory
+    /// stays at 16.3 to 17.0 GB, and the beginning takes as long (reference Mac, M1 Pro 32 GB).
     func beginningCache(_ tokens: [Int], rounded: Bool = true) throws -> [KVCache] {
+        let kept = Memory.cacheLimit
+        Memory.cacheLimit = Self.beginningBuffers
+        defer { Memory.cacheLimit = kept }
         let cache = try context.model.newCache(parameters: parameters)
         try withFloat32Activations {
             let input = LMInput(tokens: MLXArray(tokens.map { Int32($0) }))
@@ -301,6 +313,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         Memory.clearCache()
         return cache
     }
+
+    /// What MLX keeps of the buffers it frees while computing a beginning (see `beginningCache`).
+    static let beginningBuffers = 128 * 1024 * 1024
 
     /// Rounds a float32 memory to the model's own type, one layer after the other (the float32 layer goes before the next
     /// one is rounded: the memory peak stays that of the float32 memory).
