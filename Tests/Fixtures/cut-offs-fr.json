@@ -1,0 +1,43 @@
+{
+ "_comment": "French dialogues for voice-cli cut-off-bench: answers cut off one after the other, as when the user speaks over Maé. A turn with cutAfter is cut once the model has written that many tokens (what the voice had been given by then goes into the history, cut off); one without is heard to its end. The first dialogue cuts every answer, as in the app on 2026-10-20 (« Raconte-moi en six phrases … », then « Attends, attends » about 3 s into the answer, ten times): after a few, the model wrote the cut-off mark « […] » itself, more of them each time. The others cut one answer early, then ask what a user who did not hear its end would ask, without saying they cut it off: only the history can tell the model that its answer did not reach its end. In all of them, « Attends, attends » asks Maé to wait: she listens, she does not say her answer again.",
+ "dialogues": [
+  {
+   "name": "twelve answers cut off in a row",
+   "turns": [
+    {"user": "Raconte-moi en six phrases comment vivent les abeilles.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60},
+    {"user": "Raconte-moi en six phrases comment les abeilles fabriquent le miel.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60},
+    {"user": "Raconte-moi en six phrases comment on fabrique le pain.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60},
+    {"user": "Raconte-moi en six phrases la vie des dauphins.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60},
+    {"user": "Raconte-moi en six phrases pourquoi les abeilles sont importantes.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60},
+    {"user": "Raconte-moi en six phrases l'histoire de la tour Eiffel.", "cutAfter": 60},
+    {"user": "Attends, attends.", "cutAfter": 60}
+   ]
+  },
+  {
+   "name": "had you finished?",
+   "turns": [
+    {"user": "Donne-moi cinq conseils pour mieux dormir.", "cutAfter": 30},
+    {"user": "Tu avais fini ?"}
+   ]
+  },
+  {
+   "name": "what were you saying?",
+   "turns": [
+    {"user": "Raconte-moi l'histoire du Petit Chaperon rouge en six phrases.", "cutAfter": 30},
+    {"user": "Qu'est-ce que tu disais ?"}
+   ]
+  },
+  {
+   "name": "go on",
+   "turns": [
+    {"user": "Explique-moi en quatre étapes comment faire une omelette.", "cutAfter": 30},
+    {"user": "Vas-y, continue."}
+   ]
+  }
+ ]
+}

@@ -20,6 +20,9 @@
 //   voice-cli cache-check [--scenario name] [--agents]  how much of each request the model finds in its memory,
 //                                                       in the app's sequences of requests (text only; see
 //                                                       CacheCheck.swift)
+//   voice-cli cut-off-bench [--repeats 10] [--cut-off note|marker|none]
+//                                                       answers cut off one after the other: does the model write
+//                                                       the cut-off mark itself? (text only; see CutOffBench.swift)
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
 //                                                       see Delegate.swift)
 //   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
@@ -592,8 +595,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "link-client",
-    "delegate", "web-search", "inbound"].contains(options.command)
+   ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "cut-off-bench",
+    "link-client", "delegate", "web-search", "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -603,6 +606,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "actions-bench": try await runActionsBench(options)
         case "dialogue-bench": try await runDialogueBench(options)
         case "cache-check": try await runCacheCheck(options, arguments: CommandLine.arguments)
+        case "cut-off-bench": try await runCutOffBench(options, arguments: CommandLine.arguments)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)
@@ -649,6 +653,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]
                voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
+               voice-cli cut-off-bench [--tier tier] [--llm folder] [--corpus file.json] [--repeats 10] [--actions]
+                                       [--cut-off note|marker|none] [--note "(…)"] [--dialogue name]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
