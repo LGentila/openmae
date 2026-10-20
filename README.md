@@ -65,7 +65,7 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   (“combien de temps pour aller à la gare de Cergy ?”). No key is needed. “Here” is the Mac's location (macOS asks
   once); a place you name wins. Only the place, or the currency or the crypto, leaves the Mac. Shares and indices
   have no source of this kind yet: they stay with the web search. Offered on the tiers whose model passed their
-  benchmark (Gemma 4 26B for now).
+  benchmark (Gemma 4 E4B and 26B).
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.

@@ -418,8 +418,8 @@ private actor Said {
     @Test func offeredOnTheTiersThatPassedTheBenchmark() {
         #expect(BuiltInSources.offered(on: .comfort))
         #expect(BuiltInSources.offered(on: .max))
+        #expect(BuiltInSources.offered(on: .standard))
         #expect(!BuiltInSources.offered(on: .minimum))
-        #expect(!BuiltInSources.offered(on: .standard))
     }
 
     /// So that a slip of two letters in a tool's name can only stand for one tool.

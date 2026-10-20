@@ -11,8 +11,11 @@ public actor MacLocation: HereLocating {
 
     public init() {}
 
+    /// Not when Location Services are off for the whole Mac: macOS then refuses without asking, and Maé asks for the
+    /// place instead of announcing a question that never comes.
     public func willAsk() async -> Bool {
-        await MainActor.run { Self.manager.authorizationStatus == .notDetermined }
+        guard CLLocationManager.locationServicesEnabled() else { return false }
+        return await MainActor.run { Self.manager.authorizationStatus == .notDetermined }
     }
 
     public func here() async -> Place? {

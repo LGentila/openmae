@@ -73,9 +73,10 @@ public enum BuiltInSources {
 
     public static var tools: [ToolSpec] { [WeatherCatalog.spec, QuoteCatalog.spec, TravelTimeCatalog.spec] }
 
-    /// The tiers whose model passed the benchmark (Tests/Fixtures/sources-fr.json): the 26B's. E4B and E2B were not
-    /// measured: not offered there for now.
-    public static func offered(on tier: HardwareTier) -> Bool { tier == .comfort || tier == .max }
+    /// The tiers whose model passed the benchmark (Tests/Fixtures/sources-fr.json): the 26B's and E4B's (49/50 on
+    /// 2026-10-20, with no loss on the web search's and the actions' corpora). E2B did a little worse (48/50, a quote's
+    /// day said 7 times out of 9): not offered there for now.
+    public static func offered(on tier: HardwareTier) -> Bool { tier == .standard || tier == .comfort || tier == .max }
 
     /// Read first (the model's template sorts the keys, and "consigne" comes before the data): one or two sentences,
     /// the numbers as written, and no orders to follow.
