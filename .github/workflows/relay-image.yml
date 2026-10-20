@@ -33,8 +33,13 @@ on:
 permissions:
   contents: read
 
+# One group per pull request (by number), one per branch or tag otherwise. A
+# pull request's group must not come from github.ref: a pull request's run that
+# starts just after its merge gets github.ref = refs/heads/main, and would
+# cancel main's publish run. A newer push to a pull request cancels that pull
+# request's older run; runs on main and on tags are never cancelled.
 concurrency:
-  group: relay-image-${{ github.ref }}
+  group: relay-image-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -63,10 +68,12 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # Only main and version tags publish; pull requests and other branches
-    # only build.
+    # Only pushes and runs by hand on main or on a version tag publish. A pull
+    # request's run never logs in nor pushes, whatever its github.ref (it is
+    # refs/heads/main for a run that starts just after the merge); other
+    # branches only build.
     env:
-      PUBLISH: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/relay-v') }}
+      PUBLISH: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/relay-v')) }}
     steps:
       - uses: actions/checkout@v7
         with:
