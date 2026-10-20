@@ -46,9 +46,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// always what the model wrote) and computed that result again (a 700-token one: 3.4 s instead of
     /// 0.5 s with Gemma 4 26B on the reference Mac; 5–6 s seen in the app after a web search). The same
     /// once the prompt is in, after a request that went back to a snapshot or started again from scratch:
-    /// while answers keep going into the history otherwise than the model wrote them (cut off: " […]"),
-    /// every turn otherwise went back to that same point and computed more and more again (the turns after
-    /// three answers cut off in a row: 1.04, 1.23 then 1.48 s with Gemma 4 26B, instead of 0.44 s each).
+    /// while answers keep going into the history otherwise than the model wrote them (cut off: kept as far as the
+    /// voice had them, while the model wrote on), every turn otherwise went back to that same point and computed
+    /// more and more again (the turns after three answers cut off in a row: 1.04, 1.23 then 1.48 s with Gemma 4
+    /// 26B, instead of 0.44 s each).
     private var snapshot: (tokens: [Int], cache: [KVCache])?
     /// While later requests answer the same user message (a second pass), the snapshot taken before the
     /// first one. If the turn is dropped then (the user spoke again before any voice), the request that
@@ -354,8 +355,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         return try body()
     }
 
-    /// Once the history no longer matches the cache (an answer cut off: " […]", or kept otherwise than the model wrote
-    /// it), the next request went back to a snapshot and computed that answer again while the user waited (the turn
+    /// Once the history no longer matches the cache (an answer cut off, kept as far as the voice had it while the model
+    /// wrote on, or kept otherwise than the model wrote it), the next request went back to a snapshot and computed that
+    /// answer again while the user waited (the turn
     /// after an interruption: 111 tokens in 555 ms instead of 48 in 439 ms, with Gemma 4 26B on the reference Mac). And
     /// since the snapshot it took then sat before that answer, a request that replaced it (a speculative answer
     /// abandoned, the user's message then heard in full) computed the answer once more, although only the end of the

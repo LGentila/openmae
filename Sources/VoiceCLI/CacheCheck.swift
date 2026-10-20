@@ -4,7 +4,8 @@
 // the model computes it in the background), a refused call and its second try, a long result the model sums up (as
 // after a web search), that summing up cancelled while the model reads the result (the user spoke over the waiting
 // phrase), a turn dropped after its second try (the user spoke again before any voice), a speculative answer abandoned,
-// an interrupted answer, an answer in paragraphs, a speculative answer abandoned after an answer cut off, the tools
+// an interrupted answer (while the model writes it, or once written, while the voice says it), an answer in paragraphs,
+// a speculative answer abandoned after an answer cut off, the tools
 // changing, the history shortened, a new conversation; and answers that the history keeps otherwise than the model
 // wrote them, after a request computed from scratch or not.
 //
@@ -66,8 +67,9 @@ private actor CacheCheck {
                      "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
     }
 
+    /// The user's message as the app makes it: after an answer cut off, it says so (`Conversation.cutOffNote`).
     private func message(_ text: String) -> ChatMessage {
-        Conversation.userMessage(text, language: .french, dateLine: dateLine)
+        Conversation.userMessage(text, language: .french, dateLine: dateLine, afterCutOff: conversation.endsCutOff)
     }
 
     /// The model's counts of requests computed from scratch, gone back to a snapshot, and to the conversations' beginning.
@@ -262,7 +264,8 @@ private actor CacheCheck {
     private func recordAnnouncement(note: String, said: String) {
         var answer = ""
         SpeakableText.record(said, in: &answer)
-        conversation.record(user: ChatMessage(.user, note), steps: [], assistant: answer, interrupted: false)
+        conversation.record(user: Conversation.noteMessage(note, afterCutOff: conversation.endsCutOff), steps: [],
+                            assistant: answer, interrupted: false)
         print(String(format: "  %-46@ recorded, no request", "announcement" as NSString))
     }
 
@@ -515,6 +518,16 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("answer interrupted", "Raconte-moi une histoire de pirates.", stopAfter: 12, interrupted: true)
             try await check.turn("plain answer after the interruption", "Plutôt une histoire de dragons, très courte.")
             try await check.turn("plain answer", "Merci, c'était bien.")
+        }),
+        ("interrupted-at-the-end", {
+            // The model has written the whole answer, and the user speaks over the voice while it says it: the history
+            // keeps the answer cut off, all of it, as the model wrote it.
+            try await check.newConversation()
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("answer interrupted at its end", "Donne-moi une idée de dessert facile à faire.",
+                                 interrupted: true)
+            try await check.turn("plain answer after the interruption", "Et sans four, qu'est-ce que je peux faire ?")
+            try await check.turn("plain answer", "Merci, c'est parfait.")
         }),
         ("tools-changed", {
             try await check.newConversation()

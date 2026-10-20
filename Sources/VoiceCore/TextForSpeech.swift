@@ -192,6 +192,13 @@ public enum SpeakableText {
                                    options: .regularExpression)
         s = s.replacingOccurrences(of: #"[(\[][^()\[\]]*\b20\d{2}\b[^()\[\]]*\b\d{1,2}\s?[:h]\s?\d{2}\b[^()\[\]]*[)\]]"#,
                                    with: "", options: .regularExpression)
+        // An ellipsis in brackets (« […] », « [...] », « (…) »), alone or in runs: the mark of a cut, never words. The
+        // history once ended the answers cut off with it; the model copied it into its own answers, dozens in a row,
+        // and the voice read them as noise for seconds. Out of the history too, so that the model never sees it as its
+        // own. Brackets left empty go with it, and ellipses in a row are one.
+        s = s.replacingOccurrences(of: #"[ \t]*[(\[]\s*(?:…|\.{2,})\s*[)\]]"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"[ \t]*[(\[]\s*[)\]]"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?:…|\.{3})(?:\s*(?:…|\.{3}))+"#, with: "…", options: .regularExpression)
         // Links: say nothing rather than read an URL letter by letter.
         s = s.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
         // Emojis and pictographs.

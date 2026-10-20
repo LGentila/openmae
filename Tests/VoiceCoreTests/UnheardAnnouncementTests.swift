@@ -9,8 +9,9 @@ import Testing
 struct UnheardAnnouncementTests {
     static let sentence = "Ton minuteur de 10 minutes est terminé."
     static let note = "(Le minuteur a sonné.)"
-    /// The sentence as the history keeps it once it was stopped after its words could be heard.
-    static let cutOff = sentence + " […]"
+    /// The end of the message after the sentence, once it was stopped after its words could be heard: the history keeps
+    /// the sentence cut off, and the next message says so.
+    static let cutOff = "\n" + Conversation.cutOffNote
     /// The chime, then the sentence, as the fake voice plays them (1 sample = 1 ms).
     static let samples = Chime.samples(sampleRate: 1000).count + 500
 
@@ -219,18 +220,20 @@ struct UnheardAnnouncementTests {
         await waitFor { await speaker.played == Self.samples }
         try await Task.sleep(for: .milliseconds(900))  // the chime is over: the sentence plays
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
-        await waitFor { await recorded(model) == [Self.cutOff, "Oui ?"] }
+        await waitFor { await recorded(model) == [Self.sentence, "Oui ?"] }
         await waitFor { await log.finished.count == 2 }
         try await Task.sleep(for: .milliseconds(300))
         let requests = await model.requests
         #expect(!requests.isEmpty)
         for request in requests {  // the user's turn (and any answer prepared during a pause)
             #expect(request.map(\.role) == [.system, .user, .assistant, .user])
-            #expect(request.dropFirst().prefix(2).map(\.content) == [Self.note, Self.cutOff])
+            #expect(request.dropFirst().prefix(2).map(\.content) == [Self.note, Self.sentence])
+            #expect(request.last?.content.hasSuffix(Self.cutOff) == true)
         }
         let history = try #require(await model.catchUps.last)
         #expect(history.map(\.role) == [.system, .user, .assistant, .user, .assistant])
-        #expect(history.dropFirst().prefix(2).map(\.content) == [Self.note, Self.cutOff])
+        #expect(history.dropFirst().prefix(2).map(\.content) == [Self.note, Self.sentence])
+        #expect(history[3].content.hasSuffix(Self.cutOff))
         let finished = await log.finished
         #expect(finished.map(\.interrupted) == [true, false])  // the announcement, cut off; then the user's turn
         #expect(finished.first?.assistantText == Self.sentence)
@@ -251,9 +254,9 @@ struct UnheardAnnouncementTests {
         await waitFor { await speaker.played == Self.samples }
         try await Task.sleep(for: .milliseconds(900))
         await pipeline.submit(text: "Lequel ?")
-        await waitFor { await recorded(model) == [Self.cutOff, "Celui de 10 minutes."] }
+        await waitFor { await recorded(model) == [Self.sentence, "Celui de 10 minutes."] }
         let request = try #require(await model.requests.last)
-        #expect(request.dropFirst().map(\.content) == [Self.note, Self.cutOff, "Lequel ?"])
+        #expect(request.dropFirst().map(\.content) == [Self.note, Self.sentence, "Lequel ?" + Self.cutOff])
         #expect(await log.pieces == [Self.sentence, "Celui de 10 minutes."])
         await waitFor { await log.finished.count == 2 }
         #expect(await log.finished.map(\.interrupted) == [true, false])
@@ -272,16 +275,20 @@ struct UnheardAnnouncementTests {
         await waitFor { await speaker.played == Self.samples }
         try await Task.sleep(for: .milliseconds(900))
         await pipeline.interrupt()
-        await waitFor { await recorded(model) == [sentence + " […]"] }
+        await waitFor { await recorded(model) == [sentence] }
         try await Task.sleep(for: .milliseconds(1500))  // not said again
         #expect(await speaker.played == Self.samples)
         #expect(await log.pieces == [sentence])
         let history = try #require(await model.catchUps.last)
-        #expect(history.dropFirst().map(\.content) == [Self.note, sentence + " […]"])
+        #expect(history.dropFirst().map(\.content) == [Self.note, sentence])
         let finished = await log.finished
         #expect(finished.map(\.interrupted) == [true])
         #expect(finished.first?.assistantText == sentence)
         #expect(finished.first?.language == .english)
+        // Cut off: the next message says so.
+        await pipeline.submit(text: "Merci")
+        await waitFor { await model.requests.count == 1 }
+        #expect(await model.requests.last?.last?.content == "Merci" + Self.cutOff)
     }
 }
 

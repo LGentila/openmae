@@ -91,11 +91,15 @@ struct OutOfReachTests {
         voice.release()
         await waitFor { await speaker.played == 1500 }
         await pipeline.setOutputReachable(false, reachedUntil: reached)
-        await waitFor { await recorded(model) == [Self.sentences[0] + " […]"] }
-        #expect(await recorded(model) == [Self.sentences[0] + " […]"])
+        await waitFor { await recorded(model) == [Self.sentences[0]] }
+        #expect(await recorded(model) == [Self.sentences[0]])
         await pipeline.setOutputReachable(true)
         try await Task.sleep(for: .milliseconds(300))
         #expect(await speaker.played == 1500)
+        // Cut off: the next message says so.
+        await pipeline.submit(text: "Et alors ?")
+        await waitFor { await model.requests.count == 2 }
+        #expect(await model.requests.last?.last?.content == "Et alors ?\n" + Conversation.cutOffNote)
     }
 
     /// The voice was still on its first sentence (the rest not out yet) when the device was last heard: that sentence may
@@ -130,15 +134,16 @@ struct OutOfReachTests {
         await waitFor { await log.finished.count == 1 }
         await pipeline.voiceOutputChanged()  // the Mac takes the sound back
         await pipeline.setOutputReachable(true)
-        await waitFor { await recorded(model) == [Self.sentences[0] + " […]"] }
-        #expect(await recorded(model) == [Self.sentences[0] + " […]"])
+        await waitFor { await recorded(model) == [Self.sentences[0]] }
+        #expect(await recorded(model) == [Self.sentences[0]])
         try await Task.sleep(for: .milliseconds(200))
         #expect(await speaker.played == 1500)  // not said on the other device
         await pipeline.submit(text: "Autre chose.")
         await waitFor { await model.requests.count == 2 }
         let request = try #require(await model.requests.last)
         #expect(request.map(\.role) == [.system, .user, .assistant, .user])
-        #expect(request[2].content == Self.sentences[0] + " […]")
+        #expect(request[2].content == Self.sentences[0])  // what was heard, cut off: the next message says so
+        #expect(request[3].content == "Autre chose.\n" + Conversation.cutOffNote)
     }
 
     /// The user is speaking when the device goes out of reach: the sentence is not answered (nor transcribed), what the

@@ -1337,7 +1337,8 @@ public actor VoicePipeline {
             }
             let now = Date()
             turn.userMessage = Conversation.userMessage(
-                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now))
+                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now),
+                afterCutOff: conversation.endsCutOff)
             // "oui", "non", "annule": answered by the app, not the model.
             let interception = await tools?.interception(for: text, now: now)
 
@@ -1835,7 +1836,7 @@ public actor VoicePipeline {
         turn.elsewhere = announcementOutput != nil
         turn.announcement = announcement
         turn.language = announcement.language
-        turn.userMessage = ChatMessage(.user, announcement.note)
+        turn.userMessage = Conversation.noteMessage(announcement.note, afterCutOff: conversation.endsCutOff)
         self.turn = turn
         commit(turn)
         turn.task = Task { await self.runAnnouncement(turn, announcement) }

@@ -88,6 +88,28 @@ struct TextForSpeechTests {
         #expect(SpeakableText.clean("- des pâtes\n- du riz") == "des pâtes du riz")
     }
 
+    /// The mark of a cut (an ellipsis in brackets), alone or in runs, is neither said nor shown nor kept: as the model
+    /// wrote it after answers cut off, dozens in a row. An ellipsis of its own stays; several in a row are one.
+    @Test func cutOffMarksAreNotSpoken() {
+        #expect(SpeakableText.clean("Pour assurer la survie. […]") == "Pour assurer la survie.")
+        #expect(SpeakableText.clean("Toute la ruche travaille. […] […] […] [...] (…) ( ... ) [..]")
+            == "Toute la ruche travaille.")
+        #expect(SpeakableText.clean(String(repeating: "[…] ", count: 54)) == "")
+        #expect(SpeakableText.clean("[…][…][…]") == "")
+        #expect(SpeakableText.clean("Il était une fois […] un roi.") == "Il était une fois un roi.")
+        #expect(SpeakableText.clean("Euh… je ne sais pas.") == "Euh… je ne sais pas.")
+        #expect(SpeakableText.clean("Je ne sais pas… … …") == "Je ne sais pas…")
+        #expect(SpeakableText.clean("Attends... ... ...") == "Attends…")
+        #expect(SpeakableText.forVoice(SpeakableText.clean("Bien sûr. [...] Voici la suite."), language: .french)
+            == "Bien sûr. Voici la suite.")
+        // Out of the history too, with the paragraphs the model wrote.
+        #expect(SpeakableText.clean("C'est la fin. […]\n\nLa suite.", keepingLineBreaks: true) == "C'est la fin.\n\nLa suite.")
+        var answer = ""
+        SpeakableText.record("Je suis attentif. Que veux-tu me dire ?", in: &answer)
+        SpeakableText.record("[…] […] […] […] […] […] […]", after: " ", in: &answer)
+        #expect(answer == "Je suis attentif. Que veux-tu me dire ?")
+    }
+
     /// The history keeps the answer as the model wrote it, paragraphs included (its memory of the answer then still
     /// matches the next request), while the voice and the interface get the same pieces as before.
     @Test func historyKeepsTheWhiteSpaceTheModelWrote() {
@@ -142,14 +164,45 @@ struct TierAndConversationTests {
         #expect(HardwareTier.comfort.isTested && !HardwareTier.standard.isTested)
     }
 
-    @Test func englishHintStaysInHistoryAndInterruptionsAreMarked() {
+    /// An answer cut off goes into the history as it went to the voice, without any mark of the cut in its words (the
+    /// model copied such a mark into its own answers); the next message says it, after the user's words, before the
+    /// date line and the language hint, and stays in the history with it.
+    @Test func englishHintStaysInHistoryAndTheMessageAfterACutSaysSo() {
         var c = Conversation(systemPrompt: "S")
         c.record(user: "Hello there my friend", language: .english, assistant: "Hi", interrupted: true)
-        #expect(c.messages.map(\.content) == ["S", "Hello there my friend" + Conversation.englishHint, "Hi […]"])
+        #expect(c.messages.map(\.content) == ["S", "Hello there my friend" + Conversation.englishHint, "Hi"])
+        #expect(c.endsCutOff)
+        let next = c.messages(addingUser: "Sorry, go on", language: .english).last?.content
+        #expect(next == "Sorry, go on\n" + Conversation.cutOffNote + Conversation.englishHint)
+        c.record(user: "Sorry, go on", language: .english, assistant: "Sure.", interrupted: false)
+        #expect(c.messages.last(where: { $0.role == .user })?.content == next)
+        #expect(!c.endsCutOff)
+        #expect(c.messages(addingUser: "Thanks", language: .english).last?.content == "Thanks" + Conversation.englishHint)
+        // The answer cut off dropped, the note about it goes too.
         let dropped = c.dropOldestExchange()
         #expect(dropped)
+        #expect(c.messages.map(\.content) == ["S", "Sorry, go on" + Conversation.englishHint, "Sure."])
+        let droppedNext = c.dropOldestExchange()
+        #expect(droppedNext)
         #expect(c.messages.count == 1)
         let droppedAgain = c.dropOldestExchange()
         #expect(!droppedAgain)
+    }
+
+    /// With the actions on, the date line still ends the message after a cut; an announcement's note says it too; a new
+    /// conversation forgets it.
+    @Test func theNoteOfACutComesBeforeTheDateLine() {
+        let dateLine = "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)"
+        let message = Conversation.userMessage("Attends, attends.", language: .french, dateLine: dateLine, afterCutOff: true)
+        #expect(message.content == "Attends, attends.\n" + Conversation.cutOffNote + "\n" + dateLine)
+        #expect(message.content.components(separatedBy: "\n").first == "Attends, attends.")  // the user's words alone
+        #expect(Conversation.noteMessage("(Le minuteur a sonné.)", afterCutOff: true).content
+            == "(Le minuteur a sonné.)\n" + Conversation.cutOffNote)
+        #expect(Conversation.noteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)")
+        var c = Conversation(systemPrompt: "S")
+        c.record(user: "Raconte-moi une histoire.", language: .french, assistant: "Il était une fois", interrupted: true)
+        c.clear()
+        #expect(!c.endsCutOff)
+        #expect(c.messages(addingUser: "Bonjour", language: .french).last?.content == "Bonjour")
     }
 }
