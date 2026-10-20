@@ -46,7 +46,8 @@ public actor CalendarTools: ToolProvider {
     private var undoCount = 0
     /// The default calendar is named once per conversation, so the user knows where events go.
     private var calendarNamed = false
-    /// A creation just refused for its moment (gone), which a change of an item never created makes instead.
+    /// A creation just refused for a detail the user gives again (its moment, its calendar or its list), which a change
+    /// of an item never created makes instead.
     private var refusedCreation = RefusedCreation()
 
     public init(testCollection: String? = nil) {
@@ -60,7 +61,7 @@ public actor CalendarTools: ToolProvider {
         do {
             try ActionCatalog.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refusal(refusal, of: call)
+            refusedCreation.refused(call, refusal)
             throw refusal
         }
     }
@@ -113,16 +114,23 @@ public actor CalendarTools: ToolProvider {
 
     // MARK: - Carrying out a call
 
+    /// A creation refused here (a calendar or a list that does not exist) is kept as one refused by `check` is.
     public func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
-        switch call.name {
-        case ActionCatalog.createEvent.name: return try await createEvent(call, context)
-        case ActionCatalog.createReminder.name: return try await createReminder(call, context)
-        case ActionCatalog.readAgenda.name: return try await readAgenda(call, context)
-        case ActionCatalog.listReminders.name: return try await listReminders(call, context)
-        case ActionCatalog.changeItem.name: return try await change(call, context)
-        case ActionCatalog.deleteItem.name: return try await delete(call, context)
-        default:
-            throw ToolRefusal(forModel: "Outil inconnu : \(call.name).", spoken: ActionPhrases.notUnderstood(context.language))
+        do {
+            switch call.name {
+            case ActionCatalog.createEvent.name: return try await createEvent(call, context)
+            case ActionCatalog.createReminder.name: return try await createReminder(call, context)
+            case ActionCatalog.readAgenda.name: return try await readAgenda(call, context)
+            case ActionCatalog.listReminders.name: return try await listReminders(call, context)
+            case ActionCatalog.changeItem.name: return try await change(call, context)
+            case ActionCatalog.deleteItem.name: return try await delete(call, context)
+            default:
+                throw ToolRefusal(forModel: "Outil inconnu : \(call.name).",
+                                  spoken: ActionPhrases.notUnderstood(context.language))
+            }
+        } catch let refusal as ToolRefusal {
+            refusedCreation.refused(call, refusal)
+            throw refusal
         }
     }
 
@@ -295,7 +303,8 @@ public actor CalendarTools: ToolProvider {
         do {
             (key, item) = try referenced(call, context)
         } catch let refusal as ToolRefusal {
-            // The item whose creation was just refused for its moment: created at the new one.
+            // The item whose creation was just refused for a detail the user gave again: created with what the change
+            // gives (another moment, calendar or list).
             guard let creation = refusedCreation.creation(insteadOf: call) else { throw refusal }
             DebugLog.log("calendar: a change of an item never created, made as its creation")
             return try await perform(creation, context: context)
@@ -437,9 +446,11 @@ public actor CalendarTools: ToolProvider {
         if let testCollection { return try collection(.event, named: testCollection) }
         if let name {
             guard let calendar = find(name, in: store.calendars(for: .event)) else {
-                throw ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(name) ». Calendriers : "
-                                  + writable(.event).joined(separator: ", ") + ".",
-                                  spoken: ActionPhrases.unknownCalendar(name, context.language))
+                var refusal = ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(name) ». "
+                                              + "Calendriers : " + writable(.event).joined(separator: ", ") + ".",
+                                          spoken: ActionPhrases.unknownCalendar(name, context.language))
+                refusal.detailGivenAgain = true
+                throw refusal
             }
             return calendar
         }
@@ -454,9 +465,11 @@ public actor CalendarTools: ToolProvider {
         if let testCollection { return try collection(.reminder, named: testCollection) }
         if let name {
             guard let list = find(name, in: store.calendars(for: .reminder)) else {
-                throw ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(name) ». Listes : "
-                                  + writable(.reminder).joined(separator: ", ") + ".",
-                                  spoken: ActionPhrases.unknownList(name, context.language))
+                var refusal = ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(name) ». Listes : "
+                                              + writable(.reminder).joined(separator: ", ") + ".",
+                                          spoken: ActionPhrases.unknownList(name, context.language))
+                refusal.detailGivenAgain = true
+                throw refusal
             }
             return list
         }

@@ -86,7 +86,10 @@ public enum DateCheck {
         }
         switch problem {
         case .missing:
-            return ToolRefusal(forModel: "Il manque « \(key) ».", spoken: ActionPhrases.badTime(context.language))
+            var refusal = ToolRefusal(forModel: "Il manque « \(key) ».",
+                                      spoken: ActionPhrases.badTime(context.language))
+            refusal.detailGivenAgain = true
+            return refusal
         case .past(let moment):
             let creation = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(tool ?? "")
             let next = tool.map {
@@ -97,7 +100,7 @@ public enum DateCheck {
                                           + (tool == nil ? "créé ni changé" : creation ? "créé" : "changé")
                                           + " : l'app demande un autre moment à l'utilisateur." + next,
                                       spoken: ActionPhrases.datePassed(context.language), retryable: false)
-            refusal.momentGone = true
+            refusal.detailGivenAgain = true
             return refusal
         case .tooFar(let moment):
             return ToolRefusal(forModel: "\(when(moment)), à plus d'un an : nous sommes le \(now).",
@@ -106,38 +109,58 @@ public enum DateCheck {
     }
 }
 
-/// A creation refused because its moment was gone, kept for the call right after it: when the user gives another moment,
-/// Gemma 4 26B often writes a change of the "last" item (`modifier_element`, "Demain à 16h."), which was never created.
-/// That change then creates the item at the new moment. Used by the calendar providers (`CalendarTools`, and voice-cli's
-/// calendar in memory), around their check of each call.
+/// A creation refused for a detail the user then gives again (`ToolRefusal.detailGivenAgain`: a moment already gone,
+/// words about time the app cannot place or none at all, a calendar or a list that does not exist), kept for the call
+/// right after it. When the user answers ("Demain à 16h.", "Mets-la dans Maison alors."), Gemma 4 26B often takes the
+/// refused item for saved and writes a change of the "last" item (`modifier_element`), which was never created: that
+/// change then creates the item, with what the change gives. In voice-cli dialogue-bench the 26B answered so 9 times in
+/// 10 after a calendar that does not exist, 2 to 5 after words about time the app cannot place: the item was saved at
+/// that answer in 5 and 8 runs of 10, when its second try wrote the creation again, and in 10 of 10 since. Used by the
+/// calendar providers (`CalendarTools`, and voice-cli's calendar in memory), around their check and their carrying out
+/// of each call.
+///
+/// Not after a refusal whose answer only completes the refused words (« de l'après-midi » for an hour that may be the
+/// morning, « le 25 » for a weekday that does not match the date): read alone, such words would lose the rest of the
+/// moment, which the model writes again in a creation of its own.
 public struct RefusedCreation: Sendable {
     private var refused: ToolCall?
+    private static let creations = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name]
 
     public init() {}
 
-    /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change (of
-    /// an item that does not exist: a provider that finds the item forgets it).
+    /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change
+    /// (of an item that does not exist: a provider that finds the item forgets it).
     public mutating func checking(_ call: ToolCall) {
         if call.name != ActionCatalog.changeItem.name { refused = nil }
     }
 
-    /// A call was refused: kept when it is a creation whose moment is gone.
-    public mutating func refusal(_ refusal: ToolRefusal, of call: ToolCall) {
-        let creations = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name]
-        refused = refusal.momentGone && creations.contains(call.name) ? call : nil
+    /// A call was refused, by the provider's check or when carried out: a creation is kept when the user gives the
+    /// refused detail again (`ToolRefusal.detailGivenAgain`), forgotten otherwise. A change refused leaves what is
+    /// kept: its second try may still make it, and the creation it was made into, refused in turn, is already kept.
+    public mutating func refused(_ call: ToolCall, _ refusal: ToolRefusal) {
+        guard Self.creations.contains(call.name) else { return }
+        refused = refusal.detailGivenAgain ? call : nil
     }
 
     /// The creation to carry out instead of `change`, a change of an item that does not exist: the refused call, with
-    /// what the change gives (the new moment instead of the old one, a title, a length, a place). nil when no creation
-    /// was refused just before. Forgets it.
+    /// what the change gives: a new moment instead of the old one (as `quand`, whichever word the change uses), a
+    /// calendar or a list (an event's calendar, a reminder's list, whichever of the two words the change uses), a
+    /// title, a length, a place. nil when no creation was refused just before. Forgets it.
     public mutating func creation(insteadOf change: ToolCall) -> ToolCall? {
         guard var creation = refused, change.name == ActionCatalog.changeItem.name else { return nil }
         refused = nil
-        let moments = ["quand", "debut", "echeance", "fin", "journee_entiere"]
-        if moments.contains(where: { change.arguments[$0] != nil }) {
-            for key in moments { creation.arguments[key] = nil }
+        var given = change.arguments.filter { key, _ in key != "reference" && change.text(key) != nil }
+        let starts = ["quand", "debut", "echeance"]
+        if let start = starts.first(where: { given[$0] != nil }) {
+            for key in starts + ["fin", "journee_entiere"] { creation.arguments[key] = nil }
+            let moment = given[start]
+            for key in starts { given[key] = nil }
+            given["quand"] = moment
         }
-        for (key, value) in change.arguments where key != "reference" { creation.arguments[key] = value }
+        let event = creation.name == ActionCatalog.createEvent.name
+        let (own, other) = event ? ("calendrier", "liste") : ("liste", "calendrier")
+        if let named = given.removeValue(forKey: other), given[own] == nil { given[own] = named }
+        creation.arguments.merge(given) { _, changed in changed }
         return creation
     }
 

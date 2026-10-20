@@ -205,8 +205,10 @@ public struct ToolRefusal: Error, Sendable {
     public var spoken: String
     /// The model may correct its call (wrong arguments); false when retrying cannot help (permission refused).
     public var retryable: Bool
-    /// The moment the call gives is already gone: the app asks the user for another one (`DateCheck`).
-    public var momentGone = false
+    /// What is refused is one detail of the call, which the answer gives again, whole: a moment already gone, words
+    /// about time the app cannot place or none at all, a calendar or a list that does not exist. Right after a creation
+    /// refused so, a change of an item never created is that creation with what the change gives (`RefusedCreation`).
+    public var detailGivenAgain = false
 
     public init(forModel: String, spoken: String, retryable: Bool = true) {
         self.forModel = forModel

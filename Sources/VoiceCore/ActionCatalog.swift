@@ -274,10 +274,12 @@ public enum ActionCatalog {
         let language = context.language
         switch problem {
         case .notUnderstood:
-            return ToolRefusal(
+            var refusal = ToolRefusal(
                 forModel: "Je ne comprends pas « \(key) » : « \(raw) ». Recopie les mots de l'utilisateur sur le moment, "
                     + "par exemple « samedi à 20 h » ou « dans 2 heures », ou écris la date au format AAAA-MM-JJTHH:MM.",
                 spoken: ActionPhrases.badTime(language))
+            refusal.detailGivenAgain = true
+            return refusal
         case .ambiguousHour(let hour, let minute):
             // The words cannot tell: the user is asked, not the model.
             return ToolRefusal(

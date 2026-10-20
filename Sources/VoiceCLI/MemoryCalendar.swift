@@ -31,7 +31,8 @@ actor MemoryCalendar: ToolProvider {
     private var undoCount = 0
     /// The calendar is named once per conversation, as in the app.
     private var calendarNamed = false
-    /// As in the app: a creation just refused for its moment, which a change of an item never created makes instead.
+    /// As in the app: a creation just refused for a detail the user gives again (its moment, its calendar or its
+    /// list), which a change of an item never created makes instead.
     private var refusedCreation = RefusedCreation()
     /// Every item created, by reference, in order: what the bench checks a dialogue's goal against.
     private(set) var creations: [String] = []
@@ -43,7 +44,7 @@ actor MemoryCalendar: ToolProvider {
         do {
             try ActionCatalog.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refusal(refusal, of: call)
+            refusedCreation.refused(call, refusal)
             throw refusal
         }
     }
@@ -56,7 +57,18 @@ actor MemoryCalendar: ToolProvider {
         refusedCreation.forget()
     }
 
+    /// As in the app: a creation refused here (a calendar or a list that does not exist) is kept as one refused by
+    /// `check` is.
     func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
+        do {
+            return try await carryOut(call, context: context)
+        } catch let refusal as ToolRefusal {
+            refusedCreation.refused(call, refusal)
+            throw refusal
+        }
+    }
+
+    private func carryOut(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
         switch call.name {
         case ActionCatalog.createEvent.name:
             let title = try ActionCatalog.title(call, context: context)
@@ -192,7 +204,10 @@ actor MemoryCalendar: ToolProvider {
         }
         let (key, name) = (folded(named), folded(only))
         guard key == name || key.contains(name) || name.contains(key) else {
-            throw ToolRefusal(forModel: "\(kind) « \(named) ». \(others) : \(only).", spoken: spoken(named, context.language))
+            var refusal = ToolRefusal(forModel: "\(kind) « \(named) ». \(others) : \(only).",
+                                      spoken: spoken(named, context.language))
+            refusal.detailGivenAgain = true
+            throw refusal
         }
     }
 
