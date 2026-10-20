@@ -51,10 +51,11 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   a protection in front of it, if any). Keys and passwords go in the keychain; "Test" checks it all. Ask something
   Maé cannot know — “qui a gagné le match du PSG hier soir ?”, “à quelle heure ferme la piscine le dimanche ?” —
   and she searches, reads the first results and answers in a sentence or two, naming the site; whatever the pages
-  say, nothing is carried out while she sums them up. Only the few keywords she searches for leave the Mac: to
-  Brave Search, or to your SearXNG and from there to the search engines. The results are never stored (no cache):
-  they only live in the conversation. Public SearXNG instances are not used: they turn programs away, and OpenMaé
-  never passes for a browser.
+  say, nothing is carried out while she sums them up. When they do not hold the answer, ask again — “cherche
+  encore”, “regarde sur d’autres sites” — and she searches again, with other words. Only the few keywords she
+  searches for leave the Mac: to Brave Search, or to your SearXNG and from there to the search engines. The results
+  are never stored (no cache): they only live in the conversation. Public SearXNG instances are not used: they turn
+  programs away, and OpenMaé never passes for a browser.
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
@@ -327,16 +328,19 @@ that must not be, and questions about a task already handed over):
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
 ```
 
-Searching the internet: requests that need a search, requests that do not (traps included) and research for an
-agent. The model sums up the results recorded for each request in the corpus, as the app would have it do, and the
-report gives the right decisions, the searches made by mistake, the keywords and what the summaries said:
+Searching the internet: requests that need a search, requests that do not (traps included), research for an agent,
+and requests that follow a search whose results did not answer (the user insists or asks for other sites: a new
+search is expected, with keywords of its own; or asks for nothing new). The model sums up the results recorded for
+each request in the corpus, as the app would have it do, and the report gives the right decisions, the searches made
+by mistake, the keywords and what the summaries said:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/web-fr.json
 ```
 
 With `--searxng <address>`, the searches are made for real on that SearXNG, with the model's own keywords; `--web`
-offers the search tool with the other corpora too, to check that it does not change their results.
+offers the search tool with the other corpora too, to check that it does not change their results;
+`--web-addendum <file>` replaces the search's part of the system prompt, to try another wording without rebuilding.
 `--compare-beginnings` generates nothing: it computes the beginning of the conversations (the system prompt with its
 tools) as the app does (in float32, then rounded: the same state at load and after a tools change), then in bfloat16 as
 it was computed before and with every weight in float32 as a reference, compares the model's memory after each, and

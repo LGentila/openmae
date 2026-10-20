@@ -107,6 +107,8 @@ struct Options {
     var watchCalls = false
     var compareBeginnings = false
     var addendum: String?
+    /// actions-bench: the web search's part of the system prompt, read from this file.
+    var webAddendum: String?
     var examples: String?
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
@@ -163,6 +165,7 @@ struct Options {
             case "--watch-calls": o.watchCalls = true
             case "--compare-beginnings": o.compareBeginnings = true
             case "--addendum": o.addendum = it.next()
+            case "--web-addendum": o.webAddendum = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
@@ -632,7 +635,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--voice-restart-after s]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
-                                       [--compare-beginnings]
+                                       [--addendum file] [--web-addendum file] [--compare-beginnings]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]

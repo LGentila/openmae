@@ -9,9 +9,9 @@
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
-//                           [--watch-calls] [--examples app|none|file] [--web]
-//                           [--searxng http://127.0.0.1:8888 [--searxng-user name]] [--record file.json]
-//                           [--compare-beginnings]
+//                           [--watch-calls] [--examples app|none|file] [--web] [--addendum file]
+//                           [--web-addendum file] [--searxng http://127.0.0.1:8888 [--searxng-user name]]
+//                           [--record file.json] [--compare-beginnings]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -25,7 +25,10 @@
 // Conversations start with the example exchanges the app gives this tier's model (ActionCatalog.examples), or
 // with those --examples says: "app" (the app's, on any tier), "none", or a file of exchanges (the shape of a
 // case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
-// --addendum <file> replaces the actions part of the system prompt (experiments without rebuilding).
+// --addendum <file> replaces the actions part of the system prompt, --web-addendum <file> the web search's
+// (experiments without rebuilding).
+// A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
+// shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
 // as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
@@ -84,18 +87,24 @@ private struct Corpus: Decodable {
         var refused: String?
     }
 
-    /// An earlier exchange, for corrections ("décale-le") and tasks already handed over; without a call for a plain
-    /// answer ("oui").
+    /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
+    /// without a call for a plain answer ("oui").
     struct Exchange: Decodable {
         var user: String
         var call: ToolCall?
         var result: JSONValue?
+        /// A search's results, in the "recorded" shape: its result is then what the app gives the model of them.
+        var found: WebSearchResults?
         var answer: String
         /// Only for --examples (a case's earlier exchanges get the reference time's line).
         var dateLine: String?
 
         /// The call and its result, as the history keeps them.
-        var steps: [ChatMessage] { call.map { [.call($0), .result(of: $0, result ?? .null)] } ?? [] }
+        func steps(_ context: ToolContext) -> [ChatMessage] {
+            guard let call else { return [] }
+            let read = found.map { WebSearchCatalog.forModel(query: WebSearchCatalog.query(call) ?? "", $0, context: context) }
+            return [.call(call), .result(of: call, result ?? read ?? .null)]
+        }
     }
 
     func exchanges(before item: Case) -> [Exchange] {
@@ -136,9 +145,15 @@ private struct CaseResult: Encodable {
     var firstCallChance: Double?
     var bestCallChance: Double?
     var bestCallAt: Int?
+    /// The keywords of the searches in the case's earlier exchanges, and whether this request's search uses the same
+    /// ones again (whatever the accents, case and spacing).
+    var earlierSearches: [String]?
+    var sameKeywordsAsBefore: Bool?
     /// A search: what the model said of its results, and the calls it wrote meanwhile (the app carries out none).
     var summary: String?
     var callsWhileSumming: [String]?
+    /// It wrote a call and nothing else, and summed up once more (as the app has it do).
+    var summedUpAgain: Bool?
     /// Whether the summary names one of the results' sites.
     var namesASite: Bool?
     /// How many tokens the results take in the model's memory.
@@ -202,11 +217,13 @@ func runActionsBench(_ o: Options) async throws {
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     conversation.systemAddenda = [try o.addendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
         ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (agents ? [AgentCatalog.promptAddendum] : [])
-        + (web ? [WebSearchCatalog.promptAddendum] : [])
+        + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
+            ?? WebSearchCatalog.promptAddendum] : [])
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
+    let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
     let prefixStart = clock.now
     try await model.prefillBeginning(conversation.beginning)
     let prefixTokens = try await model.tokenCount(conversation.messages)
@@ -214,15 +231,15 @@ func runActionsBench(_ o: Options) async throws {
           + String(format: " (GPU memory peak %.2f GB)\n", await model.lastBeginning?.peakGB ?? 0))
     if o.showPrompt { print(try await model.promptText(conversation.messages) + "\n") }
     if o.compareBeginnings {
-        try await compareBeginnings(corpus, conversation: conversation, tools: tools, dateLine: dateLine, model: model,
-                                    options: o)
+        try await compareBeginnings(corpus, conversation: conversation, tools: tools, dateLine: dateLine,
+                                    context: reference, model: model, options: o)
         return
     }
 
     var results: [CaseResult] = []
     for (index, item) in corpus.cases.enumerated() {
         let before = corpus.exchanges(before: item)
-        let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine)
+        let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine, context: reference)
         var text = ""
         var call: ToolCall?
         var moreCalls = false
@@ -263,6 +280,9 @@ func runActionsBench(_ o: Options) async throws {
                                 moreCalls: moreCalls ? true : nil, text: text, toolOK: chosen == expectedTool,
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
+        let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
+            .compactMap(WebSearchCatalog.query)
+        if !earlierSearches.isEmpty { result.earlierSearches = earlierSearches }
         if o.watchCalls, let chances = await model.lastToolCallChances {
             result.firstCallChance = chances.first
             result.bestCallChance = chances.best
@@ -293,6 +313,9 @@ func runActionsBench(_ o: Options) async throws {
                 try WebSearchCatalog.check(call, context: context)
                 if result.toolOK, let expected = item.expected { result.argumentsOK = mentions(call, expected) }
                 let query = WebSearchCatalog.query(call) ?? ""
+                if !earlierSearches.isEmpty {
+                    result.sameKeywordsAsBefore = earlierSearches.map(keywords).contains(keywords(query))
+                }
                 var results = corpus.recorded?[item.phrase]
                 if let live {
                     let searchStart = clock.now
@@ -379,7 +402,8 @@ func runActionsBench(_ o: Options) async throws {
         if let summary = result.summary {
             let calls = (result.callsWhileSumming ?? []).isEmpty ? ""
                 : "  [calls written while summing up, not carried out: \(result.callsWhileSumming!.joined(separator: "; "))]"
-            print("      summary → “\(summary)”  \(fmt(result.summaryFirstMs))" + calls)
+            print("      summary → “\(summary)”  \(fmt(result.summaryFirstMs))" + calls
+                  + (result.summedUpAgain == true ? "  [summed up once more after a call alone]" : ""))
         }
         if o.watchCalls { print("      raw: \(await model.lastRawAnswer.debugDescription)") }
         if secondPass {
@@ -411,20 +435,21 @@ func exampleExchanges(_ examples: String, now: Date, timeZone: TimeZone) throws 
         return try entries.flatMap { entry -> [ChatMessage] in
             if case .object(let fields) = entry, let note = fields["system"]?.text { return [ChatMessage(.system, note)] }
             let exchange = try JSONDecoder().decode(Corpus.Exchange.self, from: JSONEncoder().encode(entry))
-            return [Conversation.userMessage(exchange.user, language: .french, dateLine: exchange.dateLine)] + exchange.steps
+            return [Conversation.userMessage(exchange.user, language: .french, dateLine: exchange.dateLine)]
+                + exchange.steps(ToolContext(now: now, timeZone: timeZone, language: .french))
                 + [ChatMessage(.assistant, exchange.answer)]
         }
     }
 }
 
 /// A case's request as the app would send it: the conversation, the case's earlier exchanges, then its phrase.
-private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String)
-    -> [ChatMessage]
+private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String,
+                         context: ToolContext) -> [ChatMessage]
 {
     var history = conversation
     for exchange in corpus.exchanges(before: item) {
         history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                       steps: exchange.steps, assistant: exchange.answer, interrupted: false)
+                       steps: exchange.steps(context), assistant: exchange.answer, interrupted: false)
     }
     return history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
 }
@@ -434,7 +459,7 @@ private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, cor
 /// each request's chance of a call at its first token from each, and the requests whose first-token decision (a call or
 /// not, the more likely of the two) changes.
 private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
-                               model: MLXChatModel, options o: Options) async throws
+                               context: ToolContext, model: MLXChatModel, options o: Options) async throws
 {
     guard let atLoad = await model.beginningState(named: "at load") else { throw CLIError("no beginning kept") }
     let clock = ContinuousClock()
@@ -447,7 +472,9 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
               + String(format: " (%d tokens, GPU memory peak %.2f GB)", computed?.computed ?? 0, computed?.peakGB ?? 0))
     }
     guard let toolsChanged = await model.beginningState(named: "tools changed") else { throw CLIError("no beginning kept") }
-    let requests = corpus.cases.map { caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine) }
+    let requests = corpus.cases.map {
+        caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine, context: context)
+    }
     let start = clock.now
     let comparison = try await model.compareBeginnings([atLoad, toolsChanged], requests: requests)
     print("compared in \(clock.now - start)\n")
@@ -577,8 +604,8 @@ private func scientific(_ value: Double?) -> String {
 }
 
 /// The second pass of a search, as in the app: the model reads the results and answers, and nothing it writes then is
-/// carried out (the calls are only counted). No results: the app says so itself, without the model. Returns whether
-/// the model was asked.
+/// carried out (the calls are only counted). A call and nothing else: as in the app, the model is told it is not carried
+/// out and sums up once more. No results: the app says so itself, without the model. Returns whether the model was asked.
 private func sumUp(_ call: ToolCall, query: String, results: WebSearchResults, after request: [ChatMessage],
                    context: ToolContext, model: MLXChatModel, into result: inout CaseResult) async throws -> Bool
 {
@@ -591,24 +618,34 @@ private func sumUp(_ call: ToolCall, query: String, results: WebSearchResults, a
     result.resultTokens = try await model.tokenCount(called + [.result(of: call, forModel)]) - model.tokenCount(called)
     let clock = ContinuousClock()
     let start = clock.now
-    var text = ""
     var calls: [String] = []
-    for try await output in model.reply(to: request + [.call(call), .result(of: call, forModel)]) {
-        switch output {
-        case .text(let piece):
-            if result.summaryFirstMs == nil, piece.contains(where: \.isLetter) {
-                result.summaryFirstMs = milliseconds(clock.now - start)
+    var steps: [ChatMessage] = [.call(call), .result(of: call, forModel)]
+    var summary = ""
+    for pass in 1...2 {
+        var text = ""
+        var ignored: ToolCall?
+        for try await output in model.reply(to: request + steps) {
+            switch output {
+            case .text(let piece):
+                if result.summaryFirstMs == nil, piece.contains(where: \.isLetter) {
+                    result.summaryFirstMs = milliseconds(clock.now - start)
+                }
+                text += piece
+            case .toolCall(let made):
+                calls.append(describe(made, written: nil))
+                if ignored == nil { ignored = made }
+            case .moreToolCalls: calls.append("another call, not written")
+            case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
+            case .toolCallStarted, .toolCallNamed: break
             }
-            text += piece
-        case .toolCall(let made): calls.append(describe(made, written: nil))
-        case .moreToolCalls: calls.append("another call, not written")
-        case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
-        case .toolCallStarted, .toolCallNamed: break
         }
+        var filter = ReasoningFilter()
+        summary = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard summary.isEmpty, let ignored, pass == 1 else { break }
+        result.summedUpAgain = true
+        steps += [.call(ignored), .result(of: ignored, ["erreur": .string(ToolOutcome.noCallWhileSummingUp)])]
     }
     result.summaryMs = milliseconds(clock.now - start)
-    var filter = ReasoningFilter()
-    let summary = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
     result.summary = summary.isEmpty ? "(nothing: the app says “\(WebSearchPhrases.couldNotSumUp(.french))”)" : summary
     result.callsWhileSumming = calls
     result.namesASite = namesASite(summary, results)
@@ -701,6 +738,12 @@ private func mentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
     }
     let text = folded(call.text("consigne") ?? call.text("message") ?? WebSearchCatalog.query(call) ?? "")
     return mentions.allSatisfy { text.contains(folded($0)) }
+}
+
+/// A search's words, whatever their order, accents and case.
+private func keywords(_ query: String) -> Set<String> {
+    Set(query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+        .split(whereSeparator: \.isWhitespace).map(String.init))
 }
 
 /// Whether the app refused a call as the corpus expects: for a date in the past ("past"), the one the words give (`when`):
@@ -860,10 +903,27 @@ private func summarizeSearches(_ results: [CaseResult]) {
     let made = wanted.filter { $0.chosen == search }
     print("  keywords keeping the essentials: \(made.filter { $0.argumentsOK == true }.count) / \(made.count)"
           + made.filter { $0.argumentsOK == false }.map { "\n    · \($0.phrase) → \(describe($0.arguments ?? [:]))" }.joined())
+    func written(_ item: CaseResult) -> String {
+        item.chosen == search ? WebSearchCatalog.query(ToolCall(name: search, arguments: item.arguments ?? [:])) ?? "" : ""
+    }
+    let afterSearch = results.filter { $0.earlierSearches != nil }
+    if !afterSearch.isEmpty {
+        let again = afterSearch.filter { $0.chosen == search }
+        print("  after an earlier search: searched again \(again.count) / \(afterSearch.count) (expected "
+              + "\(afterSearch.filter { $0.expected == search }.count)), with the same keywords as before "
+              + "\(again.filter { $0.sameKeywordsAsBefore == true }.count)"
+              + again.map { "\n    · \($0.phrase) → \(written($0))" }.joined())
+    }
+    let leavingOut = results.filter { written($0).lowercased().contains("-site:") }
+    print("  keywords leaving a site out (-site:): \(leavingOut.count)"
+          + leavingOut.map { "\n    · \($0.phrase) → \(written($0))" }.joined())
     let summed = results.filter { $0.chosen == search && $0.summary != nil }
     let calling = summed.filter { !($0.callsWhileSumming ?? []).isEmpty }
     print("  summaries: \(summed.count); with calls written while summing up (the app carries out none): \(calling.count)"
           + calling.map { "\n    · \($0.phrase) → \(($0.callsWhileSumming ?? []).joined(separator: "; "))" }.joined())
+    let again = summed.filter { $0.summedUpAgain == true }
+    print("  summed up once more after a call alone: \(again.count), still nothing said: "
+          + "\(again.filter { $0.summary?.hasPrefix("(nothing") == true }.count)")
     let rated = summed.filter { $0.namesASite != nil }
     print("  summaries naming a site of the results: \(rated.filter { $0.namesASite == true }.count) / \(rated.count)")
     let calls = results.filter { $0.chosen == search }.compactMap(\.callMs)
