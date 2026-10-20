@@ -119,6 +119,13 @@ public enum DateCheck {
 /// calendar providers (`CalendarTools`, and voice-cli's calendar in memory), around their check and their carrying out
 /// of each call.
 ///
+/// The last item is then the refused one, even when the conversation created another before it: a change of the last
+/// item (« dernier ») is the refused creation. That earlier item used to be changed instead (« Demain à 18 h. » moved
+/// it, « Mets-la dans Maison alors. » saved it unchanged, « C'est modifié »), and the item the user asked for was never
+/// saved. A change that names an item by its id ("r1") still changes that item: asked to move the reminder created
+/// before instead (« Laisse tomber, décale plutôt mon rappel à 11 h. »), Gemma 4 26B, E4B and E2B named it so in every
+/// change they wrote in voice-cli dialogue-bench.
+///
 /// Not after a refusal whose answer only completes the refused words (« de l'après-midi » for an hour that may be the
 /// morning, « le 25 » for a weekday that does not match the date): read alone, such words would lose the rest of the
 /// moment, which the model writes again in a creation of its own.
@@ -129,7 +136,7 @@ public struct RefusedCreation: Sendable {
     public init() {}
 
     /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change
-    /// (of an item that does not exist: a provider that finds the item forgets it).
+    /// (`creation(insteadOf:exists:)`).
     public mutating func checking(_ call: ToolCall) {
         if call.name != ActionCatalog.changeItem.name { refused = nil }
     }
@@ -142,13 +149,17 @@ public struct RefusedCreation: Sendable {
         refused = refusal.detailGivenAgain ? call : nil
     }
 
-    /// The creation to carry out instead of `change`, a change of an item that does not exist: the refused call, with
-    /// what the change gives: a new moment instead of the old one (as `quand`, whichever word the change uses), a
-    /// calendar or a list (an event's calendar, a reminder's list, whichever of the two words the change uses), a
-    /// title, a length, a place. nil when no creation was refused just before. Forgets it.
-    public mutating func creation(insteadOf change: ToolCall) -> ToolCall? {
+    /// The creation to carry out instead of `change`, a change of the last item or of one that does not exist: the
+    /// refused call, with what the change gives: a new moment instead of the old one (as `quand`, whichever word the
+    /// change uses), a calendar or a list (an event's calendar, a reminder's list, whichever of the two words the change
+    /// uses), a title, a length, a place. nil when no creation was refused just before, or when the change names by its
+    /// id an item created in this conversation (`exists`: whether a reference names one), which it changes. Forgets
+    /// the refused creation.
+    public mutating func creation(insteadOf change: ToolCall, exists: (String) -> Bool) -> ToolCall? {
         guard var creation = refused, change.name == ActionCatalog.changeItem.name else { return nil }
         refused = nil
+        let reference = change.text("reference") ?? "dernier"
+        if !ActionCatalog.meansLastItem(reference), exists(reference) { return nil }
         var given = change.arguments.filter { key, _ in key != "reference" && change.text(key) != nil }
         let starts = ["quand", "debut", "echeance"]
         if let start = starts.first(where: { given[$0] != nil }) {

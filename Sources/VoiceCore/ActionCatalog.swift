@@ -181,6 +181,12 @@ public enum ActionCatalog {
 
     public static let calendarTools = [createReminder, listReminders, createEvent, readAgenda, changeItem, deleteItem]
 
+    /// Whether the `reference` of a change or a deletion is the last item created: « dernier », as the tools'
+    /// descriptions say, or as the model may also write it.
+    public static func meansLastItem(_ reference: String) -> Bool {
+        ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased())
+    }
+
     // MARK: - Timers and shortcuts
 
     public static let timer = ToolSpec(

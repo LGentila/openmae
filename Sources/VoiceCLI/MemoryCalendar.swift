@@ -32,7 +32,7 @@ actor MemoryCalendar: ToolProvider {
     /// The calendar is named once per conversation, as in the app.
     private var calendarNamed = false
     /// As in the app: a creation just refused for a detail the user gives again (its moment, its calendar or its
-    /// list), which a change of an item never created makes instead.
+    /// list), which a change of the last item, or of an item never created, makes instead.
     private var refusedCreation = RefusedCreation()
     /// Every item created, by reference, in order: what the bench checks a dialogue's goal against.
     private(set) var creations: [String] = []
@@ -134,14 +134,12 @@ actor MemoryCalendar: ToolProvider {
                                 } ?? .null]
                            })])
         case ActionCatalog.changeItem.name:
-            let (reference, item): (String, Item)
-            do {
-                (reference, item) = try referenced(call, context)
-            } catch let refusal as ToolRefusal {
-                guard let creation = refusedCreation.creation(insteadOf: call) else { throw refusal }
+            // As in the app: the item whose creation was just refused, named as the last item or by an id that names
+            // none, is created with what the change gives.
+            if let creation = refusedCreation.creation(insteadOf: call, exists: { items[$0] != nil }) {
                 return try await perform(creation, context: context)
             }
-            refusedCreation.forget()
+            let (reference, item) = try referenced(call, context)
             var changed = item
             if let title = call.text("titre") { changed.title = title }
             if item.isEvent {
@@ -219,7 +217,7 @@ actor MemoryCalendar: ToolProvider {
     /// The item a call refers to: "dernier", or a reference given earlier ("e1").
     private func referenced(_ call: ToolCall, _ context: ToolContext) throws -> (String, Item) {
         let reference = call.text("reference") ?? "dernier"
-        let key = ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased()) ? lastCreated : reference
+        let key = ActionCatalog.meansLastItem(reference) ? lastCreated : reference
         guard let key, let item = items[key] else {
             throw ToolRefusal(forModel: "Aucun élément « \(reference) » créé dans cette conversation : seuls ceux-là "
                               + "peuvent être modifiés ou supprimés.",

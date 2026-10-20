@@ -212,7 +212,8 @@ public struct ToolRefusal: Error, Sendable {
     public var retryable: Bool
     /// What is refused is one detail of the call, which the answer gives again, whole: a moment already gone, words
     /// about time the app cannot place or none at all, a calendar or a list that does not exist. Right after a creation
-    /// refused so, a change of an item never created is that creation with what the change gives (`RefusedCreation`).
+    /// refused so, a change of the last item, or of one never created, is that creation with what the change gives
+    /// (`RefusedCreation`).
     public var detailGivenAgain = false
 
     public init(forModel: String, spoken: String, retryable: Bool = true) {

@@ -47,7 +47,7 @@ public actor CalendarTools: ToolProvider {
     /// The default calendar is named once per conversation, so the user knows where events go.
     private var calendarNamed = false
     /// A creation just refused for a detail the user gives again (its moment, its calendar or its list), which a change
-    /// of an item never created makes instead.
+    /// of the last item, or of an item never created, makes instead.
     private var refusedCreation = RefusedCreation()
 
     public init(testCollection: String? = nil) {
@@ -259,7 +259,7 @@ public actor CalendarTools: ToolProvider {
     /// this conversation can be changed or deleted.
     private func referenced(_ call: ToolCall, _ context: ToolContext) throws -> (key: String, item: Item) {
         let reference = call.text("reference") ?? "dernier"
-        let key = ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased()) ? lastCreated : reference
+        let key = ActionCatalog.meansLastItem(reference) ? lastCreated : reference
         guard let key, let item = created[key] else {
             throw ToolRefusal(forModel: "Aucun élément « \(reference) » créé dans cette conversation : seuls ceux-là "
                               + "peuvent être modifiés ou supprimés.",
@@ -299,17 +299,14 @@ public actor CalendarTools: ToolProvider {
     }
 
     private func change(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
-        let (key, item): (String, Item)
-        do {
-            (key, item) = try referenced(call, context)
-        } catch let refusal as ToolRefusal {
-            // The item whose creation was just refused for a detail the user gave again: created with what the change
-            // gives (another moment, calendar or list).
-            guard let creation = refusedCreation.creation(insteadOf: call) else { throw refusal }
+        // The item whose creation was just refused for a detail the user gave again, named as the last item (not one
+        // created before it) or by an id that names none: created with what the change gives (another moment,
+        // calendar or list).
+        if let creation = refusedCreation.creation(insteadOf: call, exists: { created[$0] != nil }) {
             DebugLog.log("calendar: a change of an item never created, made as its creation")
             return try await perform(creation, context: context)
         }
-        refusedCreation.forget()
+        let (key, item) = try referenced(call, context)
         switch item {
         case .event(let id):
             try await ensureAccess(.event, context: context)

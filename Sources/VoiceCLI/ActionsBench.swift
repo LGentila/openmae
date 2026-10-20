@@ -876,7 +876,7 @@ private func resolve(_ call: ToolCall, created: Corpus.Exchange?, context: ToolC
         // "dernier" or by its id (not, say, an example's).
         let reference = call.text("reference") ?? "dernier"
         guard case .object(let fields)? = created?.result, let id = fields["id"]?.text,
-              reference == id || ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased())
+              reference == id || ActionCatalog.meansLastItem(reference)
         else {
             throw ToolRefusal(forModel: "Aucun élément « \(reference) » créé dans cette "
                               + "conversation : seuls ceux-là peuvent être modifiés ou supprimés.",
