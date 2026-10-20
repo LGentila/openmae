@@ -237,3 +237,293 @@ struct VoiceRestartTests {
         #expect(streams[0].cancelled)
     }
 }
+
+/// A voice that opens each text with its own near-silence, as Pocket TTS does: `script` gives, for each text, the
+/// near-silent samples before it (100 a millisecond), and whether the text itself is then said as near-silence (500
+/// samples either way).
+final class SentenceStream: SynthesisStream, @unchecked Sendable {
+    typealias Script = @Sendable (String) -> (opening: Int, silent: Bool)
+    let audio: AsyncThrowingStream<VoiceAudio, Error>
+    private let texts: AsyncStream<String>.Continuation
+    private let producer: Task<Void, Never>
+    private let lock = NSLock()
+    private var given: [String] = []
+    private var stopped = false
+
+    init(script: @escaping Script) {
+        let (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
+        let (textStream, texts) = AsyncStream.makeStream(of: String.self)
+        self.audio = audio
+        self.texts = texts
+        producer = Task {
+            var number = 0
+            for await text in textStream {
+                let (opening, silent) = script(text)
+                for _ in 0..<(opening / 100) where !Task.isCancelled {
+                    output.yield(VoiceAudio([Float](repeating: 0.0001, count: 100), text: number))
+                    try? await Task.sleep(for: .milliseconds(1))
+                }
+                if Task.isCancelled { break }
+                output.yield(VoiceAudio([Float](repeating: silent ? 0.0001 : 0.1, count: 500), text: number))
+                number += 1
+            }
+            output.finish()
+        }
+    }
+
+    /// The texts this voice was given.
+    var received: [String] { lock.withLock { given } }
+    var cancelled: Bool { lock.withLock { stopped } }
+
+    func enqueue(_ text: String) {
+        lock.withLock { given.append(text) }
+        texts.yield(text)
+    }
+
+    func finish() { texts.finish() }
+
+    func cancel() async {
+        lock.withLock { stopped = true }
+        producer.cancel()
+        texts.finish()
+        await producer.value
+    }
+}
+
+/// One utterance after the other, each with its script (then texts said at once).
+actor SentenceSynthesizer: SpeechSynthesizer {
+    nonisolated let outputSampleRate = 1000.0
+    private var scripts: [SentenceStream.Script]
+    private(set) var streams: [SentenceStream] = []
+    init(_ scripts: [SentenceStream.Script]) { self.scripts = scripts }
+
+    func startUtterance(language: SpeechLanguage) async throws -> any SynthesisStream {
+        var script: SentenceStream.Script = { _ in (opening: 0, silent: false) }
+        if !scripts.isEmpty { script = scripts.removeFirst() }
+        let stream = SentenceStream(script: script)
+        streams.append(stream)
+        return stream
+    }
+}
+
+@Suite("Later sentences started again after a long near-silence")
+struct LaterSentenceRestartTests {
+    let audible: @Sendable ([Float]) -> Bool = { VoicePipeline.loudnessDB($0) >= -45 }
+    let sentences = ["Bonjour, je suis bien là.", "La mer est salée.", "Les rivières y portent du sel."]
+
+    /// What a voice says that can be heard: the numbers of its texts, in order.
+    func heard(_ voice: VoiceRestart) async throws -> [Int?] {
+        var texts: [Int?] = []
+        for try await chunk in voice.audio where audible(chunk.samples) { texts.append(chunk.text) }
+        return texts
+    }
+
+    func restart(_ synthesizer: SentenceSynthesizer, laterRestarts: Int = 2, resumed: @escaping @Sendable () -> Void = {})
+        async throws -> VoiceRestart
+    {
+        let first = try await synthesizer.startUtterance(language: .french)
+        return VoiceRestart(first, patience: 2000, restarts: 2, laterPatience: 1000, laterRestarts: laterRestarts,
+                            audible: audible, resumed: resumed) {
+            try await synthesizer.startUtterance(language: .french)
+        }
+    }
+
+    /// The second sentence would open with a second of near-silence; once 1000 samples of it went by, a new voice says
+    /// it, and the one after it: each sentence is heard once, in order, with its number, and the first one is not said
+    /// again.
+    @Test func aLongOpeningStartsAgainFromThatSentence() async throws {
+        let middle = sentences[1]
+        let synthesizer = SentenceSynthesizer([{ ($0 == middle ? 100_000 : 0, false) }])
+        let resumed = Flag()
+        let voice = try await restart(synthesizer) { resumed.set() }
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        let start = ContinuousClock.now
+        #expect(try await heard(voice) == [0, 1, 2])
+        #expect(ContinuousClock.now - start < .milliseconds(500))  // the first voice would have taken 1 s or more
+        let streams = await synthesizer.streams
+        #expect(streams.count == 2)
+        #expect(streams[0].cancelled)
+        #expect(streams[1].received == Array(sentences[1...]))
+        #expect(resumed.isSet)  // the language model's pause for the voice ends once the sentence is heard
+    }
+
+    /// The second sentence is said as near-silence from start to end: it is said again, then the one after it.
+    @Test func aSentenceSaidAsNearSilenceIsSaidAgain() async throws {
+        let middle = sentences[1]
+        let synthesizer = SentenceSynthesizer([{ (0, $0 == middle) }])
+        let voice = try await restart(synthesizer)
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        let streams = await synthesizer.streams
+        #expect(streams.count == 2)
+        #expect(streams[1].received == Array(sentences[1...]))
+    }
+
+    /// The answer's last sentence said as near-silence is said again too.
+    @Test func theLastSentenceSaidAsNearSilenceIsSaidAgain() async throws {
+        let last = sentences[2]
+        let synthesizer = SentenceSynthesizer([{ (0, $0 == last) }])
+        let voice = try await restart(synthesizer)
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        #expect(await synthesizer.streams[1].received == [last])
+    }
+
+    /// Text that comes while a sentence starts again is not lost, nor said twice.
+    @Test func textGivenMeanwhileIsSaidOnce() async throws {
+        let middle = sentences[1]
+        let synthesizer = SentenceSynthesizer([{ ($0 == middle ? 100_000 : 0, false) }])
+        let voice = try await restart(synthesizer)
+        voice.enqueue(sentences[0])
+        voice.enqueue(sentences[1])
+        for _ in 0..<200 where await synthesizer.streams.count < 2 { try await Task.sleep(for: .milliseconds(2)) }
+        voice.enqueue(sentences[2])
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        #expect(await synthesizer.streams[1].received == Array(sentences[1...]))
+    }
+
+    /// Each sentence starts again at most `laterRestarts` times: the last voice says it whatever its opening.
+    @Test func restartsAreCountedForEachSentence() async throws {
+        let (middle, last) = (sentences[1], sentences[2])
+        let slow: SentenceStream.Script = { ($0 == middle || $0 == last ? 3000 : 0, false) }
+        let synthesizer = SentenceSynthesizer([slow, slow, slow, slow])
+        let voice = try await restart(synthesizer, laterRestarts: 1)
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        // The second sentence once, then the third one once.
+        let streams = await synthesizer.streams
+        #expect(streams.count == 3)
+        #expect(streams[1].received == Array(sentences[1...]))
+        #expect(streams[2].received == [last])
+    }
+
+    /// Before the first sound nothing changes (`VoiceRestart`'s first rule): a near-silent opening starts again with
+    /// every text, after `patience`, not `laterPatience`.
+    @Test func theFirstSentenceStartsAgainAsBefore() async throws {
+        let first = sentences[0]
+        let synthesizer = SentenceSynthesizer([{ ($0 == first ? 1500 : 0, false) }, { ($0 == first ? 100_000 : 0, false) }])
+        let voice = try await restart(synthesizer)
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        #expect(await synthesizer.streams.count == 1)  // 1500 samples: under the first sentence's patience
+        let silent = SentenceSynthesizer([{ ($0 == first ? 100_000 : 0, false) }])
+        let again = try await restart(silent)
+        sentences.forEach(again.enqueue)
+        again.finish()
+        #expect(try await heard(again) == [0, 1, 2])
+        let streams = await silent.streams
+        #expect(streams.count == 2)
+        #expect(streams[1].received == sentences)
+    }
+
+    @Test func cancellingStopsASentenceStartingAgain() async throws {
+        let synthesizer = SentenceSynthesizer([{ ($0 == "Bonjour." ? 0 : 100_000, false) }, { _ in (100_000, false) }])
+        let voice = try await restart(synthesizer)
+        voice.enqueue("Bonjour.")
+        voice.enqueue("La mer est salée.")
+        for _ in 0..<200 where await synthesizer.streams.count < 2 { try await Task.sleep(for: .milliseconds(2)) }
+        await voice.cancel()
+        for try await _ in voice.audio {}
+        try await Task.sleep(for: .milliseconds(30))
+        let streams = await synthesizer.streams
+        #expect(streams.allSatisfy { $0.cancelled })
+        #expect(streams.count >= 2 && streams.count <= 3)
+    }
+
+    /// Without `laterPatience`, a long opening is waited for; a sentence said as near-silence is still said again.
+    @Test func withoutPatienceOnlyANearSilentSentenceStartsAgain() async throws {
+        let (middle, last) = (sentences[1], sentences[2])
+        let synthesizer = SentenceSynthesizer([{ ($0 == middle ? 3000 : 0, $0 == last) }])
+        let first = try await synthesizer.startUtterance(language: .french)
+        let voice = VoiceRestart(first, patience: 2000, restarts: 2, laterRestarts: 2, audible: audible) {
+            try await synthesizer.startUtterance(language: .french)
+        }
+        sentences.forEach(voice.enqueue)
+        voice.finish()
+        #expect(try await heard(voice) == [0, 1, 2])
+        let streams = await synthesizer.streams
+        #expect(streams.count == 2)
+        #expect(streams[1].received == [last])
+    }
+
+    /// In the pipeline, with `sentenceRestartAfterSeconds`: the answer's second sentence would open with seconds of
+    /// near-silence; it is heard soon after the first one, from a voice started again with it alone.
+    @Test func thePipelineStartsALaterSentenceAgain() async throws {
+        var config = PipelineConfig()
+        config.sentenceRestartAfterSeconds = 0.6
+        let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 100_000 : 0, false) }])
+        let speaker = FakeSpeaker()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
+                                     model: ScriptedModel(), synthesizer: synthesizer, output: speaker, config: config)
+        try await pipeline.start()
+        let start = ContinuousClock.now
+        await pipeline.submit(text: "Bonjour")
+        for _ in 0..<300 where await speaker.played < 1000 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await speaker.played >= 1000)  // both sentences
+        #expect(ContinuousClock.now - start < .milliseconds(900))  // the silent opening would have taken 1 s or more
+        let streams = await synthesizer.streams
+        #expect(streams.count == 2)
+        #expect(streams[0].cancelled)
+        #expect(streams[1].received.count == 1)
+        #expect(streams[1].received.first?.contains("Comment") == true)
+    }
+
+    /// In the pipeline as configured by default: the answer's second sentence, said as near-silence, is said again;
+    /// a long opening is waited for.
+    @Test func thePipelineSaysAgainASentenceSaidAsNearSilence() async throws {
+        let synthesizer = SentenceSynthesizer([{ (0, $0.contains("Comment")) }])
+        let speaker = FakeSpeaker()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
+                                     model: ScriptedModel(), synthesizer: synthesizer, output: speaker)
+        try await pipeline.start()
+        await pipeline.submit(text: "Bonjour")
+        for _ in 0..<300 where await synthesizer.streams.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        for _ in 0..<300 where await speaker.played < 1000 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await speaker.played >= 1000)  // both sentences heard
+        let streams = await synthesizer.streams
+        #expect(streams.count == 2)
+        #expect(streams[1].received.count == 1)
+        #expect(streams[1].received.first?.contains("Comment") == true)
+
+        let slow = SentenceSynthesizer([{ ($0.contains("Comment") ? 2000 : 0, false) }])
+        let other = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
+                                  model: ScriptedModel(), synthesizer: slow, output: FakeSpeaker())
+        try await other.start()
+        await other.submit(text: "Bonjour")
+        for _ in 0..<300 where await slow.streams.first?.received.count != 2 { try await Task.sleep(for: .milliseconds(5)) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await slow.streams.count == 1)
+    }
+
+    /// With `sentenceRestarts` at 0, nothing starts again after the first sound: a sentence said as near-silence is
+    /// lost, as it was before.
+    @Test func theRuleCanBeTurnedOff() async throws {
+        var config = PipelineConfig()
+        config.sentenceRestarts = 0
+        let synthesizer = SentenceSynthesizer([{ (0, $0.contains("Comment")) }])
+        let speaker = FakeSpeaker()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
+                                     model: ScriptedModel(), synthesizer: synthesizer, output: speaker, config: config)
+        try await pipeline.start()
+        await pipeline.submit(text: "Bonjour")
+        for _ in 0..<300 where await synthesizer.streams.first?.received.count != 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await synthesizer.streams.count == 1)
+    }
+}
+
+/// Set once, from any thread.
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var isSet: Bool { lock.withLock { value } }
+}

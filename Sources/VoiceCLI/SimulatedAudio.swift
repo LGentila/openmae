@@ -16,6 +16,17 @@ actor SimulatedSpeaker: AudioOutput {
     private var playing = false
     /// The gaps since the last `takeGaps()`, in seconds, in order.
     private var gaps: [Double] = []
+    /// Whether it keeps what it plays, and when (`takePlays()`).
+    private let logsPlays: Bool
+    private var plays: [Played] = []
+
+    /// Audio given to the speaker, and when it starts to be heard.
+    struct Played {
+        var samples: [Float]
+        var start: ContinuousClock.Instant
+    }
+
+    init(logsPlays: Bool = false) { self.logsPlays = logsPlays }
 
     func play(_ samples: [Float], sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -25,6 +36,7 @@ actor SimulatedSpeaker: AudioOutput {
         playing = true
         let start = max(now, playhead ?? now)
         playhead = start + .seconds(Double(samples.count) / sampleRate)
+        if logsPlays { plays.append(Played(samples: samples, start: start)) }
     }
 
     @discardableResult
@@ -52,6 +64,12 @@ actor SimulatedSpeaker: AudioOutput {
     func takeGaps() -> [Double] {
         defer { gaps = [] }
         return gaps
+    }
+
+    /// What it played since the last call, in order (with `logsPlays`).
+    func takePlays() -> [Played] {
+        defer { plays = [] }
+        return plays
     }
 }
 

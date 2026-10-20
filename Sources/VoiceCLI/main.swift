@@ -11,6 +11,8 @@
 //                                                       the gaps after the chime (see AnnounceDrop.swift)
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1] [--with-llm]
 //                                                       silence the voice produces before speaking
+//   voice-cli voice-gaps [--repeats 1] [options]        long answers to typed questions: the silence heard between
+//                                                       two sentences (see VoiceGaps.swift)
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
@@ -44,6 +46,10 @@
 //   --racing-voices <n>      voices starting each answer at once, the first audible one says it (default 1)
 //   --no-voice-restart       never start the voice again after a long near-silent opening (the app does, after 1.2 s)
 //   --voice-restart-after <s> seconds of near-silent opening before the voice starts again (default 1.2)
+//   --no-sentence-restart    after an answer's first sound, never start a sentence said as near-silence again (the
+//                            app does)
+//   --sentence-restart-after <s> after an answer's first sound, start a sentence again once its opening has been
+//                            near-silent this long (seconds of its audio; the app never does)
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
 //   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
@@ -85,7 +91,7 @@ struct Options {
     var bargeIn = BargeInProfile.mac
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
-    /// voice-onset: 3 by default; dialogue-bench: 10.
+    /// voice-onset: 3 by default; dialogue-bench: 10; voice-gaps: 1 (each question once).
     var repeats: Int?
     /// voice-onset: voices speaking each sentence at once (the first audible one counts).
     var parallel = 1
@@ -104,6 +110,12 @@ struct Options {
     var noVoiceRestart = false
     /// Seconds of near-silent opening before the voice starts again (default: the app's).
     var voiceRestartAfter: Double?
+    /// After the first sound, sentences are never started again (`PipelineConfig.sentenceRestarts`).
+    var noSentenceRestart = false
+    /// Seconds of near-silent opening of a later sentence before it starts again (`sentenceRestartAfterSeconds`).
+    var sentenceRestartAfter: Double?
+    /// voice-gaps: the first questions only.
+    var questions: Int?
     var now: String?
     var corpus: String?
     var showPrompt = false
@@ -167,6 +179,9 @@ struct Options {
             case "--racing-voices": o.racingVoices = Int(it.next() ?? "")
             case "--no-voice-restart": o.noVoiceRestart = true
             case "--voice-restart-after": o.voiceRestartAfter = Double(it.next() ?? "")
+            case "--no-sentence-restart": o.noSentenceRestart = true
+            case "--sentence-restart-after": o.sentenceRestartAfter = Double(it.next() ?? "")
+            case "--questions": o.questions = Int(it.next() ?? "")
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
@@ -262,9 +277,10 @@ struct Engine {
     let model: MLXChatModel
 }
 
-/// `voice`: what the pipeline gets of the voice (announce-drop measures it).
-func buildEngine(_ o: Options, voice: (PocketSpeechSynthesizer) -> any SpeechSynthesizer = { $0 }) async throws
-    -> Engine
+/// `voice`: what the pipeline gets of the voice (announce-drop and voice-gaps measure it); `logPlays`: the speaker keeps
+/// what it plays, and when (voice-gaps).
+func buildEngine(_ o: Options, logPlays: Bool = false,
+                 voice: (PocketSpeechSynthesizer) -> any SpeechSynthesizer = { $0 }) async throws -> Engine
 {
     let hw = HardwareProfile.current
     let tier = try tierOption(o)
@@ -304,12 +320,14 @@ func buildEngine(_ o: Options, voice: (PocketSpeechSynthesizer) -> any SpeechSyn
     if let voices = o.racingVoices { config.racingVoices = max(1, voices) }
     if let seconds = o.voiceRestartAfter { config.voiceRestartAfterSeconds = seconds }
     if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
+    if let seconds = o.sentenceRestartAfter { config.sentenceRestartAfterSeconds = seconds }
+    if o.noSentenceRestart { config.sentenceRestarts = 0 }
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     if o.noPartials { config.partialTranscriptSeconds = nil }
     config.bargeIn = o.bargeIn
     print("barge-in: \(o.bargeIn.summary) to interrupt Maé")
-    let speaker = SimulatedSpeaker()
+    let speaker = SimulatedSpeaker(logsPlays: logPlays)
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
                                  tools: o.actions ? ToolRunner(providers: [DryActions()]) : nil, config: config)
@@ -619,6 +637,17 @@ if let options = Options.parse(CommandLine.arguments),
     }
     exit(0)
 }
+if let options = Options.parse(CommandLine.arguments), options.command == "voice-gaps" {
+    do {
+        let voice = GapVoice()
+        let engine = try await buildEngine(options, logPlays: true) { voice.wrap($0) }
+        try await runVoiceGaps(options, engine, voice: voice)
+    } catch {
+        print("ERROR: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
 if let options = Options.parse(CommandLine.arguments), options.command == "announce-drop" {
     do {
         var measuring: MeasuringSynthesizer?
@@ -645,6 +674,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                      [--with-llm]
                voice-cli announce-drop [--tier tier] [--repeats 5] [--mute-first | --mute-station]
                                        [--voice-restart-after s]
+               voice-cli voice-gaps [--tier tier] [--repeats 1] [--questions n] [--no-sentence-restart]
+                                    [--sentence-restart-after s] [--out folder]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--addendum file] [--web-addendum file] [--sources] [--live-sources]

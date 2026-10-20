@@ -34,6 +34,18 @@ public struct PipelineConfig: Sendable {
     /// `VoiceRestart`), at most `voiceRestarts` times. nil = never. Needs `leadingSilenceThresholdDB`.
     public var voiceRestartAfterSeconds: Double? = 1.2
     public var voiceRestarts = 2
+    /// After the answer's first sound, a sentence said as near-silence starts again in a new utterance, from that
+    /// sentence on (see `VoiceRestart`), at most this many times per sentence: otherwise it was never heard. 0 = never.
+    /// Needs `leadingSilenceThresholdDB`, and a single voice (`racingVoices`).
+    public var sentenceRestarts = 2
+    /// After the answer's first sound, a sentence whose opening is still near-silent after this long (seconds of its
+    /// audio) starts again the same way. nil (the default) = never: it does not shorten the silences heard between
+    /// sentences. Measured with `voice-cli voice-gaps` on the reference Mac (30 answers of four or five sentences, Gemma 4
+    /// 26B; the silence heard before each sentence after the first): without it, 2 of 120 silences of 1 s or more (the
+    /// longest 1.28 s); after 0.8 s, 6 of 112 (1.70 s); after 1.2 s, 3 of 117 (1.74 s); after 1.6 s, 3 of 120 (3.55 s).
+    /// A long opening belongs mostly to its text: started again, a sentence opened as long again in 50 %, 29 % and 2 of
+    /// 3 cases (2 to 14 % of all sentences open that long), and starting again costs about 0.2 s more.
+    public var sentenceRestartAfterSeconds: Double?
     /// Voices that start each answer at once, each with its own random draws: the first one to be audible says the
     /// answer, the others stop (see `VoiceRace`). With two, on the reference Mac (`voice-cli voice-onset`, typical
     /// first sentences): first sound 208 ms instead of 372 ms in the median, 537 ms instead of 855 ms for the slowest
@@ -1532,12 +1544,18 @@ public actor VoicePipeline {
             return VoiceRace(runners, audible: audible)
         }
         let first = try await synthesizer.startUtterance(language: language)
-        guard let seconds = config.voiceRestartAfterSeconds, config.voiceRestarts > 0 else { return first }
         let (synthesizer, model) = (synthesizer, model)
-        let patience = Int(seconds * synthesizer.outputSampleRate)
-        // The language model's pause for the voice (`YieldsToVoice`, 1.5 s at most) starts again with the voice.
-        return VoiceRestart(first, patience: patience, restarts: config.voiceRestarts, audible: audible,
-                            restarting: { (model as? any YieldsToVoice)?.holdGeneration(true) }) {
+        let rate = synthesizer.outputSampleRate
+        var opening: Int?
+        if let seconds = config.voiceRestartAfterSeconds, config.voiceRestarts > 0 { opening = Int(seconds * rate) }
+        let later = config.sentenceRestartAfterSeconds.map { Int($0 * rate) }
+        guard opening != nil || config.sentenceRestarts > 0 else { return first }
+        // The language model's pause for the voice (`YieldsToVoice`, 1.5 s at most) starts again with the voice, and
+        // ends once a sentence started again is heard (the first one: once the voice is audible, `voiceIsAudible`).
+        return VoiceRestart(first, patience: opening ?? .max, restarts: opening == nil ? 0 : config.voiceRestarts,
+                            laterPatience: later, laterRestarts: config.sentenceRestarts, audible: audible,
+                            restarting: { (model as? any YieldsToVoice)?.holdGeneration(true) },
+                            resumed: { (model as? any YieldsToVoice)?.holdGeneration(false) }) {
             try await synthesizer.startUtterance(language: language)
         }
     }
