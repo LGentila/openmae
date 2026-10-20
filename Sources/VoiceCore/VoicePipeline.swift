@@ -46,6 +46,17 @@ public struct PipelineConfig: Sendable {
     /// A long opening belongs mostly to its text: started again, a sentence opened as long again in 50 %, 29 % and 2 of
     /// 3 cases (2 to 14 % of all sentences open that long), and starting again costs about 0.2 s more.
     public var sentenceRestartAfterSeconds: Double?
+    /// After the answer's first sound, the language model waits (`YieldsToVoice`) while the speakers have less than this
+    /// left to play of the voice (seconds), as long as the voice has another text after the one it says (see
+    /// `VoiceLead`). nil = never. Measured with `voice-cli voice-gaps` on the reference Mac (30 answers of four or five
+    /// sentences a run, Gemma 4 26B), with `modelWaitsDuringOpenings`: what the speakers still had to play when the voice
+    /// was done with the first sentence went from 0.20 s (median) to 0.38 s; while the Mac was quiet, the silences of 1 s
+    /// or more before a later sentence went from 4 of 360 to 2 of 240, but in a run where the voice was slower they were
+    /// more frequent (8 of 120): the model, held during the first sentences, was still writing during a later long
+    /// opening once its pause (1.5 s at most) ran out.
+    public var voiceLeadSeconds: Double? = 0.5
+    /// After the answer's first sound, the language model also waits while the voice opens a sentence with near-silence.
+    public var modelWaitsDuringOpenings = true
     /// Voices that start each answer at once, each with its own random draws: the first one to be audible says the
     /// answer, the others stop (see `VoiceRace`). With two, on the reference Mac (`voice-cli voice-onset`, typical
     /// first sentences): first sound 208 ms instead of 372 ms in the median, 537 ms instead of 855 ms for the slowest
@@ -418,6 +429,11 @@ public actor VoicePipeline {
         /// The chunks of the voice the player read, in order: the piece each one says, and when it went to the output
         /// (nil: near-silence skipped).
         var chunks: [(piece: Int?, sent: ContinuousClock.Instant?)] = []
+        /// After the first sound, the language model waits for the voice (`VoiceLead`); when the voice last produced a
+        /// chunk, and what lets the model go once the voice produces nothing (`watchVoice`).
+        var modelWaits = false
+        var lastVoiceChunk: ContinuousClock.Instant?
+        var voiceWatch: Task<Void, Never>?
         /// The player read the voice to its end.
         var voiceEnded = false
         /// An announcement's voice as the player read it, to say it again as it was (`Announcement.recording`).
@@ -1551,7 +1567,8 @@ public actor VoicePipeline {
         let later = config.sentenceRestartAfterSeconds.map { Int($0 * rate) }
         guard opening != nil || config.sentenceRestarts > 0 else { return first }
         // The language model's pause for the voice (`YieldsToVoice`, 1.5 s at most) starts again with the voice, and
-        // ends once a sentence started again is heard (the first one: once the voice is audible, `voiceIsAudible`).
+        // ends once a sentence started again is heard (the first one: once the voice is audible, `voiceIsAudible`);
+        // after the first sound, the player then decides whether it waits on (`VoiceLead`).
         return VoiceRestart(first, patience: opening ?? .max, restarts: opening == nil ? 0 : config.voiceRestarts,
                             laterPatience: later, laterRestarts: config.sentenceRestarts, audible: audible,
                             restarting: { (model as? any YieldsToVoice)?.holdGeneration(true) },
@@ -1565,10 +1582,18 @@ public actor VoicePipeline {
         let sampleRate = synthesizer.outputSampleRate
         let silenceThreshold = config.leadingSilenceThresholdDB
         let maxPauseSamples = config.maxVoicePauseMs.map { Int($0 / 1000 * sampleRate) }
+        // After the first sound, the language model waits while the voice needs the GPU (`VoiceLead`). Not for an
+        // announcement: its text is given at once, no model writes meanwhile.
+        let (minimumLead, duringOpenings) = (config.voiceLeadSeconds.map { Duration.seconds($0) },
+                                             config.modelWaitsDuringOpenings)
+        let modelWaits = model is any YieldsToVoice && silenceThreshold != nil && !turn.isAnnouncement
         turn.player = Task { [output = turn.output, clock] in
             var voiceHeard = false
             var playing = false
             var quietSamples = 0
+            var lead = VoiceLead(minimum: minimumLead, duringOpenings: duringOpenings, sampleRate: sampleRate)
+            let leads = modelWaits && lead.isOn
+            defer { self.modelWaitsForVoice(false, turn: turn) }  // the voice is over: nothing to wait for any more
             do {
                 for try await chunk in stream.audio {
                     if turn.isAnnouncement { turn.recording.append(chunk) }
@@ -1590,6 +1615,9 @@ public actor VoicePipeline {
                     quietSamples = quiet ? quietSamples + samples.count : 0
                     if let maxPauseSamples, quietSamples > maxPauseSamples {
                         turn.chunks.append((piece, nil))
+                        if leads, playing, !Task.isCancelled {
+                            self.voiceProduced(chunk, audible: !quiet, lead: &lead, turn: turn)
+                        }
                         continue
                     }
                     await turn.gate.wait()  // a speculative answer waits for the end of the turn
@@ -1599,10 +1627,57 @@ public actor VoicePipeline {
                         self.audioStarted(turn, at: clock.now)
                     }
                     turn.chunks.append((piece, clock.now))
+                    lead.played(samples.count, at: clock.now)
                     await output.play(samples, sampleRate: sampleRate)
+                    if leads, !Task.isCancelled { self.voiceProduced(chunk, audible: !quiet, lead: &lead, turn: turn) }
                 }
                 if !Task.isCancelled { turn.voiceEnded = true }
             } catch {}
+        }
+    }
+
+    /// After the first sound: the voice produced `chunk` (played, or left out as near-silence); the language model waits
+    /// for it or goes on (`VoiceLead`).
+    private func voiceProduced(_ chunk: VoiceAudio, audible: Bool, lead: inout VoiceLead, turn: Turn) {
+        let now = clock.now
+        turn.lastVoiceChunk = now
+        let (wait, renew) = lead.update(text: chunk.text, audible: audible, texts: turn.voiceTexts, at: now)
+        if wait != turn.modelWaits {
+            DebugLog.log(String(format: "turn %d: the model %@ (the speakers have %.2f s left to play)", turn.id,
+                                wait ? "waits for the voice" : "goes on", ms(lead.lead(at: now)) / 1000))
+        }
+        modelWaitsForVoice(wait, renew: renew, turn: turn)
+    }
+
+    /// The language model waits for the voice (`YieldsToVoice`), or goes on. `renew`: tell it again even if it already
+    /// waits, since its pause is bounded in time. Only the turn that has the conversation holds the model or lets it go:
+    /// once it is over, whoever ended it let the model go (`voiceIsAudible`), and another turn may hold it.
+    private func modelWaitsForVoice(_ wait: Bool, renew: Bool = false, turn: Turn) {
+        guard self.turn === turn, !turn.interrupted, turn.cut == nil else {
+            turn.modelWaits = false
+            return
+        }
+        guard wait != turn.modelWaits || (wait && renew) else { return }
+        turn.modelWaits = wait
+        (model as? any YieldsToVoice)?.holdGeneration(wait)
+        if wait { watchVoice(turn) }
+    }
+
+    /// While the model waits for the voice after the first sound: it goes on once the voice produced nothing for half a
+    /// second. The voice said all the text it had (a sentence it said as near-silence, the model waiting for its
+    /// opening): waiting longer would leave it without any.
+    private func watchVoice(_ turn: Turn) {
+        guard turn.voiceWatch == nil else { return }
+        turn.voiceWatch = Task { [clock] in
+            while turn.modelWaits, !Task.isCancelled {
+                try? await clock.sleep(for: .milliseconds(100))
+                guard turn.modelWaits, let last = turn.lastVoiceChunk, clock.now - last >= .milliseconds(500) else {
+                    continue
+                }
+                DebugLog.log("turn \(turn.id): the voice produces nothing, the model goes on")
+                self.modelWaitsForVoice(false, turn: turn)
+            }
+            turn.voiceWatch = nil
         }
     }
 

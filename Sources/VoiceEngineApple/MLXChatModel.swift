@@ -119,6 +119,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var beginningRestores = 0
     /// Diagnostics: answers stopped because they went round in circles (`RepetitionGuard`).
     public private(set) var loopsStopped = 0
+    /// Diagnostics: how many times generation paused for the voice (`holdGeneration`), and for how long in all.
+    public private(set) var voicePauses = (count: 0, seconds: 0.0)
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, time to compute them, and how long
     /// it waited for the model before (another computation under way: the history computed ahead, a keep-warm pass).
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0, waitedMs: 0.0)
@@ -710,7 +712,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
             let pause = clock.now
             if let ranOut = hold.waitWhileHeld(atMost: .milliseconds(1500)) {
-                DebugLog.log("LLM: paused for the voice \(clock.now - pause) after \(produced.count) tokens"
+                let paused = clock.now - pause
+                voicePauses = (voicePauses.count + 1,
+                               voicePauses.seconds + Double(paused.components.seconds)
+                                   + Double(paused.components.attoseconds) / 1e18)
+                DebugLog.log("LLM: paused for the voice \(paused) after \(produced.count) tokens"
                              + (ranOut ? ", the pause ran out" : ""))
             }
         }

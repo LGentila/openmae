@@ -4,9 +4,14 @@
 // audible sound before it to its first audible sound, on a speaker that plays in real time; and whether it was heard at
 // all.
 //
-//   voice-cli voice-gaps [--repeats 1] [--questions n] [--no-sentence-restart] [--sentence-restart-after s] [options]
+//   voice-cli voice-gaps [--repeats 1] [--questions n] [--no-voice-lead] [--voice-lead s] [--no-wait-openings]
+//                        [--no-sentence-restart] [--sentence-restart-after s] [options]
 //
 // --questions n: the first n questions only. A new conversation starts every 10 questions.
+//
+// Also, for each answer: its total time (from the question to the end of its last sound), the time nothing played in it
+// (that total minus the audio played: the wait for the first sound, and the speaker running dry), the speaker running
+// dry in the middle of a sentence, and the language model's pauses for the voice (`VoiceLead`).
 //
 // A sentence is a text given to the voice (the first one may stop at a comma: `SentenceChunker`). Audible: an 80 ms
 // frame of the voice at least as loud as the pipeline's threshold (`PipelineConfig.leadingSilenceThresholdDB`).
@@ -127,23 +132,60 @@ struct HeardAnswer: Codable {
     var utterances: Int
     var latencyMs: Double?
     var firstAudioMs: Double?
+    /// From the question to the end of the answer's last audible sound (seconds).
+    var totalSeconds: Double?
+    /// Audio the speaker played until then, near-silence included (seconds).
+    var playedSeconds: Double
+    /// Each time the speaker ran dry in the middle of a sentence, after its first audible sound (seconds).
+    var stalls: [Double]
+    /// The language model's pauses for the voice in this answer, and their length in all (seconds).
+    var modelPauses: Int
+    var modelPausedSeconds: Double
+}
+
+/// What the speaker played of an answer, sentence by sentence (`hear`).
+struct Heard {
+    /// For each text after the first one heard: the silence heard before it, its near-silent opening, what was left to
+    /// hear of the text before when the voice was done with it, and the voice's time from then to its first audible frame.
+    var gaps: [Double] = []
+    var openings: [Double] = []
+    var leads: [Double] = []
+    var waits: [Double] = []
+    /// Texts given to the voice and never heard.
+    var lost: [String] = []
+    /// The end of the last audible sound.
+    var end: ContinuousClock.Instant?
+    /// Audio played until then, near-silence included (seconds).
+    var played = 0.0
+    /// The speaker ran dry in the middle of a sentence, after its first audible sound: how long, each time (seconds).
+    var stalls: [Double] = []
 }
 
 /// Matches what the speaker played with the frames the voice produced (the pipeline plays them in order, and leaves
 /// some near-silent ones out), then times each text: the silence heard before each one after the first.
-func hear(_ plays: [SimulatedSpeaker.Played], frames: [GapVoice.Frame], texts: [String], sampleRate: Double)
-    -> (gaps: [Double], openings: [Double], leads: [Double], waits: [Double], lost: [String])
-{
+func hear(_ plays: [SimulatedSpeaker.Played], frames: [GapVoice.Frame], texts: [String], sampleRate: Double) -> Heard {
+    var heard = Heard()
     var cursor = 0
     var firstSound: [String: ContinuousClock.Instant] = [:]
     var lastSoundEnd: [String: ContinuousClock.Instant] = [:]
     var opening: [String: Double] = [:]
     var firstFrame: [String: Int] = [:]
+    /// The play before, and the text it said.
+    var before: (text: String, end: ContinuousClock.Instant)?
+    /// Audio played so far.
+    var played = 0.0
     for play in plays {
+        let length = Double(play.samples.count) / sampleRate
+        played += length
         guard let index = frames[cursor...].firstIndex(where: { $0.samples == play.samples }) else { continue }
         cursor = index + 1
-        guard frames[index].audible else { continue }
         let text = frames[index].text
+        if let before, before.text == text, firstSound[text] != nil {
+            let dry = (play.start - before.end).seconds
+            if dry > 0.001 { heard.stalls.append(dry) }
+        }
+        before = (text, play.start + .seconds(length))
+        guard frames[index].audible else { continue }
         if firstSound[text] == nil {
             firstSound[text] = play.start
             firstFrame[text] = index
@@ -151,30 +193,27 @@ func hear(_ plays: [SimulatedSpeaker.Played], frames: [GapVoice.Frame], texts: [
             let quiet = frames[..<index].reversed().prefix { $0.text == text && !$0.audible }
             opening[text] = Double(quiet.map(\.samples.count).reduce(0, +)) / sampleRate
         }
-        lastSoundEnd[text] = play.start + .seconds(Double(play.samples.count) / sampleRate)
+        lastSoundEnd[text] = play.start + .seconds(length)
+        heard.end = lastSoundEnd[text]
+        heard.played = played
     }
-    var gaps: [Double] = []
-    var openings: [Double] = []
-    var leads: [Double] = []
-    var waits: [Double] = []
-    var lost: [String] = []
     var previous: (text: String, end: ContinuousClock.Instant)?
     for text in texts {
         guard let start = firstSound[text], let index = firstFrame[text] else {
-            lost.append(text)
+            heard.lost.append(text)
             continue
         }
         if let previous {
-            gaps.append((start - previous.end).seconds)
-            openings.append(opening[text] ?? 0)
+            heard.gaps.append((start - previous.end).seconds)
+            heard.openings.append(opening[text] ?? 0)
             // When the voice was done with the text before (its last frame before this one's first audible frame).
             let done = frames[..<index].last { $0.text == previous.text }?.at ?? frames[index].at
-            leads.append((previous.end - done).seconds)
-            waits.append((frames[index].at - done).seconds)
+            heard.leads.append((previous.end - done).seconds)
+            heard.waits.append((frames[index].at - done).seconds)
         }
         if let end = lastSoundEnd[text] { previous = (text, end) }
     }
-    return (gaps, openings, leads, waits, lost)
+    return heard
 }
 
 func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
@@ -222,6 +261,8 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
             _ = voice.take()
             _ = await e.speaker.takePlays()
             let before = await e.log.completedTurns
+            let pausesBefore = await e.model.voicePauses
+            let asked = ContinuousClock.now
             await e.pipeline.submit(text: question)
             await waitForAnswer(e, mic: mic, after: before, timeout: 90)
             await mic.silence(0.3)
@@ -233,10 +274,15 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
             }
             let heard = hear(plays, frames: produced.frames, texts: produced.texts,
                              sampleRate: await e.speaker.sampleRate)
+            let pauses = await e.model.voicePauses
             let answer = HeardAnswer(question: question, texts: produced.texts.count, gaps: heard.gaps,
                                      openings: heard.openings, leads: heard.leads, waits: heard.waits,
                                      lost: heard.lost, utterances: produced.utterances, latencyMs: metrics.latencyMs,
-                                     firstAudioMs: metrics.synthesisFirstAudioMs)
+                                     firstAudioMs: metrics.synthesisFirstAudioMs,
+                                     totalSeconds: heard.end.map { ($0 - asked).seconds },
+                                     playedSeconds: heard.played, stalls: heard.stalls,
+                                     modelPauses: pauses.count - pausesBefore.count,
+                                     modelPausedSeconds: pauses.seconds - pausesBefore.seconds)
             answers.append(answer)
             let gaps = heard.gaps.indices.map { i in
                 String(format: "%.2f [%.2f %.2f %.2f]%@", heard.gaps[i], heard.openings[i], heard.leads[i],
@@ -245,6 +291,11 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
             print("  \(answer.texts) texts, \(answer.utterances) utterance(s); silence before each later one [its"
                   + " near-silent opening, what was left to hear of the one before, the voice's time to it] (s): "
                   + gaps.joined(separator: ", ") + (heard.lost.isEmpty ? "" : "; NOT HEARD: \(heard.lost)"))
+            print(String(format: "  total %.2f s, nothing played %.2f s; speaker dry inside a sentence %d time(s)"
+                         + " (%.2f s); model paused for the voice %d time(s) (%.2f s)",
+                         answer.totalSeconds ?? 0, (answer.totalSeconds ?? 0) - answer.playedSeconds,
+                         answer.stalls.count, answer.stalls.reduce(0, +), answer.modelPauses,
+                         answer.modelPausedSeconds))
         }
     }
     let gaps = answers.flatMap(\.gaps)
@@ -263,6 +314,18 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
     let firstAudio = answers.compactMap(\.firstAudioMs)
     print("first sound: latency median \(fmt(median(latencies))), max \(fmt(latencies.max()));"
           + " voice's first sound median \(fmt(median(firstAudio))), max \(fmt(firstAudio.max()))")
+    let totals = answers.compactMap(\.totalSeconds).map { $0 * 1000 }
+    let idle = answers.compactMap { a in a.totalSeconds.map { ($0 - a.playedSeconds) * 1000 } }
+    print("answer's total time (question → end of its last sound): median \(fmt(median(totals))), max"
+          + " \(fmt(totals.max())); nothing played in it: median \(fmt(median(idle))), 90th percentile"
+          + " \(fmt(percentile(idle, 0.9))), max \(fmt(idle.max()))")
+    let stalls = answers.flatMap(\.stalls).map { $0 * 1000 }
+    print("speaker dry inside a sentence: \(stalls.count) time(s) in \(answers.filter { !$0.stalls.isEmpty }.count)"
+          + " answer(s), \(fmt(stalls.reduce(0, +))) in all, longest \(fmt(stalls.max()))")
+    let pauses = answers.map(\.modelPauses)
+    print("model paused for the voice: \(pauses.reduce(0, +)) time(s), median per answer"
+          + " \(median(pauses.map(Double.init)).map { String(format: "%.0f", $0) } ?? "—"),"
+          + " \(fmt(answers.map(\.modelPausedSeconds).reduce(0, +) * 1000)) in all")
     try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
