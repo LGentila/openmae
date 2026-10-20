@@ -157,14 +157,16 @@ by mistake, the keywords and what the summaries said:
 
 With `--searxng <address>`, the searches are made for real on that SearXNG, with the model's own keywords; `--web`
 offers the search tool with the other corpora too, to check that it does not change their results;
-`--web-addendum <file>` replaces the search's part of the system prompt, to try another wording without rebuilding.
+`--web-addendum <file>` replaces the search's part of the system prompt, and `--results-note <file>` the note the model
+reads first in a search's results, to try another wording without rebuilding.
 On the tiers whose model opens pages (or with `--pages on`, to try it with Gemma 4 E4B or E2B), the model may open the
 page of a result while summing them up, as in the app, or one of the results of a search made earlier in the case's
 conversation: it reads the passages the corpus recorded for that page (its `pages`; a page it does not have cannot be
 read), or the page itself with `--live-pages`, and the report says which pages were opened, whether the answers hold
-what the corpus expects (its cases 81-83, among them a page with orders planted in it), and how long the call, the page
-and its reading took. One page, read as the app reads it (the passages it gives the model around the words looked
-for):
+what the corpus expects (its cases 81-88, among them a page with orders planted in it and real results where a
+snippet gives a price without its day), how often a page was opened where the snippets lack the answer and left closed
+where they hold it with its source and date (the cases' `reads`), and how long the call, the page and its reading
+took. One page, read as the app reads it (the passages it gives the model around the words looked for):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli read-page https://www.boursorama.com/cours/AAPL/ --words "prix action Apple"

@@ -206,6 +206,8 @@ struct Options {
     var webAddendum: String?
     /// actions-bench: the delegation's part of the system prompt, read from this file.
     var agentsAddendum: String?
+    /// actions-bench: the note the model reads first in a search's results, read from this file.
+    var resultsNote: String?
     var examples: String?
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
@@ -329,6 +331,7 @@ struct Options {
             case "--addendum": o.addendum = it.next()
             case "--web-addendum": o.webAddendum = it.next()
             case "--agents-addendum": o.agentsAddendum = it.next()
+            case "--results-note": o.resultsNote = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
@@ -911,7 +914,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                     [--no-wait-openings] [--slower-voice f] [--out folder]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
-                                       [--no-actions] [--addendum file] [--web-addendum file]
+                                       [--no-actions] [--addendum file] [--web-addendum file] [--results-note file]
                                        [--agents-addendum file] [--sources] [--live-sources]
                                        [--record-sources file.json] [--news] [--news-addendum file]
                                        [--pages on|off] [--live-pages] [--record-pages file.json]

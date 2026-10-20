@@ -11,7 +11,7 @@
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
 //                           [--watch-calls] [--examples app|none|file] [--web] [--no-actions] [--addendum file]
-//                           [--web-addendum file] [--agents-addendum file]
+//                           [--web-addendum file] [--agents-addendum file] [--results-note file]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
 //                           [--record file.json] [--sources] [--news] [--pages on|off] [--live-pages]
 //                           [--record-pages file.json] [--memory [--journal]] [--memory-addendum file]
@@ -64,7 +64,8 @@
 // them).
 // --addendum <file> replaces the actions part of the system prompt (with --no-actions, what the prompt says in its place:
 // that the actions are off, and what the date line is; with no tool at all, what the model is told then),
-// --web-addendum <file> the web search's, --agents-addendum <file> the delegation's (experiments without rebuilding).
+// --web-addendum <file> the web search's, --agents-addendum <file> the delegation's, --results-note <file> the note the
+// model reads first in a search's results (experiments without rebuilding).
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
 // has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
 // that the actions are off and what the model therefore does not have (`ActionCatalog.offRule`), and what the date
@@ -208,7 +209,8 @@ private struct Corpus: Decodable {
         var mode: String?
         /// The memory: the action expected (`retenir`, `chercher`, `oublier`, `effacer_memoire`).
         var action: String?
-        /// A search whose snippets do not hold the answer: the model must open a page.
+        /// A search whose snippets do not hold the answer: the model must open a page (true); they hold it, with its
+        /// source and its date: it must not (false), a page adding several seconds.
         var reads: Bool?
         /// What the final answer must say: in each group, one of the words at least (whatever the accents and case).
         var answer: [[String]]?
@@ -244,11 +246,12 @@ private struct Corpus: Decodable {
         var dateLine: String?
 
         /// The call and its result, as the history keeps them. `numbered`: a search's results numbered, as the app gives
-        /// them when it opens pages.
-        func steps(_ context: ToolContext, numbered: Bool = false) -> [ChatMessage] {
+        /// them when it opens pages. `note`: --results-note's.
+        func steps(_ context: ToolContext, numbered: Bool = false, note: String? = nil) -> [ChatMessage] {
             guard let call else { return [] }
             let read = found.map {
-                WebSearchCatalog.forModel(query: WebSearchCatalog.query(call) ?? "", $0, context: context, numbered: numbered)
+                noted(WebSearchCatalog.forModel(query: WebSearchCatalog.query(call) ?? "", $0, context: context,
+                                                numbered: numbered), note)
             }
             return [.call(call), .result(of: call, result ?? read ?? .null)]
         }
@@ -349,6 +352,15 @@ private struct CaseResult: Encodable {
     var callsWhileReading: [String]?
     /// For a case that says what the answer must hold (`answer`, `answerWithout`, `reads`): whether it does.
     var answerOK: Bool?
+    /// The corpus's `reads`: a page must be opened (the snippets lack the answer), or must not (they hold it).
+    var pageExpected: Bool?
+}
+
+/// What the model reads of a search, with --results-note's note instead of the app's.
+private func noted(_ forModel: JSONValue, _ note: String?) -> JSONValue {
+    guard let note, case .object(var fields) = forModel, fields["note"] != nil else { return forModel }
+    fields["note"] = .string(note)
+    return .object(fields)
 }
 
 func runActionsBench(_ o: Options) async throws {
@@ -468,6 +480,10 @@ func runActionsBench(_ o: Options) async throws {
         print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")
             : "without the journal, as the app on this tier (--journal to offer it)") + ", \(sheet.count) entries in the sheet")
     }
+    let resultsNote = try o.resultsNote.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if resultsNote != nil { print("search results' note: --results-note's") }
     let examples = o.examples
         ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents || home.provider != nil) ? "app" : "none")
     // Without the actions, the app's are the tools' own: the delegation's (`AgentTools.exampleExchanges`, Claude Code
@@ -528,7 +544,7 @@ func runActionsBench(_ o: Options) async throws {
         defer { delegation?.end() }
         let request = caseRequest(item, in: conversation, corpus: corpus,
                                   dateLine: item.now == nil ? dateLine : ActionCatalog.dateLine(now, timeZone: timeZone),
-                                  context: caseReference, numbered: opensPages)
+                                  context: caseReference, numbered: opensPages, note: resultsNote)
         var text = ""
         var call: ToolCall?
         var moreCalls = false
@@ -604,6 +620,7 @@ func runActionsBench(_ o: Options) async throws {
         if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
         if chosen == "aucun", saysItWasSaved(text) { result.claimsASave = true }
         if tools.isEmpty, before.contains(where: { $0.call != nil }) { result.callBeforeWithoutTools = true }
+        result.pageExpected = item.expected?.reads
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
         if !earlierSearches.isEmpty { result.earlierSearches = earlierSearches }
@@ -662,7 +679,7 @@ func runActionsBench(_ o: Options) async throws {
                 }
                 if let results {
                     secondPass = try await sumUp(call, results: results, after: request, context: context, model: model,
-                                                 pages: opensPages ? pageReader : nil, into: &result)
+                                                 pages: opensPages ? pageReader : nil, note: resultsNote, into: &result)
                     if let expected = item.expected, result.toolOK,
                        expected.answer != nil || expected.answerWithout != nil || expected.reads != nil
                     {
@@ -945,14 +962,15 @@ func exampleExchanges(_ examples: String, now: Date, timeZone: TimeZone) throws 
 }
 
 /// A case's request as the app would send it: the conversation, the case's earlier exchanges, then its phrase.
-/// `numbered`: their searches' results numbered, as the app gives them when it opens pages.
+/// `numbered`: their searches' results numbered, as the app gives them when it opens pages. `note`: --results-note's.
 private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String?,
-                         context: ToolContext, numbered: Bool = false) -> [ChatMessage]
+                         context: ToolContext, numbered: Bool = false, note: String? = nil) -> [ChatMessage]
 {
     var history = conversation
     for exchange in corpus.exchanges(before: item) {
         history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                       steps: exchange.steps(context, numbered: numbered), assistant: exchange.answer, interrupted: false)
+                       steps: exchange.steps(context, numbered: numbered, note: note), assistant: exchange.answer,
+                       interrupted: false)
     }
     return history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
 }
@@ -1205,10 +1223,11 @@ private func scientific(_ value: Double?) -> String {
 /// and then no call at all is carried out, not even a page's. As in the app, the history keeps each pass's calls as the
 /// model wrote them, then what each one gave (the page's text, or that it was not carried out). `earlier`: the call is
 /// a page asked for at once, of one of the results (`results`) of this search of the case's earlier exchanges (the
-/// app's last search). No results: the app says so itself, without the model. Returns whether the model was asked.
+/// app's last search). No results: the app says so itself, without the model. `note`: --results-note's, instead of the
+/// app's. Returns whether the model was asked.
 private func sumUp(_ call: ToolCall, results: WebSearchResults, earlier: ToolCall? = nil, after request: [ChatMessage],
-                   context: ToolContext, model: MLXChatModel, pages: BenchPageReader?, into result: inout CaseResult)
-    async throws -> Bool
+                   context: ToolContext, model: MLXChatModel, pages: BenchPageReader?, note: String? = nil,
+                   into result: inout CaseResult) async throws -> Bool
 {
     let tools = WebSearchTools(provider: FixedResults(results), pageReader: pages)
     var steps: [ChatMessage] = []
@@ -1235,7 +1254,7 @@ private func sumUp(_ call: ToolCall, results: WebSearchResults, earlier: ToolCal
             result.summary = outcome.spoken
             return false
         }
-        steps = [.call(call), .result(of: call, outcome.forModel)]
+        steps = [.call(call), .result(of: call, noted(outcome.forModel, note))]
         let called = request + [.call(call)]
         result.resultTokens = try await model.tokenCount(called + [steps[1]]) - model.tokenCount(called)
         allowed = outcome.allowedWhileSumming
@@ -1359,6 +1378,7 @@ private func answers(_ result: CaseResult, _ expected: Corpus.Expected) -> Bool 
     // A page read: its site named, as the prompt asks.
     let named = result.namesASite == true || (expected.source ?? []).contains { said.contains(folded($0)) }
     if expected.reads == true, (result.pagesOpened ?? []).isEmpty || !named { return false }
+    if expected.reads == false, result.pagesOpened != nil { return false }
     if !(result.callsWhileReading ?? []).isEmpty || !(result.callsWhileSumming ?? []).isEmpty { return false }
     for group in expected.answer ?? [] where !group.contains(where: { said.contains(folded($0)) }) { return false }
     return !(expected.answerWithout ?? []).contains { said.contains(folded($0)) }
@@ -1938,6 +1958,21 @@ private func summarizeSearches(_ results: [CaseResult]) {
     guard !opening.isEmpty || results.contains(where: { $0.answerOK != nil }) else { return }
     print("  summaries that opened a page: \(opening.count) / \(summed.count)"
           + opening.map { "\n    · \($0.phrase) → \(($0.pagesOpened ?? []).joined(separator: ", then "))" }.joined())
+    // The cases that say whether a page is needed: the snippets lack the answer, or hold it with its source and date.
+    let needing = summed.filter { $0.pageExpected == true }
+    let holding = summed.filter { $0.pageExpected == false }
+    if !needing.isEmpty {
+        print("  snippets without the answer: a page opened \(needing.filter { $0.pagesOpened != nil }.count) / "
+              + "\(needing.count)"
+              + needing.filter { $0.pagesOpened == nil }.map { "\n    · \($0.phrase) → no page: “\($0.summary ?? "")”" }
+                  .joined())
+    }
+    if !holding.isEmpty {
+        print("  snippets holding the answer: no page \(holding.filter { $0.pagesOpened == nil }.count) / \(holding.count)"
+              + holding.filter { $0.pagesOpened != nil }.map { item in
+                  "\n    · \(item.phrase) → \((item.pagesOpened ?? []).joined(separator: ", then "))"
+              }.joined())
+    }
     let reading = opening.filter { !($0.callsWhileReading ?? []).isEmpty }
     print("  calls written while reading a page (the app carries out none): \(reading.count)"
           + reading.map { "\n    · \($0.phrase) → \(($0.callsWhileReading ?? []).joined(separator: "; "))" }.joined())
