@@ -50,6 +50,12 @@
 //                            app does)
 //   --sentence-restart-after <s> after an answer's first sound, start a sentence again once its opening has been
 //                            near-silent this long (seconds of its audio; the app never does)
+//   --no-voice-lead          after an answer's first sound, the language model never waits for the voice (the app
+//                            has it wait while the voice opens a sentence with near-silence, or has under 0.5 s ready)
+//   --voice-lead <s>         after an answer's first sound, the model waits while the voice has less than this ready
+//                            ahead of the speakers (seconds; default 0.5)
+//   --no-wait-openings       after an answer's first sound, the model no longer waits while the voice opens a sentence
+//                            with near-silence (only for the lead)
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
 //   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
@@ -116,6 +122,13 @@ struct Options {
     var noSentenceRestart = false
     /// Seconds of near-silent opening of a later sentence before it starts again (`sentenceRestartAfterSeconds`).
     var sentenceRestartAfter: Double?
+    /// After the first sound, the language model never waits for the voice (`PipelineConfig.voiceLeadSeconds` and
+    /// `modelWaitsDuringOpenings`).
+    var noVoiceLead = false
+    /// The voice's lead below which the model waits (`PipelineConfig.voiceLeadSeconds`; default: the app's).
+    var voiceLead: Double?
+    /// The model no longer waits while the voice opens a sentence with near-silence (`modelWaitsDuringOpenings`).
+    var noWaitOpenings = false
     /// voice-gaps: the first questions only.
     var questions: Int?
     var now: String?
@@ -184,6 +197,9 @@ struct Options {
             case "--voice-restart-after": o.voiceRestartAfter = Double(it.next() ?? "")
             case "--no-sentence-restart": o.noSentenceRestart = true
             case "--sentence-restart-after": o.sentenceRestartAfter = Double(it.next() ?? "")
+            case "--no-voice-lead": o.noVoiceLead = true
+            case "--voice-lead": o.voiceLead = Double(it.next() ?? "")
+            case "--no-wait-openings": o.noWaitOpenings = true
             case "--questions": o.questions = Int(it.next() ?? "")
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
@@ -331,6 +347,12 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
     if let seconds = o.sentenceRestartAfter { config.sentenceRestartAfterSeconds = seconds }
     if o.noSentenceRestart { config.sentenceRestarts = 0 }
+    if let seconds = o.voiceLead { config.voiceLeadSeconds = seconds }
+    if o.noWaitOpenings { config.modelWaitsDuringOpenings = false }
+    if o.noVoiceLead {
+        config.voiceLeadSeconds = nil
+        config.modelWaitsDuringOpenings = false
+    }
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     if o.noPartials { config.partialTranscriptSeconds = nil }
