@@ -33,6 +33,10 @@ public enum VoiceInput: Sendable {
 /// The iPhone's side of the link: finds the Mac (directly at home, through the relay elsewhere, whichever answers
 /// first, the direct way preferred), keeps the session open, and comes back on its own after a cut. It is the
 /// iPhone interface's `AssistantConnection`: the screens are built from the same events as the Mac's.
+///
+/// A cut is seen within seconds: the Mac must answer the session's pings (`LinkSession.RoundTrips`), and again just
+/// after each change of the device's network (NWPathMonitor). A change of network also cuts short the wait before the
+/// next attempt: the Mac is reached again as soon as the network is back (airplane mode off, Wi-Fi joined).
 public actor PhoneLink: AssistantConnection {
     public enum Status: Sendable, Equatable {
         case connecting
@@ -73,12 +77,37 @@ public actor PhoneLink: AssistantConnection {
     private var pendingSwitch: LinkSession?
     /// The Mac said it removed this iPhone.
     private var forgotten = false
+    /// How the sessions check that the Mac answers (nil: they do not).
+    private let roundTrips: LinkSession.RoundTrips?
+    /// Opens a session; nil: `attempt()`, both ways.
+    private let connector: (@Sendable () async throws -> LinkSession)?
+    /// The device's network changes; nil: NWPathMonitor's.
+    private let networkChanges: AsyncStream<NetworkPath>?
+    private var monitor: NetworkMonitor?
+    private var networkWatch: Task<Void, Never>?
+    /// The device's network as last reported (nil: not yet).
+    private var network: NetworkPath?
+    /// Bumped at each change of network: a failed attempt that started before it is tried again at once.
+    private var networkGeneration = 0
+    /// Attempts that failed in a row while the device had a network; a change of network starts the count again.
+    private var failures = 0
 
     /// `ways`: both by default; one only for tests (`voice-cli link-client --relay-only`).
     public init(mac: PairedMac, identity: DeviceIdentity, ways: Set<LinkPath> = [.direct, .relay]) {
+        self.init(mac: mac, identity: identity, ways: ways, roundTrips: .standard, networkChanges: nil, connector: nil)
+    }
+
+    /// For the tests: the sessions' round trips, the network's changes and the way sessions are opened, their own.
+    init(mac: PairedMac, identity: DeviceIdentity, ways: Set<LinkPath> = [.direct, .relay],
+         roundTrips: LinkSession.RoundTrips?, networkChanges: AsyncStream<NetworkPath>?,
+         connector: (@Sendable () async throws -> LinkSession)?)
+    {
         self.mac = mac
         self.identity = identity
         self.ways = ways
+        self.roundTrips = roundTrips
+        self.networkChanges = networkChanges
+        self.connector = connector
         browser = DirectBrowser(macID: mac.id)
         (events, eventSink) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (status, statusSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -140,7 +169,8 @@ public actor PhoneLink: AssistantConnection {
             wakeUp?.yield()  // "Try again": no more waiting
             return
         }
-        browser.start()
+        if connector == nil { browser.start() }
+        watchNetwork()
         loop = Task { await run() }
     }
 
@@ -150,8 +180,41 @@ public actor PhoneLink: AssistantConnection {
         upgrade?.cancel()
         upgrade = nil
         browser.stop()
+        networkWatch?.cancel()
+        networkWatch = nil
+        monitor?.stop()
+        monitor = nil
+        network = nil
         current.session?.close()
         current.session = nil
+    }
+
+    private func watchNetwork() {
+        let changes: AsyncStream<NetworkPath>
+        if let networkChanges {
+            changes = networkChanges
+        } else {
+            let monitor = NetworkMonitor()
+            self.monitor = monitor
+            changes = monitor.paths
+        }
+        networkWatch = Task { [weak self] in
+            for await path in changes { await self?.networkChanged(path) }
+        }
+    }
+
+    /// The device's network changed (NWPathMonitor): Wi-Fi back after airplane mode, another address, Wi-Fi to
+    /// cellular. The session may not have lived through it: the Mac must answer at once (`LinkSession.networkChanged`).
+    /// Without a session, the next attempt is now, and the waits between attempts start short again.
+    private func networkChanged(_ path: NetworkPath) {
+        let previous = network
+        network = path
+        guard let previous, previous != path else { return }  // the first report, or nothing new
+        DebugLog.log("link: the network changed (\(path))")
+        networkGeneration += 1
+        failures = 0
+        wakeUp?.yield()
+        current.session?.networkChanged()
     }
 
     private func setStatus(_ status: Status) {
@@ -161,7 +224,7 @@ public actor PhoneLink: AssistantConnection {
 
     private func run() async {
         setStatus(.connecting)
-        var failures = 0
+        failures = 0
         while !Task.isCancelled {
             let session: LinkSession
             if let pending = pendingSwitch, pending.isOpen {
@@ -169,19 +232,24 @@ public actor PhoneLink: AssistantConnection {
                 session = pending
             } else {
                 pendingSwitch = nil
+                let generation = networkGeneration
                 do {
-                    session = try await attempt()
+                    session = try await open()
                     failures = 0
                 } catch HandshakeFailure.refused("unknown_device") {
                     setStatus(.forgotten)
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    failures += 1
-                    DebugLog.log("link: cannot reach the Mac (\(error))")
+                    // Without any network (airplane mode), the Mac is not said not to answer: the iPhone waits for the
+                    // network, and tries again as soon as it is back.
+                    let offline = network?.available == false
+                    if !offline { failures += 1 }
+                    DebugLog.log("link: cannot reach the Mac (\(error))\(offline ? ", no network" : "")")
                     // After a second failure the Mac is said not to answer; the attempts go on, further apart.
                     if failures >= 2 { setStatus(.unreachable) }
-                    await pause(seconds: min(30, failures < 3 ? 1 : pow(2, Double(failures - 2))))
+                    await pause(seconds: offline ? 5 : min(30, failures < 3 ? 1 : pow(2, Double(failures - 2))),
+                                unlessNetworkChangedSince: generation)
                     continue
                 }
             }
@@ -198,8 +266,10 @@ public actor PhoneLink: AssistantConnection {
         }
     }
 
-    /// Waits before the next attempt; "Try again" or the Mac appearing on the local network cut it short.
-    private func pause(seconds: Double) async {
+    /// Waits before the next attempt; "Try again", a change of network or the Mac appearing on the local network cut it
+    /// short. None when the network changed during the attempt that failed (it may have failed for want of it).
+    private func pause(seconds: Double, unlessNetworkChangedSince generation: Int) async {
+        guard networkGeneration == generation else { return }
         let (signal, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         wakeUp = continuation
         browser.onChange = { endpoint in if endpoint != nil { continuation.yield() } }
@@ -211,6 +281,11 @@ public actor PhoneLink: AssistantConnection {
         }
         browser.onChange = nil
         wakeUp = nil
+    }
+
+    private func open() async throws -> LinkSession {
+        if let connector { return try await connector() }
+        return try await attempt()
     }
 
     /// Both ways at once, the direct one preferred: the relay's tube is opened meanwhile, but its session only once
@@ -279,6 +354,8 @@ public actor PhoneLink: AssistantConnection {
     /// Runs a session until it closes.
     private func use(_ session: LinkSession) async {
         current.session = session
+        if let roundTrips { session.checkRoundTrips(roundTrips) }
+        DebugLog.log("link: connected to the Mac (\(session.path.rawValue))")
         if let about = session.peerMac { learn(about) }
         setStatus(.connected(session.path))
         if let settings { session.send(.command(.updateSettings(settings))) }

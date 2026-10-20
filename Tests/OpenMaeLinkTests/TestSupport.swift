@@ -28,6 +28,8 @@ final class MemoryWire: Sendable {
     }
 
     func cut() { line.cut() }
+    /// The network is back under a cut connection, as if nothing had happened (unless an end closed meanwhile).
+    func restore() { line.restore() }
     func close() { line.close(from: nil) }
 
     /// The datagrams (the voice) the Mac sent into this connection, carried or not.
@@ -76,6 +78,8 @@ final class MemoryWire: Sendable {
         func datagrams(from side: Side) -> Int { lock.withLock { sent[side] ?? 0 } }
 
         func cut() { lock.withLock { isCut = true } }
+
+        func restore() { lock.withLock { isCut = false } }
 
         /// The end that closes knows it; the other one is told unless the line is cut. nil: both are told.
         func close(from side: Side?) {

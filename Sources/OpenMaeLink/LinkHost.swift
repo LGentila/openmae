@@ -456,6 +456,9 @@ public actor LinkHost: AssistantConnection {
         updateKeepAwake()
     }
 
+    /// The port of the local listener, once it listens (for the tests).
+    var directPort: UInt16? { listener?.port }
+
     private func stopRegistration() {
         registrationTasks.forEach { $0.cancel() }
         registrationTasks = []

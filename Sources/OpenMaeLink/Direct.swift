@@ -24,6 +24,9 @@ public final class DirectListener: @unchecked Sendable {
         (connections, sink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(8))
     }
 
+    /// The UDP port it listens on, once it does.
+    public var port: UInt16? { lock.withLock { listener?.port?.rawValue } }
+
     public func start() {
         lock.withLock { restart?.cancel() }
         do {

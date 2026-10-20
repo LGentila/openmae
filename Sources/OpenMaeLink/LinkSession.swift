@@ -3,8 +3,38 @@ import VoiceCore
 
 /// An open session between the iPhone and the Mac, over one transport: encrypted messages on the reliable channel,
 /// sound in encrypted datagrams. Either side keeps it alive with a ping every 25 s, and gives up after 60 s
-/// without hearing anything.
+/// without hearing anything. The iPhone also checks that the Mac answers (`checkRoundTrips`), to see within seconds
+/// that its network went or changed under the session.
 public final class LinkSession: @unchecked Sendable {
+    /// How the iPhone checks that the Mac still answers on its session: a ping every `every`, which the Mac answers with
+    /// a pong (any version of it does). Hearing the Mac is not enough: its voice may still reach the iPhone while
+    /// nothing the iPhone sends reaches the Mac.
+    ///
+    /// No answer for `giveUpAfter`: the network went (airplane mode, a tunnel) or changed under the session, and the
+    /// session is closed, so that a new one is opened as soon as the network is back, rather than a minute later. A
+    /// session that lived through a long cut does not come back reliably (heard again for a second, then lost again),
+    /// and the Mac only closes its end after a minute without hearing anything.
+    ///
+    /// After a change of network (Wi-Fi back, another address, Wi-Fi to cellular), the Mac must answer a ping sent then
+    /// within `afterNetworkChange`, or the session is closed.
+    public struct RoundTrips: Sendable, Equatable {
+        public var every: Duration
+        public var giveUpAfter: Duration
+        public var afterNetworkChange: Duration
+
+        public init(every: Duration, giveUpAfter: Duration, afterNetworkChange: Duration) {
+            self.every = every
+            self.giveUpAfter = giveUpAfter
+            self.afterNetworkChange = afterNetworkChange
+        }
+
+        /// A round trip through the relay over a cellular network takes well under a second, retransmissions
+        /// included, and the Mac answers at once, whatever its engine is doing (the session's own task does). The Mac
+        /// itself takes the iPhone as out of reach after a second without its microphone.
+        public static let standard = RoundTrips(every: .seconds(1), giveUpAfter: .seconds(4),
+                                                afterNetworkChange: .milliseconds(1500))
+    }
+
     public let path: LinkPath
     /// The peer's Noise static key.
     public let peerKey: Data
@@ -24,6 +54,13 @@ public final class LinkSession: @unchecked Sendable {
     private var isClosed = false
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
     private var tasks: [Task<Void, Never>] = []
+    // The round trips (iPhone): pings sent and pongs heard, which answer them in order on the reliable channel.
+    private var roundTrips: RoundTrips?
+    private var pingsSent = 0
+    private var pongsHeard = 0
+    private var lastPong = ContinuousClock.now
+    /// After a change of network: the pongs needed (up to that of the ping sent then), and by when.
+    private var awaitedPong: (count: Int, by: ContinuousClock.Instant)?
 
     init(transport: any LinkTransport, inbox: FrameInbox, keys: SessionKeys, peerKey: Data,
          peerMac: HandshakePayload.Mac?, peerPhone: HandshakePayload.Session? = nil) {
@@ -44,11 +81,16 @@ public final class LinkSession: @unchecked Sendable {
     public var isOpen: Bool { lock.withLock { !isClosed } }
 
     public func send(_ message: LinkMessage) {
-        lock.withLock {
-            guard !isClosed, let frame = try? keys.seal(message) else { return }
-            lastSent = .now
-            transport.send(Frame.encode(frame))
-        }
+        lock.withLock { _ = sendLocked(message) }
+    }
+
+    /// With the lock held. Whether it went out.
+    private func sendLocked(_ message: LinkMessage) -> Bool {
+        guard !isClosed, let frame = try? keys.seal(message) else { return false }
+        lastSent = .now
+        if case .ping = message { pingsSent += 1 }
+        transport.send(Frame.encode(frame))
+        return true
     }
 
     public func send(_ packet: AudioPacket) {
@@ -97,7 +139,12 @@ public final class LinkSession: @unchecked Sendable {
                 }
                 switch message {
                 case .success(.ping)?: send(.pong)
-                case .success(.pong)?: break
+                case .success(.pong)?:
+                    lock.withLock {
+                        pongsHeard += 1
+                        lastPong = .now
+                        if let awaited = awaitedPong, pongsHeard >= awaited.count { awaitedPong = nil }
+                    }
                 case .success(let message)?: messageSink.yield(message)
                 case .failure?:
                     // A newer peer's message of a kind this version does not know: the channel is fine, it is skipped.
@@ -134,6 +181,60 @@ public final class LinkSession: @unchecked Sendable {
             }
             if quietFor > .seconds(25) { send(.ping) }
         }
+    }
+
+    // MARK: Round trips (iPhone)
+
+    /// iPhone: from now on, checks that the Mac answers (`RoundTrips`), and closes the session when it does not.
+    public func checkRoundTrips(_ policy: RoundTrips) {
+        let task = Task<Void, Never> { [weak self] in await self?.watchRoundTrips(policy) }
+        let started: Bool = lock.withLock {
+            guard !isClosed, roundTrips == nil else { return false }
+            roundTrips = policy
+            lastPong = .now
+            tasks.append(task)
+            return true
+        }
+        if !started { task.cancel() }
+    }
+
+    /// iPhone: the device's network changed. The session may not live through it (a new address, another interface):
+    /// the Mac must answer a ping sent now within `RoundTrips.afterNetworkChange`, or the session is closed. Again at
+    /// each change.
+    public func networkChanged() {
+        lock.withLock {
+            guard let roundTrips, sendLocked(.ping) else { return }
+            awaitedPong = (pingsSent, .now + roundTrips.afterNetworkChange)
+        }
+    }
+
+    private func watchRoundTrips(_ policy: RoundTrips) async {
+        let tick = min(policy.every, .milliseconds(250))
+        var nextPing = ContinuousClock.now
+        while !Task.isCancelled {
+            let now = ContinuousClock.now
+            if now >= nextPing {
+                send(.ping)
+                nextPing = now + policy.every
+            }
+            let (unanswered, awaited) = lock.withLock { (now - lastPong, awaitedPong) }
+            if unanswered > policy.giveUpAfter {
+                DebugLog.log("link: the Mac has not answered for \(Self.seconds(unanswered)), closing the session")
+                close()
+                return
+            }
+            if let awaited, now >= awaited.by {
+                DebugLog.log("link: the Mac did not answer after the network changed, closing the session")
+                close()
+                return
+            }
+            try? await Task.sleep(for: tick)
+        }
+    }
+
+    private static func seconds(_ duration: Duration) -> String {
+        let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+        return String(format: "%.1f s", seconds)
     }
 }
 
