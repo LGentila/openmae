@@ -243,6 +243,25 @@ struct OpenPageToolTests {
         #expect(pages.contains("ouvrir_page"))
     }
 
+    /// With the page tool, the results' note (read where the model decides) and the prompt say when a snippet does not
+    /// hold the answer: a figure that changes without its day or time, or hours that are not the day's. Without the page
+    /// tool (the smaller models), the note stays as it was.
+    @Test func theResultsSayWhenToOpenAPage() async throws {
+        let (runner, _) = tools(FakePageReader([:]))
+        _ = await runner.tools()
+        let search = await runner.handle(ToolCall(name: "chercher_web", arguments: ["requete": "prix action Apple"]),
+                                         context: context())
+        let note = try #require(search.forModel["note"]?.text)
+        #expect(note.hasPrefix(WebSearchCatalog.resultsNote))
+        #expect(note.contains("sans le jour ou l'heure où il valait") && note.hasSuffix("avec ouvrir_page."))
+        let plain = WebSearchTools(provider: FakeSearch(quotes))
+        let found = try await plain.perform(ToolCall(name: "chercher_web", arguments: ["requete": "prix action Apple"]),
+                                            context: context())
+        #expect(found.forModel["note"]?.text == WebSearchCatalog.resultsNote)
+        #expect(WebSearchCatalog.promptAddendumWithPages.contains("« actuellement » ou « en temps réel » dans un extrait"))
+        #expect(!WebSearchCatalog.promptAddendum.contains("ouvrir_page"))
+    }
+
     @Test func theResultsAreNumberedAndAPageMayBeOpenedWhileSummingThemUp() async throws {
         let reader = FakePageReader([boursorama: .success(quotePage)])
         let (runner, _) = tools(reader)

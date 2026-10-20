@@ -186,6 +186,8 @@ struct Options {
     var webAddendum: String?
     /// actions-bench: the delegation's part of the system prompt, read from this file.
     var agentsAddendum: String?
+    /// actions-bench: the note the model reads first in a search's results, read from this file.
+    var resultsNote: String?
     var examples: String?
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
@@ -278,6 +280,7 @@ struct Options {
             case "--addendum": o.addendum = it.next()
             case "--web-addendum": o.webAddendum = it.next()
             case "--agents-addendum": o.agentsAddendum = it.next()
+            case "--results-note": o.resultsNote = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
