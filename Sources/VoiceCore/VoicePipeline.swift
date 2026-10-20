@@ -239,7 +239,8 @@ public actor VoicePipeline {
     /// user's turn, or once the voice's output is back): stopped before any of its sound, or during its chime by the
     /// user taking the floor (speaking, the talk key, a typed turn, the wake phrase); or said without the device that
     /// has the conversation saying it played it (`PlaybackEnd.unconfirmed`), or stopped while that device was out of
-    /// reach, and then once more at most, so that it never loops.
+    /// reach, and then once more at most, so that it never loops. Said without that device saying it played it, its
+    /// voice had been produced to its end: it is said again from that recording (`RecordedVoice`), at once.
     private struct Announcement {
         var text: String
         var note: String
@@ -249,6 +250,8 @@ public actor VoicePipeline {
         var retried = false
         /// Lets `withdrawAnnouncement` take it back while it waits.
         var id: UUID?
+        /// Its voice, produced to its end the time before: said again from it rather than by the voice.
+        var recording: [VoiceAudio]?
     }
     private var announcements: [Announcement] = []
 
@@ -386,6 +389,8 @@ public actor VoicePipeline {
         var chunks: [(piece: Int?, sent: ContinuousClock.Instant?)] = []
         /// The player read the voice to its end.
         var voiceEnded = false
+        /// An announcement's voice as the player read it, to say it again as it was (`Announcement.recording`).
+        var recording: [VoiceAudio] = []
         /// The device went out of reach before it heard the whole answer: the voice stopped, the rest waits for it.
         var cut: Cut?
         /// Stopping the voice after the cut: the turn ends once it is done.
@@ -1439,6 +1444,7 @@ public actor VoicePipeline {
             var quietSamples = 0
             do {
                 for try await chunk in stream.audio {
+                    if turn.isAnnouncement { turn.recording.append(chunk) }
                     let samples = chunk.samples
                     // The piece it says, and when it went out: what the device heard, should it go out of reach.
                     let piece = chunk.text.flatMap { turn.voicePieces[$0] }
@@ -1729,7 +1735,13 @@ public actor VoicePipeline {
 
     private func runAnnouncement(_ turn: Turn, _ announcement: Announcement) async {
         do {
-            let stream = try await startVoice(language: announcement.language)
+            let stream: any SynthesisStream
+            if let recording = announcement.recording {
+                DebugLog.log("announcement: said again from its voice of the time before")
+                stream = RecordedVoice(recording)
+            } else {
+                stream = try await startVoice(language: announcement.language)
+            }
             turn.stream = stream
             guard !Task.isCancelled else {
                 await stream.cancel()  // stopped while the voice got ready: it has nothing to stop yet
@@ -1753,7 +1765,7 @@ public actor VoicePipeline {
             if end == .unconfirmed {
                 guard announcement.retried else {
                     DebugLog.log("announcement: it may not have reached the user, said again once the voice does")
-                    sayAgainLater(turn, retried: true)
+                    sayAgainLater(turn, retried: true, recorded: true)
                     finish(turn, metrics: nil)
                     return
                 }
@@ -1797,9 +1809,11 @@ public actor VoicePipeline {
 
     /// The turn's announcement did not reach the user: back to the head of the queue, for the next quiet moment. What
     /// the interfaces showed of it is reported cut off. `retried`: it may have been said to nobody (`Announcement`).
-    private func sayAgainLater(_ turn: Turn, retried: Bool = false) {
+    /// `recorded`: its voice went to the output to its end, and is said again as it was.
+    private func sayAgainLater(_ turn: Turn, retried: Bool = false, recorded: Bool = false) {
         guard var announcement = turn.announcement else { return }
         if retried { announcement.retried = true }
+        if recorded, turn.voiceEnded, !turn.recording.isEmpty { announcement.recording = turn.recording }
         announcements.insert(announcement, at: 0)
         DebugLog.log("turn \(turn.id): the announcement is said again later")
         guard !turn.answer.isEmpty else { return }

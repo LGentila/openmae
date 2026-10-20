@@ -290,7 +290,7 @@ time.
 An announcement cut by a home station's drop (the iPad unplugged 0.6 s into the chime), said again at once on the
 Mac, as the app does; each try reports the pace of every utterance of the voice, and the gaps in the Mac's sound after
 its chime. `--mute-first` takes the Mac's first utterance of it for near-silence, so that the voice would start it
-again after 1.2 s of its audio;
+again after 1.2 s of its audio (an announcement said again from its recording no longer uses the voice);
 `--mute-station` does the same on the station, whose voice then starts again just after the drop:
 
 ```bash

@@ -82,6 +82,40 @@ struct UnheardAnnouncementTests {
         #expect(await log.finished.map(\.interrupted) == [true, false])
     }
 
+    /// Said without the device saying it played it, the announcement's voice had been produced to its end: it is said
+    /// again from that recording, the voice not started again (its new near-silent opening could leave a gap after the
+    /// chime).
+    @Test func unconfirmedSaidAgainFromItsRecording() async throws {
+        let (model, speaker, voice) = (ScriptedModel(), FakeSpeaker(confirms: false), CountingSynthesizer())
+        let pipeline = make(model, speaker, synthesizer: voice)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await announce(pipeline)
+        await waitFor { await recorded(model) == [Self.sentence] }
+        #expect(await speaker.played == 2 * Self.samples)  // the chime and the same words, twice
+        #expect(voice.started == 1)
+        #expect(await log.pieces == [Self.sentence, Self.sentence])
+    }
+
+    /// The home station that says the announcement drops during it (the iPad unplugged during the chime): it is said
+    /// again at once where the conversation is, from the voice the station was given, which the voice had produced to
+    /// its end.
+    @Test func droppedStationSaidAgainHereFromItsRecording() async throws {
+        let (model, speaker, voice) = (ScriptedModel(), FakeSpeaker(), CountingSynthesizer())
+        let station = FakeSpeaker(confirms: false)
+        let pipeline = make(model, speaker, synthesizer: voice)
+        try await pipeline.start()
+        await pipeline.announceThrough(station)
+        await announce(pipeline)
+        await waitFor { await station.played == Self.samples }  // all of it went to the station: the chime plays
+        await pipeline.announceThrough(nil)
+        await waitFor { await recorded(model) == [Self.sentence] }
+        #expect(await station.played == Self.samples)
+        #expect(await speaker.played == Self.samples)
+        #expect(voice.started == 1)
+    }
+
     /// Out of reach for a moment while the announcement is said, but the device says it played it: not said again.
     @Test func confirmedDespiteAMomentOutOfReachNotSaidAgain() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
@@ -248,6 +282,18 @@ struct UnheardAnnouncementTests {
         #expect(finished.map(\.interrupted) == [true])
         #expect(finished.first?.assistantText == sentence)
         #expect(finished.first?.language == .english)
+    }
+}
+
+/// `FakeSynthesizer`, counting the utterances it starts.
+final class CountingSynthesizer: SpeechSynthesizer, @unchecked Sendable {
+    let outputSampleRate = 1000.0
+    private let lock = NSLock()
+    private var count = 0
+    var started: Int { lock.withLock { count } }
+    func startUtterance(language: SpeechLanguage) async throws -> any SynthesisStream {
+        lock.withLock { count += 1 }
+        return FakeStream()
     }
 }
 
