@@ -247,6 +247,14 @@ extension SpeakableText {
             s = s.replacingOccurrences(of: #"\b(\d{1,2}) ?h ?(\d{2})\b"#, with: "$1 heures $2", options: .regularExpression)
             s = s.replacingOccurrences(of: #"\b1 ?h\b"#, with: "1 heure", options: .regularExpression)
             s = s.replacingOccurrences(of: #"\b(\d{1,2}) ?h\b"#, with: "$1 heures", options: .regularExpression)
+            // The built-in sources' numbers: "1,2 %", "18 °C", "18°".
+            s = s.replacingOccurrences(of: #"(\d) ?%"#, with: "$1 pour cent", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"(\d) ?° ?C\b"#, with: "$1 degrés", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"(\d) ?°"#, with: "$1 degrés", options: .regularExpression)
+        } else {
+            s = s.replacingOccurrences(of: #"(\d) ?%"#, with: "$1 percent", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"(\d) ?° ?C\b"#, with: "$1 degrees Celsius", options: .regularExpression)
+            s = s.replacingOccurrences(of: #"(\d) ?°"#, with: "$1 degrees", options: .regularExpression)
         }
         s = s.replacingOccurrences(of: #" +([.,:;!?])"#, with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)

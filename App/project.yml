@@ -79,6 +79,14 @@ targets:
           Maé adds the events you ask for to your calendar and reads it to you when you ask what is planned.
         NSRemindersFullAccessUsageDescription: >-
           Maé adds the reminders you ask for and reads you those still to do.
+        # The built-in sources (Settings › Search the internet): "here" for the weather and the travel times, asked the
+        # first time the user asks for one without naming a place. Shown from Resources/InfoPlist.xcstrings too.
+        NSLocationUsageDescription: >-
+          Maé uses your Mac’s location for the weather and the travel times “from here”, when you don’t name a place.
+          She doesn’t keep it.
+        NSLocationWhenInUseUsageDescription: >-
+          Maé uses your Mac’s location for the weather and the travel times “from here”, when you don’t name a place.
+          She doesn’t keep it.
         # The iPhone app finds this Mac on the local network (Settings › iPhone and iPad). Shown from
         # Resources/InfoPlist.xcstrings too.
         NSLocalNetworkUsageDescription: >-
@@ -87,12 +95,14 @@ targets:
     entitlements:
       path: Resources/App.entitlements
       properties:
-        # Hardened runtime: the app needs the microphone, and the calendar and reminders for the actions (one
-        # entitlement covers both). No App Sandbox (the models live in ~/Library/Application Support/<name>/Models,
+        # Hardened runtime: the app needs the microphone, the calendar and reminders for the actions (one
+        # entitlement covers both), and the location for the built-in sources. No App Sandbox (the models live in ~/Library/Application Support/<name>/Models,
         # shared with the command-line tool), so no network entitlement is needed either (it only exists inside the
         # sandbox).
         com.apple.security.device.audio-input: true
         com.apple.security.personal-information.calendars: true
+        # The Mac's location, for "here" (the built-in sources).
+        com.apple.security.personal-information.location: true
     # Signing: Signing.xcconfig, completed on each Mac by Signing.local.xcconfig (not published, so the
     # Apple Developer team stays private). Distributed builds need a "Developer ID Application" certificate.
     configFiles:

@@ -57,6 +57,11 @@ public actor AssistantHost: AssistantConnection {
     /// keeps the Mac awake in turn, as an exchange, once it has started.
     private let timersAwake = StayAwake(reason: "OpenMaé: a timer is running", linger: .seconds(5))
     private let tasksAwake = StayAwake(reason: "OpenMaé: an agent is working on a task")
+    /// The built-in sources (weather, quotes, travel times): one switch for the three, with the actions or without.
+    private let here = MacLocation()
+    private let weatherTools: WeatherTools
+    private let quoteTools = QuoteTools()
+    private let travelTools: TravelTimeTools
     private var actionsStatus: ActionsStatus?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
@@ -64,6 +69,8 @@ public actor AssistantHost: AssistantConnection {
     /// the tasks handed to agents, and their folders, there instead of the user's own.
     public init(actionsTestCollection: String? = nil, agentsTestFolder: URL? = nil) {
         calendarTools = CalendarTools(testCollection: actionsTestCollection)
+        weatherTools = WeatherTools(here: here)
+        travelTools = TravelTimeTools(here: here, estimator: MapKitTravel())
         agentTools = agentsTestFolder.map {
             AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
         } ?? AgentTools()
@@ -463,10 +470,18 @@ public actor AssistantHost: AssistantConnection {
                 do { try await pipeline?.toolsChanged() } catch { emit.yield(.warning("\(error)")) }
             }
         }
-        if new.webSearch != old.webSearch, await configureWebSearch(), new.actionsEnabled == old.actionsEnabled {
-            DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
-            // With the actions, its tool comes or goes and the conversation goes on. On its own, it is the only tool:
-            // the tools come or go, and a new conversation starts, as when the actions are switched on or off.
+        var searchChanged = false
+        if new.webSearch != old.webSearch { searchChanged = await configureWebSearch() }
+        var sourcesChanged = false
+        if new.builtInSources != old.builtInSources { sourcesChanged = await configureSources() }
+        if searchChanged || sourcesChanged, new.actionsEnabled == old.actionsEnabled {
+            if searchChanged {
+                DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
+            }
+            if sourcesChanged { DebugLog.log("built-in sources: \(new.builtInSources ? "on" : "off")") }
+            // With the actions, its tool comes or goes and the conversation goes on. On their own, the search and the
+            // sources are the only tools: the tools come or go, and a new conversation starts, as when the actions are
+            // switched on or off.
             do {
                 if new.actionsEnabled {
                     try await pipeline?.toolsChanged()
@@ -492,17 +507,33 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Actions
 
-    /// The tools for a new pipeline or conversation: the actions when they are on, the web search when it is; nil when
-    /// both are off.
+    /// The tools for a new pipeline or conversation: the actions when they are on, the web search and the built-in
+    /// sources when they are; nil when all are off.
     private func toolRunner() async -> ToolRunner? {
         await configureWebSearch()
+        await configureSources()
+        let sources: [any ToolProvider] = [weatherTools, quoteTools, travelTools]
         guard settings.actionsEnabled else {
-            return settings.webSearch.isReady ? ToolRunner(providers: [webSearchTools], actions: false) : nil
+            let on = (settings.webSearch.isReady ? [webSearchTools] : []) + (sourcesOn ? sources : [])
+            return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
         await configureAgents()
-        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools])
+        return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources)
+    }
+
+    /// The built-in sources are offered: switched on, on a tier whose model passed their benchmark.
+    private var sourcesOn: Bool { settings.builtInSources && BuiltInSources.offered(on: tier) }
+
+    /// Switches the three built-in sources on or off together. Returns true when what the model sees changed.
+    @discardableResult
+    private func configureSources() async -> Bool {
+        let on = sourcesOn
+        let weather = await weatherTools.configure(on)
+        let quotes = await quoteTools.configure(on)
+        let travel = await travelTools.configure(on)
+        return weather || quotes || travel
     }
 
     /// Hands the source of the settings to the web search tool while the search is switched on, with the keychain's key

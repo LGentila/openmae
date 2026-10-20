@@ -1511,6 +1511,16 @@
         }
       }
     },
+    "For “here”, Maé uses your Mac’s location: macOS asks you the first time.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour « ici », Maé se sert de la position de ton Mac : macOS te la demande la première fois."
+          }
+        }
+      }
+    },
     "Found in the “OpenMaé” folder · %lld": {
       "localizations": {
         "fr": {
@@ -2261,6 +2271,16 @@
         }
       }
     },
+    "Maé answers the weather, a currency’s or a crypto’s rate and travel times from dedicated services, without searching. The place you ask about goes to Open-Meteo or Apple, the currency or the crypto to the European Central Bank’s rates or to CoinGecko; the rest of the conversation stays on your Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te donne la météo, le cours d’une devise ou d’une cryptomonnaie et les temps de trajet grâce à des services dédiés, sans chercher sur internet. L’endroit que tu demandes va à Open-Meteo ou à Apple, la devise ou la cryptomonnaie aux taux de la Banque centrale européenne ou à CoinGecko ; le reste de la conversation reste sur ton Mac."
+          }
+        }
+      }
+    },
     "Maé can’t use them. Allow OpenMaé in System Settings, Privacy & Security.": {
       "localizations": {
         "fr": {
@@ -2787,6 +2807,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Non proposé"
+          }
+        }
+      }
+    },
+    "Not on this level yet: Maé’s model on it hasn’t been checked with these sources.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas encore à ce niveau : le modèle de Maé n’y a pas encore été vérifié avec ces services."
           }
         }
       }
@@ -4857,6 +4887,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Attend ton oui"
+          }
+        }
+      }
+    },
+    "Weather data by Open-Meteo.com (CC BY 4.0). Rates of the European Central Bank, through Frankfurter. Crypto prices by CoinGecko. Travel times by Apple Maps.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Données météo d’Open-Meteo.com (CC BY 4.0). Taux de la Banque centrale européenne, par Frankfurter. Cours des cryptomonnaies par CoinGecko. Temps de trajet par Plans d’Apple."
+          }
+        }
+      }
+    },
+    "Weather, rates and travel times": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Météo, cours et trajets"
           }
         }
       }

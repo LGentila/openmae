@@ -96,6 +96,38 @@
           }
         }
       }
+    },
+    "NSLocationUsageDescription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé se sert de la position de ton Mac pour la météo et les temps de trajet « d’ici », quand tu ne nommes pas d’endroit. Elle ne la garde pas."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé uses your Mac’s location for the weather and the travel times “from here”, when you don’t name a place. She doesn’t keep it."
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé se sert de la position de ton Mac pour la météo et les temps de trajet « d’ici », quand tu ne nommes pas d’endroit. Elle ne la garde pas."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé uses your Mac’s location for the weather and the travel times “from here”, when you don’t name a place. She doesn’t keep it."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

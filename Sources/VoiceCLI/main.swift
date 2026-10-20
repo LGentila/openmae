@@ -11,7 +11,7 @@
 //                                                       the gaps after the chime (see AnnounceDrop.swift)
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1] [--with-llm]
 //                                                       silence the voice produces before speaking
-//   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>]
+//   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
 //   voice-cli dialogue-bench [--repeats 10] [--corpus file.json]
@@ -116,6 +116,11 @@ struct Options {
     var searxng: String?
     var searxngUser: String?
     var record: String?
+    /// actions-bench: the built-in sources' tools offered with any corpus; their real services asked instead of the
+    /// corpus's recorded answers; what they answered written to a file.
+    var sources = false
+    var liveSources = false
+    var recordSources: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -172,6 +177,9 @@ struct Options {
             case "--searxng": o.searxng = it.next()
             case "--searxng-user": o.searxngUser = it.next()
             case "--record": o.record = it.next()
+            case "--sources": o.sources = true
+            case "--live-sources": o.liveSources = true
+            case "--record-sources": o.recordSources = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -635,7 +643,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--voice-restart-after s]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
-                                       [--addendum file] [--web-addendum file] [--compare-beginnings]
+                                       [--addendum file] [--web-addendum file] [--sources] [--live-sources]
+                                       [--record-sources file.json] [--compare-beginnings]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]

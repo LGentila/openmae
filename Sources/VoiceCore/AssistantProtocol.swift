@@ -44,13 +44,16 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     public var claudeCode = AgentSettings()
     /// Searching the internet, through Brave Search or the user's SearXNG (with the actions on or off).
     public var webSearch = WebSearchSettings()
+    /// The built-in sources (the weather, currencies and cryptos, travel times; with the actions on or off). Off by
+    /// default: a place, a currency or a crypto leaves the Mac for Open-Meteo, Apple, the ECB's rates or CoinGecko.
+    public var builtInSources = false
     public init() {}
 
     /// `pushToTalk`: how earlier versions, which only knew hands-free and push-to-talk, saved the way of talking. It is
     /// still written, so that an earlier version (on this Mac, or the iPhone app) keeps push-to-talk.
     private enum CodingKeys: String, CodingKey {
         case audioMode, listening, pushToTalk, wakeLog, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode,
-             webSearch
+             webSearch, builtInSources
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
@@ -68,6 +71,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         shortcutsToConfirm = try c.decodeIfPresent([String].self, forKey: .shortcutsToConfirm) ?? []
         claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
         webSearch = (try? c.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch)) ?? WebSearchSettings()
+        builtInSources = try c.decodeIfPresent(Bool.self, forKey: .builtInSources) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -81,6 +85,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         try c.encode(shortcutsToConfirm, forKey: .shortcutsToConfirm)
         try c.encode(claudeCode, forKey: .claudeCode)
         try c.encode(webSearch, forKey: .webSearch)
+        try c.encode(builtInSources, forKey: .builtInSources)
     }
 }
 

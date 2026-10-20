@@ -267,6 +267,12 @@ extension Snapshots {
             SettingsScene(name: "RgWebSearxRefuse", page: .webSearch, events: [.webSearchTested(.failed(.unauthorized))],
                           settings: search(.searxng, address: "https://searx.maison.lan", username: "maé")),
             SettingsScene(name: "RgWeb-eteinte", page: .webSearch),
+            // The weather, rates and travel times, on the same page (not in the design)
+            SettingsScene(name: "RgWeb-meteo-cours-trajets", page: .webSearch,
+                          events: [.webSearchTested(.works(results: 5, seconds: 0.62))], settings: { s in
+                              search(.brave, key: true)(&s)
+                              s.builtInSources = true
+                          }),
             SettingsScene(name: "RgWeb-retirer-cle", page: .webSearch, settings: search(.brave, key: true),
                           prepare: { navigation, _, _ in navigation.sheet = .removeBraveKey }),
             // Connected tools (drawn, greyed in the sidebar)

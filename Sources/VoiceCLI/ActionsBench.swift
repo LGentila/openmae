@@ -2,7 +2,8 @@
 //
 // Text only: no microphone, no voice, and nothing is carried out (no event, reminder or timer is created, no task
 // is handed over). Each request of the corpus (Tests/Fixtures/actions-fr.json; Tests/Fixtures/agents-fr.json for
-// handing tasks to Claude Code; Tests/Fixtures/web-fr.json for searching the internet) is sent to the model with the
+// handing tasks to Claude Code; Tests/Fixtures/web-fr.json for searching the internet; Tests/Fixtures/sources-fr.json
+// for the built-in sources: weather, quotes, travel times) is sent to the model with the
 // same system prompt and tools as in the app, at a fixed reference time, and what the app would make of the call it
 // writes (the tool its name stands for, misspelled or not; the date worked out from the words it copied, the length,
 // the shortcut, the words of a task's instruction or of a search) is compared with the expected one.
@@ -18,6 +19,11 @@
 // the searches are made on that SearXNG, with the model's own words (the password, if any, in the SEARXNG_PASSWORD
 // environment variable), and --record writes what they found, by request, in the corpus's "recorded" shape. --web
 // offers the search tool with any corpus (to check that it does not change the choice of the other tools).
+//
+// The built-in sources (a corpus with "sources": true, or --sources with any corpus) work the same way: the model sums
+// up what the corpus recorded for the request ("recordedSources", as the model reads it), or with --live-sources what
+// the real services answer (Open-Meteo, the ECB's rates, CoinGecko, Apple's maps; "here" is the corpus's "here"), timed;
+// --record-sources writes those answers, by request, in the corpus's shape.
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -50,6 +56,12 @@ private struct Corpus: Decodable {
     var histories: [String: [Exchange]]?
     /// What a search found for a request (by its phrase), as the app keeps it: summed up by the model when it searches.
     var recorded: [String: WebSearchResults]?
+    /// The built-in sources' tools are offered too (weather, quotes, travel times).
+    var sources: Bool?
+    /// Where "here" is for them.
+    var here: Place?
+    /// What a source answered for a request (by its phrase), as the model reads it: summed up by the model.
+    var recordedSources: [String: JSONValue]?
 
     struct Case: Decodable {
         var phrase: String
@@ -85,6 +97,12 @@ private struct Corpus: Decodable {
         /// The app must refuse the call: "past" for a date already gone. The call is still expected, with the user's
         /// words (the app checks the date, not the model), and `when` is the date they give.
         var refused: String?
+        /// A built-in source: the call names no place (where the user is); the instrument the app must find ("EUR/USD",
+        /// "bitcoin/EUR"); the travel mode ("car", "transit"). `when` is then the forecast's day ("none" for now) or the
+        /// time to arrive by.
+        var here: Bool?
+        var instrument: String?
+        var mode: String?
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -162,6 +180,10 @@ private struct CaseResult: Encodable {
     var summaryFirstMs: Double?
     var summaryMs: Double?
     var searchMs: Double?
+    /// A built-in source: whether the summary keeps a number of the data as written, and, for a quote, says when it is
+    /// from.
+    var keepsNumber: Bool?
+    var saysWhen: Bool?
 }
 
 func runActionsBench(_ o: Options) async throws {
@@ -189,12 +211,22 @@ func runActionsBench(_ o: Options) async throws {
 
     let agents = corpus.agents == true
     let web = corpus.web == true || o.web
-    // In the app's order: the actions, the agents, the web search.
+    let sources = corpus.sources == true || o.sources
+    // In the app's order: the actions, the agents, the web search, the built-in sources.
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
         + (web ? [WebSearchCatalog.search] : [])
+        + (sources ? BuiltInSources.tools : [])
+    let here = FixedHere(corpus.here)
+    let liveSources: [String: any ToolProvider] = o.liveSources ? [
+        WeatherCatalog.name: WeatherTools(on: true, here: here),
+        QuoteCatalog.name: QuoteTools(on: true),
+        TravelTimeCatalog.name: TravelTimeTools(on: true, here: here, estimator: MapKitTravel()),
+    ] : [:]
+    if o.liveSources { print("built-in sources asked for real, here = \(corpus.here?.name ?? "unknown")") }
+    var answered: [String: JSONValue] = [:]  // the live sources' answers, for --record-sources
     var live: SearXNGProvider?
     if let text = o.searxng {
         guard let address = SearXNGProvider.address(text) else {
@@ -219,6 +251,7 @@ func runActionsBench(_ o: Options) async throws {
         ?? ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (agents ? [AgentCatalog.promptAddendum] : [])
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
+        + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
@@ -336,6 +369,35 @@ func runActionsBench(_ o: Options) async throws {
                 result.refusal = refused.forModel
                 if result.toolOK, item.expected != nil { result.argumentsOK = false }
             }
+        } else if let call, BuiltInSources.names.contains(call.name) {
+            // A built-in source: whether the app accepts the call and reads it as the corpus expects, then the model's
+            // summary of what the source answered (recorded, or asked for real).
+            do {
+                try checkSource(call, context: context)
+                if result.toolOK, let expected = item.expected {
+                    result.argumentsOK = mentions(call, expected) && sourceMatches(call, expected, context)
+                }
+                var forModel = corpus.recordedSources?[item.phrase]
+                if let provider = liveSources[call.name] {
+                    let sourceStart = clock.now
+                    do {
+                        forModel = try await provider.perform(call, context: context).forModel
+                        answered[item.phrase] = forModel
+                    } catch let refused as ToolRefusal {
+                        forModel = nil
+                        result.refusal = refused.forModel
+                    }
+                    result.searchMs = milliseconds(clock.now - sourceStart)
+                }
+                if let forModel {
+                    secondPass = try await sumUpSource(call, forModel: forModel, after: request, model: model,
+                                                       into: &result)
+                }
+            } catch let refused as ToolRefusal {
+                refusal = refused
+                result.refusal = refused.forModel
+                if result.toolOK, item.expected != nil { result.argumentsOK = false }
+            }
         } else if let call {
             do {
                 let resolved = try resolve(call, created: created, context: context, shortcuts: corpus.shortcuts)
@@ -420,6 +482,12 @@ func runActionsBench(_ o: Options) async throws {
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(found).write(to: URL(fileURLWithPath: record))
         print("searches recorded: \(record) (\(found.count))")
+    }
+    if let record = o.recordSources {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(answered).write(to: URL(fileURLWithPath: record))
+        print("sources' answers recorded: \(record) (\(answered.count))")
     }
 }
 
@@ -652,6 +720,112 @@ private func sumUp(_ call: ToolCall, query: String, results: WebSearchResults, a
     return true
 }
 
+/// The summing up of a built-in source's data, as in the app: the model reads it and answers, and nothing it writes
+/// then is carried out (the calls are only counted). Returns whether the model was asked.
+private func sumUpSource(_ call: ToolCall, forModel: JSONValue, after request: [ChatMessage], model: MLXChatModel,
+                         into result: inout CaseResult) async throws -> Bool
+{
+    let called = request + [.call(call)]
+    result.resultTokens = try await model.tokenCount(called + [.result(of: call, forModel)]) - model.tokenCount(called)
+    let clock = ContinuousClock()
+    let start = clock.now
+    var text = ""
+    var calls: [String] = []
+    for try await output in model.reply(to: called + [.result(of: call, forModel)]) {
+        switch output {
+        case .text(let piece):
+            if result.summaryFirstMs == nil, piece.contains(where: \.isLetter) {
+                result.summaryFirstMs = milliseconds(clock.now - start)
+            }
+            text += piece
+        case .toolCall(let made): calls.append(describe(made, written: nil))
+        case .moreToolCalls: calls.append("another call, not written")
+        case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
+        case .toolCallStarted, .toolCallNamed: break
+        }
+    }
+    result.summaryMs = milliseconds(clock.now - start)
+    var filter = ReasoningFilter()
+    let summary = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+    result.summary = summary.isEmpty ? "(nothing: the app says its own sentence)" : summary
+    result.callsWhileSumming = calls
+    // The main number of the data ("47 minutes", "1,12 dollar", "15 degrés"): its digits must be in the summary.
+    if case .object(let fields) = forModel {
+        let main = ["duree", "cours", "temperature", "maximum"].compactMap { fields[$0]?.text }
+            + (fields["previsions"].flatMap { value -> [String]? in
+                guard case .array(let days) = value, case .object(let day)? = days.first else { return nil }
+                return [day["maximum"]?.text].compactMap { $0 }
+            } ?? [])
+            + (fields["maintenant"].flatMap { value -> [String]? in
+                guard case .object(let now) = value else { return nil }
+                return [now["temperature"]?.text].compactMap { $0 }
+            } ?? [])
+        let said = summary.replacingOccurrences(of: "[\u{00A0}\u{202F} ]", with: "", options: .regularExpression)
+        let numbers = main.compactMap { text -> String? in
+            // A rate's number is the one after "vaut" ("1 euro vaut 1,12 dollar (taux d’hier…)").
+            let value = text.components(separatedBy: " vaut ").last ?? text
+            let plain = value.replacingOccurrences(of: "[\u{00A0}\u{202F} ]", with: "", options: .regularExpression)
+            return plain.range(of: #"\d+(,\d+)?"#, options: .regularExpression).map { String(plain[$0]) }
+        }
+        result.keepsNumber = numbers.isEmpty ? nil : numbers.contains { said.contains($0) }
+    }
+    if call.name == QuoteCatalog.name {
+        let folded = summary.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+        result.saysWhen = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche", "aujourd'hui",
+                           "aujourd’hui", "hier", "ce matin", "ce soir", "octobre", "novembre"].contains { folded.contains($0) }
+            || folded.range(of: #"\d+ ?h"#, options: .regularExpression) != nil
+    }
+    return true
+}
+
+/// The app's check of a built-in source's call.
+private func checkSource(_ call: ToolCall, context: ToolContext) throws {
+    switch call.name {
+    case WeatherCatalog.name: try WeatherCatalog.check(call, context: context)
+    case QuoteCatalog.name: try QuoteCatalog.check(call, context: context)
+    default: try TravelTimeCatalog.check(call, context: context)
+    }
+}
+
+/// "EUR/USD", "bitcoin/EUR".
+private func describe(_ instrument: Instrument) -> String {
+    switch instrument {
+    case .currency(let base, let quote): "\(base)/\(quote)"
+    case .crypto(let id, _, let currency): "\(id)/\(currency)"
+    }
+}
+
+/// Whether the app reads a source's call as the corpus expects: no place for "here", the forecast's day, the
+/// instrument, the travel mode and the time to arrive by.
+private func sourceMatches(_ call: ToolCall, _ expected: Corpus.Expected, _ context: ToolContext) -> Bool {
+    switch call.name {
+    case WeatherCatalog.name:
+        if expected.here == true, WeatherCatalog.place(call) != nil { return false }
+        guard let when = expected.when else { return true }
+        let days: [Date]?
+        do { days = try WeatherCatalog.days(call, context: context) } catch { return false }
+        if when == "none" { return days == nil }
+        guard let wanted = LocalDateTime.parse(when, in: context.timeZone)?.date, let days else { return false }
+        return days.contains { context.calendar.isDate($0, inSameDayAs: wanted) }
+    case QuoteCatalog.name:
+        // A pair of currencies either way round: the model is given both rates.
+        guard let wanted = expected.instrument else { return true }
+        let found = QuoteCatalog.instrument(QuoteCatalog.words(call) ?? "")
+        if case .currency(let base, let quote)? = found { return [base + "/" + quote, quote + "/" + base].contains(wanted) }
+        // A crypto in either currency: the model is given both prices.
+        if case .crypto(let id, _, _)? = found { return wanted.hasPrefix(id + "/") }
+        return false
+    default:
+        if expected.here == true, TravelTimeCatalog.origin(call) != nil { return false }
+        if let mode = expected.mode, TravelTimeCatalog.mode(call).rawValue != mode { return false }
+        guard let when = expected.when else { return true }
+        let arrive: Date?
+        do { arrive = try TravelTimeCatalog.arriveBy(call, context: context) } catch { return false }
+        if when == "none" { return arrive == nil }
+        return arrive == LocalDateTime.parse(when, in: context.timeZone)?.date
+    }
+}
+
 /// Whether a text names one of the results' sites: "lequipe.fr" in "D'après L'Équipe", "fr.wikipedia.org" in
 /// "Selon Wikipédia" (letters and digits only, whatever the accents and case).
 private func namesASite(_ text: String, _ results: WebSearchResults) -> Bool {
@@ -736,7 +910,8 @@ private func mentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
     func folded(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
     }
-    let text = folded(call.text("consigne") ?? call.text("message") ?? WebSearchCatalog.query(call) ?? "")
+    let text = folded(call.text("consigne") ?? call.text("message") ?? WebSearchCatalog.query(call)
+        ?? WeatherCatalog.place(call) ?? QuoteCatalog.words(call) ?? TravelTimeCatalog.destination(call) ?? "")
     return mentions.allSatisfy { text.contains(folded($0)) }
 }
 
@@ -822,12 +997,16 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     if results.contains(where: { $0.expected == WebSearchCatalog.searchName || $0.chosen == WebSearchCatalog.searchName }) {
         summarizeSearches(results)
     }
+    if results.contains(where: { BuiltInSources.names.contains($0.expected) || BuiltInSources.names.contains($0.chosen) }) {
+        summarizeSources(results)
+    }
 
     // Expected / chosen.
-    let optional = AgentCatalog.names.union([WebSearchCatalog.searchName])
+    let optional = AgentCatalog.names.union([WebSearchCatalog.searchName]).union(BuiltInSources.names)
     let tools = ["creer_evenement", "creer_rappel", "lire_agenda", "lister_rappels", "modifier_element",
                  "supprimer_element", "minuteur", "lancer_raccourci", AgentCatalog.delegateName, AgentCatalog.statusName,
-                 AgentCatalog.followUpName, AgentCatalog.cancelName, WebSearchCatalog.searchName, "aucun"]
+                 AgentCatalog.followUpName, AgentCatalog.cancelName, WebSearchCatalog.searchName, WeatherCatalog.name,
+                 QuoteCatalog.name, TravelTimeCatalog.name, "aucun"]
         .filter { name in !optional.contains(name) || results.contains { $0.expected == name || $0.chosen == name } }
     let others2 = Set(results.map(\.chosen)).subtracting(tools).sorted()
     let columns = tools + others2
@@ -933,9 +1112,58 @@ private func summarizeSearches(_ results: [CaseResult]) {
     let tokens = summed.compactMap(\.resultTokens).map(Double.init)
     print("  the results in the model's memory: median \(median(tokens).map { String(Int($0)) } ?? "—") tokens, most "
           + "\(tokens.max().map { String(Int($0)) } ?? "—")")
-    let searches = results.compactMap(\.searchMs)
+    let searches = results.filter { $0.chosen == search }.compactMap(\.searchMs)
     if !searches.isEmpty {
         print("  the searches themselves (--searxng): median \(fmt(median(searches))), worst \(fmt(searches.max()))")
+    }
+}
+
+/// The built-in sources' figures: the right decisions (to call one or not), by tool; the calls by mistake and the missed
+/// ones; the calls the app reads as expected; and what the summaries did.
+private func summarizeSources(_ results: [CaseResult]) {
+    let names = BuiltInSources.names
+    func phrases(_ items: [CaseResult]) -> String {
+        items.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined()
+    }
+    let wanted = results.filter { names.contains($0.expected) }
+    let others = results.filter { !names.contains($0.expected) }
+    let mistaken = others.filter { names.contains($0.chosen) }
+    let missed = wanted.filter { !$0.toolOK }
+    let right = results.count - mistaken.count - missed.count
+    print(String(format: "\nbuilt-in sources: right decisions (the right source, or none) %d / %d (%.0f %%)", right,
+                 results.count, percent(right, results.count)))
+    for name in [WeatherCatalog.name, QuoteCatalog.name, TravelTimeCatalog.name] {
+        let these = wanted.filter { $0.expected == name }
+        guard !these.isEmpty else { continue }
+        let ok = these.filter(\.toolOK)
+        print("  \(name): \(ok.count) / \(these.count) right tool, \(ok.filter { $0.argumentsOK != false }.count) read as "
+              + "expected" + ok.filter { $0.argumentsOK == false }
+                  .map { "\n    · \($0.phrase) → \(describe($0.arguments ?? [:]))" }.joined())
+    }
+    print("  sources called by mistake: \(mistaken.count) / \(others.count)" + phrases(mistaken))
+    print("  missed: \(missed.count) / \(wanted.count)" + phrases(missed))
+    let summed = results.filter { names.contains($0.chosen) && $0.summary != nil }
+    let calling = summed.filter { !($0.callsWhileSumming ?? []).isEmpty }
+    print("  summaries: \(summed.count); with calls written while summing up (the app carries out none): \(calling.count)"
+          + calling.map { "\n    · \($0.phrase) → \(($0.callsWhileSumming ?? []).joined(separator: "; "))" }.joined())
+    let rated = summed.filter { $0.keepsNumber != nil }
+    print("  summaries keeping the data's main number as written: \(rated.filter { $0.keepsNumber == true }.count) / "
+          + "\(rated.count)" + rated.filter { $0.keepsNumber == false }.map { "\n    · \($0.phrase) → “\($0.summary ?? "")”" }.joined())
+    let quotes = summed.filter { $0.saysWhen != nil }
+    print("  quotes saying when they are from: \(quotes.filter { $0.saysWhen == true }.count) / \(quotes.count)"
+          + quotes.filter { $0.saysWhen == false }.map { "\n    · \($0.phrase) → “\($0.summary ?? "")”" }.joined())
+    let long = summed.filter { ($0.summary ?? "").filter { ".!?".contains($0) }.count > 2 }
+    print("  summaries of more than two sentences: \(long.count)" + long.map { "\n    · \($0.phrase)" }.joined())
+    for name in [WeatherCatalog.name, QuoteCatalog.name, TravelTimeCatalog.name] {
+        let these = results.filter { $0.chosen == name }
+        guard !these.isEmpty else { continue }
+        let calls = these.compactMap(\.callMs), asked = these.compactMap(\.searchMs)
+        let firstWords = these.compactMap(\.summaryFirstMs), ends = these.compactMap(\.summaryMs)
+        let tokens = these.compactMap(\.resultTokens).map(Double.init)
+        print("  \(name): complete call median \(fmt(median(calls))); "
+              + (asked.isEmpty ? "" : "the source itself median \(fmt(median(asked))), worst \(fmt(asked.max())); ")
+              + "data → first words median \(fmt(median(firstWords))), worst \(fmt(firstWords.max())); "
+              + "→ end of the summary median \(fmt(median(ends))); the data \(median(tokens).map { String(Int($0)) } ?? "—") tokens")
     }
 }
 

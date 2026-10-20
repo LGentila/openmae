@@ -56,13 +56,24 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   searches for leave the Mac: to Brave Search, or to your SearXNG and from there to the search engines. The results
   are never stored (no cache): they only live in the conversation. Public SearXNG instances are not used: they turn
   programs away, and OpenMaé never passes for a browser.
+- **Weather, rates and travel times (optional).** One switch on the same page. Maé answers these from dedicated
+  services rather than from a search, whose snippets rarely hold a forecast, a price or a travel time: the weather
+  now and up to seven days ahead from [Open-Meteo](https://open-meteo.com) (“il va pleuvoir demain à Lyon ?”), a
+  currency's rate from the European Central Bank's reference rates (through [Frankfurter](https://frankfurter.dev))
+  or a crypto's price from [CoinGecko](https://www.coingecko.com) (“combien vaut le bitcoin ?”), always with its time
+  or day, and a travel time by car with the traffic or by public transport, with when to leave, from Apple Maps
+  (“combien de temps pour aller à la gare de Cergy ?”). No key is needed. “Here” is the Mac's location (macOS asks
+  once); a place you name wins. Only the place, or the currency or the crypto, leaves the Mac. Shares and indices
+  have no source of this kind yet: they stay with the web search. Offered on the tiers whose model passed their
+  benchmark (Gemma 4 26B for now).
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
 - **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
   never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
   the two being end-to-end encrypted. (Claude Code, when you hand it a task, goes online on its own, with your
-  account; the web search, when you turn it on, sends its keywords to Brave Search or to your SearXNG.)
+  account; the web search, when you turn it on, sends its keywords to Brave Search or to your SearXNG; the weather,
+  rates and travel times send the place, the currency or the crypto to their services.)
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
@@ -349,6 +360,15 @@ is one the model hesitates on). One search, made as the app makes it (the passwo
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise
+```
+
+The weather, rates and travel times: requests for each, requests that must not use them (general knowledge, small
+talk, questions for the web search, actions), with the services' answers recorded so that it runs offline;
+`--live-sources` asks the real services instead (timed; “here” is the corpus's place) and `--record-sources file.json`
+writes what they answered; `--sources` offers these tools with the other corpora too:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/sources-fr.json
 ```
 
 Short conversations, as the app has them: the dialogues of `Tests/Fixtures/dialogues-fr.json` (here, a request for a

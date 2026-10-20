@@ -24,6 +24,8 @@ struct QuickPanel: View {
                 Hairline()
                 switchRow("Search the internet", isOn: $model.settings.webSearch.enabled)
                 Hairline()
+                switchRow("Weather, rates and travel times", isOn: $model.settings.builtInSources)
+                Hairline()
                 NavigationLine(title: Text("Agents"), value: AgentsPage.summary(model)) { openSettings(.agents) }
                 Hairline()
                 NavigationLine(title: Text("Connected tools"), value: Text("Soon"),

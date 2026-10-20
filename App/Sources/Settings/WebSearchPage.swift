@@ -52,6 +52,7 @@ struct WebSearchPage: View {
                     SettingsCard { testRows }
                 }
             }
+            sourcesSection
         }
         .onAppear {
             address = search.address
@@ -65,6 +66,27 @@ struct WebSearchPage: View {
             }
         }
         .onChange(of: search.braveKeySaved) { replacingKey = false }
+    }
+
+    // MARK: - The built-in sources
+
+    /// One switch for the weather, the rates and the travel times, which come from dedicated services rather than from
+    /// the search's engine, with what leaves the Mac and the services' credits.
+    @ViewBuilder private var sourcesSection: some View {
+        PageSection("Weather, rates and travel times")
+        SettingsCard {
+            SwitchRow("On", isOn: $model.settings.builtInSources)
+                .accessibilityLabel(Text("Weather, rates and travel times"))
+            Caption("Maé answers the weather, a currency’s or a crypto’s rate and travel times from dedicated services, without searching. The place you ask about goes to Open-Meteo or Apple, the currency or the crypto to the European Central Bank’s rates or to CoinGecko; the rest of the conversation stays on your Mac.")
+            if model.settings.builtInSources {
+                if let tier = model.tier, !BuiltInSources.offered(on: tier) {
+                    Caption("Not on this level yet: Maé’s model on it hasn’t been checked with these sources.", tone: .warn)
+                } else {
+                    Caption("For “here”, Maé uses your Mac’s location: macOS asks you the first time.")
+                }
+            }
+            Caption("Weather data by Open-Meteo.com (CC BY 4.0). Rates of the European Central Bank, through Frankfurter. Crypto prices by CoinGecko. Travel times by Apple Maps.")
+        }
     }
 
     // MARK: - The engine
