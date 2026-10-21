@@ -1,0 +1,33 @@
+{
+ "_comment": "French dialogues for voice-cli cut-off-bench --corpus Tests/Fixtures/drops-fr.json: answers cut by a drop. A turn with droppedAfter is cut by a drop once the device that has the conversation has heard that many pieces of the answer (what the voice is given, SentenceChunker), and it is not back in time to hear the rest: the history keeps those pieces, as VoicePipeline.recordHeard does (the model writes on in the app; the bench stops it once it has written the next piece, which the history does not keep). As in the app on 2026-10-21 (« Raconte-moi l'histoire de … », airplane mode on about 5 s into the answer, 25 s away, then a question about it): recorded as answers the user had cut off after their first sentence, two or three of them made Gemma 4 26B answer the next « Raconte-moi … » in a single sentence, with no drop. The last request of the first two dialogues is heard to its end: count its sentences. The third asks what Maé was saying: she should take the story up again.",
+ "dialogues": [
+  {
+   "name": "three drops then a story",
+   "turns": [
+    {"user": "Raconte-moi l'histoire de la tour Eiffel.", "droppedAfter": 1},
+    {"user": "Raconte-moi l'histoire du Mont-Saint-Michel.", "droppedAfter": 1},
+    {"user": "Raconte-moi l'histoire de la cathédrale Notre-Dame de Paris.", "droppedAfter": 1},
+    {"user": "Raconte-moi l'histoire du château de Versailles."}
+   ]
+  },
+  {
+   "name": "three drops with questions then a story",
+   "turns": [
+    {"user": "Raconte-moi l'histoire de la tour Eiffel.", "droppedAfter": 1},
+    {"user": "Qui l'a fait construire ?"},
+    {"user": "Raconte-moi l'histoire du Mont-Saint-Michel.", "droppedAfter": 1},
+    {"user": "Qui vivait là-bas ?"},
+    {"user": "Raconte-moi l'histoire de la cathédrale Notre-Dame de Paris.", "droppedAfter": 1},
+    {"user": "Quand a-t-elle brûlé ?"},
+    {"user": "Raconte-moi l'histoire du château de Versailles."}
+   ]
+  },
+  {
+   "name": "what were you saying after a drop",
+   "turns": [
+    {"user": "Raconte-moi l'histoire du Petit Chaperon rouge.", "droppedAfter": 1},
+    {"user": "Qu'est-ce que tu disais ?"}
+   ]
+  }
+ ]
+}

@@ -59,22 +59,23 @@ struct CutByADropTests {
         await rig.end()
     }
 
-    /// It comes back after the patience: the rest of an old answer is not said, and the history keeps what was heard of
-    /// it, cut off.
+    /// It comes back after the patience: the rest of an old answer is not said, and the history keeps the answer as the
+    /// model wrote it, then the note that the drop cut it after its first sentence.
     @Test func anAnswerCutIsDroppedWhenTheIPhoneComesBackTooLate() async throws {
         var config = PipelineConfig()
         config.outOfReachPatienceSeconds = 0.5
         let (voice, model) = (StepVoice(), Notebook(answer: Self.answer))
         let rig = try await Rig(model: model, voice: voice, config: config)
         _ = try await answerUntilTheDrop(rig, voice) { first in first.wire.cut() }
-        await waitFor { await model.recorded == [Self.first] }
-        #expect(await model.recorded == [Self.first])
+        await waitFor { await model.lastMessage == Conversation.dropMessage(lastHeard: Self.first) }
+        #expect(await model.recorded == [Self.answer])
+        #expect(await model.lastMessage == Conversation.dropMessage(lastHeard: Self.first))
         let second = await rig.connect(path: .relay)
         await waitFor { rig.engine.reachability == [false, true] }
         try await Task.sleep(for: .milliseconds(500))
         #expect(second.phone.framesHeard == 0)
         #expect(rig.engine.said.isEmpty)
-        #expect(await model.recorded == [Self.first])
+        #expect(await model.recorded == [Self.answer])
         await rig.end()
     }
 
@@ -85,8 +86,8 @@ struct CutByADropTests {
         let rig = try await Rig(gracePeriod: .milliseconds(800), model: model, voice: voice)
         _ = try await answerUntilTheDrop(rig, voice, releaseFirst: true) { first in first.wire.close() }
         await waitFor { rig.engine.localRoutes == 1 }
-        await waitFor { await model.recorded == [Self.first] }
-        #expect(await model.recorded == [Self.first])
+        await waitFor { await model.lastMessage == Conversation.dropMessage(lastHeard: Self.first) }
+        #expect(await model.recorded == [Self.answer])  // as written, the drop's note after it
         try await Task.sleep(for: .milliseconds(300))
         #expect(rig.engine.localPlayed == 0)
         #expect(rig.engine.said.isEmpty)
@@ -226,6 +227,8 @@ private actor Notebook: LanguageModel {
 
     /// What the history holds of what Maé said, in order.
     var recorded: [String] { history.filter { $0.role == .assistant }.map(\.content) }
+    /// What the history ends with.
+    var lastMessage: ChatMessage? { history.last }
 
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { [answer] continuation in

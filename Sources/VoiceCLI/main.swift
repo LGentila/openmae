@@ -23,8 +23,10 @@
 //                                                       in the app's sequences of requests (text only; see
 //                                                       CacheCheck.swift)
 //   voice-cli cut-off-bench [--repeats 10] [--cut-off ahead|after-user-words|marker|none]
+//                           [--drop written|heard|cut-off|none|whole]
 //                                                       answers cut off one after the other: does the model write
-//                                                       the cut-off mark itself? (text only; see CutOffBench.swift)
+//                                                       the cut-off mark itself? Answers cut by a drop: does it
+//                                                       shorten its own? (text only; see CutOffBench.swift)
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
 //                                                       see Delegate.swift)
 //   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
@@ -744,7 +746,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                      [--cut-off ahead|after-user-words] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli cut-off-bench [--tier tier] [--llm folder] [--corpus file.json] [--repeats 10] [--actions]
                                        [--cut-off ahead|after-user-words|marker|none] [--note "(…)"]
-                                       [--note-role system|user] [--dialogue name]
+                                       [--note-role system|user] [--drop written|heard|cut-off|none|whole]
+                                       [--dialogue name]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]

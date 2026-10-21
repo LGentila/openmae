@@ -432,6 +432,19 @@ comparison, `--cut-off marker` records the answers cut off as the app did before
 .build/xcode/Build/Products/Release/voice-cli cut-off-bench --repeats 10
 ```
 
+Answers cut by a drop (the iPhone that has the conversation went out of reach in the middle of an answer and was not
+back in time to hear the rest): the dialogues of `Tests/Fixtures/drops-fr.json`, three « Raconte-moi … » answers cut
+after their first piece, with or without a question between them, then a fourth heard to its end. Each answer cut by
+the drop goes into the history as the app records it: as the model wrote it, then a note saying that the link dropped
+and the user heard only its beginning, where the tier puts the note of an answer cut off. The report counts, per turn,
+the answers heard to their end that hold a single whole sentence. For comparison, `--drop heard` keeps only what the
+device heard, then the note, `--drop cut-off` what it heard as an answer the user cut off (as the app did before),
+`--drop none` what it heard without a note, `--drop whole` as if there had been no drop:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli cut-off-bench --corpus Tests/Fixtures/drops-fr.json --actions
+```
+
 Hand a task to Claude Code the way the app does, without the app or a language model (it uses the Claude Code
 signed in on this Mac; `--check` only says whether it is installed and signed in):
 

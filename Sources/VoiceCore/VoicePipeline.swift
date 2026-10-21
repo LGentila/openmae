@@ -323,6 +323,11 @@ public actor VoicePipeline {
             }
             return answer
         }
+
+        /// The last of these pieces that the history keeps (`Conversation.dropNote` says the user heard up to it).
+        static func lastHeard(in pieces: some BidirectionalCollection<SpokenPiece>) -> String? {
+            pieces.last(where: \.inHistory)?.text
+        }
     }
 
     /// The device that has the conversation went out of reach before it heard all of an answer.
@@ -333,7 +338,7 @@ public actor VoicePipeline {
     }
 
     /// An answer cut by a drop, to be said again from piece `from`, and its exchange: recorded whole once said, or as cut
-    /// after what was heard once it is given up.
+    /// by the drop once it is given up.
     private struct Resume: Sendable {
         var userText: String
         var userMessage: ChatMessage
@@ -345,8 +350,12 @@ public actor VoicePipeline {
         /// What is said again: the pieces from the cut on, without the phrase said while the model wrote a tool call
         /// (the tool's result is known by then).
         var rest: [SpokenPiece] { pieces[from...].filter(\.inHistory) }
-        /// The answer as the history keeps what was heard of it: the pieces before the cut.
+        /// What was heard of the answer: the pieces before the cut.
         var heard: String { SpokenPiece.answer(pieces[..<from]) }
+        /// The answer as the model wrote it, to its end.
+        var written: String { SpokenPiece.answer(pieces) }
+        /// How it ended for the history: cut by the drop, after the last piece heard (`SpokenPiece.lastHeard`).
+        var dropped: Conversation.Ending { .dropped(lastHeard: SpokenPiece.lastHeard(in: pieces[..<from])) }
     }
 
     /// What waits for the device that has the conversation to be back in reach (`setOutputReachable`): the rest of an
@@ -1861,9 +1870,12 @@ public actor VoicePipeline {
         unheardTimer = nil
     }
 
-    /// An answer cut by a drop and not said again: the history keeps what the device heard of it, cut off.
+    /// An answer cut by a drop and not said again: the history keeps it as the model wrote it, and says how far the
+    /// device heard it (`Conversation.dropNote`). Kept as far as the device heard it, it showed the model its own answers
+    /// stopping after their first sentence, which it then imitated.
     private func recordHeard(_ resume: Resume) {
-        conversation.record(user: resume.userMessage, steps: resume.steps, assistant: resume.heard, interrupted: true)
+        conversation.record(user: resume.userMessage, steps: resume.steps, assistant: resume.written,
+                            ending: resume.dropped)
         language = resume.language
         letModelCatchUp()
     }
@@ -2172,8 +2184,11 @@ public actor VoicePipeline {
             }
         }
         if !turn.userText.isEmpty, let message = turn.userMessage {
-            // An answer cut by a drop before: what the device heard of it, not what was written meanwhile.
-            conversation.record(user: message, steps: turn.steps, assistant: turn.answerHeard, interrupted: true)
+            // An answer cut by a drop before: as the model wrote it so far, and the note says how far the device heard it
+            // (`recordHeard`).
+            let lastHeard = turn.cut.map { SpokenPiece.lastHeard(in: turn.pieces[..<$0.from]) }
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answer,
+                                ending: lastHeard.map { .dropped(lastHeard: $0) } ?? .cutOff)
             letModelCatchUp()  // the model's memory holds what it wrote, the history the answer cut off
             var metrics = TurnMetrics()
             metrics.userText = turn.userText

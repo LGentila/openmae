@@ -11,7 +11,9 @@ import Foundation
 ///   budget. Voice conversations are short; a small budget keeps the model fast and light.
 /// - An answer cut off (the user spoke over it) is kept as far as it went to the voice, never with a mark of the cut in
 ///   its words: the model read such a mark as part of how it writes, and copied it. A note says so instead
-///   (`cutOffNote`), where the tier puts it (`cutOffPlacement(on:)`).
+///   (`cutOffNote`), where the tier puts it (`cutOffPlacement(on:)`). An answer cut by a drop (the device that has the
+///   conversation went out of reach) is kept as the model wrote it, with a note of its own that says where the user
+///   stopped hearing it (`dropNote`).
 /// - The default prompt is written in French on purpose: the assistant is French-first, and the model
 ///   follows the language of its instructions. In short: be a kind voice assistant, answer in one to three
 ///   short spoken sentences (longer for a story), open with a 5-to-8-word sentence (the voice renders shorter
@@ -52,9 +54,66 @@ public struct Conversation: Sendable {
     /// note goes with the exchange it is about when the history is shortened.
     public static let cutOffMessage = ChatMessage(.system, cutOffNote)
 
-    /// Where the history tells the model that an answer was cut off (`cutOffNote`). Either way the user's words begin
-    /// their message (`ToolContext.userSaid` reads its first line), and the date line still ends it
-    /// (`ActionCatalog.dateLineRule`).
+    /// What the history says after an answer cut by a drop (`Ending.dropped`): the device that has the conversation (an
+    /// iPhone) went out of reach in the middle of the answer and was not back in time to hear the rest; `lastHeard`, the
+    /// last piece of it the device heard (nil: none). Where the tier puts the note of an answer cut off
+    /// (`cutOffPlacement(on:)`).
+    ///
+    /// Such an answer used to be kept as far as the device heard it, as one the user had cut off (`cutOffNote`),
+    /// although nobody had. After three of them, cut after their first piece, Gemma 4 26B answered the next
+    /// « Raconte-moi … » with a single whole sentence 10 times out of 10 (`voice-cli cut-off-bench`, with
+    /// Tests/Fixtures/drops-fr.json), often then a few words and nothing more, as its answers in the history: imitating
+    /// them, not the note. Kept as far as the device heard it with a note that the link dropped: 3 times out of 10;
+    /// without a note: 5. The pipeline keeps it as the model wrote it instead (`VoicePipeline.recordHeard`): 0 times out
+    /// of 10, with as many sentences as with no drop, on the 26B, E4B and E2B. And the note says where the user stopped
+    /// hearing it: told only that they had heard its beginning, the 26B asked « Qu'est-ce que tu disais ? » gave the end
+    /// of its story, which the user had not heard (10 times out of 10); told up to where, it took the story up from
+    /// there (9 times out of 10).
+    public static func dropNote(lastHeard: String?) -> String {
+        guard let lastHeard = lastHeard.map(quoted), !lastHeard.isEmpty else {
+            return dropNotePrefix + " : l'utilisateur n'a pas entendu ta réponse.)"
+        }
+        return dropNotePrefix + " : l'utilisateur n'a entendu ta réponse que jusqu'à « \(lastHeard) ».)"
+    }
+
+    /// How every `dropNote` begins.
+    static let dropNotePrefix = "(La liaison avec l'appareil a coupé"
+
+    /// A piece of an answer on one line, without the white space around it.
+    private static func quoted(_ piece: String) -> String {
+        piece.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// `dropNote` read ahead (`CutOffPlacement.ahead`), as `cutOffMessage`.
+    public static func dropMessage(lastHeard: String?) -> ChatMessage {
+        ChatMessage(.system, dropNote(lastHeard: lastHeard))
+    }
+
+    /// How an answer the history keeps ended.
+    public enum Ending: Sendable, Equatable {
+        /// Heard to its end.
+        case whole
+        /// The user cut it off (they spoke over it, the stop button, a typed turn): kept as far as it went to the voice,
+        /// and `cutOffNote` says so.
+        case cutOff
+        /// Cut by a drop: the device that has the conversation went out of reach in the middle of it, after it heard
+        /// `lastHeard` (nil: nothing), and `dropNote` says so. The pipeline keeps it as the model wrote it.
+        case dropped(lastHeard: String?)
+
+        /// What the history says after the answer.
+        var note: String? {
+            switch self {
+            case .whole: nil
+            case .cutOff: Conversation.cutOffNote
+            case .dropped(let lastHeard): Conversation.dropNote(lastHeard: lastHeard)
+            }
+        }
+    }
+
+    /// Where the history tells the model that an answer was cut off (`cutOffNote`), or cut by a drop (`dropNote`).
+    /// Either way the user's words begin their message (`ToolContext.userSaid` reads its first line), and the date line
+    /// still ends it (`ActionCatalog.dateLineRule`).
     public enum CutOffPlacement: String, Sendable, CaseIterable {
         /// Read ahead, while the user is still speaking: a message of its own right after the answer (`cutOffMessage`).
         case ahead
@@ -87,9 +146,9 @@ public struct Conversation: Sendable {
     /// Where this conversation tells the model that an answer was cut off: the tier's (`cutOffPlacement(on:)`), which
     /// the pipeline sets from `PipelineConfig.cutOffPlacement`.
     public var cutOffPlacement = CutOffPlacement.ahead
-    /// The answer the history ends with was cut off, and the note waits for the next message
+    /// The answer the history ends with was cut off or cut by a drop, and its note waits for the next message
     /// (`CutOffPlacement.afterUserWords`): `nextUserMessage` and `nextNoteMessage` add it.
-    private var noteDue = false
+    private var dueNote: String?
 
     public init(systemPrompt: String = Conversation.defaultSystemPrompt) {
         self.systemPrompt = systemPrompt
@@ -102,27 +161,29 @@ public struct Conversation: Sendable {
     /// The user's message as stored in history (with the language hint when needed). With actions on, it ends
     /// with the date and time (`ActionCatalog.dateLine`): in the message rather than in the system prompt, so the
     /// prompt stays constant, and kept in history so the model's memory of the conversation stays valid.
-    /// `afterCutOff`: the note of an answer cut off follows the user's words (`CutOffPlacement.afterUserWords`).
+    /// `note`: the note of an answer cut off or cut by a drop, which follows the user's words
+    /// (`CutOffPlacement.afterUserWords`).
     public static func userMessage(_ text: String, language: SpeechLanguage, dateLine: String? = nil,
-                                   afterCutOff: Bool = false) -> ChatMessage
+                                   note: String? = nil) -> ChatMessage
     {
         var content = text
-        if afterCutOff { content += "\n" + cutOffNote }
+        if let note { content += "\n" + note }
         if let dateLine { content += "\n" + dateLine }
         if language == .english { content += englishHint }
         return ChatMessage(.user, content)
     }
 
-    /// The user's next message as the history will keep it (`userMessage`): after an answer cut off, with the note after
-    /// their words when it goes there (`CutOffPlacement.afterUserWords`).
+    /// The user's next message as the history will keep it (`userMessage`): after an answer cut off or cut by a drop,
+    /// with its note after their words when it goes there (`CutOffPlacement.afterUserWords`).
     public func nextUserMessage(_ text: String, language: SpeechLanguage, dateLine: String? = nil) -> ChatMessage {
-        Self.userMessage(text, language: language, dateLine: dateLine, afterCutOff: noteDue)
+        Self.userMessage(text, language: language, dateLine: dateLine, note: dueNote)
     }
 
     /// The note of what the app says on its own next (`VoicePipeline.announce`) as the history will keep it: as the
-    /// user's message, before what was said; after an answer cut off, followed by `cutOffNote` when it goes there.
+    /// user's message, before what was said; after an answer cut off or cut by a drop, followed by its note when it goes
+    /// there.
     public func nextNoteMessage(_ note: String) -> ChatMessage {
-        ChatMessage(.user, noteDue ? note + "\n" + Self.cutOffNote : note)
+        ChatMessage(.user, dueNote.map { note + "\n" + $0 } ?? note)
     }
 
     /// Messages to send for a new user turn (history is not modified: the turn may be speculative).
@@ -147,38 +208,55 @@ public struct Conversation: Sendable {
     }
 
     /// Records an exchange with the tool calls made on the way (`steps`: call, result, possibly a second try).
-    /// `interrupted`: the answer was cut off, as far as `answer` goes; the note says so, so that the model does not take
-    /// it for one the user heard to its end: right after it (`cutOffMessage`), or in the next message
-    /// (`cutOffPlacement`).
+    /// `interrupted`: the user cut the answer off, as far as `answer` goes (`Ending.cutOff`).
     public mutating func record(user message: ChatMessage, steps: [ChatMessage], assistant answer: String,
                                 interrupted: Bool)
+    {
+        record(user: message, steps: steps, assistant: answer, ending: interrupted ? .cutOff : .whole)
+    }
+
+    /// Records an exchange with the tool calls made on the way (`steps`), and how its answer ended. An answer cut off or
+    /// cut by a drop goes as far as `answer` goes, and its note says so, so that the model does not take it for one the
+    /// user heard to its end: right after it (`cutOffMessage`, `dropMessage`), or in the next message
+    /// (`cutOffPlacement`).
+    public mutating func record(user message: ChatMessage, steps: [ChatMessage], assistant answer: String,
+                                ending: Ending)
     {
         exchanges.append(message)
         exchanges += steps
         exchanges.append(ChatMessage(.assistant, answer))
         switch cutOffPlacement {
         case .ahead:
-            if interrupted { exchanges.append(Self.cutOffMessage) }
-            noteDue = false
+            if let note = ending.note { exchanges.append(ChatMessage(.system, note)) }
+            dueNote = nil
         case .afterUserWords:
-            noteDue = interrupted
+            dueNote = ending.note
         }
     }
 
     /// Drops the oldest exchange: a user message and everything up to the next one (the note after its answer, when it
-    /// was cut off and the note read ahead). Returns false when nothing is left to drop. A note on the next message about
-    /// that exchange's answer cut off goes with it.
+    /// was cut off or cut by a drop and the note read ahead). Returns false when nothing is left to drop. A note on the
+    /// next message about that exchange's answer goes with it.
     @discardableResult
     public mutating func dropOldestExchange() -> Bool {
         guard exchanges.count >= 2 else { return false }
         let next = exchanges.dropFirst().firstIndex { $0.role == .user } ?? exchanges.endIndex
         exchanges.removeSubrange(..<next)
-        if var first = exchanges.first, first.role == .user, let note = first.content.range(of: "\n" + Self.cutOffNote) {
+        if var first = exchanges.first, first.role == .user, let note = Self.noteRange(in: first.content) {
             first.content.removeSubrange(note)
             exchanges[0] = first
         }
-        if exchanges.isEmpty { noteDue = false }
+        if exchanges.isEmpty { dueNote = nil }
         return true
+    }
+
+    /// Where a note about the answer before (`cutOffNote`, `dropNote`) is in a user's message, with the line break before
+    /// it.
+    private static func noteRange(in content: String) -> Range<String.Index>? {
+        if let range = content.range(of: "\n" + cutOffNote) { return range }
+        guard let start = content.range(of: "\n" + dropNotePrefix) else { return nil }
+        let end = content[start.upperBound...].firstIndex(of: "\n") ?? content.endIndex
+        return start.lowerBound..<end
     }
 
     /// Drops the `count` oldest exchanges.
@@ -190,6 +268,6 @@ public struct Conversation: Sendable {
 
     public mutating func clear() {
         exchanges.removeAll()
-        noteDue = false
+        dueNote = nil
     }
 }

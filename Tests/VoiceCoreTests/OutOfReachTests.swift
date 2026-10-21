@@ -79,7 +79,8 @@ struct OutOfReachTests {
         #expect(await log.finished.map(\.interrupted) == [false])
     }
 
-    /// Back too late: nothing is said again, and the history keeps what was heard, cut off.
+    /// Back too late: nothing is said again, and the history keeps the answer as the model wrote it, then a note that
+    /// says the drop cut it after its first sentence, not the user.
     @Test func anAnswerIsGivenUpAfterThePatience() async throws {
         var config = PipelineConfig()
         config.outOfReachPatienceSeconds = 0.2
@@ -92,15 +93,42 @@ struct OutOfReachTests {
         voice.release()
         await waitFor { await speaker.played == 1500 }
         await pipeline.setOutputReachable(false, reachedUntil: reached)
-        await waitFor { await recorded(model) == [Self.sentences[0]] }
-        #expect(await recorded(model) == [Self.sentences[0]])
+        await waitFor { await recorded(model) == [Self.answer] }
+        #expect(await model.catchUps.last?.suffix(2)
+            == [ChatMessage(.assistant, Self.answer), Conversation.dropMessage(lastHeard: Self.sentences[0])])
         await pipeline.setOutputReachable(true)
         try await Task.sleep(for: .milliseconds(300))
         #expect(await speaker.played == 1500)
-        // Cut off: a note says so, before the next message.
+        // The note comes before the next message, which stays the user's words.
         await pipeline.submit(text: "Et alors ?")
         await waitFor { await model.requests.count == 2 }
-        #expect(await model.requests.last?.suffix(2) == [Conversation.cutOffMessage, ChatMessage(.user, "Et alors ?")])
+        #expect(await model.requests.last?.suffix(2)
+            == [Conversation.dropMessage(lastHeard: Self.sentences[0]), ChatMessage(.user, "Et alors ?")])
+    }
+
+    /// On a tier that keeps the notes after the user's words (E4B, E2B): nothing follows the answer given up, and the
+    /// user's next message says the drop cut it, after their words, which stay its first line.
+    @Test func afterTheUsersWordsTheirNextMessageSaysTheDropCutIt() async throws {
+        var config = PipelineConfig()
+        config.outOfReachPatienceSeconds = 0.2
+        config.cutOffPlacement = .afterUserWords
+        let (model, speaker, voice) = (ScriptedModel(answer: Self.sentences.map { $0 + " " }), FakeSpeaker(), HeldVoice())
+        let (pipeline, _) = make(model, speaker, voice, config: config)
+        try await pipeline.start()
+        await pipeline.submit(text: "Raconte-moi quelque chose.")
+        await waitFor { await speaker.played == 500 }
+        let reached = ContinuousClock.now
+        voice.release()
+        await waitFor { await speaker.played == 1500 }
+        await pipeline.setOutputReachable(false, reachedUntil: reached)
+        await waitFor { await recorded(model) == [Self.answer] }
+        #expect(await model.catchUps.last?.last == ChatMessage(.assistant, Self.answer))  // no note after it
+        await pipeline.setOutputReachable(true)
+        await pipeline.submit(text: "Et alors ?")
+        await waitFor { await model.requests.count == 2 }
+        let request = try #require(await model.requests.last)
+        #expect(request.map(\.role) == [.system, .user, .assistant, .user])
+        #expect(request[3].content == "Et alors ?\n" + Conversation.dropNote(lastHeard: Self.sentences[0]))
     }
 
     /// The voice was still on its first sentence (the rest not out yet) when the device was last heard: that sentence may
@@ -120,8 +148,8 @@ struct OutOfReachTests {
         #expect(await speaker.played == 2000)  // the three sentences
     }
 
-    /// The conversation goes on before the device is back (a typed turn): the cut answer goes into the history as it
-    /// was heard, before the new turn.
+    /// The conversation goes on before the device is back (the voice moves to the Mac, then a typed turn): the answer
+    /// cut by the drop goes into the history, before the new turn.
     @Test func theConversationGoesOnWithoutIt() async throws {
         let (model, speaker, voice) = (ScriptedModel(answer: Self.sentences.map { $0 + " " }), FakeSpeaker(), HeldVoice())
         let (pipeline, log) = make(model, speaker, voice)
@@ -135,17 +163,43 @@ struct OutOfReachTests {
         await waitFor { await log.finished.count == 1 }
         await pipeline.voiceOutputChanged()  // the Mac takes the sound back
         await pipeline.setOutputReachable(true)
-        await waitFor { await recorded(model) == [Self.sentences[0]] }
-        #expect(await recorded(model) == [Self.sentences[0]])
+        await waitFor { await recorded(model) == [Self.answer] }
         try await Task.sleep(for: .milliseconds(200))
         #expect(await speaker.played == 1500)  // not said on the other device
         await pipeline.submit(text: "Autre chose.")
         await waitFor { await model.requests.count == 2 }
         let request = try #require(await model.requests.last)
         #expect(request.map(\.role) == [.system, .user, .assistant, .system, .user])
-        #expect(request[2].content == Self.sentences[0])  // what was heard, cut off: a note says so
-        #expect(request[3] == Conversation.cutOffMessage)
+        #expect(request[2].content == Self.answer)  // as the model wrote it: a note says the drop cut it
+        #expect(request[3] == Conversation.dropMessage(lastHeard: Self.sentences[0]))
         #expect(request[4].content == "Autre chose.")
+    }
+
+    /// The voice goes to another device while the model still writes an answer cut by a drop: the turn stops there, and
+    /// the history keeps what the model had written, cut by the drop, not by the user.
+    @Test func anAnswerStillWrittenWhenTheVoiceMovesIsCutByTheDrop() async throws {
+        let (model, speaker, voice) = (ScriptedModel(answer: Self.sentences.map { $0 + " " }, pauseAfter: 2),
+                                       FakeSpeaker(), HeldVoice())
+        let (pipeline, _) = make(model, speaker, voice)
+        try await pipeline.start()
+        await pipeline.submit(text: "Raconte-moi quelque chose.")
+        await waitFor { await speaker.played == 500 }
+        let reached = ContinuousClock.now
+        voice.release()
+        await waitFor { await speaker.played == 1000 }  // the second sentence went out; the model writes on
+        await pipeline.setOutputReachable(false, reachedUntil: reached)
+        await pipeline.voiceOutputChanged()  // the Mac takes the sound back
+        let written = Self.sentences.prefix(2).joined(separator: " ")
+        await waitFor { await recorded(model) == [written] }
+        #expect(await model.catchUps.last?.suffix(2)
+            == [ChatMessage(.assistant, written), Conversation.dropMessage(lastHeard: Self.sentences[0])])
+        await pipeline.setOutputReachable(true)
+        await pipeline.submit(text: "Autre chose.")
+        await waitFor { await model.requests.count == 2 }
+        let request = try #require(await model.requests.last)
+        #expect(request.map(\.role) == [.system, .user, .assistant, .system, .user])
+        #expect(request[3] == Conversation.dropMessage(lastHeard: Self.sentences[0]))
+        await pipeline.interrupt()  // the model waits in the middle of this answer too
     }
 
     /// The user is speaking when the device goes out of reach: the sentence is not answered (nor transcribed), what the

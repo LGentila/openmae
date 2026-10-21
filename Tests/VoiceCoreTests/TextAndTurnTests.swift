@@ -262,4 +262,76 @@ struct TierAndConversationTests {
         #expect(c.nextUserMessage("Bonjour", language: .french).content == "Bonjour")
         #expect(c.nextNoteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)")
     }
+
+    /// An answer cut by a drop goes into the history as the pipeline gives it (as the model wrote it), then a note of its
+    /// own says the link dropped, and how far the user heard it, not that the user cut it off
+    /// (`Conversation.dropMessage`); the user's next message stays their words. An answer the user cuts off still gets
+    /// its own note. Dropping the exchange drops its note.
+    @Test func aNoteSaysTheDropCutTheAnswer() {
+        let heard = "Il était une fois une fille."
+        var c = Conversation(systemPrompt: "S")
+        c.record(user: ChatMessage(.user, "Raconte-moi une histoire."), steps: [],
+                 assistant: heard + "\n\nUn loup passait.", ending: .dropped(lastHeard: heard))
+        let note = "(La liaison avec l'appareil a coupé : l'utilisateur n'a entendu ta réponse que jusqu'à « \(heard) ».)"
+        #expect(Conversation.dropNote(lastHeard: heard) == note)
+        #expect(c.messages.map(\.content)
+            == ["S", "Raconte-moi une histoire.", heard + "\n\nUn loup passait.", note])
+        #expect(c.messages.last == Conversation.dropMessage(lastHeard: heard))
+        #expect(c.messages.last?.role == .system)
+        #expect(c.nextUserMessage("Et alors ?", language: .french) == ChatMessage(.user, "Et alors ?"))
+        c.record(user: "Et alors ?", language: .french, assistant: "Je reprends", interrupted: true)
+        #expect(c.messages.suffix(3).map(\.content) == ["Et alors ?", "Je reprends", Conversation.cutOffNote])
+        c.record(user: "Merci.", language: .french, assistant: "Avec plaisir.", interrupted: false)
+        #expect(c.messages.last == ChatMessage(.assistant, "Avec plaisir."))
+        let dropped = c.dropOldestExchange()
+        #expect(dropped)
+        #expect(c.messages.map(\.content)
+            == ["S", "Et alors ?", "Je reprends", Conversation.cutOffNote, "Merci.", "Avec plaisir."])
+    }
+
+    /// The note of a drop quotes the last piece heard on one line; when the device heard none of the answer, it says so.
+    @Test func theNoteOfADropSaysHowFarTheUserHeard() {
+        #expect(Conversation.dropNote(lastHeard: "  Au départ,\n\nla tour ") == "(La liaison avec l'appareil a coupé : "
+            + "l'utilisateur n'a entendu ta réponse que jusqu'à « Au départ, la tour ».)")
+        #expect(Conversation.dropNote(lastHeard: nil)
+            == "(La liaison avec l'appareil a coupé : l'utilisateur n'a pas entendu ta réponse.)")
+        #expect(Conversation.dropNote(lastHeard: " ") == Conversation.dropNote(lastHeard: nil))
+        #expect(!Conversation.dropNote(lastHeard: "Bonjour.").contains(Conversation.cutOffNote))
+    }
+
+    /// After the user's words (E4B, E2B): the note of a drop comes in the user's next message, after their words and
+    /// before the date line, or after an announcement's note; the next answer cut off by the user gets its own note.
+    /// Dropping the exchange cut by the drop takes its note out of the next message; a new conversation forgets it.
+    @Test func afterTheUsersWordsTheNextMessageSaysTheDropCutTheAnswer() {
+        let dateLine = "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)"
+        let note = Conversation.dropNote(lastHeard: "Il était une fois.")
+        var c = Conversation(systemPrompt: "S")
+        c.cutOffPlacement = .afterUserWords
+        c.record(user: ChatMessage(.user, "Raconte-moi une histoire."), steps: [],
+                 assistant: "Il était une fois. Un loup passait.", ending: .dropped(lastHeard: "Il était une fois."))
+        #expect(c.messages.map(\.content) == ["S", "Raconte-moi une histoire.", "Il était une fois. Un loup passait."])
+        let message = c.nextUserMessage("Et alors ?", language: .french, dateLine: dateLine)
+        #expect(message.content == "Et alors ?\n" + note + "\n" + dateLine)
+        #expect(message.content.components(separatedBy: "\n").first == "Et alors ?")  // the user's words alone
+        #expect(c.nextNoteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)\n" + note)
+        var forgotten = c
+        forgotten.clear()
+        #expect(forgotten.nextUserMessage("Bonjour", language: .french).content == "Bonjour")
+        c.record(user: message, steps: [], assistant: "Je reprends", ending: .cutOff)
+        #expect(c.nextUserMessage("Pardon.", language: .french).content == "Pardon.\n" + Conversation.cutOffNote)
+        let dropped = c.dropOldestExchange()
+        #expect(dropped)
+        #expect(c.messages.map(\.content) == ["S", "Et alors ?\n" + dateLine, "Je reprends"])
+        #expect(c.nextUserMessage("Pardon.", language: .french).content == "Pardon.\n" + Conversation.cutOffNote)
+        // The note last in a message (no date line): taken out too.
+        var last = Conversation(systemPrompt: "S")
+        last.cutOffPlacement = .afterUserWords
+        last.record(user: ChatMessage(.user, "Raconte."), steps: [], assistant: "Un. Deux.",
+                    ending: .dropped(lastHeard: "Un."))
+        last.record(user: last.nextUserMessage("Et alors ?", language: .french), steps: [], assistant: "Trois.",
+                    ending: .whole)
+        let droppedLast = last.dropOldestExchange()
+        #expect(droppedLast)
+        #expect(last.messages.map(\.content) == ["S", "Et alors ?", "Trois."])
+    }
 }
