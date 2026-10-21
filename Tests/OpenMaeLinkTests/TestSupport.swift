@@ -11,6 +11,11 @@ func waitFor(_ condition: () async -> Bool) async {
     for _ in 0..<400 where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
 }
 
+/// `waitFor`, for longer: checks `condition` every 10 ms, for `seconds` at most.
+func waitFor(seconds: Double, _ condition: () async -> Bool) async {
+    for _ in 0..<Int(seconds * 100) where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
+}
+
 // MARK: - A connection in memory
 
 /// A connection between the Mac and the iPhone, in memory: what one end sends, the other end receives. `cut()`: the

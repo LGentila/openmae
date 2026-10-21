@@ -86,6 +86,29 @@ struct HeldAnnouncementTests {
         await rig.end()
     }
 
+    /// The same with an iPhone that pings every second, as the app does: it is waited for as before. Its session is not
+    /// closed after a few seconds of silence, as a home station's is (the grace period would then start, and the Mac
+    /// take the sound back once it is over, here after 0.8 s).
+    @Test func aSilentIPhoneThatPingsKeepsTheConversation() async throws {
+        let rig = try await Rig(gracePeriod: .milliseconds(800), phone: FakePhone(roundTrips: .standard))
+        let first = await rig.connect()
+        await rig.takeTheConversation()
+        try await Task.sleep(for: .milliseconds(1500))  // its pings heard
+        first.wire.cut()
+        await waitFor { rig.engine.reachability == [false] }
+        #expect(rig.engine.reachability == [false])
+        try await Task.sleep(for: .seconds(5))
+        #expect(first.mac.isOpen)
+        #expect(rig.engine.localRoutes == 0)  // the iPhone keeps the conversation
+        #expect(rig.engine.reachability == [false])
+        let second = await rig.connect(path: .relay)
+        await waitFor { rig.engine.reachability == [false, true] }
+        #expect(rig.engine.reachability == [false, true])
+        #expect(!first.mac.isOpen)  // replaced
+        #expect(second.mac.isOpen)
+        await rig.end()
+    }
+
     // MARK: Cut off on the way
 
     /// Its Wi-Fi goes off while the announcement is being sent: the chime reached it, and it comes back through the
@@ -211,16 +234,18 @@ final class Rig: @unchecked Sendable {
 
     let engine: PipelineEngine
     let host: LinkHost
-    let phone = FakePhone()
+    let phone: FakePhone
     private let folder: URL
     private let lock = NSLock()
     private var connections: [Connection] = []
 
     /// `transcriber`, `model`, `voice`: the engine's stages, none of which hears, answers or speaks by default (beyond
-    /// the announcement, said by the voice alone).
+    /// the announcement, said by the voice alone). `phone`: the iPhone of `connect()` and `takeTheConversation()`.
     init(gracePeriod: Duration = .seconds(15), transcriber: any Transcriber = Deaf(), model: any LanguageModel = Mute(),
-         voice: any SpeechSynthesizer = ToneVoice(), config: PipelineConfig = .init()) async throws
+         voice: any SpeechSynthesizer = ToneVoice(), config: PipelineConfig = .init(), phone: FakePhone = FakePhone())
+        async throws
     {
+        self.phone = phone
         folder = FileManager.default.temporaryDirectory.appending(path: "held-announcement-\(UUID().uuidString)")
         engine = try await PipelineEngine(transcriber: transcriber, model: model, voice: voice, config: config)
         host = LinkHost(engine: engine, audio: engine, identityStore: NoIdentity(),
@@ -235,7 +260,8 @@ final class Rig: @unchecked Sendable {
         let phone = device ?? self.phone
         let wire = MemoryWire(path: path)
         let (mac, phoneEnd) = wire.sessions(phoneKey: phone.key, macKey: Self.macKey)
-        let connection = Connection(wire: wire, phone: PhoneSession(phoneEnd, playsInRealTime: playsInRealTime))
+        let connection = Connection(wire: wire, phone: PhoneSession(phoneEnd, playsInRealTime: playsInRealTime),
+                                    mac: mac)
         lock.withLock { connections.append(connection) }
         await host.open(mac, device: phone.device)
         phone.use(connection.phone)
@@ -267,6 +293,8 @@ final class Rig: @unchecked Sendable {
 struct Connection {
     let wire: MemoryWire
     let phone: PhoneSession
+    /// The Mac's end of the session.
+    let mac: LinkSession
 }
 
 /// No keys: the Mac's link stays off the network (no listener, no relay); the tests open the sessions themselves.
@@ -281,6 +309,9 @@ struct NoIdentity: IdentityStore {
 final class FakePhone: @unchecked Sendable {
     let key: Data
     let model: String
+    /// How its sessions check that the Mac answers (`LinkSession.checkRoundTrips`): a ping every second, as the app
+    /// does since then. nil: an app from before, which pings only after 25 s without sending anything.
+    let roundTrips: LinkSession.RoundTrips?
     var device: PairedDevice { PairedDevice(publicKey: key, name: model.hasPrefix("iPad") ? "iPad" : "iPhone",
                                             model: model) }
     private let lock = NSLock()
@@ -290,21 +321,27 @@ final class FakePhone: @unchecked Sendable {
     private var station: Bool?
     private var microphone: Task<Void, Never>?
 
-    init(key: Data = Data(repeating: 9, count: 32), model: String = "iPhone17,3") {
+    init(key: Data = Data(repeating: 9, count: 32), model: String = "iPhone17,3",
+         roundTrips: LinkSession.RoundTrips? = nil)
+    {
         self.key = key
         self.model = model
+        self.roundTrips = roundTrips
     }
 
     /// The user's iPad mini, left at home.
-    static func iPad() -> FakePhone { FakePhone(key: Data(repeating: 11, count: 32), model: "iPad14,1") }
+    static func iPad(roundTrips: LinkSession.RoundTrips? = nil) -> FakePhone {
+        FakePhone(key: Data(repeating: 11, count: 32), model: "iPad14,1", roundTrips: roundTrips)
+    }
 
-    /// A new session: as `PhoneLink` does, it says again whether it is a station, and asks for the conversation
-    /// again on it, if it had it.
+    /// A new session: as `PhoneLink` does, it checks its round trips on it (if it does), says again whether it is a
+    /// station, and asks for the conversation again on it, if it had it.
     func use(_ session: PhoneSession) {
         let (asks, station) = lock.withLock {
             self.session = session
             return (wantsTheConversation, self.station)
         }
+        if let roundTrips { session.session.checkRoundTrips(roundTrips) }
         if let station { session.session.send(.device(station: station)) }
         if asks { session.session.send(.audio(.start)) }
     }
@@ -698,11 +735,6 @@ final class PipelineEngine: AssistantConnection, RemoteAudioRouting, @unchecked 
 }
 
 // MARK: - Stages for the tests that cut an announcement off
-
-/// `waitFor`, for longer: checks `condition` every 10 ms, for `seconds` at most.
-private func waitFor(seconds: Double, _ condition: () async -> Bool) async {
-    for _ in 0..<Int(seconds * 100) where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
-}
 
 /// Hears the same sentence in whatever it is given.
 private struct Hears: Transcriber {

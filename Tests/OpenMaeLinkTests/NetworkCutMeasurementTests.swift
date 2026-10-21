@@ -142,12 +142,122 @@ struct NetworkCutMeasurementTests {
     }
 }
 
-/// The engine as the link sees it: when it was told that the iPhone hears the voice, or no longer does.
+/// The same for a home station, an iPad that does not have the conversation: its network goes without a word reaching
+/// the Mac (airplane mode, its Wi-Fi gone at the router). How long until the Mac sees it gone, so that what Maé says on
+/// her own waits for it rather than going into the dead session; then, the network back, until the announcements go to
+/// the station again. An iPad that pings every second, as the app does since its round trips
+/// (`LinkSession.RoundTrips.standard`, its network reports given by the test), and one from before them (a ping every
+/// 25 s, no network reports). Only when asked, as it takes minutes:
+///
+///     OPENMAE_NETWORK_TESTS=1      (with xcodebuild test: TEST_RUNNER_ in front)
+@Suite("A cut of a home station's network, measured", .serialized,
+       .enabled(if: ProcessInfo.processInfo.environment["OPENMAE_NETWORK_TESTS"] == "1"))
+struct StationCutMeasurementTests {
+    @Test(arguments: [true, false])
+    func aStationCutWithoutAWord(pingsEverySecond: Bool) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "station-cut-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        // The Mac, with its keys and the iPad already paired, without a relay.
+        let macStore = FileIdentityStore(url: folder.appending(path: "mac.key"))
+        let macIdentity = try macStore.loadOrCreate()
+        let iPadIdentity = DeviceIdentity.generate()
+        let device = PairedDevice(publicKey: iPadIdentity.publicKey, name: "iPad", model: "iPad14,1")
+        let devices = String(decoding: try JSONEncoder().encode([device]), as: UTF8.self)
+        try Data(#"{"devices":\#(devices),"relay":{"none":{}},"keepAwake":false}"#.utf8)
+            .write(to: folder.appending(path: "link.json"))
+        let engine = TimedEngine()
+        let host = LinkHost(engine: engine, audio: engine, identityStore: macStore,
+                            storeURL: folder.appending(path: "link.json"), macName: "Mac de test")
+        var macPort: UInt16?
+        for _ in 0..<100 where macPort == nil {
+            macPort = await host.directPort
+            if macPort == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        let relay = try CuttableUDP(toMacPort: try #require(macPort, "the Mac's listener did not start"))
+        defer { relay.stop() }
+
+        // The iPad, a home station, through the relay; without a network its attempts fail at once.
+        let (paths, path) = AsyncStream<NetworkPath>.makeStream(bufferingPolicy: .unbounded)
+        let wiFi = NetworkPath(available: true, interfaces: ["en0 (wifi)"])
+        path.yield(wiFi)
+        let online = Flag(true)
+        let counts = Counts()
+        let relayPort = relay.port
+        let macKey = macIdentity.publicKey
+        let link = PhoneLink(
+            mac: PairedMac(id: macIdentity.id, publicKey: macKey, name: "Mac de test", relay: nil),
+            identity: iPadIdentity, ways: [.direct], roundTrips: pingsEverySecond ? .standard : nil,
+            networkChanges: paths,
+            connector: {
+                counts.attempt()
+                guard online.value else { throw TransportError.failed("no network") }
+                let transport = try await QUICTransport.connect(
+                    to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: relayPort)!),
+                    alpn: QUIC.directALPN, verification: .none, path: .direct, timeout: .seconds(4))
+                let session = try await LinkSession.open(over: transport, macKey: macKey, identity: iPadIdentity)
+                counts.opened()
+                return session
+            })
+        await link.setStation(true)
+        await link.connect()
+        await waitFor { engine.announcements.last.map { $0.station && $0.reachable } == true }
+        #expect(engine.announcements.last.map { $0.station && $0.reachable } == true)
+        try await Task.sleep(for: .seconds(3))
+
+        // The cut, until the Mac sees it (or 90 s), and 2 s more; then the network back.
+        let cut = ContinuousClock.now
+        online.value = false
+        relay.cut()
+        if pingsEverySecond { path.yield(NetworkPath(available: false)) }
+        var gone: ContinuousClock.Instant?
+        while gone == nil, ContinuousClock.now - cut < .seconds(90) {
+            gone = engine.announcements.first { $0.at > cut && !($0.station && $0.reachable) }?.at
+            if gone == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        try await Task.sleep(for: .seconds(2))
+        let back = ContinuousClock.now
+        relay.restore(newAddress: false)
+        online.value = true
+        if pingsEverySecond { path.yield(wiFi) }
+        var again: ContinuousClock.Instant?
+        while again == nil, ContinuousClock.now - back < .seconds(90) {
+            again = engine.announcements.first { $0.at > back && $0.station && $0.reachable }?.at
+            if again == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+
+        let timeline = engine.announcements.filter { $0.at > cut }.map {
+            "\(NetworkCutMeasurementTests.seconds($0.at - cut)): "
+                + (!$0.station ? "where the conversation is" : $0.reachable ? "on the station" : "wait for the station")
+        }
+        print("MEASURE [station, " + (pingsEverySecond ? "pings every second" : "an app from before its round trips")
+              + "] the Mac saw it gone "
+              + (gone.map { "\(NetworkCutMeasurementTests.seconds($0 - cut)) after the cut" } ?? "not within 90 s")
+              + "; announcements on the station again "
+              + (again.map { "\(NetworkCutMeasurementTests.seconds($0 - back)) after the network was back" }
+                  ?? "not within 90 s of it")
+              + "; sessions opened \(counts.sessions) in \(counts.attempts) attempts; timeline from the cut: "
+              + timeline.joined(separator: ", "))
+        if pingsEverySecond {
+            let goneAfter = try #require(gone, "the Mac did not see the station gone") - cut
+            #expect(goneAfter < .seconds(4))
+            let againAfter = try #require(again, "the announcements did not go to the station again") - back
+            #expect(againAfter < .seconds(5))
+        }
+        await link.disconnect()
+        await host.remove(device.id)
+    }
+}
+
+/// The engine as the link sees it: when it was told that the iPhone hears the voice, or no longer does, and where the
+/// announcements go.
 private final class TimedEngine: AssistantConnection, RemoteAudioRouting, @unchecked Sendable {
     let events: AsyncStream<AssistantEvent>
     private let emit: AsyncStream<AssistantEvent>.Continuation
     private let lock = NSLock()
     private var told: [(reachable: Bool, at: ContinuousClock.Instant)] = []
+    private var announcementsTold: [(station: Bool, reachable: Bool, at: ContinuousClock.Instant)] = []
     private var routes = 0
 
     init() {
@@ -155,6 +265,10 @@ private final class TimedEngine: AssistantConnection, RemoteAudioRouting, @unche
     }
 
     var reachability: [(reachable: Bool, at: ContinuousClock.Instant)] { lock.withLock { told } }
+    /// `station`: on a home station's voice (false: where the conversation is); `reachable`: it hears them now.
+    var announcements: [(station: Bool, reachable: Bool, at: ContinuousClock.Instant)] {
+        lock.withLock { announcementsTold }
+    }
     var remoteRoutes: Int { lock.withLock { routes } }
 
     func send(_ command: AssistantCommand) {}
@@ -168,7 +282,10 @@ private final class TimedEngine: AssistantConnection, RemoteAudioRouting, @unche
         lock.withLock { told.append((reachable, .now)) }
     }
 
-    func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {}
+    func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {
+        lock.withLock { announcementsTold.append((output != nil, reachable, .now)) }
+    }
+
     func useLocalAudio() async {}
 }
 

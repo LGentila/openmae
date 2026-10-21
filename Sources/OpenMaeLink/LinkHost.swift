@@ -189,6 +189,11 @@ public actor LinkHost: AssistantConnection {
     /// longer (it has to notice the drop, then look for the Mac both ways).
     static let changeOfWay = Duration.milliseconds(300)
 
+    /// A device that checks its round trips pings every second (`LinkSession.peerChecksRoundTrips`): nothing from it for
+    /// this long, its network went (airplane mode, its Wi-Fi gone at the router) without a word reaching the Mac, whose
+    /// session with it would only close a minute later. See `watchSilence`.
+    static let connectionLost = Duration.seconds(3)
+
     /// `audio`: nil when the engine cannot switch its sound (a demonstration engine): the iPhones then see and
     /// command the conversation without sound. `gracePeriod`: how long an iPhone whose connection dropped keeps the
     /// conversation, to come back by another way, before the Mac takes the sound back.
@@ -605,6 +610,12 @@ public actor LinkHost: AssistantConnection {
                 await session.waitUntilClosed()
                 await self?.closed(session, key: key)
             },
+            Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard let self, await self.watchSilence(session, key: key) else { return }
+                }
+            },
         ]
         sessions[key] = Peer(session: session, device: device, tasks: tasks, station: station)
         publish()
@@ -620,7 +631,8 @@ public actor LinkHost: AssistantConnection {
         if peer.station, hand?.key != key, var station = stations[key] {
             // A station's Wi-Fi drops, or the Mac's: it has the grace period to come back; what Maé says on her own
             // waits for it meanwhile, rather than being said to nobody. (One that has the conversation is waited for
-            // as the conversation's device is, below.)
+            // as the conversation's device is, below.) A drop nobody told the Mac of is seen within seconds
+            // (`watchSilence`).
             station.output.bind(nil)
             station.grace?.cancel()
             station.grace = Task { [weak self, gracePeriod] in
@@ -643,6 +655,23 @@ public actor LinkHost: AssistantConnection {
         publish()
         await updateReach()  // meanwhile its voice reaches nobody
         await updateAnnouncements()
+    }
+
+    /// A device that pings every second, not heard for `connectionLost`: its network went without a word reaching the
+    /// Mac. Its session is closed as if it had said so (`closed`): a home station has its grace period to come back, and
+    /// what Maé says on her own waits for it meanwhile, rather than going into the dead session for a minute. Not the
+    /// device that has the conversation: it is out of reach after a second without its microphone (`hears`), and
+    /// waited for as before, its session closing after a minute of silence, then its grace period. A device that does
+    /// not ping every second (an app from before) is not judged on a few seconds of silence. False once the session is
+    /// over or replaced.
+    private func watchSilence(_ session: LinkSession, key: Data) -> Bool {
+        guard sessions[key]?.session === session, session.isOpen else { return false }
+        let silence = session.silence
+        guard hand?.key != key, session.peerChecksRoundTrips, silence > Self.connectionLost else { return true }
+        DebugLog.log("link: nothing heard for \(LinkSession.seconds(silence)) from a device that pings every second, "
+                     + "closing its session")
+        session.close()
+        return false
     }
 
     private func graceOver(_ key: Data) async {

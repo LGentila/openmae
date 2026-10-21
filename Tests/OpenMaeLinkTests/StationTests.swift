@@ -158,6 +158,95 @@ struct StationAnnouncementTests {
         await rig.end(iPad)
     }
 
+    // MARK: Its network gone without a word
+
+    /// The station's network goes without a word reaching the Mac (airplane mode, its Wi-Fi gone at the router): its
+    /// session with it would look open for a minute more. It pings every second, as the app does: a few seconds
+    /// without hearing it are enough. From then on the announcements wait for it, and are said on it once it is back on
+    /// a new session, once.
+    @Test func waitsForAStationWhoseNetworkWentWithoutAWord() async throws {
+        let rig = try await Rig()
+        let iPad = FakePhone.iPad(roundTrips: .standard)
+        let first = await rig.connect(iPad)
+        iPad.say(station: true)
+        await waitFor { rig.engine.announcements == [true] }
+        try await Task.sleep(for: .milliseconds(1500))  // its pings heard
+        let cut = ContinuousClock.now
+        first.wire.cut()
+        await waitFor(seconds: 8) { rig.engine.announcements == [true, false] }
+        let seenGoneAfter = ContinuousClock.now - cut
+        #expect(rig.engine.announcements == [true, false])
+        #expect(seenGoneAfter < .seconds(4))
+        #expect(!first.mac.isOpen)
+        let sent = first.wire.datagramsFromMac
+        await rig.ringTheTimer()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(first.wire.datagramsFromMac == sent)  // nothing into the dead session
+        #expect(rig.engine.said.isEmpty)
+        #expect(rig.engine.stationPlayed == 0)
+        #expect(rig.engine.localPlayed == 0)
+        let second = await rig.connect(iPad, path: .relay)
+        await waitFor { second.phone.played.count == 1 }
+        #expect(second.phone.played.map(\.frames) == [Rig.announcementFrames])
+        await waitFor { rig.engine.said == [Self.sentence] }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(rig.engine.said == [Self.sentence])
+        #expect(second.phone.played.count == 1)  // once
+        #expect(rig.engine.stationPlayed == Rig.announcementSamples)
+        #expect(rig.engine.announcements == [true, false, true])
+        #expect(rig.engine.localPlayed == 0)
+        #expect(first.phone.framesHeard == 0)
+        await rig.end(iPad)
+    }
+
+    /// The timer rings just after the station's network went, before the Mac can see it: the announcement goes into
+    /// the dead session. It is not taken as said: once the Mac sees the station gone, it waits for it, and is said on it
+    /// once it is back (before, said a second time into the dead session, it was then given up).
+    @Test func anAnnouncementSentAsTheStationsNetworkWentIsSaidOnceItIsBack() async throws {
+        let rig = try await Rig()
+        let iPad = FakePhone.iPad(roundTrips: .standard)
+        let first = await rig.connect(iPad)
+        iPad.say(station: true)
+        await waitFor { rig.engine.announcements == [true] }
+        try await Task.sleep(for: .milliseconds(1500))
+        first.wire.cut()
+        try await Task.sleep(for: .seconds(1))
+        await rig.ringTheTimer()
+        await waitFor { rig.engine.stationPlayed == Rig.announcementSamples }
+        #expect(rig.engine.stationPlayed == Rig.announcementSamples)  // into the dead session
+        await waitFor(seconds: 8) { rig.engine.announcements == [true, false] }
+        #expect(rig.engine.announcements == [true, false])
+        await waitFor(seconds: 8) { rig.engine.cutOff == [Self.sentence] }
+        #expect(rig.engine.cutOff == [Self.sentence])
+        #expect(rig.engine.said.isEmpty)
+        let second = await rig.connect(iPad, path: .relay)
+        await waitFor { second.phone.played.count == 1 }
+        #expect(second.phone.played.map(\.frames) == [Rig.announcementFrames])
+        await waitFor { rig.engine.said == [Self.sentence] }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(rig.engine.said == [Self.sentence])
+        #expect(second.phone.played.count == 1)
+        #expect(rig.engine.stationPlayed == 2 * Rig.announcementSamples)
+        #expect(rig.engine.localPlayed == 0)
+        #expect(first.phone.framesHeard == 0)
+        await rig.end(iPad)
+    }
+
+    /// An iPad with an app from before the round trips pings only every 25 s: a few seconds of silence say nothing of
+    /// its network, and its session is not closed for them (only after a minute without hearing anything, as before).
+    @Test func anOlderStationIsNotTakenAsGoneForAFewSecondsOfSilence() async throws {
+        let rig = try await Rig()
+        let iPad = FakePhone.iPad()
+        let station = await rig.connect(iPad)
+        iPad.say(station: true)
+        await waitFor { rig.engine.announcements == [true] }
+        station.wire.cut()
+        try await Task.sleep(for: .seconds(5))
+        #expect(station.mac.isOpen)
+        #expect(rig.engine.announcements == [true])
+        await rig.end(iPad)
+    }
+
     /// The iPad sits next to the Mac: while the announcement plays on it, the Mac's microphone hears Maé's voice. It
     /// does not take it for the user's.
     @Test func theMacsMicrophoneDoesNotInterruptTheStation() async throws {
