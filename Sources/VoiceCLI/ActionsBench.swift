@@ -35,16 +35,23 @@
 // (experiments without rebuilding).
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
+// --home-assistant (or a corpus with "homeAssistant": true) offers a pretend Home Assistant's tools too, as a connected
+// tool just added gets them (FakeHomeAssistant: the tools its MCP server lists, the switches a new tool starts with),
+// after the others, with their part of the system prompt. A call to one is checked for the words its arguments must
+// hold ("mentions", whatever the accents and case) and the values they must have ("values"); nothing is carried out.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
 // as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
 // layer by layer, and each request's chance of a call at its first token.
 
+import FakeHomeAssistant
 import Foundation
 import VoiceCore
 import VoiceEngineApple
 
 private struct Corpus: Decodable {
+    /// A pretend Home Assistant's tools are offered too (a connected tool).
+    var homeAssistant: Bool?
     var now: String
     var shortcuts: [String]
     /// The delegation tools are offered too (Claude Code switched on).
@@ -103,6 +110,11 @@ private struct Corpus: Decodable {
         var here: Bool?
         var instrument: String?
         var mode: String?
+        /// Other tools that do as well ("HassSetPosition" for « ferme le volet »).
+        var or: [String]?
+        /// A connected tool's call: arguments that must have these values (a number, or a text whatever its accents and
+        /// case; for a list, one of its items).
+        var values: [String: JSONValue]?
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -212,6 +224,7 @@ func runActionsBench(_ o: Options) async throws {
     let agents = corpus.agents == true
     let web = corpus.web == true || o.web
     let sources = corpus.sources == true || o.sources
+    let home = try await homeAssistantTools(corpus.homeAssistant == true || o.homeAssistant)
     // In the app's order: the actions, the agents, the web search, the built-in sources.
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 }
@@ -219,6 +232,8 @@ func runActionsBench(_ o: Options) async throws {
             : [])
         + (web ? [WebSearchCatalog.search] : [])
         + (sources ? BuiltInSources.tools : [])
+        + home.tools
+    let homeNames = Set(home.tools.map(\.name))
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
         WeatherCatalog.name: WeatherTools(on: true, here: here),
@@ -252,6 +267,7 @@ func runActionsBench(_ o: Options) async throws {
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
+        + [home.addendum].compactMap { $0 }
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
@@ -310,7 +326,8 @@ func runActionsBench(_ o: Options) async throws {
         let chosen = call?.name ?? (unreadable != nil ? "illisible" : "aucun")
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
-                                moreCalls: moreCalls ? true : nil, text: text, toolOK: chosen == expectedTool,
+                                moreCalls: moreCalls ? true : nil, text: text,
+                                toolOK: chosen == expectedTool || item.expected?.or?.contains(chosen) == true,
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
@@ -331,6 +348,9 @@ func runActionsBench(_ o: Options) async throws {
             refusal = ToolRefusal(forModel: ToolNames.unknown(call.name, among: tools.map(\.name)),
                                   spoken: ActionPhrases.notUnderstood(.french))
             result.refusal = refusal?.forModel
+        } else if let call, homeNames.contains(call.name) {
+            // A connected tool's call: nothing is carried out; its arguments must name what the user named.
+            if result.toolOK, let expected = item.expected { result.argumentsOK = homeArguments(call, expected) }
         } else if let call, AgentCatalog.names.contains(call.name) {
             // Handing a task over: what the app checks, and whether the instruction keeps the user's words.
             do {
@@ -489,6 +509,58 @@ func runActionsBench(_ o: Options) async throws {
         try encoder.encode(answered).write(to: URL(fileURLWithPath: record))
         print("sources' answers recorded: \(record) (\(answered.count))")
     }
+}
+
+/// --home-assistant: the tools a pretend Home Assistant offers once added as a connected tool (the switches a new tool
+/// starts with), and their part of the system prompt.
+private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], addendum: String?) {
+    guard on else { return ([], nil) }
+    let server = FakeHomeAssistant()
+    try await server.start()
+    defer { server.stop() }
+    let client = MCPClient(address: server.address, token: nil)
+    var settings = ConnectedToolSettings(name: "Home Assistant", address: server.address.absoluteString, access: .none)
+    settings.actions = settings.merging(try await client.listTools())
+    let provider = ConnectedTools()
+    await provider.configure([ConnectedTools.Connection(settings: settings, client: client)])
+    let tools = await provider.tools()
+    print("Home Assistant (pretend): \(tools.count) of \(settings.actions.count) actions on: "
+          + tools.map(\.name).joined(separator: ", "))
+    return (tools, await provider.promptAddendum())
+}
+
+/// A connected tool's call holds the words and the values the corpus expects, and Home Assistant would take it: the words
+/// in its targets (`name`, `area`, `floor`), a `domain` that is one, a `device_class` among those it knows.
+private func homeArguments(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
+    func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+    }
+    func texts(_ value: JSONValue) -> [String] {
+        switch value {
+        case .array(let items): items.flatMap(texts)
+        case .object(let object): object.values.flatMap(texts)
+        default: value.text.map { [$0] } ?? []
+        }
+    }
+    let targets = folded(["name", "area", "floor"].compactMap { call.arguments[$0] }.flatMap(texts).joined(separator: " "))
+    guard (expected.mentions ?? []).allSatisfy({ targets.contains(folded($0)) }) else { return false }
+    let domains: Set<String> = ["light", "switch", "cover", "climate", "fan", "lock", "media_player", "valve", "vacuum",
+                                "scene", "script", "input_boolean", "humidifier", "water_heater", "button", "siren"]
+    if let domain = call.arguments["domain"], !Set(texts(domain)).isSubset(of: domains) { return false }
+    let classes: Set<String> = ["tv", "speaker", "receiver", "awning", "blind", "curtain", "damper", "door", "garage", "gate",
+                                "shade", "shutter", "window", "water", "gas", "outlet", "switch"]
+    if let deviceClass = call.arguments["device_class"], !Set(texts(deviceClass)).isSubset(of: classes) { return false }
+    for (key, value) in expected.values ?? [:] {
+        guard let given = call.arguments[key] else { return false }
+        if let number = value.integer {
+            let written = given.integer ?? given.text.flatMap { Double($0.replacingOccurrences(of: ",", with: ".")) }
+                .map { Int($0.rounded()) }
+            guard written == number else { return false }
+        } else if let text = value.text {
+            guard texts(given).contains(where: { folded($0) == folded(text) }) else { return false }
+        }
+    }
+    return true
 }
 
 /// The exchanges every conversation starts with, as --examples says: "app" (the app's, `ActionCatalog.examples`), "none",

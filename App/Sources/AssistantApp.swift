@@ -20,7 +20,7 @@ struct AssistantApp: App {
     @State private var phone: PhoneAccess
     @State private var inbound: InboundAccess
     @State private var navigation = SettingsNavigation()
-    @State private var tools = ConnectedToolsAccess()
+    @State private var tools: ConnectedToolsAccess
 
     init() {
         Fonts.register()
@@ -65,6 +65,7 @@ struct AssistantApp: App {
         phone.relayChanged = { inboundAccess.setPublicRelay($0) }
         #endif
         _model = State(initialValue: model)
+        _tools = State(initialValue: ConnectedToolsAccess(model: model))
         _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
         _phone = State(initialValue: phone)
         _inbound = State(initialValue: inboundAccess)

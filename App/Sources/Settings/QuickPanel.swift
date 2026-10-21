@@ -2,8 +2,8 @@ import SwiftUI
 import VoiceCore
 
 /// The quick panel, under the top bar's round button: only what changes often (the output, how to talk, the actions
-/// and the search), a line to the agents (and, greyed until it exists, to the connected tools), "New conversation", and
-/// "All settings…", which opens the settings window.
+/// and the search), a line to the agents and one to the connected tools, "New conversation", and "All settings…", which
+/// opens the settings window.
 struct QuickPanel: View {
     @Bindable var model: AssistantModel
     let close: () -> Void
@@ -28,7 +28,8 @@ struct QuickPanel: View {
                 Hairline()
                 NavigationLine(title: Text("Agents"), value: AgentsPage.summary(model)) { openSettings(.agents) }
                 Hairline()
-                NavigationLine(title: Text("Connected tools"), value: Text("Soon"),
+                NavigationLine(title: Text("Connected tools"),
+                               value: ConnectedToolsAccess.isAvailable ? ToolsPage.summary(model) : Text("Soon"),
                                isEnabled: ConnectedToolsAccess.isAvailable) { openSettings(.tools) }
             }
             QuickCard {

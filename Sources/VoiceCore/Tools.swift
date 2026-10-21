@@ -104,14 +104,20 @@ public enum ToolRisk: String, Sendable, Codable {
     case sensitive
 }
 
-/// One parameter of a tool (a small subset of JSON Schema: what the voice tools need).
+/// One parameter of a tool (a small subset of JSON Schema: what the voice tools need, and what connected tools use).
 public struct ToolParameter: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
         case string
         case integer
+        /// Any number, whole or not (a temperature).
+        case number
         case boolean
         /// A string among these values.
         case oneOf([String])
+        /// Several strings; among these values when there are some.
+        case strings([String])
+        /// Anything deeper (an object, an array of objects): the JSON Schema as a connected tool gave it, passed on as is.
+        case schema(JSONValue)
     }
 
     public var name: String
@@ -298,9 +304,11 @@ public protocol ToolProvider: Sendable {
     func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String?
     /// What the app says before asking "On y va ?" for a sensitive call.
     func summary(of call: ToolCall, context: ToolContext) async -> String
-    /// A sensitive call that waited for the user's "oui" will not be carried out: they said no, it expired, another
-    /// request replaced it or a new conversation began.
+    /// A sensitive call that waited for the user's "oui" will not be carried out: it expired, another request replaced
+    /// it or a new conversation began.
     func dropped(_ call: ToolCall) async
+    /// The same, because the user said no (by default, `dropped`).
+    func declined(_ call: ToolCall) async
     /// Carries out a call that passed `check`. Throws a `ToolRefusal` when it cannot.
     func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome
     /// Takes back an action; returns what to say.
@@ -318,6 +326,7 @@ extension ToolProvider {
     public func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String? { nil }
     public func summary(of call: ToolCall, context: ToolContext) async -> String { call.name }
     public func dropped(_ call: ToolCall) async {}
+    public func declined(_ call: ToolCall) async { await dropped(call) }
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {
         ActionPhrases.cannotUndo(context.language)
     }

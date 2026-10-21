@@ -14,8 +14,13 @@
 //   voice-cli voice-gaps [--repeats 1] [options]        long answers to typed questions: the silence heard between
 //                                                       two sentences (see VoiceGaps.swift)
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
+//                           [--home-assistant]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
+//   voice-cli connected-tools [--actions] [--do-directly] [--repeats 1]
+//                                                       a conversation with a pretend Home Assistant connected, typed
+//                                                       turns: asks first, « oui », « non », reading, "Do it directly"
+//                                                       (see ConnectedToolsDialogue.swift)
 //   voice-cli dialogue-bench [--repeats 10] [--corpus file.json]
 //                                                       the model in short conversations, turn after turn, as the
 //                                                       app has them (text only; see DialogueBench.swift)
@@ -134,6 +139,12 @@ struct Options {
     /// actions-bench: the built-in sources' tools offered with any corpus; their real services asked instead of the
     /// corpus's recorded answers; what they answered written to a file.
     var sources = false
+    /// actions-bench: a pretend Home Assistant's tools offered too, as a connected tool; connected-tools: "Do it
+    /// directly" from the start.
+    var homeAssistant = false
+    var doDirectly = false
+    /// connected-tools: only the time of the answer after a short and a long `GetLiveContext`.
+    var longResult = false
     var liveSources = false
     var recordSources: String?
     var out = URL(fileURLWithPath: "measurements")
@@ -156,6 +167,9 @@ struct Options {
             case "--new-conversation-every": o.newConversationEvery = Int(it.next() ?? "")
             case "--history-budget": o.historyBudget = Int(it.next() ?? "")
             case "--actions": o.actions = true
+            case "--home-assistant": o.homeAssistant = true
+            case "--do-directly": o.doDirectly = true
+            case "--long-result": o.longResult = true
             case "--wake-word": o.wakeWord = true
             case "--follow-up": o.followUp = Double(it.next() ?? "")
             case "--no-partials": o.noPartials = true
@@ -280,8 +294,8 @@ struct Engine {
 }
 
 /// `voice`: what the pipeline gets of the voice (announce-drop and voice-gaps measure it); `logPlays`: the speaker keeps
-/// what it plays, and when (voice-gaps).
-func buildEngine(_ o: Options, logPlays: Bool = false,
+/// what it plays, and when (voice-gaps); `tools`: the pipeline's tools instead of those `--actions` gives (connected-tools).
+func buildEngine(_ o: Options, logPlays: Bool = false, tools: ToolRunner? = nil,
                  voice: (PocketSpeechSynthesizer) -> any SpeechSynthesizer = { $0 }) async throws -> Engine
 {
     let hw = HardwareProfile.current
@@ -332,7 +346,7 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     let speaker = SimulatedSpeaker(logsPlays: logPlays)
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
-                                 tools: o.actions ? ToolRunner(providers: [DryActions()]) : nil, config: config)
+                                 tools: tools ?? (o.actions ? ToolRunner(providers: [DryActions()]) : nil), config: config)
     let log = EventLog()
     await log.attach(model)
     Task { for await event in pipeline.events { await log.record(event) } }
@@ -635,6 +649,19 @@ if let options = Options.parse(CommandLine.arguments),
         }
     } catch {
         print("\nERROR: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+if let options = Options.parse(CommandLine.arguments), options.command == "connected-tools" {
+    do {
+        if options.longResult {
+            try await measureLongResult(options)
+        } else {
+            try await runConnectedToolsDialogue(options)
+        }
+    } catch {
+        print("ERROR: \(error)")
         exit(1)
     }
     exit(0)

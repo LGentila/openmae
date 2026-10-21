@@ -47,13 +47,16 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     /// The built-in sources (the weather, currencies and cryptos, travel times; with the actions on or off). Off by
     /// default: a place, a currency or a crypto leaves the Mac for Open-Meteo, Apple, the ECB's rates or CoinGecko.
     public var builtInSources = false
+    /// The connected tools (MCP), in the order they were added: their actions are offered with the actions on or off.
+    /// Their tokens are in the keychain, never here.
+    public var connectedTools: [ConnectedToolSettings] = []
     public init() {}
 
     /// `pushToTalk`: how earlier versions, which only knew hands-free and push-to-talk, saved the way of talking. It is
     /// still written, so that an earlier version (on this Mac, or the iPhone app) keeps push-to-talk.
     private enum CodingKeys: String, CodingKey {
         case audioMode, listening, pushToTalk, wakeLog, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode,
-             webSearch, builtInSources
+             webSearch, builtInSources, connectedTools
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
@@ -72,6 +75,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
         webSearch = (try? c.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch)) ?? WebSearchSettings()
         builtInSources = try c.decodeIfPresent(Bool.self, forKey: .builtInSources) ?? false
+        connectedTools = (try? c.decodeIfPresent([ConnectedToolSettings].self, forKey: .connectedTools)) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -86,6 +90,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         try c.encode(claudeCode, forKey: .claudeCode)
         try c.encode(webSearch, forKey: .webSearch)
         try c.encode(builtInSources, forKey: .builtInSources)
+        try c.encode(connectedTools, forKey: .connectedTools)
     }
 }
 
@@ -201,6 +206,9 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     /// Search once with the web search's settings and the key or password in the keychain (the "Test" button),
     /// switched on or not; answered by `.webSearchTested`.
     case testWebSearch
+    /// Connect to a connected tool and list its actions, with these settings and the token the keychain keeps for its id
+    /// (the "Test" button; adding a tool, before it is in the settings); answered by `.connectedToolTested`.
+    case testConnectedTool(ConnectedToolSettings)
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -424,6 +432,12 @@ public enum AssistantEvent: Sendable, Codable {
     case tasks([AgentTask])
     /// What `.testWebSearch` found.
     case webSearchTested(WebSearchTest)
+    /// What `.testConnectedTool` found, for that tool's id. Also sent when a tool said its actions changed (fetched again).
+    case connectedToolTested(UUID, ConnectedToolTest)
+    /// A connected tool's action was carried out, refused by the user or failed: a line of its log.
+    case connectedToolLog(UUID, ConnectedToolLogEntry)
+    /// A connected tool answered again, refused the access or could not be reached, during an action.
+    case connectedToolState(UUID, ConnectedToolState)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)

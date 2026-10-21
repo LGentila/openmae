@@ -87,11 +87,16 @@ targets:
         NSLocationWhenInUseUsageDescription: >-
           Maé uses your Mac’s location for the weather and the travel times “from here”, when you don’t name a place.
           She doesn’t keep it.
-        # The iPhone app finds this Mac on the local network (Settings › iPhone and iPad). Shown from
-        # Resources/InfoPlist.xcstrings too.
+        # The iPhone app finds this Mac on the local network (Settings › iPhone and iPad), and the connected tools
+        # (Settings › Connected tools) are reached there. Shown from Resources/InfoPlist.xcstrings too.
         NSLocalNetworkUsageDescription: >-
-          Your iPhone finds this Mac on your Wi-Fi to talk to Maé.
+          Your iPhone finds this Mac on your Wi-Fi to talk to Maé, and Maé reaches the tools you connect on your
+          network, such as Home Assistant.
         NSBonjourServices: [_openmae._udp]
+        # A connected tool at a plain http:// address of the home network (homeassistant.local, an IP address); any
+        # other address stays https:// only.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     entitlements:
       path: Resources/App.entitlements
       properties:

@@ -53,11 +53,13 @@ let package = Package(
             ]
         ),
         .target(name: "OpenMaeLink", dependencies: ["VoiceCore"]),
+        // A pretend Home Assistant (its MCP server on a local port), for the tests and voice-cli: never in the apps.
+        .target(name: "FakeHomeAssistant", dependencies: ["VoiceCore"]),
         .executableTarget(
             name: "VoiceCLI",
-            dependencies: ["VoiceCore", "VoiceEngineApple", "OpenMaeLink",
+            dependencies: ["VoiceCore", "VoiceEngineApple", "OpenMaeLink", "FakeHomeAssistant",
                            .product(name: "FluidAudio", package: "FluidAudio")]),
-        .testTarget(name: "VoiceCoreTests", dependencies: ["VoiceCore"]),
+        .testTarget(name: "VoiceCoreTests", dependencies: ["VoiceCore", "FakeHomeAssistant"]),
         .testTarget(name: "OpenMaeLinkTests", dependencies: ["OpenMaeLink"]),
     ]
 )
