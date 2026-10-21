@@ -108,6 +108,10 @@ jobs:
           annotations: |
             org.opencontainers.image.title=OpenMaé relay
             org.opencontainers.image.description=Relay that links the OpenMaé iPhone app to OpenMaé on the Mac; in home mode, it also passes deliveries from the home network.
+      # The build cache only speeds builds up: a cache export that fails
+      # (ignore-error) must not fail the build. A pull request's run that
+      # starts just after its merge gets a read-only Actions cache, where the
+      # export cannot write; runs that can write still export it.
       - uses: docker/build-push-action@v7
         with:
           context: relay
@@ -117,4 +121,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
