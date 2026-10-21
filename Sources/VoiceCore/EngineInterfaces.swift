@@ -50,10 +50,11 @@ public struct ChatMessage: Sendable, Equatable, Codable {
         return message
     }
 
-    /// What the tool returned, right after the call.
+    /// What the tool returned, right after the call. Without the model's own marks (`ModelMarkers`), whatever the tool:
+    /// a text from outside in it cannot pass for the end of the result and the start of something else.
     public static func result(of call: ToolCall, _ result: JSONValue) -> ChatMessage {
         var message = ChatMessage(.tool, call.name)
-        message.toolResult = result
+        message.toolResult = ModelMarkers.strip(result)
         return message
     }
 

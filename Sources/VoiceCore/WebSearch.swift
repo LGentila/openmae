@@ -334,10 +334,12 @@ public final class BraveSearchProvider: WebSearchProvider {
 
 /// Tidying up what a search service gives, for the model to read.
 enum WebResultText {
-    /// One line: no line breaks, single spaces, "..." as "…".
+    /// One line: "..." as "…", none of the model's own marks (`ModelMarkers`: in a title or a snippet, they could pass for
+    /// the end of the results and the start of something else; `plain` has already written the entities as characters),
+    /// no line breaks, single spaces.
     static func clean(_ text: String?) -> String {
-        (text ?? "").replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "...", with: "…")
+        ModelMarkers.strip((text ?? "").replacingOccurrences(of: "...", with: "…"))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
 

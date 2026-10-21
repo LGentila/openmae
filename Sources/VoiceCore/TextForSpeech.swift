@@ -203,6 +203,10 @@ public enum SpeakableText {
         s = s.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
         // Emojis and pictographs.
         s = String(String.UnicodeScalarView(s.unicodeScalars.filter { !isPictograph($0) }))
+        // The model's own marks, last (taking anything out after them could join the pieces of one): the app's sentences
+        // quote texts from outside (an event's title, what another system sent), and the history keeps what is said as
+        // Maé's words (`ModelMarkers`).
+        s = ModelMarkers.strip(s)
         // Runs of spaces become one; non-breaking spaces stay (French typography, shown in the transcript).
         let spaces = #"[^\S\u00A0\u202F]+"#
         if keepingLineBreaks {
