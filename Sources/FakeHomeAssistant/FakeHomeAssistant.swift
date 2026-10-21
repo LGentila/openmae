@@ -4,7 +4,7 @@ import VoiceCore
 
 /// A pretend Home Assistant for the tests and the benchmarks: its MCP server (the "Model Context Protocol Server"
 /// integration) on a local port, Streamable HTTP at `/api/mcp`, with the tools Home Assistant lists for its Assist API,
-/// named, described and shaped as it sends them (no annotations, as versions before 2025.12 do), over a small house:
+/// named, described and shaped as it sends them (without annotations, as older versions do), over a small house:
 /// lights in four rooms, a thermostat and two covers. It changes its house as the calls ask and answers as Home
 /// Assistant does (an intent's response as JSON text; `isError` and "Error calling tool: …" when nothing matches).
 ///

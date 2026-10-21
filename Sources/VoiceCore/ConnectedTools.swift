@@ -238,7 +238,12 @@ public actor ConnectedTools: ToolProvider {
             return ToolOutcome(spoken: result.isError ? ConnectedToolPhrases.failed(name) : ConnectedToolPhrases.done,
                                forModel: forModel, cannotUndo: cannotUndo, modelSpeaks: true)
         } catch let error as MCPError {
-            report(.state(id, error == .unauthorized ? .needsReconnect : error == .unreachable ? .unreachable : .connected))
+            let state: ConnectedToolState = switch error {
+            case .unauthorized: .needsReconnect
+            case .unreachable, .noAnswer: .unreachable
+            case .notMCP, .refused: .connected  // it answered
+            }
+            report(.state(id, state))
             report(.log(id, ConnectedToolLogEntry(date: Date(), title: title, result: .failed(ConnectedToolFailure(error)))))
             throw ToolRefusal(forModel: ConnectedToolPhrases.errorForModel(error, name),
                               spoken: ConnectedToolPhrases.unavailable(error, name), retryable: false)

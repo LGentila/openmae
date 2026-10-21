@@ -109,6 +109,8 @@ public actor AssistantHost: AssistantConnection {
     private let connectedTools = ConnectedTools()
     /// One client per connected tool, kept while its address, access and token stay the same (its session with it too).
     private var mcpClients: [UUID: (key: String, client: MCPClient)] = [:]
+    /// Connected tools that said their list of actions changed: fetched again at the next new conversation.
+    private var changedLists: Set<UUID> = []
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
     /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
@@ -221,7 +223,6 @@ public actor AssistantHost: AssistantConnection {
             case .log(let id, let entry): emit.yield(.connectedToolLog(id, entry))
             case .state(let id, let state): emit.yield(.connectedToolState(id, state))
             case .toolsChanged(let id):
-                // Fetched again; the interface keeps the new list in the settings, which apply at the next conversation.
                 Task { await self?.listChanged(id) }
             }
         }
@@ -252,6 +253,7 @@ public actor AssistantHost: AssistantConnection {
             await pipeline?.interrupt()
         case .newConversation:
             do { try await pipeline?.resetConversation() } catch { emit.yield(.warning("\(error)")) }
+            if !changedLists.isEmpty { Task { await refreshChangedLists() } }
         case .downloadModels:
             startDownload()
         case .pauseDownload:
@@ -908,10 +910,17 @@ public actor AssistantHost: AssistantConnection {
         emit.yield(.connectedToolTested(tool.id, test))
     }
 
-    /// A tool said its list of actions changed: fetched again, for the interface to keep.
-    private func listChanged(_ id: UUID) async {
-        guard let tool = settings.connectedTools.first(where: { $0.id == id }) else { return }
-        await testConnectedTool(tool)
+    /// A tool said its list of actions changed: the conversation under way keeps the tools it has.
+    private func listChanged(_ id: UUID) {
+        changedLists.insert(id)
+    }
+
+    /// A new conversation: the lists that changed are fetched again, for the interface to keep in the settings (which
+    /// then give the model the new tools, in a new conversation).
+    private func refreshChangedLists() async {
+        let ids = changedLists
+        changedLists = []
+        for tool in settings.connectedTools where ids.contains(tool.id) { await testConnectedTool(tool) }
     }
 
     /// The built-in sources are offered: switched on, on a tier whose model passed their benchmark.
