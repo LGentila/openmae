@@ -18,8 +18,9 @@ final class FakeHub: @unchecked Sendable {
     var damage: [String: Int] = [:]
     var ignoreRange = false
     var status: [String: Int] = [:]
-    /// Wait between two 4 KB chunks (to pause in the middle of a file).
-    var chunkDelay: TimeInterval = 0
+    /// Sends only this many bytes of the response, then goes quiet without closing the connection: a
+    /// download that stays in the middle of the file until it is paused, however busy the Mac is.
+    var holdAfterBytes: Int?
     private var requestLog: [(path: String, range: String?)] = []
     /// Read under the lock: a test may look while the requests arrive (on URLSession's threads).
     var requests: [(path: String, range: String?)] { Self.lock.withLock { requestLog } }
@@ -109,6 +110,7 @@ final class FakeHubProtocol: URLProtocol, @unchecked Sendable {
                                        headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         let drop = hub?.takeDrop()
+        let hold = hub?.holdAfterBytes
         var sent = 0
         while sent < body.count {
             if let drop, sent >= drop {
@@ -116,10 +118,12 @@ final class FakeHubProtocol: URLProtocol, @unchecked Sendable {
                 Thread.sleep(forTimeInterval: 0.05)
                 return fail(URLError(.networkConnectionLost))
             }
+            // Returning without finishing leaves the request open. (No sleeping here instead: URLSession serves
+            // every fake request of the test process on one thread.)
+            if let hold, sent >= hold { return }
             let chunk = body.subdata(in: sent..<min(sent + 4096, body.count))
             client?.urlProtocol(self, didLoad: chunk)
             sent += chunk.count
-            if let delay = hub?.chunkDelay, delay > 0 { Thread.sleep(forTimeInterval: delay) }
         }
         client?.urlProtocolDidFinishLoading(self)
     }
@@ -152,8 +156,10 @@ struct DownloaderTests {
         Data((0..<count).map { _ in UInt8.random(in: 0...255) })
     }
 
+    /// Waits until `condition` holds, for 30 seconds at most (the Mac may be busy).
     func waitFor(_ condition: () async -> Bool) async {
-        for _ in 0..<400 where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
+        let deadline = ContinuousClock.now + .seconds(30)
+        while !(await condition()), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     @Test func filesAreDownloadedCheckedAndPutInPlace() async throws {
@@ -278,14 +284,15 @@ struct DownloaderTests {
     @Test func pauseKeepsWhatWasDownloaded() async throws {
         let hub = FakeHub()
         hub.files = ["model.bin": randomData(400_000)]
-        hub.chunkDelay = 0.005  // 100 chunks of 4 KB: about half a second
+        hub.holdAfterBytes = 163_840  // 40 chunks of 4 KB, then the server goes quiet: the file stays unfinished
         let pack = hub.pack(["model.bin"])
         let task = Task { try await downloader().download([pack]) { _ in } }
-        try await Task.sleep(for: .milliseconds(200))
+        // Pause once what the server sent is on disk. (A fixed wait could end before the first byte.)
+        await waitFor { store.partialSize(pack.files[0]) == 163_840 }
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
         let kept = store.partialSize(pack.files[0])
-        #expect(kept > 0 && kept < 400_000)
+        #expect(kept == 163_840)
         #expect(store.bytesToDownload([pack]) == 400_000 - kept)
     }
 }
