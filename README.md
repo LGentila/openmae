@@ -373,9 +373,11 @@ gives every request's chance of a call at its first token from each, read as the
 the same as `--watch-calls`; a request whose decision moves with mere rounding is one the model hesitates on).
 `--compare-requests` generates nothing either: from the beginning the app keeps, it reads each request's first token
 computed as the app computes it (its new tokens in float32, the same as `--watch-calls`), as it was computed before (in
-bfloat16), and for a request with earlier exchanges with those computed first on their own (as the history computed
-ahead, or in one pass), against the same float32 reference. `--bfloat16-prompts` (also for `cache-check`) computes the
-requests' new tokens and the history in bfloat16, as the app did before, to compare both in one build. One
+bfloat16), with Gemma 4 26B also with its experts' products in bfloat16 rather than float32, and for a request with
+earlier exchanges with those computed first on their own (as the history computed ahead, or in one pass), against the
+same float32 reference. `--bfloat16-prompts` (also for `cache-check`) computes the requests' new tokens and the history
+in bfloat16, as the app did before, and `--bfloat16-experts` computes Gemma 4 26B's experts' products in bfloat16 while
+the rest of them is computed in float32, to compare in one build. One
 search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 ```bash

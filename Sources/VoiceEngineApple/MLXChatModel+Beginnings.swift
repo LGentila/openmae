@@ -170,9 +170,11 @@ extension MLXChatModel {
     /// (`computeInFloat32`), or in the weights' own types with `inFloat32: false` (as the app did before; the reference's
     /// weights are all float32 then). `history`: the request's earlier turns are computed first, as the history computed
     /// ahead (`chunk`: 64 tokens at a time) or in one pass (`chunk` nil) when a request goes back to the beginning, in
-    /// float32 or not (`historyInFloat32`).
+    /// float32 or not (`historyInFloat32`). `halfPrecisionExperts`: whether a mixture-of-experts model's experts compute in
+    /// bfloat16 as the rest is computed in float32 (nil: as the model does, `expertsInHalfPrecision`).
     private func firstTokenLogProbs(_ conversation: [ChatMessage], from state: BeginningState, inFloat32: Bool,
-                                    history: (chunk: Int?, inFloat32: Bool)? = nil) throws -> MLXArray
+                                    history: (chunk: Int?, inFloat32: Bool)? = nil,
+                                    halfPrecisionExperts: Bool? = nil) throws -> MLXArray
     {
         let prompt = try render(conversation, generationPrompt: true)
         guard prompt.count > state.tokens.count, prompt.starts(with: state.tokens) else {
@@ -188,7 +190,7 @@ extension MLXChatModel {
                 let end = min(start + (history.chunk ?? earlier.count), earlier.count)
                 let tokens = earlier[start..<end]
                 if history.inFloat32 {
-                    try computeInFloat32(cache) { try feed(tokens, into: $0) }
+                    try computeInFloat32(cache, halfPrecisionExperts: halfPrecisionExperts) { try feed(tokens, into: $0) }
                 } else {
                     try feed(tokens, into: cache)
                 }
@@ -204,7 +206,11 @@ extension MLXChatModel {
             guard let logits = captured.logits else { throw BeginningsError(description: "no logits") }
             eval(logits)
         }
-        if inFloat32 { try computeInFloat32(cache, read) } else { try read(cache) }
+        if inFloat32 {
+            try computeInFloat32(cache, halfPrecisionExperts: halfPrecisionExperts, read)
+        } else {
+            try read(cache)
+        }
         guard let logits = captured.logits?.asType(.float32) else { throw BeginningsError(description: "no logits") }
         let logProbs = logits - logSumExp(logits, axis: -1, keepDims: true)
         eval(logProbs)
@@ -224,6 +230,8 @@ extension MLXChatModel {
     public struct RequestsComparison: Sendable {
         /// The ways' names, the reference (float32) last.
         public var names: [String]
+        /// The app's own way.
+        public var app: Int
         /// For each request, for each way: its first token; nil when the way does not apply (only a request with earlier
         /// turns can compute them on their own).
         public var firstTokens: [[FirstToken?]]
@@ -231,10 +239,11 @@ extension MLXChatModel {
 
     /// Reads each request's first token from the beginning the model keeps (computed in float32, then rounded) in several
     /// ways: the request's new tokens in one pass in bfloat16 (as the app computed them before) and in float32 (as it does
-    /// now, `readingPrompt`); for a request with earlier turns, those turns on their own first, as the history computed
-    /// ahead (64 tokens at a time, `computeAhead`) or in one pass (`feedEarlierTurns`), in bfloat16 or in float32, then its
-    /// own message in float32; and the reference: every weight in float32, the beginning and the request computed in one
-    /// pass each, nothing rounded.
+    /// now, `readingPrompt`), and for a mixture-of-experts model in float32 with the experts' products in the other type
+    /// than the app's (`expertsInHalfPrecision`); for a request with earlier turns, those turns on their own first, as the
+    /// history computed ahead (64 tokens at a time, `computeAhead`) or in one pass (`feedEarlierTurns`), in bfloat16 or in
+    /// float32, then its own message in float32; and the reference: every weight in float32, the beginning and the request
+    /// computed in one pass each, nothing rounded.
     public func compareRequests(_ requests: [[ChatMessage]]) throws -> RequestsComparison {
         guard let beginning else { throw BeginningsError(description: "no beginning kept") }
         let state = BeginningState(name: "kept", tokens: beginning.tokens, cache: beginning.cache)
@@ -251,13 +260,22 @@ extension MLXChatModel {
         guard weightTypes() == types else {
             throw BeginningsError(description: "the weights did not go back to their types after the reference")
         }
-        let ways: [(name: String, inFloat32: Bool, history: (chunk: Int?, inFloat32: Bool)?)] = [
-            ("one pass, bfloat16 (the app before)", false, nil),
-            ("one pass, float32 (the app now)", true, nil),
-            ("earlier turns ahead, 64 at a time, bfloat16; then float32", true, (64, false)),
-            ("earlier turns ahead, 64 at a time, float32; then float32", true, (64, true)),
-            ("earlier turns in one pass, bfloat16; then float32", true, (nil, false)),
-            ("earlier turns in one pass, float32; then float32", true, (nil, true)),
+        typealias Way = (name: String, inFloat32: Bool, history: (chunk: Int?, inFloat32: Bool)?,
+                         halfPrecisionExperts: Bool?)
+        let experts = { (half: Bool) in half ? "the experts in bfloat16" : "the experts in float32 too" }
+        var ways: [Way] = [
+            ("one pass, bfloat16 (the app before)", false, nil, nil),
+            ("one pass, float32" + (hasExperts ? ", " + experts(expertsInHalfPrecision) : "") + " (the app now)", true,
+             nil, nil),
+        ]
+        if hasExperts {
+            ways.append(("one pass, float32, " + experts(!expertsInHalfPrecision), true, nil, !expertsInHalfPrecision))
+        }
+        ways += [
+            ("earlier turns ahead, 64 at a time, bfloat16; then float32", true, (64, false), nil),
+            ("earlier turns ahead, 64 at a time, float32; then float32", true, (64, true), nil),
+            ("earlier turns in one pass, bfloat16; then float32", true, (nil, false), nil),
+            ("earlier turns in one pass, float32; then float32", true, (nil, true), nil),
         ]
         var firstTokens: [[FirstToken?]] = []
         for (request, referenceRow) in zip(requests, referenceLogProbs) {
@@ -270,13 +288,20 @@ extension MLXChatModel {
                     continue
                 }
                 row.append(reading(try firstTokenLogProbs(request, from: state, inFloat32: way.inFloat32,
-                                                          history: way.history), reference: referenceRow))
+                                                          history: way.history,
+                                                          halfPrecisionExperts: way.halfPrecisionExperts),
+                                   reference: referenceRow))
             }
             row.append(reading(referenceRow, reference: referenceRow))
             firstTokens.append(row)
         }
-        return RequestsComparison(names: ways.map(\.name) + ["float32, every weight converted (reference)"],
+        return RequestsComparison(names: ways.map(\.name) + ["float32, every weight converted (reference)"], app: 1,
                                   firstTokens: firstTokens)
+    }
+
+    /// Whether the model has experts that compute in bfloat16 as the rest is computed in float32 (`HalfPrecisionExperts`).
+    private var hasExperts: Bool {
+        context.model.leafModules().flattened().contains { $0.1 is QuantizedSwitchLinear }
     }
 
     private func reading(_ logProbs: MLXArray, reference: MLXArray) -> FirstToken {
@@ -306,13 +331,16 @@ extension MLXChatModel {
         Dictionary(uniqueKeysWithValues: context.model.parameters().flattened().map { ($0.0, $0.1.dtype) })
     }
 
-    /// Puts the weights back as they were (exactly: a float32 made from a half-precision value goes back to it).
+    /// Puts the weights back as they were (exactly: a float32 made from a half-precision value goes back to it). They are
+    /// new arrays: what the model swaps in to compute in float32 is prepared again (`float32Swap`), rather than keep the
+    /// arrays it had.
     private func leaveFloat32(_ types: [String: DType]) {
         let restored = context.model.parameters().flattened().compactMap { key, array in
             types[key].map { (key, array.asType($0)) }
         }
         context.model.update(parameters: NestedDictionary<String, MLXArray>.unflattened(restored))
         eval(restored.map(\.1))
+        float32Swap = nil
         Memory.clearCache()
     }
 

@@ -13,6 +13,7 @@
 //                           [--watch-calls] [--examples app|none|file] [--web] [--addendum file]
 //                           [--web-addendum file] [--searxng http://127.0.0.1:8888 [--searxng-user name]]
 //                           [--record file.json] [--compare-beginnings] [--compare-requests] [--bfloat16-prompts]
+//                           [--bfloat16-experts]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -46,10 +47,13 @@
 // --compare-requests generates nothing either: from the beginning the app keeps, it reads each request's first token in
 // several ways, against the same float32 reference (every weight converted, the beginning and the request in one pass):
 // the request's new tokens in one pass, in bfloat16 as the app computed them before and in float32 as it does now (the
-// same as --watch-calls); and for a request with earlier exchanges, those first on their own (as the history computed
-// ahead, 64 tokens at a time, or in one pass as when a request goes back to the beginning), in bfloat16 or in float32.
+// same as --watch-calls), with a mixture-of-experts model (Gemma 4 26B) also with its experts' products in the other type
+// (float32 in the app, bfloat16 with --bfloat16-experts); and for a request with earlier exchanges, those first on their
+// own (as the history computed ahead, 64 tokens at a time, or in one pass as when a request goes back to the beginning),
+// in bfloat16 or in float32.
 // --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the app did before (comparisons in
-// one build; the beginning stays in float32).
+// one build; the beginning stays in float32). --bfloat16-experts computes a mixture-of-experts model's experts' products
+// in bfloat16 as the requests and the history are computed in float32 (the app computes them in float32 too).
 
 import Foundation
 import VoiceCore
@@ -267,6 +271,8 @@ func runActionsBench(_ o: Options) async throws {
     await model.watchToolCalls(o.watchCalls)
     await model.computePromptsInFloat32(!o.bfloat16Prompts)
     if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
+    await model.computeExpertsInHalfPrecision(o.bfloat16Experts)
+    if o.bfloat16Experts { print("experts' products in bfloat16 in the requests and the history (--bfloat16-experts)") }
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     // As `VoicePipeline` puts it together: the actions' part, or without them what the date line is; then the tools'.
@@ -715,7 +721,7 @@ private func compareRequests(_ corpus: Corpus, conversation: Conversation, dateL
     print("compared in \(clock.now - start)\n")
     let names = comparison.names
     let reference = names.count - 1
-    let app = 1  // one pass, float32
+    let app = comparison.app
     for (index, name) in names.enumerated() { print("  [\(index)] \(name)") }
     func decides(_ chance: Double) -> Bool { chance >= 0.5 }
 
@@ -747,14 +753,16 @@ private func compareRequests(_ corpus: Corpus, conversation: Conversation, dateL
         return line + " (\(pairs.count) requests)"
     }
     let rows = comparison.firstTokens
-    let withHistory = rows.filter { $0[2] != nil }  // the ways with earlier exchanges apply
+    let withHistory = rows.filter { $0.allSatisfy { $0 != nil } }  // the ways with earlier exchanges apply
+    // The ways that apply to every request: the request's new tokens in one pass.
+    let onePass = names.indices.filter { index in index != reference && rows.allSatisfy { $0[index] != nil } }
     print("\nagainst the reference [\(reference)], over all \(rows.count) requests:")
-    for index in [0, app] { print("  [\(index)] " + compare(index, against: reference, over: rows)) }
+    for index in onePass { print("  [\(index)] " + compare(index, against: reference, over: rows)) }
     print("\nthe \(withHistory.count) requests with earlier exchanges, against the reference [\(reference)]:")
     for index in names.indices where index != reference {
         print("  [\(index)] " + compare(index, against: reference, over: withHistory))
     }
-    print("\nthe same requests, against the app's way [\(app)] (one pass in float32):")
+    print("\nthe same requests, against the app's way [\(app)]:")
     for index in names.indices where index != reference && index != app {
         print("  [\(index)] " + compare(index, against: app, over: withHistory))
     }
