@@ -256,7 +256,7 @@ extension Snapshots {
         let relaysForSheets = RelayAccess(phone: PhoneAccess(link: nil, status: devices),
                                           inbound: InboundAccess(host: nil, status: online), passesInternetRelay: false)
 
-        // Connected tools (not reachable yet: their pages are drawn for whoever builds them)
+        // Connected tools (made-up ones: the pictures do not ask a real service)
         func action(_ id: String, _ title: String, reads: Bool = false, on: Bool = true) -> ConnectedTool.Action {
             ConnectedTool.Action(id: id, title: title, reads: reads, enabled: on)
         }
@@ -271,7 +271,7 @@ extension Snapshots {
         }
         let homeTool = ConnectedTool(name: "Home Assistant", icon: .home, color: Palette.turquoiseSoft, place: .home,
                                      connection: .service(address: "http://homeassistant.local:8123/api/mcp",
-                                                          access: .account),
+                                                          access: .token),
                                      actions: homeActions,
                                      log: [.init(date: at(11, 35), title: "Allumer le salon", result: .done),
                                            .init(date: at(11, 10), title: "Régler le chauffage à 19 °", result: .done),
@@ -447,7 +447,7 @@ extension Snapshots {
             SettingsScene(name: "RgMemoire-effacer-conversations", page: .memory,
                           events: [memory(Array(remembered.prefix(4)), exchanges: 1_248)], settings: journalOn,
                           prepare: { navigation, _, _ in navigation.sheet = .clearMemoryJournal }),
-            // Connected tools (drawn, greyed in the sidebar)
+            // Connected tools
             SettingsScene(name: "RgMcp", page: .tools, tools: tools),
             SettingsScene(name: "RgMcpVide", page: .tools),
             SettingsScene(name: "RgMcpOutil", page: .tools, tools: [homeTool],

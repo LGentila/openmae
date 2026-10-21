@@ -21,7 +21,7 @@ struct AssistantApp: App {
     @State private var inbound: InboundAccess
     @State private var relays: RelayAccess
     @State private var navigation = SettingsNavigation()
-    @State private var tools = ConnectedToolsAccess()
+    @State private var tools: ConnectedToolsAccess
 
     init() {
         Fonts.register()
@@ -86,6 +86,7 @@ struct AssistantApp: App {
         let relays = RelayAccess(phone: phone, inbound: inboundAccess)
         #endif
         _model = State(initialValue: model)
+        _tools = State(initialValue: ConnectedToolsAccess(model: model))
         _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
         _phone = State(initialValue: phone)
         _inbound = State(initialValue: inboundAccess)

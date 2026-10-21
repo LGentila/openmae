@@ -105,6 +105,10 @@ public actor AssistantHost: AssistantConnection {
     private var journalWriter: StoreJournal?
     /// Forgets the exchanges older than the retention, at start-up and once a day.
     private var purge: Task<Void, Never>?
+    /// The connected tools (MCP) that are on: with the actions on or off, like the web search.
+    private let connectedTools = ConnectedTools()
+    /// One client per connected tool, kept while its address, access and token stay the same (its session with it too).
+    private var mcpClients: [UUID: (key: String, client: MCPClient)] = [:]
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
     /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
@@ -127,6 +131,7 @@ public actor AssistantHost: AssistantConnection {
         commandLoop.withLock { $0 = loop }
         Task { await self.observeTimers() }
         Task { await self.observeTasks() }
+        Task { await self.observeConnectedTools() }
     }
 
     /// The app is quitting: the agents' runs stop with it (synchronous, from the app's last moments).
@@ -209,6 +214,19 @@ public actor AssistantHost: AssistantConnection {
         await pipeline?.noteForNextMessage(AgentPhrases.historyNote(for: task))
     }
 
+    private func observeConnectedTools() async {
+        let emit = emit
+        await connectedTools.observe { [weak self] report in
+            switch report {
+            case .log(let id, let entry): emit.yield(.connectedToolLog(id, entry))
+            case .state(let id, let state): emit.yield(.connectedToolState(id, state))
+            case .toolsChanged(let id):
+                // Fetched again; the interface keeps the new list in the settings, which apply at the next conversation.
+                Task { await self?.listChanged(id) }
+            }
+        }
+    }
+
     public nonisolated func send(_ command: AssistantCommand) {
         work.yield(.command(command))
     }
@@ -261,6 +279,8 @@ public actor AssistantHost: AssistantConnection {
         case .eraseMemory:
             do { try await memoryStore.eraseAll() } catch { emit.yield(.warning("\(error)")) }
             await reportMemory()
+        case .testConnectedTool(let tool):
+            Task { await testConnectedTool(tool) }
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:
@@ -692,6 +712,14 @@ public actor AssistantHost: AssistantConnection {
             if new.memory.retention != old.memory.retention { Task { await self.purgeJournal() } }
             await reportMemory()
         }
+        if new.connectedTools != old.connectedTools, new.actionsEnabled == old.actionsEnabled,
+           await configureConnectedTools()
+        {
+            // A tool added or removed, switched on or off, an action switched, "When she acts" changed: the tools are
+            // part of the model's instructions, so a new conversation starts, as when the actions are switched.
+            DebugLog.log("connected tools: \(new.connectedTools.filter(\.enabled).count) on")
+            do { try await pipeline?.setTools(await toolRunner()) } catch { emit.yield(.warning("\(error)")) }
+        }
         if agentsChanged || searchChanged || sourcesChanged || memoryChanged, new.actionsEnabled == old.actionsEnabled {
             if searchChanged {
                 DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
@@ -730,11 +758,13 @@ public actor AssistantHost: AssistantConnection {
     // MARK: - Actions
 
     /// The tools for a new pipeline or conversation: the actions when they are on; Claude Code, the web search, the
-    /// built-in sources, the news and the memory when they are, with the actions or on their own; nil when all are off.
+    /// built-in sources, the news, the connected tools and the memory when they are, with the actions or on their own;
+    /// nil when all are off.
     private func toolRunner() async -> ToolRunner? {
         await configureWebSearch()
         await configureSources()
         await configureAgents()
+        await configureConnectedTools()
         let sources: [any ToolProvider] = [weatherTools, quoteTools, travelTools]
         await configureMemory()
         // Last: the sheet it adds to the prompt changes between conversations, what comes before it does not.
@@ -743,15 +773,16 @@ public actor AssistantHost: AssistantConnection {
             // In the same order as with the actions.
             let agents: [any ToolProvider] = settings.claudeCode.enabled ? [agentTools] : []
             let search: [any ToolProvider] = settings.webSearch.isReady ? [webSearchTools] : []
+            let connected: [any ToolProvider] = await connectedTools.tools().isEmpty ? [] : [connectedTools]
             let on = agents + search + (sourcesOn ? sources : []) + (await newsTools.isOn ? [newsTools] : [])
-                + (settings.memory.enabled ? memory : [])
+                + connected + (settings.memory.enabled ? memory : [])
             return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
         await calendarTools.offerMoves(ActionCatalog.movesItems(on: tier))
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
         return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources
-            + [newsTools] + memory)
+            + [newsTools, connectedTools] + memory)
     }
 
     // MARK: - Memory
@@ -815,6 +846,72 @@ public actor AssistantHost: AssistantConnection {
         emit.yield(.memory(MemoryOverview(entries: entries, characters: MemorySheet(entries: entries).characters,
                                           capacity: MemorySheet.capacity, exchanges: exchanges,
                                           folder: memoryStore.folder.path)))
+    }
+
+    /// Hands the connected tools that are on to their provider, each with its client. Returns true when what the model
+    /// sees changed.
+    @discardableResult
+    private func configureConnectedTools() async -> Bool {
+        var connections: [ConnectedTools.Connection] = []
+        var kept: [UUID: (key: String, client: MCPClient)] = [:]
+        for tool in settings.connectedTools where tool.enabled {
+            guard let client = mcpClient(tool) else { continue }
+            kept[tool.id] = mcpClients[tool.id]
+            connections.append(ConnectedTools.Connection(settings: tool, client: client))
+        }
+        mcpClients = kept
+        return await connectedTools.configure(connections)
+    }
+
+    /// The client of a tool, the same one while its address, access and token do not change; nil when the address cannot
+    /// be one.
+    private func mcpClient(_ tool: ConnectedToolSettings) -> MCPClient? {
+        guard let address = MCPClient.address(tool.address) else { return nil }
+        let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
+        let key = "\(address.absoluteString) \(tool.access.rawValue) \(token.map { String($0.hashValue) } ?? "")"
+        if let known = mcpClients[tool.id], known.key == key { return known.client }
+        let client = MCPClient(address: address, token: token)
+        mcpClients[tool.id] = (key, client)
+        return client
+    }
+
+    /// The settings' "Test" button, or a tool being added: connects, lists its actions, and says how long it took.
+    private func testConnectedTool(_ tool: ConnectedToolSettings) async {
+        guard let address = MCPClient.address(tool.address) else {
+            emit.yield(.connectedToolTested(tool.id, .failed(.unreachable)))
+            return
+        }
+        // A new client: the token may have just been saved, and an old session must not hide a problem.
+        let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
+        let client = MCPClient(address: address, token: token)
+        let start = ContinuousClock.now
+        let test: ConnectedToolTest
+        do {
+            let tools = try await client.listTools()
+            let d = ContinuousClock.now - start
+            test = .works(tools: tools,
+                          seconds: Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
+            if settings.connectedTools.contains(where: { $0.id == tool.id }) {
+                emit.yield(.connectedToolState(tool.id, .connected))
+                mcpClients[tool.id] = nil  // the next configuration reads the token again
+            }
+        } catch let error as MCPError {
+            test = .failed(error)
+        } catch {
+            test = .failed(.unreachable)
+        }
+        if case .works(let tools, let seconds) = test {
+            DebugLog.log("connected tool test: \(tools.count) actions in \(seconds) s")
+        } else {
+            DebugLog.log("connected tool test: \(test)")
+        }
+        emit.yield(.connectedToolTested(tool.id, test))
+    }
+
+    /// A tool said its list of actions changed: fetched again, for the interface to keep.
+    private func listChanged(_ id: UUID) async {
+        guard let tool = settings.connectedTools.first(where: { $0.id == id }) else { return }
+        await testConnectedTool(tool)
     }
 
     /// The built-in sources are offered: switched on, on a tier whose model passed their benchmark.

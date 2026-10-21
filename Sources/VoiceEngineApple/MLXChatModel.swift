@@ -1243,16 +1243,42 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         return .toolCall(call)
     }
 
+    /// A list of strings comes as Gemma writes it, `[<|"|>light<|"|>]`, which the parser cannot read (it is not JSON):
+    /// a text, or strings that keep their marks. Read here as the list it is (a connected tool's `domain`).
     private static func value(_ value: MLXLMCommon.JSONValue) -> VoiceCore.JSONValue {
         switch value {
         case .null: .null
         case .bool(let b): .bool(b)
         case .int(let i): .int(i)
         case .double(let d): .double(d)
-        case .string(let s): .string(s)
+        case .string(let s): list(s) ?? .string(unquoted(s))
         case .array(let a): .array(a.map(Self.value))
         case .object(let o): .object(o.mapValues(Self.value))
         }
+    }
+
+    private static let stringMark = "<|\"|>"
+
+    private static func unquoted(_ text: String) -> String {
+        guard text.hasPrefix(stringMark), text.hasSuffix(stringMark), text.count >= 2 * stringMark.count else { return text }
+        return String(text.dropFirst(stringMark.count).dropLast(stringMark.count))
+    }
+
+    /// `[<|"|>light<|"|>,<|"|>switch<|"|>]` → ["light", "switch"]; nil for any other text.
+    private static func list(_ text: String) -> VoiceCore.JSONValue? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("["), text.hasSuffix("]"), text.contains(stringMark) else { return nil }
+        var items: [VoiceCore.JSONValue] = []
+        var rest = Substring(text.dropFirst().dropLast())
+        while let open = rest.range(of: stringMark) {
+            guard rest[..<open.lowerBound].allSatisfy({ $0 == "," || $0.isWhitespace }),
+                  let close = rest[open.upperBound...].range(of: stringMark)
+            else { return nil }
+            items.append(.string(String(rest[open.upperBound..<close.lowerBound])))
+            rest = rest[close.upperBound...]
+        }
+        guard rest.allSatisfy({ $0 == "," || $0.isWhitespace }) else { return nil }
+        return .array(items)
     }
 
     /// Where a request's computation starts from (see `reuseCache`).
@@ -1400,15 +1426,24 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private static func schema(_ tool: VoiceCore.ToolSpec) -> [String: any Sendable] {
         var properties: [String: any Sendable] = [:]
         for parameter in tool.parameters {
-            var property: [String: any Sendable] = ["description": parameter.description]
+            var property: [String: any Sendable] = [:]
             switch parameter.kind {
             case .string: property["type"] = "string"
             case .integer: property["type"] = "integer"
+            case .number: property["type"] = "number"
             case .boolean: property["type"] = "boolean"
             case .oneOf(let values):
                 property["type"] = "string"
                 property["enum"] = values
+            case .strings(let values):
+                property["type"] = "array"
+                property["items"] = (values.isEmpty ? ["type": "string"] : ["type": "string", "enum": values])
+                    as [String: any Sendable]
+            case .schema(let schema):
+                if case .object(let object) = schema { property = object.mapValues(Self.sendable) }
             }
+            // A connected tool's parameter may come without a description (Home Assistant's do).
+            if !parameter.description.isEmpty { property["description"] = parameter.description }
             properties[parameter.name] = property
         }
         let parameters: [String: any Sendable] = [

@@ -951,16 +951,19 @@ struct WindowSegmented<Value: Hashable>: View {
     let label: Text
     /// Its track as wide as its place, the segments at its start (in a sheet, under a field's label).
     var fills = false
+    /// Options not built yet: greyed, "Soon", as the sidebar shows a page not built yet.
+    var soon: Set<Value> = []
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options.indices, id: \.self) { i in
                 let option = options[i]
                 let isOn = option.value == selection
+                let isSoon = soon.contains(option.value)
                 Button { selection = option.value } label: {
-                    Text(option.title)
+                    (isSoon ? Text(option.title) + Text(verbatim: " · ") + Text("Soon") : Text(option.title))
                         .textStyle(isOn ? .control : .controlOff)
-                        .foregroundStyle(isOn ? Palette.ink : Palette.inkMuted)
+                        .foregroundStyle(isOn ? Palette.ink : isSoon ? Palette.inkDisabled : Palette.inkMuted)
                         .lineLimit(1)
                         .fixedSize()
                         .padding(.horizontal, 16)
@@ -977,6 +980,7 @@ struct WindowSegmented<Value: Hashable>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(isSoon)
                 .accessibilityAddTraits(isOn ? .isSelected : [])
             }
         }
@@ -1265,6 +1269,8 @@ struct SheetChoice: View {
     let disc: FamilyDisc
     let title: Text
     let detail: Text
+    /// False for a choice not built yet: greyed, "Soon", as the sidebar shows a page not built yet.
+    var isEnabled = true
     let choose: () -> Void
     @State private var isHovered = false
 
@@ -1272,18 +1278,25 @@ struct SheetChoice: View {
         Button(action: choose) {
             HStack(spacing: 16) {
                 disc
+                    .opacity(isEnabled ? 1 : 0.5)
                 VStack(alignment: .leading, spacing: 0) {
                     title
                         .textStyle(.rowTitle)
-                        .foregroundStyle(Palette.ink)
+                        .foregroundStyle(isEnabled ? Palette.ink : Palette.inkDisabled)
                     detail
                         .textStyle(.rowSub)
-                        .foregroundStyle(Palette.inkMuted)
+                        .foregroundStyle(isEnabled ? Palette.inkMuted : Palette.inkDisabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                IconView(icon: .forward, size: 18)
-                    .foregroundStyle(Palette.inkDisabled)
+                if isEnabled {
+                    IconView(icon: .forward, size: 18)
+                        .foregroundStyle(Palette.inkDisabled)
+                } else {
+                    Text("Soon")
+                        .textStyle(.sidebarCount)
+                        .foregroundStyle(Palette.inkDisabled)
+                }
             }
             .padding(16)
             .background(Palette.white, in: RoundedRectangle(cornerRadius: Radius.choice, style: .continuous))
@@ -1292,7 +1305,8 @@ struct SheetChoice: View {
             .contentShape(RoundedRectangle(cornerRadius: Radius.choice, style: .continuous))
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 && isEnabled }
         .animation(.easeOut(duration: Timing.ui), value: isHovered)
     }
 }

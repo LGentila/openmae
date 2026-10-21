@@ -184,7 +184,7 @@ public actor ToolRunner {
             return Reply(spoken: spoken.joined(separator: " "), forModel: .array(replies.map(\.forModel)),
                          retryable: false)
         case .decline:
-            await dropPending()
+            await dropPending(declined: true)
             return Reply(spoken: ActionPhrases.declined(context.language),
                          forModel: ["statut": "abandonné à la demande de l'utilisateur"], retryable: false)
         case .undo:
@@ -326,13 +326,20 @@ public actor ToolRunner {
         await dropPending()
     }
 
-    private func dropPending() async {
+    /// `declined`: the user said no.
+    private func dropPending(declined: Bool = false) async {
         expiry?.cancel()
         expiry = nil
         let dropped = pending
         pending = []
         pendingSince = nil
-        for action in dropped { await action.provider.dropped(action.call) }
+        for action in dropped {
+            if declined {
+                await action.provider.declined(action.call)
+            } else {
+                await action.provider.dropped(action.call)
+            }
+        }
     }
 
     /// A new conversation: nothing waits for a "oui" any more, and "annule" has nothing to take back.

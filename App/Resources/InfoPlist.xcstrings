@@ -86,13 +86,13 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ton iPhone trouve ce Mac sur ton Wi-Fi pour parler à Maé."
+            "value": "Ton iPhone trouve ce Mac sur ton Wi-Fi pour parler à Maé, et Maé joint les outils que tu connectes sur ton réseau, comme Home Assistant."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your iPhone finds this Mac on your Wi-Fi to talk to Maé."
+            "value": "Your iPhone finds this Mac on your Wi-Fi to talk to Maé, and Maé reaches the tools you connect on your network, such as Home Assistant."
           }
         }
       }

@@ -1,13 +1,11 @@
 import SwiftUI
 import VoiceCore
+import VoiceEngineApple
 
-// Settings › Connected tools (MCP): servers Maé can ask for actions (turn on a light, add a task, search notes),
-// several at once. NOT BUILT YET: OpenMaé has no MCP client. The pages and the sheet below are drawn from the design
-// (its screens of connected tools) and read `ConnectedToolsAccess`, which nothing feeds; the sidebar entry and the quick
-// panel's line stay greyed while `ConnectedToolsAccess.isAvailable` is false. Whoever builds MCP feeds `tools` from the
-// real client, fills the methods marked "Not wired yet", and sets `isAvailable`. To check before building, from the
-// design: Home Assistant's action names, its address and the administrator-only note are examples written without
-// asking a real server; "Ask first" by default for what acts is a proposal.
+// Settings › Connected tools (MCP): services Maé can ask for actions (turn on a light, add a task, search notes),
+// several at once, reached at their address. `ConnectedToolsAccess` turns the settings' connected tools and what the
+// engine reports (states, tests, logs) into what the pages show, and carries out what they change. A program on this Mac
+// (stdio) and signing in with an account (OAuth) are not built yet: shown greyed, "Soon".
 
 /// A connected tool, as the settings show it.
 struct ConnectedTool: Identifiable, Equatable {
@@ -50,7 +48,7 @@ struct ConnectedTool: Identifiable, Equatable {
             case failed(String)
         }
 
-        var id = UUID()
+        var id = UUID().uuidString
         var date: Date
         var title: String
         var result: Result
@@ -59,6 +57,7 @@ struct ConnectedTool: Identifiable, Equatable {
     enum Test: Equatable {
         case works(actions: Int, seconds: Double)
         case noAnswer
+        case failed(String)
     }
 
     var id = UUID()
@@ -81,43 +80,101 @@ struct ConnectedTool: Identifiable, Equatable {
 @MainActor
 @Observable
 final class ConnectedToolsAccess {
-    /// False until MCP is built: the sidebar entry and the quick panel's line are greyed.
-    static let isAvailable = false
+    /// The sidebar entry and the quick panel's line are greyed while false.
+    static let isAvailable = true
 
-    var tools: [ConnectedTool]
+    /// nil for the still pictures of the screens, which show `shown`.
+    @ObservationIgnored private let model: AssistantModel?
+    private let shown: [ConnectedTool]
+    /// The tools whose test is under way.
+    private(set) var testing: Set<ConnectedTool.ID> = []
+    /// What the last trial of a draft found, by the draft's trial id.
+    @ObservationIgnored private var trialTools: [UUID: [MCPTool]] = [:]
 
+    init(model: AssistantModel) {
+        self.model = model
+        shown = []
+    }
+
+    /// The still pictures: these tools, nothing wired.
     init(tools: [ConnectedTool] = []) {
-        self.tools = tools
+        model = nil
+        shown = tools
+    }
+
+    var tools: [ConnectedTool] {
+        guard let model else { return shown }
+        return model.settings.connectedTools.enumerated().map { Self.shown($1, index: $0, model: model) }
     }
 
     func tool(_ id: ConnectedTool.ID) -> ConnectedTool? {
         tools.first { $0.id == id }
     }
 
-    /// A change made in the settings. Not wired yet: the real client must apply it (and report the new state).
+    /// A change made in the settings: its switch, "When she acts", an action's switch. The engine starts a new
+    /// conversation with the new tools.
     func update(_ tool: ConnectedTool) {
-        guard let i = tools.firstIndex(where: { $0.id == tool.id }) else { return }
-        tools[i] = tool
+        guard let model, let i = model.settings.connectedTools.firstIndex(where: { $0.id == tool.id }) else { return }
+        var settings = model.settings.connectedTools[i]
+        settings.enabled = tool.enabled
+        settings.whenActing = tool.whenActing == .askFirst ? .askFirst : .doDirectly
+        for action in tool.actions {
+            if let a = settings.actions.firstIndex(where: { $0.name == action.id }) { settings.actions[a].enabled = action.enabled }
+        }
+        if settings != model.settings.connectedTools[i] { model.settings.connectedTools[i] = settings }
     }
 
-    /// "Reconnect" (signing in again), "Try again", "Test". Not wired yet.
-    func reconnect(_ id: ConnectedTool.ID) {}
-    func test(_ id: ConnectedTool.ID) {}
+    /// "Test", "Try again": connects again and lists its actions (kept in the settings).
+    func test(_ id: ConnectedTool.ID) {
+        guard let model, let settings = model.settings.connectedTools.first(where: { $0.id == id }), !testing.contains(id)
+        else { return }
+        testing.insert(id)
+        Task {
+            _ = await model.testConnectedTool(settings)
+            testing.remove(id)
+        }
+    }
 
+    /// Removes the tool, its token and its log.
     func remove(_ id: ConnectedTool.ID) {
-        tools.removeAll { $0.id == id }  // Not wired yet: the client must forget it too.
+        guard let model else { return }
+        model.settings.connectedTools.removeAll { $0.id == id }
+        ConnectedToolsKeychain.setToken(nil, for: id)
+        model.forgetConnectedTool(id)
     }
 
-    /// What "Add a tool" asks for.
+    /// What "Add a tool" asks for, or "Change…" of a tool's connection.
     struct Draft: Equatable {
         enum Kind: Equatable { case service, program }
 
+        /// The tool's id once added; the tool changed, for "Change…".
+        var id = UUID()
+        /// Where the token of a trial is kept until the tool is added or saved (the tool's own id for a new tool).
+        var trialID: UUID
         var kind = Kind.service
         var name = ""
         var address = ""
-        var access = ConnectedTool.Access.account
+        var access = ConnectedTool.Access.token
+        /// Typed in the sheet; empty for "Change…" keeps the saved one. Goes to the keychain, never to the settings.
+        var token = ""
         var command = ""
         var arguments = ""
+        /// "Change…": the tool's connection, not a new tool.
+        var changes = false
+
+        init() {
+            trialID = id
+        }
+
+        /// "Change…" of this tool.
+        init(changing tool: ConnectedToolSettings) {
+            id = tool.id
+            trialID = UUID()
+            name = tool.name
+            address = tool.address
+            access = ConnectedToolsAccess.shown(tool.access)
+            changes = true
+        }
     }
 
     /// What the test of a new tool found.
@@ -126,13 +183,162 @@ final class ConnectedToolsAccess {
         case failed(String)
     }
 
-    /// Connects to a new tool to see what it offers. Not wired yet.
-    func trial(_ draft: Draft) async -> Trial {
-        .failed(String(localized: "Connected tools are not available yet."))
+    func draft(changing id: ConnectedTool.ID) -> Draft? {
+        model?.settings.connectedTools.first { $0.id == id }.map(Draft.init(changing:))
     }
 
-    /// Adds the tool the trial connected to; its id. Not wired yet.
-    func add(_ draft: Draft) -> ConnectedTool.ID? { nil }
+    /// Connects to the tool of a draft, to see what it offers.
+    func trial(_ draft: Draft) async -> Trial {
+        guard let model else { return .failed(String(localized: "Connected tools are not available yet.")) }
+        guard MCPClient.address(draft.address) != nil else { return .failed(String(localized: "This address can’t be one.")) }
+        let access = Self.settings(draft.access)
+        var token = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if access == .token, token.isEmpty, draft.changes { token = ConnectedToolsKeychain.token(for: draft.id) ?? "" }
+        if access == .token, token.isEmpty { return .failed(String(localized: "Paste the tool’s token first.")) }
+        ConnectedToolsKeychain.setToken(access == .token ? token : nil, for: draft.trialID, name: draft.name)
+        let tested = ConnectedToolSettings(id: draft.trialID, name: draft.name, address: draft.address, access: access)
+        switch await model.testConnectedTool(tested) {
+        case .works(let tools, _):
+            trialTools[draft.trialID] = tools
+            return .connected(actions: tools.count)
+        case .failed(let error):
+            trialTools[draft.trialID] = nil
+            return .failed(Self.reason(error))
+        }
+    }
+
+    /// Adds the tool the trial connected to, or saves the changed connection; its id.
+    func add(_ draft: Draft) -> ConnectedTool.ID? {
+        guard let model, let found = trialTools.removeValue(forKey: draft.trialID) else { return nil }
+        let access = Self.settings(draft.access)
+        if draft.trialID != draft.id {
+            ConnectedToolsKeychain.setToken(access == .token ? ConnectedToolsKeychain.token(for: draft.trialID) : nil,
+                                            for: draft.id, name: draft.name)
+            ConnectedToolsKeychain.setToken(nil, for: draft.trialID)
+        }
+        let name = draft.name.trimmingCharacters(in: .whitespaces)
+        if let i = model.settings.connectedTools.firstIndex(where: { $0.id == draft.id }) {
+            var tool = model.settings.connectedTools[i]
+            tool.address = draft.address.trimmingCharacters(in: .whitespacesAndNewlines)
+            tool.access = access
+            if !name.isEmpty { tool.name = name }
+            tool.actions = tool.merging(found)
+            model.settings.connectedTools[i] = tool
+            model.reconnected(draft.id)
+        } else {
+            var tool = ConnectedToolSettings(id: draft.id, name: name,
+                                             address: draft.address.trimmingCharacters(in: .whitespacesAndNewlines),
+                                             access: access)
+            tool.actions = tool.merging(found)
+            model.settings.connectedTools.append(tool)
+        }
+        return draft.id
+    }
+
+    /// The sheet closed without adding or saving: the token of its trial goes.
+    func discard(_ draft: Draft) {
+        trialTools[draft.trialID] = nil
+        guard draft.trialID != draft.id || model?.settings.connectedTools.contains(where: { $0.id == draft.id }) == false
+        else { return }
+        ConnectedToolsKeychain.setToken(nil, for: draft.trialID)
+    }
+
+    // MARK: - From the settings
+
+    private static func shown(_ tool: ConnectedToolSettings, index: Int, model: AssistantModel) -> ConnectedTool {
+        let host = MCPClient.address(tool.address)?.host() ?? ""
+        let home = tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
+        let place: ConnectedTool.Place = MCPClient.isHomeNetwork(host) ? .home : .internet
+        let colors = [Palette.azureSoft, Palette.sunSoft, Palette.coralSoft]
+        let state: ConnectedTool.State = switch model.connectedToolStates[tool.id] {
+        case _ where !tool.enabled: .paused
+        case .needsReconnect?: .needsReconnect
+        case .unreachable?: .unreachable
+        default: .connected
+        }
+        let lastTest: ConnectedTool.Test? = switch model.connectedToolTests[tool.id] {
+        case .works(let tools, let seconds)?: .works(actions: tools.count, seconds: seconds)
+        case .failed(let error)? where error == .noAnswer || error == .unreachable: .noAnswer
+        case .failed(let error)?: .failed(reason(error))
+        case nil: nil
+        }
+        let log = (model.connectedToolLogs[tool.id] ?? []).enumerated().map { i, entry in
+            ConnectedTool.LogEntry(id: "\(i)-\(entry.date.timeIntervalSince1970)", date: entry.date, title: entry.title,
+                                   result: result(entry.result))
+        }
+        return ConnectedTool(
+            id: tool.id, name: tool.name, icon: home ? .home : place == .home ? .plug : .globe,
+            color: home ? Palette.turquoiseSoft : colors[index % colors.count], place: place,
+            connection: .service(address: tool.address, access: shown(tool.access)), state: state, enabled: tool.enabled,
+            whenActing: tool.whenActing == .askFirst ? .askFirst : .doDirectly,
+            actions: tool.actions.map { ConnectedTool.Action(id: $0.name, title: title($0.tool), reads: $0.reads,
+                                                              enabled: $0.enabled) },
+            log: log, lastTest: lastTest,
+            accessNote: home ? String(localized: "By default, only Home Assistant administrator accounts can connect.")
+                : nil)
+    }
+
+    nonisolated static func shown(_ access: ConnectedToolSettings.Access) -> ConnectedTool.Access {
+        switch access {
+        case .token: .token
+        case .none: .none
+        case .account: .account
+        }
+    }
+
+    private static func settings(_ access: ConnectedTool.Access) -> ConnectedToolSettings.Access {
+        switch access {
+        case .token: .token
+        case .none: .none
+        case .account: .account
+        }
+    }
+
+    /// Home Assistant's common actions get a title of their own; any other one the service's title, or its name.
+    private static func title(_ tool: MCPTool) -> String {
+        switch tool.name {
+        case "GetLiveContext": String(localized: "Read the state of the home")
+        case "GetDateTime": String(localized: "Read the date and time")
+        case "HassTurnOn": String(localized: "Turn on")
+        case "HassTurnOff": String(localized: "Turn off")
+        case "HassToggle": String(localized: "Switch over")
+        case "HassLightSet": String(localized: "Set a light")
+        case "HassClimateSetTemperature": String(localized: "Set the heating")
+        case "HassSetPosition": String(localized: "Open or close")
+        case "HassMediaPause": String(localized: "Pause the music")
+        case "HassMediaUnpause": String(localized: "Resume the music")
+        case "HassMediaNext": String(localized: "Next track")
+        case "HassMediaPrevious": String(localized: "Previous track")
+        case "HassSetVolume": String(localized: "Set the volume")
+        case "HassListAddItem": String(localized: "Add to a list")
+        case "HassListCompleteItem": String(localized: "Check off an item of a list")
+        case "todo_get_items": String(localized: "Read a list")
+        case "calendar_get_events": String(localized: "Read the calendar")
+        default: tool.title ?? tool.name
+        }
+    }
+
+    private static func result(_ result: ConnectedToolLogEntry.Result) -> ConnectedTool.LogEntry.Result {
+        switch result {
+        case .done: .done
+        case .refusedByUser: .refusedByUser
+        case .failed(.noAnswer): .failed(String(localized: "no answer"))
+        case .failed(.unreachable): .failed(String(localized: "unreachable"))
+        case .failed(.unauthorized): .failed(String(localized: "access refused"))
+        case .failed(.said(let why)): .failed(why)
+        }
+    }
+
+    /// Why a trial or a test failed, for the sheet and the tool's page.
+    static func reason(_ error: MCPError) -> String {
+        switch error {
+        case .unreachable: String(localized: "Nothing answers at this address. Check it, and that this Mac is on the same network.")
+        case .noAnswer: String(localized: "The tool did not answer in time.")
+        case .unauthorized: String(localized: "The tool refuses the access: check the token.")
+        case .notMCP(let what): String(localized: "Something answers at this address, but not a connected tool (\(what)).")
+        case .refused(let why): String(localized: "The tool refused: \(why)")
+        }
+    }
 }
 
 // MARK: - The list
@@ -197,7 +403,7 @@ struct ToolsPage: View {
                 }
                 .accessibilityElement(children: .combine)
                 if tool.state == .needsReconnect {
-                    Button("Reconnect") { tools.reconnect(tool.id) }
+                    Button("Reconnect") { navigation.sheet = .changeTool(tool.id) }
                         .buttonStyle(WindowButtonStyle(kind: .link))
                 } else {
                     BareSwitch(label: Text("Turn on \(tool.name)"), isOn: Binding(
@@ -214,6 +420,12 @@ struct ToolsPage: View {
                     .accessibilityLabel(Text("\(tool.name) settings"))
             }
         }
+    }
+
+    /// The quick panel's line: "None", "1 on", "2 on".
+    static func summary(_ model: AssistantModel) -> Text {
+        let on = model.settings.connectedTools.filter(\.enabled).count
+        return on == 0 ? Text("None") : Text("\(on) on")
     }
 
     static func badge(_ tools: ConnectedToolsAccess) -> SidebarBadge? {
@@ -267,6 +479,7 @@ struct ToolPage: View {
                 ActionRow(top: 12, bottom: 0) {
                     Button("Try again") { tools.test(tool.id) }
                         .buttonStyle(WindowButtonStyle())
+                        .disabled(tools.testing.contains(tool.id))
                 }
             }
             PageSection("Connection")
@@ -313,7 +526,7 @@ struct ToolPage: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Button("Change…") {}
+                    Button("Change…") { navigation.sheet = .changeTool(tool.id) }
                         .buttonStyle(WindowButtonStyle())
                 }
             }
@@ -324,7 +537,7 @@ struct ToolPage: View {
                         .textStyle(.setting)
                         .foregroundStyle(Palette.ink)
                     if access != .none {
-                        Button("Reconnect") { tools.reconnect(tool.id) }
+                        Button("Reconnect") { navigation.sheet = .changeTool(tool.id) }
                             .buttonStyle(WindowButtonStyle())
                     }
                 }
@@ -348,11 +561,18 @@ struct ToolPage: View {
                                style: .success)
                 case .noAnswer:
                     StatusPill(text: Text("No answer"), style: .refused)
+                case .failed(let reason):
+                    StatusPill(text: Text("Failed: \(reason)"), style: .refused)
+                        .lineLimit(1)
                 case nil:
                     EmptyView()
                 }
+                if tools.testing.contains(tool.id) {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Test") { tools.test(tool.id) }
                     .buttonStyle(WindowButtonStyle())
+                    .disabled(tools.testing.contains(tool.id))
             }
         }
     }
@@ -419,7 +639,8 @@ struct ToolPage: View {
 
 // MARK: - Sheets
 
-/// "Add a tool": a service on the network or on the internet, or a program on this Mac; tested when added.
+/// "Add a tool": a service on the network or on the internet (a program on this Mac comes later); tested when added.
+/// Also "Change…" and "Reconnect" of a tool's connection: its address, its access, a new token.
 struct AddToolSheet: View {
     let tools: ConnectedToolsAccess
     let navigation: SettingsNavigation
@@ -427,6 +648,8 @@ struct AddToolSheet: View {
     @State private var draft: ConnectedToolsAccess.Draft
     @State private var trial: ConnectedToolsAccess.Trial?
     @State private var isTrying = false
+    /// The trial of exactly this draft connected (a change of its address or token needs a new one).
+    @State private var tried: ConnectedToolsAccess.Draft?
 
     enum Step: Equatable { case choose, form }
 
@@ -462,7 +685,7 @@ struct AddToolSheet: View {
                 }
                 SheetChoice(disc: FamilyDisc(icon: .laptop, color: Palette.sunSoft, size: 48),
                             title: Text("A program on this Mac"),
-                            detail: Text("Notes, files, browser… Maé starts it herself."))
+                            detail: Text("Notes, files, browser… Maé starts it herself."), isEnabled: false)
                 {
                     draft.kind = .program
                     step = .form
@@ -481,13 +704,15 @@ struct AddToolSheet: View {
     }
 
     private var form: some View {
-        SheetCard(title: draft.kind == .service ? Text("A service on your network or on the internet")
-            : Text("A program on this Mac"))
+        SheetCard(title: draft.changes ? Text("The connection of \(draft.name)")
+            : draft.kind == .service ? Text("A service on your network or on the internet") : Text("A program on this Mac"))
         {
             VStack(alignment: .leading, spacing: 0) {
-                LabeledField(label: Text("Name")) {
-                    TextField(text: $draft.name, prompt: placeholder(Text(verbatim: ""))) { Text("Name") }
-                        .windowField()
+                if !draft.changes {
+                    LabeledField(label: Text("Name")) {
+                        TextField(text: $draft.name, prompt: placeholder(Text(verbatim: ""))) { Text("Name") }
+                            .windowField()
+                    }
                 }
                 if draft.kind == .service {
                     LabeledField(label: Text("Address")) {
@@ -500,10 +725,21 @@ struct AddToolSheet: View {
                         WindowSegmented(selection: $draft.access,
                                         options: [(value: .account, title: "With my account"),
                                                   (value: .token, title: "With a token"), (value: .none, title: "None")],
-                                        label: Text("Access"), fills: true)
+                                        label: Text("Access"), fills: true, soon: [.account])
                     }
-                    Note("For Home Assistant: turn on the “MCP Server” integration in Settings › Devices & services. Only administrator accounts can connect to it.",
-                         icon: .bulb)
+                    if draft.access == .token {
+                        LabeledField(label: Text("Token")) {
+                            SecureField(text: $draft.token, prompt: placeholder(draft.changes ? Text(verbatim: "••••••••")
+                                : Text("Paste the token here"))) { Text("Token") }
+                                .windowField(mono: true, isRefused: isRefused)
+                        }
+                        Caption(draft.changes ? "Leave it empty to keep the saved token. It is kept in your Mac’s keychain."
+                            : "It is kept in your Mac’s keychain.")
+                    }
+                    if !draft.changes {
+                        Note("For Home Assistant: add the “Model Context Protocol Server” integration in Settings › Devices & services, then create a long-lived access token in your profile, under Security. By default, only administrator accounts can connect.",
+                             icon: .bulb)
+                    }
                 } else {
                     LabeledField(label: Text("Command")) {
                         TextField(text: $draft.command, prompt: placeholder(Text(verbatim: "npx -y @modelcontextprotocol/server-filesystem"))) {
@@ -530,17 +766,32 @@ struct AddToolSheet: View {
             }
             .padding(.top, 18)
         } footer: {
-            Button("Back") {
-                step = .choose
-                trial = nil
+            if draft.changes {
+                Button("Cancel") { navigation.sheet = nil }
+                    .buttonStyle(WindowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+            } else {
+                Button("Back") {
+                    step = .choose
+                    trial = nil
+                }
+                .buttonStyle(WindowButtonStyle())
+                .keyboardShortcut(.cancelAction)
             }
-            .buttonStyle(WindowButtonStyle())
-            .keyboardShortcut(.cancelAction)
+            if isTrying { ProgressView().controlSize(.small) }
             Button(action: next) { nextTitle }
                 .buttonStyle(WindowButtonStyle(kind: .main))
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isComplete || isTrying)
         }
+        .onChange(of: draft) {
+            // Another address, access or token: the trial no longer tells anything.
+            if tried != nil, tried != draft {
+                tried = nil
+                trial = nil
+            }
+        }
+        .onDisappear { tools.discard(draft) }
     }
 
     private var isRefused: Bool {
@@ -558,7 +809,7 @@ struct AddToolSheet: View {
 
     private var nextTitle: Text {
         switch trial {
-        case .connected: Text("Add")
+        case .connected: draft.changes ? Text("Save") : Text("Add")
         case .failed: Text("Try again")
         case nil: draft.kind == .program ? Text("Test and add") : Text("Test")
         }
@@ -575,6 +826,7 @@ struct AddToolSheet: View {
         let draft = draft
         Task {
             trial = await tools.trial(draft)
+            if case .connected = trial { tried = draft }
             isTrying = false
         }
     }

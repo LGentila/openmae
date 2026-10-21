@@ -141,6 +141,16 @@
         }
       }
     },
+    "%lld on": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld activé(s)"
+          }
+        }
+      }
+    },
     "%lld ready": {
       "localizations": {
         "fr": {
@@ -437,6 +447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ajouter un outil"
+          }
+        }
+      }
+    },
+    "Add to a list": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter à une liste"
           }
         }
       }
@@ -801,6 +821,16 @@
         }
       }
     },
+    "By default, only Home Assistant administrator accounts can connect.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Par défaut, seuls les comptes administrateur de Home Assistant peuvent se connecter."
+          }
+        }
+      }
+    },
     "Calendar and reminders": {
       "localizations": {
         "fr": {
@@ -867,6 +897,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Modifier…"
+          }
+        }
+      }
+    },
+    "Check off an item of a list": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cocher un élément d’une liste"
           }
         }
       }
@@ -1621,12 +1661,12 @@
         }
       }
     },
-    "For Home Assistant: turn on the “MCP Server” integration in Settings › Devices & services. Only administrator accounts can connect to it.": {
+    "For Home Assistant: add the “Model Context Protocol Server” integration in Settings › Devices & services, then create a long-lived access token in your profile, under Security. By default, only administrator accounts can connect.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pour Home Assistant : active l’intégration « Serveur MCP » dans Paramètres › Appareils et services. Seuls les comptes administrateur peuvent s’y connecter."
+            "value": "Pour Home Assistant : ajoute l’intégration « Model Context Protocol Server » dans Paramètres › Appareils et services, puis crée un jeton d’accès longue durée dans ton profil, sous Sécurité. Par défaut, seuls les comptes administrateur peuvent se connecter."
           }
         }
       }
@@ -2151,6 +2191,16 @@
         }
       }
     },
+    "It is kept in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il est gardé dans le trousseau de ton Mac."
+          }
+        }
+      }
+    },
     "It took over 10 seconds to arrive.": {
       "localizations": {
         "fr": {
@@ -2367,6 +2417,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dernière étape"
+          }
+        }
+      }
+    },
+    "Leave it empty to keep the saved token. It is kept in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Laisse-le vide pour garder le jeton enregistré. Il est gardé dans le trousseau de ton Mac."
           }
         }
       }
@@ -2971,6 +3031,16 @@
         }
       }
     },
+    "Next track": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Morceau suivant"
+          }
+        }
+      }
+    },
     "No answer": {
       "localizations": {
         "fr": {
@@ -3157,6 +3227,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Notes, fichiers, navigateur… Maé le lance elle-même."
+          }
+        }
+      }
+    },
+    "Nothing answers at this address. Check it, and that this Mac is on the same network.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien ne répond à cette adresse. Vérifie-la, et que ce Mac est sur le même réseau."
           }
         }
       }
@@ -3401,6 +3481,16 @@
         }
       }
     },
+    "Open or close": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir ou fermer"
+          }
+        }
+      }
+    },
     "Open the folder": {
       "localizations": {
         "fr": {
@@ -3511,6 +3601,26 @@
         }
       }
     },
+    "Paste the token here": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colle le jeton ici"
+          }
+        }
+      }
+    },
+    "Paste the tool’s token first.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colle d’abord le jeton de l’outil."
+          }
+        }
+      }
+    },
     "Paste your Brave key first.": {
       "localizations": {
         "fr": {
@@ -3537,6 +3647,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mettre en pause"
+          }
+        }
+      }
+    },
+    "Pause the music": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mettre la musique en pause"
           }
         }
       }
@@ -3631,6 +3751,16 @@
         }
       }
     },
+    "Previous track": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Morceau précédent"
+          }
+        }
+      }
+    },
     "Protected by a password": {
       "localizations": {
         "fr": {
@@ -3701,12 +3831,52 @@
         }
       }
     },
+    "Read a list": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire une liste"
+          }
+        }
+      }
+    },
     "Read back before sending": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Relire avant d’envoyer"
+          }
+        }
+      }
+    },
+    "Read the calendar": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire l’agenda"
+          }
+        }
+      }
+    },
+    "Read the date and time": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire la date et l’heure"
+          }
+        }
+      }
+    },
+    "Read the state of the home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire l’état de la maison"
           }
         }
       }
@@ -3951,6 +4121,16 @@
         }
       }
     },
+    "Resume the music": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre la musique"
+          }
+        }
+      }
+    },
     "Run it at once": {
       "localizations": {
         "fr": {
@@ -4107,6 +4287,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Session"
+          }
+        }
+      }
+    },
+    "Set a light": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Régler une lumière"
+          }
+        }
+      }
+    },
+    "Set the heating": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Régler le chauffage"
+          }
+        }
+      }
+    },
+    "Set the volume": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Régler le volume"
           }
         }
       }
@@ -4281,6 +4491,16 @@
         }
       }
     },
+    "Something answers at this address, but not a connected tool (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quelque chose répond à cette adresse, mais pas un outil connecté (%@)."
+          }
+        }
+      }
+    },
     "Soon": {
       "localizations": {
         "fr": {
@@ -4437,6 +4657,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arrêtée"
+          }
+        }
+      }
+    },
+    "Switch over": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Basculer"
           }
         }
       }
@@ -4671,6 +4901,16 @@
         }
       }
     },
+    "The connection of %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion de %@"
+          }
+        }
+      }
+    },
     "The conversation goes on on your iPad until you take over.": {
       "localizations": {
         "fr": {
@@ -4871,6 +5111,36 @@
         }
       }
     },
+    "The tool did not answer in time.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’outil n’a pas répondu à temps."
+          }
+        }
+      }
+    },
+    "The tool refused: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’outil a refusé : %@"
+          }
+        }
+      }
+    },
+    "The tool refuses the access: check the token.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’outil refuse l’accès : vérifie le jeton."
+          }
+        }
+      }
+    },
     "Thinking": {
       "localizations": {
         "fr": {
@@ -4917,6 +5187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce Mac n’est pas compatible"
+          }
+        }
+      }
+    },
+    "This address can’t be one.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette adresse ne peut pas en être une."
           }
         }
       }
@@ -5111,6 +5391,16 @@
         }
       }
     },
+    "Token": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jeton"
+          }
+        }
+      }
+    },
     "Tokens already in memory": {
       "localizations": {
         "fr": {
@@ -5167,6 +5457,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réessayer"
+          }
+        }
+      }
+    },
+    "Turn off": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Éteindre"
+          }
+        }
+      }
+    },
+    "Turn on": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allumer"
           }
         }
       }
@@ -5861,6 +6171,16 @@
         }
       }
     },
+    "access refused": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "accès refusé"
+          }
+        }
+      }
+    },
     "already here": {
       "localizations": {
         "fr": {
@@ -5981,6 +6301,16 @@
         }
       }
     },
+    "no answer": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pas de réponse"
+          }
+        }
+      }
+    },
     "or press": {
       "localizations": {
         "fr": {
@@ -6017,6 +6347,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "pour parler"
+          }
+        }
+      }
+    },
+    "unreachable": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "injoignable"
           }
         }
       }

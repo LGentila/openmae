@@ -68,6 +68,11 @@ final class AssistantModel {
     private(set) var isTestingWebSearch = false
     /// What Maé remembers and how many exchanges the journal holds (the memory page); nil until the engine said.
     private(set) var memory: MemoryOverview?
+    /// The connected tools: where each stands after its last action or test, its last test, its log (the most recent
+    /// first, kept across launches).
+    private(set) var connectedToolStates: [UUID: ConnectedToolState] = [:]
+    private(set) var connectedToolTests: [UUID: ConnectedToolTest] = [:]
+    private(set) var connectedToolLogs: [UUID: [ConnectedToolLogEntry]] = AssistantModel.loadToolLogs()
     /// Quitting would stop a task.
     var hasRunningTask: Bool { tasks.contains { $0.status == .running } }
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
@@ -162,6 +167,8 @@ final class AssistantModel {
     /// The web search's settings when its "Test" button was clicked: a result that comes back after they changed
     /// (another source chosen meanwhile) is not shown.
     @ObservationIgnored private var testedWebSearch: WebSearchSettings?
+    /// Those waiting for a connected tool's test, by its id.
+    @ObservationIgnored private var toolTestWaiters: [UUID: [CheckedContinuation<ConnectedToolTest, Never>]] = [:]
 
     init(connection: any AssistantConnection) {
         self.connection = connection
@@ -269,6 +276,29 @@ final class AssistantModel {
     /// "Erase everything": the sheet and the journal.
     func eraseMemory() {
         connection.send(.eraseMemory)
+    }
+
+    /// Connects to a connected tool and lists its actions, with the token the keychain keeps for its id. For a tool of the
+    /// settings, the list found replaces the one they keep (each action keeping its switch).
+    func testConnectedTool(_ tool: ConnectedToolSettings) async -> ConnectedToolTest {
+        await withCheckedContinuation { continuation in
+            toolTestWaiters[tool.id, default: []].append(continuation)
+            connection.send(.testConnectedTool(tool))
+        }
+    }
+
+    /// A tool's connection was changed after a trial that connected (`ConnectedToolsAccess.add`).
+    func reconnected(_ id: UUID) {
+        connectedToolStates[id] = .connected
+        connectedToolTests[id] = nil
+    }
+
+    /// A tool removed: its state, test and log go with it.
+    func forgetConnectedTool(_ id: UUID) {
+        connectedToolStates[id] = nil
+        connectedToolTests[id] = nil
+        connectedToolLogs[id] = nil
+        Self.saveToolLogs(connectedToolLogs)
     }
 
     /// The Stop button of a task.
@@ -385,6 +415,26 @@ final class AssistantModel {
         case .webSearchTested(let test):
             if testedWebSearch.map({ $0 == settings.webSearch }) ?? true { webSearchTest = test }
             isTestingWebSearch = false
+        case .connectedToolTested(let id, let test):
+            connectedToolTests[id] = test
+            if let i = settings.connectedTools.firstIndex(where: { $0.id == id }) {
+                switch test {
+                case .works(let tools, _):
+                    connectedToolStates[id] = .connected
+                    let actions = settings.connectedTools[i].merging(tools)
+                    if actions != settings.connectedTools[i].actions { settings.connectedTools[i].actions = actions }
+                case .failed(.unauthorized): connectedToolStates[id] = .needsReconnect
+                case .failed: connectedToolStates[id] = .unreachable
+                }
+            }
+            for waiter in toolTestWaiters.removeValue(forKey: id) ?? [] { waiter.resume(returning: test) }
+        case .connectedToolLog(let id, let entry):
+            var log = connectedToolLogs[id] ?? []
+            log.insert(entry, at: 0)
+            connectedToolLogs[id] = Array(log.prefix(Self.toolLogLength))
+            Self.saveToolLogs(connectedToolLogs)
+        case .connectedToolState(let id, let state):
+            connectedToolStates[id] = state
         case .warning(let message):
             lastWarning = message
         }
@@ -468,6 +518,20 @@ final class AssistantModel {
     // MARK: - Saved settings
 
     nonisolated static let settingsKey = "settings"
+    private static let toolLogsKey = "connectedToolsLog"
+    /// Lines kept in each connected tool's log.
+    static let toolLogLength = 20
+
+    private static func loadToolLogs() -> [UUID: [ConnectedToolLogEntry]] {
+        guard let data = AppDefaults.store.data(forKey: toolLogsKey),
+              let logs = try? JSONDecoder().decode([UUID: [ConnectedToolLogEntry]].self, from: data)
+        else { return [:] }
+        return logs
+    }
+
+    private static func saveToolLogs(_ logs: [UUID: [ConnectedToolLogEntry]]) {
+        AppDefaults.store.set(try? JSONEncoder().encode(logs), forKey: toolLogsKey)
+    }
 
     private static func loadSettings() -> AssistantSettings {
         guard let data = AppDefaults.store.data(forKey: settingsKey),

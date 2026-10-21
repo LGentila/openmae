@@ -25,6 +25,8 @@ final class SettingsNavigation {
         case clearMemoryJournal
         case eraseMemory
         case addTool
+        /// "Change…" or "Reconnect" of a tool's connection.
+        case changeTool(ConnectedTool.ID)
         case removeTool(ConnectedTool.ID)
         /// Relay: the address of one's own internet relay, or of the home relay.
         case ownRelay
@@ -368,6 +370,9 @@ private struct SettingsSheetLayer: View {
                 return Shown(view: AnyView(EraseMemorySheet(model: model, navigation: navigation)), top: 120)
             case .addTool:
                 return Shown(view: AnyView(AddToolSheet(tools: tools, navigation: navigation)))
+            case .changeTool(let id):
+                guard let draft = tools.draft(changing: id) else { return nil }
+                return Shown(view: AnyView(AddToolSheet(tools: tools, navigation: navigation, step: .form, draft: draft)))
             case .removeTool(let id):
                 guard let tool = tools.tool(id) else { return nil }
                 return Shown(view: AnyView(RemoveToolSheet(tools: tools, tool: tool, navigation: navigation)),
