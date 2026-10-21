@@ -48,12 +48,14 @@ public struct PipelineConfig: Sendable {
     public var sentenceRestartAfterSeconds: Double?
     /// After the answer's first sound, the language model waits (`YieldsToVoice`) while the speakers have less than this
     /// left to play of the voice (seconds), as long as the voice has another text after the one it says (see
-    /// `VoiceLead`). nil = never. Measured with `voice-cli voice-gaps` on the reference Mac (30 answers of four or five
-    /// sentences a run, Gemma 4 26B), with `modelWaitsDuringOpenings`: what the speakers still had to play when the voice
-    /// was done with the first sentence went from 0.20 s (median) to 0.38 s; while the Mac was quiet, the silences of 1 s
-    /// or more before a later sentence went from 4 of 360 to 2 of 240, but in a run where the voice was slower they were
-    /// more frequent (8 of 120): the model, held during the first sentences, was still writing during a later long
-    /// opening once its pause (1.5 s at most) ran out.
+    /// `VoiceLead`); while it should wait, its pause is said again at every chunk of the voice. nil = never. Measured
+    /// with `voice-cli voice-gaps` on the reference Mac (30 answers of four or five sentences a run, Gemma 4 26B), with
+    /// `modelWaitsDuringOpenings`, against the model never waiting, while the Mac was quiet: silences of 1 s or more
+    /// before a later sentence 4 of 236 instead of 8 of 223, 90th percentile 240 ms instead of 397 ms; the speakers had
+    /// 0.49 s left at the first boundary instead of 0.31 s (median), and no opening under 2.5 s of near-silence was
+    /// heard as a silence of 1 s or more any more. Longer openings (1.3 % of later sentences) still are: the voice needs
+    /// about 56 ms a frame later in an answer, model waiting or not. With a voice 10 % slower (`--slower-voice 0.1`): 8 of
+    /// 240 instead of 12 of 240.
     public var voiceLeadSeconds: Double? = 0.5
     /// After the answer's first sound, the language model also waits while the voice opens a sentence with near-silence.
     public var modelWaitsDuringOpenings = true
@@ -1661,23 +1663,24 @@ public actor VoicePipeline {
     private func voiceProduced(_ chunk: VoiceAudio, audible: Bool, lead: inout VoiceLead, turn: Turn) {
         let now = clock.now
         turn.lastVoiceChunk = now
-        let (wait, renew) = lead.update(text: chunk.text, audible: audible, texts: turn.voiceTexts, at: now)
+        let wait = lead.update(text: chunk.text, audible: audible, texts: turn.voiceTexts, at: now)
         if wait != turn.modelWaits {
             DebugLog.log(String(format: "turn %d: the model %@ (the speakers have %.2f s left to play)", turn.id,
                                 wait ? "waits for the voice" : "goes on", ms(lead.lead(at: now)) / 1000))
         }
-        modelWaitsForVoice(wait, renew: renew, turn: turn)
+        modelWaitsForVoice(wait, turn: turn)
     }
 
-    /// The language model waits for the voice (`YieldsToVoice`), or goes on. `renew`: tell it again even if it already
-    /// waits, since its pause is bounded in time. Only the turn that has the conversation holds the model or lets it go:
-    /// once it is over, whoever ended it let the model go (`voiceIsAudible`), and another turn may hold it.
-    private func modelWaitsForVoice(_ wait: Bool, renew: Bool = false, turn: Turn) {
+    /// The language model waits for the voice (`YieldsToVoice`), or goes on. While it should wait, it is told so again
+    /// at every chunk of the voice (a heartbeat): its pause is bounded in time (1.5 s, `MLXChatModel`), and a long
+    /// opening would outlast it. Only the turn that has the conversation holds the model or lets it go: once it is
+    /// over, whoever ended it let the model go (`voiceIsAudible`), and another turn may hold it.
+    private func modelWaitsForVoice(_ wait: Bool, turn: Turn) {
         guard self.turn === turn, !turn.interrupted, turn.cut == nil else {
             turn.modelWaits = false
             return
         }
-        guard wait != turn.modelWaits || (wait && renew) else { return }
+        guard wait || turn.modelWaits else { return }
         turn.modelWaits = wait
         (model as? any YieldsToVoice)?.holdGeneration(wait)
         if wait { watchVoice(turn) }

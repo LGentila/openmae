@@ -56,6 +56,8 @@
 //                            ahead of the speakers (seconds; default 0.5)
 //   --no-wait-openings       after an answer's first sound, the model no longer waits while the voice opens a sentence
 //                            with near-silence (only for the lead)
+//   --slower-voice <f>       voice-gaps: as if the voice (and the model) were this fraction slower than speech (0.1:
+//                            10 %): the simulated speaker plays the voice that much faster than real time
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
 //   --follow-up <s>          with --wake-word: seconds Maé listens to any voice after an answer (default 8)
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
@@ -129,6 +131,8 @@ struct Options {
     var voiceLead: Double?
     /// The model no longer waits while the voice opens a sentence with near-silence (`modelWaitsDuringOpenings`).
     var noWaitOpenings = false
+    /// voice-gaps: as if the voice and the model were this fraction slower than speech (`GapSynthesizer`).
+    var slowerVoice: Double?
     /// voice-gaps: the first questions only.
     var questions: Int?
     var now: String?
@@ -200,6 +204,7 @@ struct Options {
             case "--no-voice-lead": o.noVoiceLead = true
             case "--voice-lead": o.voiceLead = Double(it.next() ?? "")
             case "--no-wait-openings": o.noWaitOpenings = true
+            case "--slower-voice": o.slowerVoice = Double(it.next() ?? "")
             case "--questions": o.questions = Int(it.next() ?? "")
             case "--now": o.now = it.next()
             case "--corpus": o.corpus = it.next()
@@ -678,7 +683,7 @@ if let options = Options.parse(CommandLine.arguments),
 if let options = Options.parse(CommandLine.arguments), options.command == "voice-gaps" {
     do {
         let voice = GapVoice()
-        let engine = try await buildEngine(options, logPlays: true) { voice.wrap($0) }
+        let engine = try await buildEngine(options, logPlays: true) { voice.wrap($0, slower: options.slowerVoice ?? 0) }
         try await runVoiceGaps(options, engine, voice: voice)
     } catch {
         print("ERROR: \(error)")
@@ -713,7 +718,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli announce-drop [--tier tier] [--repeats 5] [--mute-first | --mute-station]
                                        [--voice-restart-after s]
                voice-cli voice-gaps [--tier tier] [--repeats 1] [--questions n] [--no-sentence-restart]
-                                    [--sentence-restart-after s] [--out folder]
+                                    [--sentence-restart-after s] [--no-voice-lead] [--voice-lead s]
+                                    [--no-wait-openings] [--slower-voice f] [--out folder]
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--addendum file] [--web-addendum file] [--sources] [--live-sources]

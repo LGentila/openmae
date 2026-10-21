@@ -15,9 +15,11 @@ import Foundation
 ///
 /// Before the first sound, the pipeline holds the model on its own, as before (`VoicePipeline.deliver`).
 ///
-/// The model's pause is bounded (1.5 s, `MLXChatModel`), and said again only when a sentence starts or is heard: a long
-/// opening can outlast it, and the model then writes during the rest of that opening (see
-/// `PipelineConfig.voiceLeadSeconds`).
+/// The model's pause is bounded (1.5 s, `MLXChatModel`): the pipeline says it again at every chunk of the voice while
+/// the model should wait (a heartbeat), so that the model waits for the whole of a long opening (one token at most
+/// slips through each time its pause runs out). Said only when a sentence started or was heard, a long opening could
+/// outlast the pause, and the model wrote during the rest of it. If the voice produces nothing for half a second
+/// meanwhile, the pipeline lets the model go (`VoicePipeline.watchVoice`).
 struct VoiceLead {
     /// The model waits while the speakers have less than this left to play; nil = never for that.
     let minimum: Duration?
@@ -52,26 +54,17 @@ struct VoiceLead {
     }
 
     /// The voice produced a chunk of `text` after the first sound (played or left out), the voice having been given
-    /// `texts` texts so far. `wait`: whether the model should wait now; `renew`: say so again even if it already waits,
-    /// at a sentence that starts or is heard (the model's pause is bounded in time, and may have run out meanwhile). A
-    /// voice that cannot tell which text it says never has the model wait.
-    mutating func update(text: Int?, audible: Bool, texts: Int, at now: ContinuousClock.Instant)
-        -> (wait: Bool, renew: Bool)
-    {
-        guard let text else { return (false, false) }
-        var renew = false
+    /// `texts` texts so far: whether the model should wait now. A voice that cannot tell which text it says never has
+    /// the model wait.
+    mutating func update(text: Int?, audible: Bool, texts: Int, at now: ContinuousClock.Instant) -> Bool {
+        guard let text else { return false }
         if text != sentence {
             sentence = text
             heard = false
-            renew = true
         }
-        if audible, !heard {
-            heard = true
-            renew = true
-        }
+        if audible { heard = true }
         let opening = duringOpenings && !heard
         let short = minimum.map { text < texts - 1 && lead(at: now) < $0 } ?? false
-        let wait = opening || short
-        return (wait, renew && wait)
+        return opening || short
     }
 }

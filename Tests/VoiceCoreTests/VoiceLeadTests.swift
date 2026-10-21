@@ -25,87 +25,110 @@ struct VoiceLeadTests {
     /// A later sentence that opens with near-silence: the model waits from its first chunk until it is heard, whatever
     /// the lead, and even when no text follows it (the voice has that sentence to say).
     @Test func theModelWaitsWhileASentenceOpensWithNearSilence() {
+        var wait = false
         var lead = rule()
         lead.played(2000, at: at(0))  // two seconds ready: the lead is no reason to wait
-        var r = lead.update(text: 0, audible: true, texts: 2, at: at(10))
-        #expect(!r.wait)
-        r = lead.update(text: 1, audible: false, texts: 2, at: at(20))
-        #expect(r.wait && r.renew)  // a sentence that starts: said again, the model's pause may have run out
-        r = lead.update(text: 1, audible: false, texts: 2, at: at(30))
-        #expect(r.wait && !r.renew)
-        r = lead.update(text: 1, audible: true, texts: 2, at: at(40))
-        #expect(!r.wait)
-        r = lead.update(text: 1, audible: false, texts: 2, at: at(50))  // a pause inside the sentence: not an opening
-        #expect(!r.wait)
+        wait = lead.update(text: 0, audible: true, texts: 2, at: at(10))
+        #expect(!wait)
+        wait = lead.update(text: 1, audible: false, texts: 2, at: at(20))
+        #expect(wait)  // a sentence that opens with near-silence
+        wait = lead.update(text: 1, audible: false, texts: 2, at: at(30))
+        #expect(wait)  // still its opening
+        wait = lead.update(text: 1, audible: true, texts: 2, at: at(40))
+        #expect(!wait)
+        wait = lead.update(text: 1, audible: false, texts: 2, at: at(50))
+        #expect(!wait)  // a pause inside the sentence
     }
 
     /// The speakers have little left to play: the model waits as long as the voice has another text after the one it
     /// says, and goes on once they have enough.
     @Test func theModelWaitsWhileTheSpeakersHaveLittleLeft() {
+        var wait = false
         var lead = rule()
         lead.played(80, at: at(0))
-        var r = lead.update(text: 0, audible: true, texts: 1, at: at(0))
-        #expect(!r.wait)  // no text after this one: waiting could leave the voice without any
-        r = lead.update(text: 0, audible: true, texts: 2, at: at(10))
-        #expect(r.wait && !r.renew)  // 70 ms left, and another text follows
+        // No text after this one: waiting could leave the voice without any.
+        wait = lead.update(text: 0, audible: true, texts: 1, at: at(0))
+        #expect(!wait)
+        wait = lead.update(text: 0, audible: true, texts: 2, at: at(10))
+        #expect(wait)  // 70 ms left, and another text follows
         for i in 1...6 { lead.played(80, at: at(10 + 20 * i)) }  // six more frames of 80 ms, one every 20 ms
-        r = lead.update(text: 0, audible: true, texts: 2, at: at(130))
         #expect(lead.lead(at: at(130)) == .milliseconds(430))  // 560 ms of audio from 0 ms
-        #expect(r.wait)
+        wait = lead.update(text: 0, audible: true, texts: 2, at: at(130))
+        #expect(wait)
         lead.played(80, at: at(140))
         lead.played(80, at: at(140))  // 720 ms of audio in all
-        r = lead.update(text: 0, audible: true, texts: 2, at: at(150))
         #expect(lead.lead(at: at(150)) == .milliseconds(570))
-        #expect(!r.wait)
+        wait = lead.update(text: 0, audible: true, texts: 2, at: at(150))
+        #expect(!wait)
     }
 
     @Test func theModelGoesOnOnceTheSpeakersHaveEnough() {
+        var wait = false
         var lead = rule()
         lead.played(400, at: at(0))
-        var r = lead.update(text: 0, audible: true, texts: 3, at: at(0))
-        #expect(r.wait && r.renew)  // 400 ms ready, another text follows; the sentence is heard
+        wait = lead.update(text: 0, audible: true, texts: 3, at: at(0))
+        #expect(wait)  // 400 ms ready, another text follows
         lead.played(400, at: at(100))
-        r = lead.update(text: 0, audible: true, texts: 3, at: at(100))
-        #expect(!r.wait)  // 700 ms left
-        r = lead.update(text: 0, audible: true, texts: 3, at: at(350))
-        #expect(r.wait && !r.renew)  // 450 ms left
-        r = lead.update(text: 1, audible: true, texts: 3, at: at(360))
-        #expect(r.wait && r.renew)  // a new sentence, heard at once, 440 ms left: said again
+        wait = lead.update(text: 0, audible: true, texts: 3, at: at(100))
+        #expect(!wait)  // 700 ms left
+        wait = lead.update(text: 0, audible: true, texts: 3, at: at(350))
+        #expect(wait)  // 450 ms left
+        wait = lead.update(text: 1, audible: true, texts: 3, at: at(360))
+        #expect(wait)  // a new sentence heard, 440 ms left
     }
 
     @Test func theRulesCanBeTurnedOff() {
+        var wait = false
         var openingsOnly = rule(minimum: nil)
         openingsOnly.played(80, at: at(0))
-        #expect(!openingsOnly.update(text: 0, audible: true, texts: 3, at: at(0)).wait)  // the lead does not count
-        #expect(openingsOnly.update(text: 1, audible: false, texts: 3, at: at(10)).wait)
+        wait = openingsOnly.update(text: 0, audible: true, texts: 3, at: at(0))
+        #expect(!wait)  // the lead does not count
+        wait = openingsOnly.update(text: 1, audible: false, texts: 3, at: at(10))
+        #expect(wait)
         var leadOnly = rule(openings: false)
         leadOnly.played(2000, at: at(0))
-        #expect(!leadOnly.update(text: 1, audible: false, texts: 3, at: at(0)).wait)  // openings do not count
+        wait = leadOnly.update(text: 1, audible: false, texts: 3, at: at(0))
+        #expect(!wait)  // openings do not count
         let off = rule(minimum: nil, openings: false)
         #expect(!off.isOn)
     }
 
     /// A voice that cannot tell which text it says never has the model wait: nothing tells whether it has text left.
     @Test func aVoiceWithoutTextNumbersNeverHasTheModelWait() {
+        var wait = false
         var lead = rule()
         lead.played(80, at: at(0))
-        #expect(!lead.update(text: nil, audible: false, texts: 3, at: at(0)).wait)
-        #expect(!lead.update(text: nil, audible: true, texts: 3, at: at(10)).wait)
+        wait = lead.update(text: nil, audible: false, texts: 3, at: at(0))
+        #expect(!wait)
+        wait = lead.update(text: nil, audible: true, texts: 3, at: at(10))
+        #expect(!wait)
     }
 }
 
 /// A scripted language model that writes its pieces after the delays given, and records when the pipeline has it wait
-/// for the voice (`YieldsToVoice`), and when it wrote each piece.
+/// for the voice (`YieldsToVoice`), and when it wrote each piece. With `pause`, it waits as `MLXChatModel` does: after
+/// each piece, while it is held, at most that long; a pause that ran out is over until the pipeline holds it again.
+/// Without, it only records.
 final class WaitingModel: LanguageModel, YieldsToVoice, @unchecked Sendable {
     private let pieces: [(delay: Duration, text: String)]
+    private let pause: Duration?
     private let lock = NSLock()
     private var holds: [(held: Bool, at: ContinuousClock.Instant)] = []
     private var written: [ContinuousClock.Instant] = []
+    private var isHeld = false
 
-    init(_ pieces: [(delay: Duration, text: String)]) { self.pieces = pieces }
+    init(_ pieces: [(delay: Duration, text: String)], pause: Duration? = nil) {
+        self.pieces = pieces
+        self.pause = pause
+    }
     convenience init(_ texts: [String]) { self.init(texts.map { (.milliseconds(5), $0) }) }
 
-    func holdGeneration(_ held: Bool) { lock.withLock { holds.append((held, .now)) } }
+    func holdGeneration(_ held: Bool) {
+        lock.withLock {
+            holds.append((held, .now))
+            isHeld = held
+        }
+    }
     /// Whether the model was held or let go, in order, and when.
     var held: [(held: Bool, at: ContinuousClock.Instant)] { lock.withLock { holds } }
     /// When each piece was written.
@@ -119,6 +142,7 @@ final class WaitingModel: LanguageModel, YieldsToVoice, @unchecked Sendable {
                     if Task.isCancelled { break }
                     lock.withLock { written.append(.now) }
                     continuation.yield(.text(piece.text))
+                    if let pause { await waitWhileHeld(atMost: pause) }
                 }
                 continuation.finish()
             }
@@ -126,8 +150,30 @@ final class WaitingModel: LanguageModel, YieldsToVoice, @unchecked Sendable {
         }
     }
 
+    private func waitWhileHeld(atMost limit: Duration) async {
+        let deadline = ContinuousClock.now + limit
+        while true {
+            // As `GenerationHold`: the pause ends when it is let go or runs out, and is then over (under the lock, so
+            // that no hold said meanwhile is lost).
+            let over: Bool = lock.withLock {
+                guard isHeld, ContinuousClock.now < deadline else {
+                    isHeld = false
+                    return true
+                }
+                return false
+            }
+            if over { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
     func prefill(_ conversation: [ChatMessage]) async throws {}
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { conversation.count * 10 }
+}
+
+/// The values in order, each run of the same value once: [true, true, false, true] → [true, false, true].
+func runs(_ values: [Bool]) -> [Bool] {
+    values.reduce(into: []) { result, value in if result.last != value { result.append(value) } }
 }
 
 /// A voice that says each text as `chunks` audible chunks of 100 samples (100 ms at 1000 Hz), one every `pace`.
@@ -191,8 +237,8 @@ struct VoiceLeadPipelineTests {
     }
 
     /// The answer's second sentence opens with three seconds of near-silence: the model waits from the start of that
-    /// opening until the sentence is heard. Before the first sound, as before: it waits from the first piece until then.
-    /// (The lead's rule is off here, so that only the opening counts.)
+    /// opening until the sentence is heard, told so again at each of the opening's chunks. Before the first sound, as
+    /// before: it waits from the first piece until then. (The lead's rule is off here: only the opening counts.)
     @Test func theModelWaitsWhileALaterSentenceOpensWithNearSilence() async throws {
         var config = PipelineConfig()
         config.voiceLeadSeconds = nil
@@ -201,9 +247,42 @@ struct VoiceLeadPipelineTests {
         let speaker = try await run(model, synthesizer, config: config, until: 1000)
         #expect(await speaker.played >= 1000)  // both sentences
         let held = model.held.map(\.held)
-        #expect(Array(held.prefix(4)) == [true, false, true, false])  // first piece, first sound; the opening
-        #expect(held.last == false)
-        #expect(held.dropFirst(4).allSatisfy { !$0 })
+        #expect(runs(held) == [true, false, true, false])  // first piece, first sound; the opening, then heard
+        // The opening's 30 chunks of 100 ms (the first three played, the others left out): the pause said at each one.
+        #expect(held.dropFirst(2).prefix { $0 }.count == 30)
+    }
+
+    /// A model whose pause is bounded (as `MLXChatModel`'s, here 250 ms) and a later sentence whose opening outlasts it
+    /// (24 chunks of near-silence, one every 50 ms): told to wait again at each chunk, the model waits for the whole
+    /// opening, writing one piece (60 ms) each time its pause runs out, instead of the rest of the answer once the
+    /// first pause ran out. (The lead's rule is off here, so that only the opening counts.)
+    @Test func theModelWaitsForTheWholeOfALongOpening() async throws {
+        var config = PipelineConfig()
+        config.voiceLeadSeconds = nil
+        let words = ["Il ", "fait ", "très ", "beau ", "et ", "chaud ", "sur ", "toute ", "la ", "côte ", "ce ",
+                     "matin."]
+        let pause = Duration.milliseconds(250)
+        let model = WaitingModel([(.milliseconds(5), "Bonjour, je suis bien là. "),
+                                  (.milliseconds(5), "Comment vas-tu ce matin, mon ami ? ")]
+                                     + words.map { (.milliseconds(60), $0) }, pause: pause)
+        let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 2400 : 0, false) }], pace: .milliseconds(50))
+        let speaker = try await run(model, synthesizer, config: config, until: 1800)
+        #expect(await speaker.played == 1800)  // three sentences of 500, and 300 of the opening's near-silence
+        let held = model.held
+        #expect(runs(held.map(\.held)) == [true, false, true, false])  // first piece, first sound; the opening
+        let opening = Array(held.dropFirst(2).prefix { $0.held })
+        let waits = try #require(opening.first)
+        let heard = try #require(held.dropFirst(2 + opening.count).first)
+        #expect(heard.at - waits.at >= .milliseconds(1000))  // the opening: 24 chunks, one every 50 ms
+        // Said at every chunk: never 200 ms without it.
+        #expect(zip(opening, opening.dropFirst()).allSatisfy { $1.at - $0.at < .milliseconds(200) })
+        // The pieces written meanwhile: one when the opening starts, then one each time the pause ran out (the next
+        // chunk holds it again within 50 ms). Told only once, the model would have written all twelve once its first
+        // pause ran out (11 × 60 ms after).
+        let during = model.writes.filter { $0 > waits.at && $0 < heard.at }.count
+        let runOuts = Int((heard.at - waits.at) / pause)
+        #expect(during <= runOuts + 2)
+        #expect(during < words.count)
     }
 
     /// Without the rule, the model is held as before only: from the first piece to the first sound.

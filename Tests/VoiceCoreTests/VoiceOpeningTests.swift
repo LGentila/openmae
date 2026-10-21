@@ -239,8 +239,8 @@ struct VoiceRestartTests {
 }
 
 /// A voice that opens each text with its own near-silence, as Pocket TTS does: `script` gives, for each text, the
-/// near-silent samples before it (100 a millisecond), and whether the text itself is then said as near-silence (500
-/// samples either way).
+/// near-silent samples before it (in chunks of 100, one every `pace`), and whether the text itself is then said as
+/// near-silence (500 samples either way).
 final class SentenceStream: SynthesisStream, @unchecked Sendable {
     typealias Script = @Sendable (String) -> (opening: Int, silent: Bool)
     let audio: AsyncThrowingStream<VoiceAudio, Error>
@@ -250,7 +250,7 @@ final class SentenceStream: SynthesisStream, @unchecked Sendable {
     private var given: [String] = []
     private var stopped = false
 
-    init(script: @escaping Script) {
+    init(script: @escaping Script, pace: Duration = .milliseconds(1)) {
         let (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
         let (textStream, texts) = AsyncStream.makeStream(of: String.self)
         self.audio = audio
@@ -261,7 +261,7 @@ final class SentenceStream: SynthesisStream, @unchecked Sendable {
                 let (opening, silent) = script(text)
                 for _ in 0..<(opening / 100) where !Task.isCancelled {
                     output.yield(VoiceAudio([Float](repeating: 0.0001, count: 100), text: number))
-                    try? await Task.sleep(for: .milliseconds(1))
+                    try? await Task.sleep(for: pace)
                 }
                 if Task.isCancelled { break }
                 output.yield(VoiceAudio([Float](repeating: silent ? 0.0001 : 0.1, count: 500), text: number))
@@ -290,17 +290,22 @@ final class SentenceStream: SynthesisStream, @unchecked Sendable {
     }
 }
 
-/// One utterance after the other, each with its script (then texts said at once).
+/// One utterance after the other, each with its script (then texts said at once); `pace`: between two chunks of an
+/// opening.
 actor SentenceSynthesizer: SpeechSynthesizer {
     nonisolated let outputSampleRate = 1000.0
     private var scripts: [SentenceStream.Script]
+    private let pace: Duration
     private(set) var streams: [SentenceStream] = []
-    init(_ scripts: [SentenceStream.Script]) { self.scripts = scripts }
+    init(_ scripts: [SentenceStream.Script], pace: Duration = .milliseconds(1)) {
+        self.scripts = scripts
+        self.pace = pace
+    }
 
     func startUtterance(language: SpeechLanguage) async throws -> any SynthesisStream {
         var script: SentenceStream.Script = { _ in (opening: 0, silent: false) }
         if !scripts.isEmpty { script = scripts.removeFirst() }
-        let stream = SentenceStream(script: script)
+        let stream = SentenceStream(script: script, pace: pace)
         streams.append(stream)
         return stream
     }

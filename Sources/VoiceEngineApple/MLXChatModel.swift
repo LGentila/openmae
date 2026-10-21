@@ -1116,7 +1116,7 @@ final class GenerationHold: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(seconds)
         while held, condition.wait(until: deadline) {}
         let ranOut = held
-        held = false  // a pause that ran out of time is over for this answer
+        held = false  // a pause that ran out of time is over, until the pipeline holds generation again
         return ranOut
     }
 }

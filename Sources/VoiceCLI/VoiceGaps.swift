@@ -5,9 +5,13 @@
 // all.
 //
 //   voice-cli voice-gaps [--repeats 1] [--questions n] [--no-voice-lead] [--voice-lead s] [--no-wait-openings]
-//                        [--no-sentence-restart] [--sentence-restart-after s] [options]
+//                        [--no-sentence-restart] [--sentence-restart-after s] [--slower-voice f] [options]
 //
 // --questions n: the first n questions only. A new conversation starts every 10 questions.
+// --slower-voice f: as if the voice and the language model were that fraction slower than speech (0.1: 10 %), as on a
+// Mac whose GPU is slower for a while: the voice tells the pipeline its sample rate is that fraction higher, so the
+// simulated speaker plays it that much faster than real time, while the voice and the model run as usual (the model's
+// waits act on the real voice). Durations of audio are then in seconds as heard.
 //
 // Also, for each answer: its total time (from the question to the end of its last sound), the time nothing played in it
 // (that total minus the audio played: the wait for the first sound, and the speaker running dry), the speaker running
@@ -27,6 +31,8 @@ final class GapVoice: @unchecked Sendable {
         var text: String
         var samples: [Float]
         var audible: Bool
+        /// The utterance that produced it (a sentence may be started again in another one).
+        var utterance: Int
         /// When the voice produced it.
         var at = ContinuousClock.now
     }
@@ -37,9 +43,18 @@ final class GapVoice: @unchecked Sendable {
     private var texts: [String] = []
     private var utterances = 0
 
-    func wrap(_ voice: PocketSpeechSynthesizer) -> any SpeechSynthesizer { GapSynthesizer(voice: voice, log: self) }
+    /// `slower`: see `--slower-voice`.
+    func wrap(_ voice: PocketSpeechSynthesizer, slower: Double = 0) -> any SpeechSynthesizer {
+        GapSynthesizer(voice: voice, log: self, rateScale: 1 + slower)
+    }
 
-    func started() { lock.withLock { utterances += 1 } }
+    /// A new utterance starts: its number in this answer.
+    func started() -> Int {
+        lock.withLock {
+            utterances += 1
+            return utterances
+        }
+    }
     func given(_ text: String) { lock.withLock { texts.append(text) } }
     func produced(_ frame: Frame) { lock.withLock { frames.append(frame) } }
 
@@ -57,12 +72,14 @@ final class GapVoice: @unchecked Sendable {
 struct GapSynthesizer: SpeechSynthesizer, KeepsWarm {
     let voice: PocketSpeechSynthesizer
     let log: GapVoice
+    /// Above 1: the speaker plays the voice that much faster than real time (`--slower-voice`).
+    let rateScale: Double
 
-    var outputSampleRate: Double { voice.outputSampleRate }
+    var outputSampleRate: Double { voice.outputSampleRate * rateScale }
 
     func startUtterance(language: SpeechLanguage) async throws -> any SynthesisStream {
-        log.started()
-        return GapStream(try await voice.startUtterance(language: language), log: log)
+        let utterance = log.started()
+        return GapStream(try await voice.startUtterance(language: language), utterance: utterance, log: log)
     }
 
     func keepWarm() async { await voice.keepWarm() }
@@ -82,7 +99,7 @@ struct GapStream: SynthesisStream {
     private let texts = GivenTexts()
     private let log: GapVoice
 
-    init(_ voice: any SynthesisStream, log: GapVoice) {
+    init(_ voice: any SynthesisStream, utterance: Int, log: GapVoice) {
         self.voice = voice
         self.log = log
         let texts = self.texts
@@ -93,7 +110,8 @@ struct GapStream: SynthesisStream {
                     for try await chunk in voice.audio {
                         let meanSquare = chunk.samples.reduce(0) { $0 + $1 * $1 } / Float(max(chunk.samples.count, 1))
                         log.produced(GapVoice.Frame(text: chunk.text.flatMap(texts.text) ?? "", samples: chunk.samples,
-                                                    audible: 10 * log10(max(meanSquare, 1e-12)) >= threshold))
+                                                    audible: 10 * log10(max(meanSquare, 1e-12)) >= threshold,
+                                                    utterance: utterance))
                         continuation.yield(chunk)
                     }
                     continuation.finish()
@@ -118,6 +136,8 @@ struct GapStream: SynthesisStream {
 /// One answer, as heard.
 struct HeardAnswer: Codable {
     var question: String
+    /// When it was asked (ISO 8601, UTC).
+    var askedAt: String?
     var texts: Int
     /// Seconds of silence heard before each text after the first one heard, in order.
     var gaps: [Double]
@@ -141,6 +161,22 @@ struct HeardAnswer: Codable {
     /// The language model's pauses for the voice in this answer, and their length in all (seconds).
     var modelPauses: Int
     var modelPausedSeconds: Double
+    /// The voice's pace: the median time between two frames of the same text (milliseconds; 80 ms of audio a frame).
+    var voicePaceMs: Double?
+}
+
+/// The voice's pace in `frames`: the median time between two frames of the same text in the same utterance (it produces
+/// a text's frames one after the other), in milliseconds.
+func voicePace(_ frames: [GapVoice.Frame]) -> Double? {
+    var last: [Int: GapVoice.Frame] = [:]
+    var intervals: [Double] = []
+    for frame in frames {
+        if let before = last[frame.utterance], before.text == frame.text, !frame.text.isEmpty {
+            intervals.append((frame.at - before.at).seconds * 1000)
+        }
+        last[frame.utterance] = frame
+    }
+    return median(intervals)
 }
 
 /// What the speaker played of an answer, sentence by sentence (`hear`).
@@ -249,6 +285,10 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
         "Raconte-moi en cinq phrases l'histoire des Jeux olympiques.",
         "En cinq phrases, explique-moi comment fonctionne un réfrigérateur.",
     ]
+    if let slower = o.slowerVoice, slower > 0 {
+        print(String(format: "simulated: the voice and the model %.0f %% slower than speech (the speaker plays the"
+                     + " voice %.0f %% faster than real time)\n", slower * 100, slower * 100))
+    }
     let mic = SimulatedMicrophone(pipeline: e.pipeline)
     var answers: [HeardAnswer] = []
     var asked = 0
@@ -263,6 +303,7 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
             let before = await e.log.completedTurns
             let pausesBefore = await e.model.voicePauses
             let asked = ContinuousClock.now
+            let askedAt = ISO8601DateFormatter().string(from: Date())
             await e.pipeline.submit(text: question)
             await waitForAnswer(e, mic: mic, after: before, timeout: 90)
             await mic.silence(0.3)
@@ -275,14 +316,16 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
             let heard = hear(plays, frames: produced.frames, texts: produced.texts,
                              sampleRate: await e.speaker.sampleRate)
             let pauses = await e.model.voicePauses
-            let answer = HeardAnswer(question: question, texts: produced.texts.count, gaps: heard.gaps,
+            let answer = HeardAnswer(question: question, askedAt: askedAt, texts: produced.texts.count,
+                                     gaps: heard.gaps,
                                      openings: heard.openings, leads: heard.leads, waits: heard.waits,
                                      lost: heard.lost, utterances: produced.utterances, latencyMs: metrics.latencyMs,
                                      firstAudioMs: metrics.synthesisFirstAudioMs,
                                      totalSeconds: heard.end.map { ($0 - asked).seconds },
                                      playedSeconds: heard.played, stalls: heard.stalls,
                                      modelPauses: pauses.count - pausesBefore.count,
-                                     modelPausedSeconds: pauses.seconds - pausesBefore.seconds)
+                                     modelPausedSeconds: pauses.seconds - pausesBefore.seconds,
+                                     voicePaceMs: voicePace(produced.frames))
             answers.append(answer)
             let gaps = heard.gaps.indices.map { i in
                 String(format: "%.2f [%.2f %.2f %.2f]%@", heard.gaps[i], heard.openings[i], heard.leads[i],
@@ -323,6 +366,9 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
     print("speaker dry inside a sentence: \(stalls.count) time(s) in \(answers.filter { !$0.stalls.isEmpty }.count)"
           + " answer(s), \(fmt(stalls.reduce(0, +))) in all, longest \(fmt(stalls.max()))")
     let pauses = answers.map(\.modelPauses)
+    let paces = answers.compactMap(\.voicePaceMs)
+    print("voice: median \(fmt(median(paces))) per frame (median of the answers; 90th percentile"
+          + " \(fmt(percentile(paces, 0.9))))")
     print("model paused for the voice: \(pauses.reduce(0, +)) time(s), median per answer"
           + " \(median(pauses.map(Double.init)).map { String(format: "%.0f", $0) } ?? "—"),"
           + " \(fmt(answers.map(\.modelPausedSeconds).reduce(0, +) * 1000)) in all")
