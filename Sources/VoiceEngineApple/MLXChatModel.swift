@@ -66,17 +66,21 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// own, for good: 0.24 GB with Gemma 4 26B and the actions, 0.04 GB with E4B.
     ///
     /// It is computed in float32, in a new cache, then rounded to the model's own type (`beginningCache`); the
-    /// conversations are computed in bfloat16 on it. Computed in bfloat16 like them, it drifted far from the model's exact
-    /// computation (a third of the keys and values in Gemma 4 26B's last layers), differently at load (after the warm-up)
-    /// and when the tools changed, and the requests the model hesitates on followed that draw: "Cherche-moi une recette de
-    /// crumble aux pommes" opened a search at its first token 99 % of the time from the beginning computed at load, 19 %
-    /// from the one computed when the tools changed (100 % from a float32 computation). In float32 it took less time on the
-    /// reference Mac (Gemma 4 26B: 5.0 s instead of 5.4 s at load; E4B: 2.6 s instead of 3.0 s), but more GPU memory
-    /// while it lasts (0.8 GB more with Gemma 4 26B, 0.4 to 0.5 GB with E4B, 0.6 to 0.8 GB with E2B).
+    /// conversations' tokens are computed in float32 on it too (`readingPrompt`), and the answers' in bfloat16.
+    /// Computed in bfloat16, it drifted far from the model's exact computation (a third of the keys and values in Gemma
+    /// 4 26B's last layers), differently at load (after the warm-up) and when the tools changed, and the requests the
+    /// model hesitates on followed that draw: "Cherche-moi une recette de crumble aux pommes" opened a search at its
+    /// first token 99 % of the time from the beginning computed at load, 19 % from the one computed when the tools
+    /// changed (100 % from a float32 computation). In float32 it took less time on the reference Mac (Gemma 4 26B: 5.0
+    /// s instead of 5.4 s at load; E4B: 2.6 s instead of 3.0 s), but more GPU memory while it lasts (0.8 GB more with
+    /// Gemma 4 26B, 0.4 to 0.5 GB with E4B, 0.6 to 0.8 GB with E2B).
     private(set) var beginning: (tokens: [Int], cache: [KVCache])?
-    /// The type of the model's memory as it computes a conversation (that of Gemma 4's weights: bfloat16), read after the
-    /// warm-up: the beginning, computed in float32, is rounded to it.
+    /// The type of the model's memory as it computes a conversation (that of Gemma 4's half-precision weights: bfloat16),
+    /// read before the warm-up: what is computed in float32 (the beginning, the requests, the history) is rounded to it.
     private var memoryType = DType.bfloat16
+    /// Whether the tokens the model reads (a request's new tokens, the history computed ahead or again) are computed in
+    /// float32 like the beginning (`readingPrompt`); off only for comparisons (`computePromptsInFloat32`).
+    private(set) var promptsInFloat32 = true
     /// The user's message the last request answered.
     private var lastTurn: Turn?
 
@@ -124,6 +128,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Diagnostics of the last request: tokens found in the cache, tokens computed, time to compute them, and how long
     /// it waited for the model before (another computation under way: the history computed ahead, a keep-warm pass).
     public private(set) var lastPrefill = (reused: 0, computed: 0, ms: 0.0, waitedMs: 0.0)
+    /// Diagnostics: the GPU memory peak during the last request, from its start to its answer's last token (GB, the
+    /// weights included).
+    public private(set) var lastRequestPeakGB = 0.0
     /// Diagnostics of the last `catchUp`: tokens computed (0: nothing to do), and time to compute them.
     public private(set) var lastCatchUp = (computed: 0, ms: 0.0)
     /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
@@ -308,6 +315,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         watchingToolCalls = on
     }
 
+    /// Benchmark diagnostics (`voice-cli … --bfloat16-prompts`): `false` computes the requests' new tokens and the history
+    /// in the model's own type, as before they were computed in float32 (see `readingPrompt`), for comparisons in one
+    /// build. The beginning stays in float32.
+    public func computePromptsInFloat32(_ on: Bool) {
+        promptsInFloat32 = on
+    }
+
     /// Diagnostics (`voice-cli cache-check`): `observer` is called on the request's own task each time the model has read
     /// a chunk of a long prompt, with the new tokens read so far and their number (then once more when all are read).
     /// mlx-swift-lm reads more than 512 new tokens in chunks, and between two it stops if the request was cancelled.
@@ -383,11 +397,56 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Rounds a float32 memory to the model's own type, one layer after the other (the float32 layer goes before the next
     /// one is rounded: the memory peak stays that of the float32 memory).
     func roundToMemoryType(_ cache: [KVCache]) {
-        for var layer in cache {
+        for var layer in cache where !layer.state.isEmpty {
             let state = layer.state.map { $0.asType(memoryType) }
             eval(state)
             layer.state = state
         }
+    }
+
+    /// Runs `body`, which computes tokens into `cache` (the model's memory or a copy of it, which already holds what comes
+    /// before them; `body` is given it), as the beginning is computed: with float32 activations (`withFloat32Activations`),
+    /// on keys and values put in float32 first, so that the new tokens' own stay in float32 in every layer while they are
+    /// computed; then the cache is rounded back to the model's own type, layer by layer, even if `body` throws. Without that
+    /// first step, the sliding-window layers went to float32 anyway (the new tokens' keys and values are appended to them),
+    /// but a full-attention layer only when its buffer had to grow: otherwise its new keys and values were rounded as they
+    /// were written, before the new tokens read them, depending on the room an earlier answer had left.
+    func computeInFloat32<T>(_ cache: [KVCache], _ body: ([KVCache]) throws -> T) rethrows -> T {
+        for var layer in cache where !layer.state.isEmpty {
+            layer.state = layer.state.map { $0.asType(.float32) }
+        }
+        defer { roundToMemoryType(cache) }
+        return try withFloat32Activations {
+            let result = try body(cache)
+            eval(cache.flatMap(\.state))  // with the float32 weights (MLX computes lazily)
+            return result
+        }
+    }
+
+    /// Runs `body`, which computes tokens the model reads into the cache (a request's new tokens, up to the one whose
+    /// output gives the answer's first token; the history computed ahead, or again from a snapshot or the beginning), in
+    /// float32 like the beginning (`computeInFloat32`). The answer's tokens are computed in the model's own type.
+    ///
+    /// Computed in bfloat16 on the float32 beginning, a request was far from the model's exact computation of it, and the
+    /// first token of the answer (whether it opens a tool call) followed that on the requests the model hesitates on. With
+    /// Gemma 4 26B and web-fr's 80 requests (`voice-cli actions-bench --compare-requests`), the chances of a call at the
+    /// first token were 0.87 off in all from a float32 reference (every weight converted, nothing rounded), and one
+    /// decision differed: "Mais si tu peux. Je veux le dernier chiffre en date…", after a search, opened one at 70 %
+    /// (reference: 16 %). In float32: 0.25 off, no decision different (that request: 27 %). The history goes in float32 too:
+    /// computed on its own in one pass in bfloat16 (`feedEarlierTurns`, a request that goes back to the beginning), that
+    /// request opened a call at 77 % (25 % in float32); 64 tokens at a time (`computeAhead`), the first tokens of the ten
+    /// requests with earlier exchanges were ten times closer to the reference's in float32 (median divergence 1e-6 nats
+    /// instead of 1e-5).
+    ///
+    /// It costs time and memory while those tokens are computed (`voice-cli cache-check`, medians on the reference Mac):
+    /// the first output comes 30 ms later with Gemma 4 26B (598 ms instead of 568), 26 ms with E4B, 23 ms with E2B; the GPU
+    /// memory peak during a request is 0.82 GB higher with Gemma 4 26B (15.90 GB instead of 15.08), 0.40 GB with E4B, 0.28
+    /// GB with E2B: computing in float32, MLX casts each quantized layer's scales and biases to float32 (every expert's, in
+    /// Gemma 4 26B's mixture-of-experts layers). A long prompt takes no longer (a 706-token tool result: 2.70 s instead of
+    /// 2.79 s with Gemma 4 26B).
+    private func readingPrompt<T>(_ body: () throws -> T) rethrows -> T {
+        if promptsInFloat32 { return try computeInFloat32(cache) { _ in try body() } }
+        return try body()
     }
 
     /// Runs `body` with the model computing in float32: its quantized embedding tables give their rows dequantized in
@@ -484,7 +543,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             let done = cachedTokens.count
             let chunk = Array(tokens[..<min(done + Self.aheadChunk, tokens.count)])
             let t0 = clock.now
-            let read = (try? readPrompt(chunk, from: done)) != nil  // which keeps `cachedTokens` in step if it throws
+            // `readPrompt` keeps `cachedTokens` in step if it throws.
+            let read = (try? readingPrompt { try readPrompt(chunk, from: done) }) != nil
             if read {
                 eval(cache.flatMap(\.state))
                 cachedTokens = Array(chunk.prefix(cachedTokenCount(upTo: chunk.count)))
@@ -511,7 +571,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let clock = ContinuousClock()
         let t0 = clock.now
         // The iterator also samples one token, which we ignore.
-        _ = try readPrompt(tokens, from: start)
+        _ = try readingPrompt { try readPrompt(tokens, from: start) }
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
@@ -650,8 +710,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard var r = rebuild else { return }
         let end = min(r.done + chunk, r.tokens.count - 1)
         let input = LMInput(tokens: MLXArray(r.tokens[r.done..<end].map { Int32($0) }))
-        guard (try? TokenIterator(input: input, model: context.model, cache: r.cache, parameters: parameters)) != nil
-        else {
+        func read(_ cache: [KVCache]) throws -> TokenIterator {
+            try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters)
+        }
+        // In float32, as the history in the cache (see `readingPrompt`).
+        guard (try? (promptsInFloat32 ? computeInFloat32(r.cache, read) : read(r.cache))) != nil else {
             rebuild = nil
             return
         }
@@ -670,6 +733,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
         hold.set(false)  // a new answer never starts paused
         logResidency("before the request")
+        GPU.resetPeakMemory()
+        defer { lastRequestPeakGB = Double(Memory.peakMemory) / 1e9 }
         let prompt = try render(conversation, generationPrompt: true)
         let (reused, from) = try reuseCache(for: prompt)
         let wentBack = from != .cache
@@ -699,7 +764,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if !tools.isEmpty {
             components = components.appendingLogitProcessor { UpcomingToken(box: upcoming) }
         }
-        var iterator = try readPrompt(prompt, from: start, components: components)
+        var iterator = try readingPrompt { try readPrompt(prompt, from: start, components: components) }
         let d = clock.now - t0
         lastPrefill = (reused, prompt.count - reused,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
@@ -927,7 +992,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard let user = conversation.lastIndex(where: { $0.role == .user }), user > 0 else { return start }
         let earlier = try render(Array(conversation[..<user]), generationPrompt: false)
         guard earlier.count > start, commonPrefix(earlier, prompt) == earlier.count else { return start }
-        _ = try readPrompt(earlier, from: start)
+        _ = try readingPrompt { try readPrompt(earlier, from: start) }
         eval(cache.flatMap(\.state))
         cachedTokens = Array(earlier.prefix(cachedTokenCount(upTo: earlier.count)))
         return cachedTokens.count
@@ -1023,9 +1088,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     private func warmUp() throws {
-        // First call compiles the Metal kernels; do it at load time, not during the first answer.
+        // The type the model computes in, which its memory is rounded to after what is computed in float32 (the warm-up's
+        // own request included): that of its half-precision weights (quantization scales, norms), float32 without any.
+        memoryType = context.model.parameters().flattened().lazy.map(\.1.dtype)
+            .first { $0 == .bfloat16 || $0 == .float16 } ?? .float32
+        // First call compiles the Metal kernels (float32 for the request, the model's own type for the answer); do it at
+        // load time, not during the first answer.
         try generate([ChatMessage(.user, "Bonjour")], maxTokens: 8) { _ in }
-        if let type = cache.first?.state.first?.dtype { memoryType = type }
     }
 }
 

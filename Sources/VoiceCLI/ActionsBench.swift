@@ -12,7 +12,7 @@
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
 //                           [--watch-calls] [--examples app|none|file] [--web] [--addendum file]
 //                           [--web-addendum file] [--searxng http://127.0.0.1:8888 [--searxng-user name]]
-//                           [--record file.json] [--compare-beginnings]
+//                           [--record file.json] [--compare-beginnings] [--compare-requests] [--bfloat16-prompts]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -43,6 +43,13 @@
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
 // layer by layer, and each request's chance of a call at its first token, read as the app reads it (from the state at
 // load, the same as --watch-calls).
+// --compare-requests generates nothing either: from the beginning the app keeps, it reads each request's first token in
+// several ways, against the same float32 reference (every weight converted, the beginning and the request in one pass):
+// the request's new tokens in one pass, in bfloat16 as the app computed them before and in float32 as it does now (the
+// same as --watch-calls); and for a request with earlier exchanges, those first on their own (as the history computed
+// ahead, 64 tokens at a time, or in one pass as when a request goes back to the beginning), in bfloat16 or in float32.
+// --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the app did before (comparisons in
+// one build; the beginning stays in float32).
 
 import Foundation
 import VoiceCore
@@ -163,6 +170,8 @@ private struct CaseResult: Encodable {
     var callMs: Double?
     /// From the start of the call to its tool's name read (the app's waiting phrase waits for it when a tool has its own).
     var nameReadMs: Double?
+    /// The GPU memory peak during the request (GB, the weights included).
+    var peakGB: Double?
     /// With --watch-calls: the chance of opening a tool call at the first token, and at the most tempted one.
     var firstCallChance: Double?
     var bestCallChance: Double?
@@ -256,6 +265,8 @@ func runActionsBench(_ o: Options) async throws {
     }
     await model.useTools(tools)
     await model.watchToolCalls(o.watchCalls)
+    await model.computePromptsInFloat32(!o.bfloat16Prompts)
+    if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     // As `VoicePipeline` puts it together: the actions' part, or without them what the date line is; then the tools'.
@@ -285,6 +296,11 @@ func runActionsBench(_ o: Options) async throws {
     if o.compareBeginnings {
         try await compareBeginnings(corpus, conversation: conversation, tools: tools, dateLine: dateLine,
                                     context: reference, model: model, options: o)
+        return
+    }
+    if o.compareRequests {
+        try await compareRequests(corpus, conversation: conversation, dateLine: dateLine, context: reference,
+                                  model: model, folder: folder, options: o)
         return
     }
 
@@ -334,6 +350,7 @@ func runActionsBench(_ o: Options) async throws {
                                 moreCalls: moreCalls ? true : nil, text: text, toolOK: chosen == expectedTool,
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
+        result.peakGB = await model.lastRequestPeakGB
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
         if !earlierSearches.isEmpty { result.earlierSearches = earlierSearches }
@@ -677,6 +694,94 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
     let url = o.out.appendingPathComponent("compare-beginnings-\(stamp).json")
+    try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
+    try encoder.encode(report).write(to: url)
+    print("report: \(url.path)")
+}
+
+/// --compare-requests: each request's first token from the beginning the app keeps, in several ways (see
+/// `MLXChatModel.compareRequests`), against the float32 reference: how far each way's chances of a call are from the
+/// reference's, over all requests and over those with earlier exchanges (where the ways differ), and from the app's own
+/// way (one pass in float32) there.
+private func compareRequests(_ corpus: Corpus, conversation: Conversation, dateLine: String, context: ToolContext,
+                             model: MLXChatModel, folder: URL, options o: Options) async throws
+{
+    let requests = corpus.cases.map {
+        caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine, context: context)
+    }
+    let clock = ContinuousClock()
+    let start = clock.now
+    let comparison = try await model.compareRequests(requests)
+    print("compared in \(clock.now - start)\n")
+    let names = comparison.names
+    let reference = names.count - 1
+    let app = 1  // one pass, float32
+    for (index, name) in names.enumerated() { print("  [\(index)] \(name)") }
+    func decides(_ chance: Double) -> Bool { chance >= 0.5 }
+
+    print("\nchance of a call at the first token (%), ways [0] … [\(reference)] (· where a way does not apply):")
+    for (item, row) in zip(corpus.cases, comparison.firstTokens) {
+        let chances = row.map { $0.map { String(format: "%5.1f", $0.callChance * 100) } ?? "    ·" }.joined(separator: " ")
+        let decisions = Set(row.compactMap { $0.map { decides($0.callChance) } })
+        print("  \(chances)  \(decisions.count > 1 ? "≠" : " ") \(item.phrase)")
+    }
+
+    /// `rows`: the requests compared; `against`: the way compared with.
+    func compare(_ index: Int, against other: Int, over rows: [[MLXChatModel.FirstToken?]]) -> String {
+        let pairs = rows.compactMap { row -> (MLXChatModel.FirstToken, MLXChatModel.FirstToken)? in
+            guard let a = row[index], let b = row[other] else { return nil }
+            return (a, b)
+        }
+        let flips = pairs.filter { decides($0.0.callChance) != decides($0.1.callChance) }.count
+        let far = pairs.filter { abs($0.0.callChance - $0.1.callChance) >= 0.2 }.count
+        let tops = pairs.filter { $0.0.top != $0.1.top }.count
+        let offBy = pairs.map { abs($0.0.callChance - $0.1.callChance) }.reduce(0, +)
+        let largest = pairs.map { abs($0.0.callChance - $0.1.callChance) }.max() ?? 0
+        var line = "decision changed: \(flips) · call chance 20 points or more away: \(far) · other first token: \(tops)"
+            + String(format: " · call chance off by %.3f in all (largest %.1f points)", offBy, largest * 100)
+        if other == reference {
+            let divergences = pairs.map(\.0.divergence)
+            line += " · divergence median " + scientific(median(divergences)) + ", max " + scientific(divergences.max())
+                + " nats"
+        }
+        return line + " (\(pairs.count) requests)"
+    }
+    let rows = comparison.firstTokens
+    let withHistory = rows.filter { $0[2] != nil }  // the ways with earlier exchanges apply
+    print("\nagainst the reference [\(reference)], over all \(rows.count) requests:")
+    for index in [0, app] { print("  [\(index)] " + compare(index, against: reference, over: rows)) }
+    print("\nthe \(withHistory.count) requests with earlier exchanges, against the reference [\(reference)]:")
+    for index in names.indices where index != reference {
+        print("  [\(index)] " + compare(index, against: reference, over: withHistory))
+    }
+    print("\nthe same requests, against the app's way [\(app)] (one pass in float32):")
+    for index in names.indices where index != reference && index != app {
+        print("  [\(index)] " + compare(index, against: app, over: withHistory))
+    }
+
+    struct Request: Encodable {
+        var phrase: String
+        var expected: String
+        var callChances: [Double?]
+        var tops: [String?]
+        var divergences: [Double?]
+    }
+    struct Report: Encodable {
+        var model: String
+        var corpus: String
+        var ways: [String]
+        var requests: [Request]
+    }
+    let report = Report(
+        model: folder.lastPathComponent, corpus: o.corpus ?? "", ways: names,
+        requests: zip(corpus.cases, rows).map { item, row in
+            Request(phrase: item.phrase, expected: item.expected?.tool ?? "aucun", callChances: row.map { $0?.callChance },
+                    tops: row.map { $0?.top }, divergences: row.map { $0?.divergence })
+        })
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+    let url = o.out.appendingPathComponent("compare-requests-\(stamp).json")
     try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
     try encoder.encode(report).write(to: url)
     print("report: \(url.path)")
@@ -1066,6 +1171,9 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     let nameTimes = results.compactMap(\.nameReadMs)
     print("tool's name read after the start of the call: median \(fmt(median(nameTimes))), worst \(fmt(nameTimes.max()))")
     print("time to the first word of an answer without action: median \(fmt(median(textTimes))), worst \(fmt(textTimes.max()))")
+    let peaks = results.compactMap(\.peakGB)
+    print(String(format: "GPU memory peak during a request: median %.2f GB, max %.2f GB", median(peaks) ?? 0,
+                 peaks.max() ?? 0))
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

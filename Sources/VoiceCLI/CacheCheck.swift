@@ -13,19 +13,22 @@
 // carried out: an action "succeeds" or is refused as each scenario says.
 //
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
-//                         [--cut-off ahead|after-user-words]
+//                         [--cut-off ahead|after-user-words] [--bfloat16-prompts]
 //
 // --cut-off says where the history tells the model that an answer was cut off; by default as the app does on the tier
 // (`Conversation.cutOffPlacement(on:)`): "ahead", a note of its own right after the answer, or "after-user-words", the
 // note in the next message, after the user's words.
 //
-// Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
-// memory in use after it (and how long it waited for the model, when it did); and after an exchange is recorded, what the
-// model computes of the history while nobody waits, as in the app ("the history caught up"): an answer cut off, or what
-// the model never wrote (an announcement, a tool's result and the app's own sentences). A request after which the model
-// counts other tokens in its memory than the memory holds is marked "out of step" (the next one would be computed from
-// the wrong place). VOICE_DEBUG=1 adds the model's own lines ("the request leaves the cache at token N", with the text
-// on each side; "restored the snapshot"; "prefill N tokens (reused M)"; "computed N of M tokens of the history ahead").
+// Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, the GPU
+// memory in use after it and its peak during the request (and how long it waited for the model, when it did); and after
+// an exchange is recorded, what the model computes of the history while nobody waits, as in the app ("the history caught
+// up"): an answer cut off, or what the model never wrote (an announcement, a tool's result and the app's own sentences).
+// A request after which the model counts other tokens in its memory than the memory holds is marked "out of step" (the
+// next one would be computed from the wrong place). VOICE_DEBUG=1 adds the model's own lines ("the request leaves the
+// cache at token N", with the text on each side; "restored the snapshot"; "prefill N tokens (reused M)"; "computed N of
+// M tokens of the history ahead").
+// --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the app did before (comparisons in
+// one build).
 
 import Foundation
 import Synchronization
@@ -39,6 +42,8 @@ private struct Step {
     var computed: Int
     var prefillMs: Double
     var firstOutputMs: Double?
+    /// The GPU memory peak during the request (GB, the weights included).
+    var peakGB: Double
     var rebuilt: Bool
     var restored: Bool
     var fromBeginning: Bool
@@ -115,6 +120,7 @@ private actor CacheCheck {
         let after = await wentBack()
         let step = Step(label: label, promptTokens: try await model.tokenCount(messages), reused: prefill.reused,
                         computed: prefill.computed, prefillMs: prefill.ms, firstOutputMs: first,
+                        peakGB: await model.lastRequestPeakGB,
                         rebuilt: after.rebuilds > before.rebuilds, restored: after.restores > before.restores,
                         fromBeginning: after.beginnings > before.beginnings)
         steps.append(step)
@@ -122,9 +128,9 @@ private actor CacheCheck {
             : step.reused == 0 ? "  ← from scratch" : step.fromBeginning ? "  ← back to the conversations' beginning"
             : step.restored ? "  ← back to a snapshot" : ""
         let waited = prefill.waitedMs >= 1 ? String(format: " · waited %.0f ms for the model", prefill.waitedMs) : ""
-        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB%@%@%@",
-                     label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
-                     MLXChatModel.activeMemoryGB, waited, note, await outOfStepNote()))
+        print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB (peak %.2f)"
+                     + "%@%@%@", label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
+                     MLXChatModel.activeMemoryGB, step.peakGB, waited, note, await outOfStepNote()))
         return (text, calls, moreCalls || calls.count > 1)
     }
 
@@ -353,6 +359,13 @@ private actor CacheCheck {
         print(String(format: "the history caught up while nobody waits: %d times (%.0f ms in all)", catchUps.count,
                      catchUps.reduce(0, +)))
         print("requests after which the model counted other tokens than its cache held: \(outOfStep)")
+        let prefills = steps.map(\.prefillMs).sorted()
+        let peaks = steps.map(\.peakGB).sorted()
+        if !prefills.isEmpty {
+            print(String(format: "computing the requests' new tokens: median %.0f ms, max %.0f ms · GPU memory peak during a "
+                         + "request: median %.2f GB, max %.2f GB", prefills[prefills.count / 2], prefills.last ?? 0,
+                         peaks[peaks.count / 2], peaks.last ?? 0))
+        }
     }
 }
 
@@ -392,6 +405,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let folder = o.llm.map { URL(fileURLWithPath: $0) } ?? store.folder(pack)
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · the note of an answer cut off: \(placement.rawValue)")
     let model = try await MLXChatModel.load(directory: folder)
+    await model.computePromptsInFloat32(!o.bfloat16Prompts)
+    if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
 
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])

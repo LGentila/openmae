@@ -6,7 +6,9 @@ import VoiceCore
 // Diagnostics for `voice-cli actions-bench --compare-beginnings`: the beginning every conversation starts with (the
 // system prompt with its tools, and the example exchanges when there are), computed in several ways and compared with a
 // float32 reference: the caches layer by layer, and the first token the model gives each request of a corpus from each,
-// read as the app reads it (the request computed by `generate`'s path, in bfloat16; the reference's in float32).
+// read as the app reads it (the request computed by `generate`'s path, in float32; the reference's with every weight in
+// float32). And for `--compare-requests`: each request's first token from the beginning the app keeps, its new tokens
+// computed in several ways (`compareRequests`), against the same reference.
 //
 // Why: the same beginning, computed in bfloat16 at load (on the warm-up's first 2 tokens) or again from scratch (when the
 // tools change), made the model decide differently afterwards. Measured with Gemma 4 26B: no way of computing it is
@@ -16,9 +18,10 @@ import VoiceCore
 // 19 % from the one computed from scratch; of web-fr's 80 requests, 4 moved by 20 points or more between two bfloat16
 // ways, from scratch and in the chunks of the load, and 1 changed its decision). So the app computes it in float32 and
 // rounds it (`MLXChatModel.beginningCache`): the comparison checks that its states, at load and after a tools change, are
-// the reference's own computation, rounded. The requests themselves are computed in bfloat16 on it, so the app's first
-// tokens are not quite the reference's: on web-fr, the call chances are 0.87 off in all from the state at load, one
-// decision changed; 0.93 to 2.49 off, up to two decisions changed, from the bfloat16 ways.
+// the reference's own computation, rounded. The requests themselves were computed in bfloat16 on it, so the app's first
+// tokens were not quite the reference's: on web-fr, the call chances were 0.87 off in all from the state at load, one
+// decision changed; 0.93 to 2.49 off, up to two decisions changed, from the bfloat16 ways. They are computed in float32
+// now (`MLXChatModel.readingPrompt`): 0.25 off from the state at load, no decision changed.
 
 extension MLXChatModel {
     /// A beginning as one way of computing it left the model's memory.
@@ -112,7 +115,7 @@ extension MLXChatModel {
         do {
             defer { leaveFloat32(halfTypes) }
             reference = try computed("float32, every weight converted (reference)") { try feed(tokens[...], into: $0) }
-            referenceLogProbs = try requests.map { try firstTokenLogProbs($0, from: reference) }
+            referenceLogProbs = try requests.map { try firstTokenLogProbs($0, from: reference, inFloat32: false) }
         }
         // The other states' first tokens are read as the app reads them: with the weights as they are.
         guard weightTypes() == types else {
@@ -145,7 +148,8 @@ extension MLXChatModel {
             var row: [FirstToken] = []
             for (index, state) in states.dropLast().enumerated() {
                 row.append(readFrom[index] < index ? row[readFrom[index]]
-                    : reading(try firstTokenLogProbs(request, from: state), reference: referenceRow))
+                    : reading(try firstTokenLogProbs(request, from: state, inFloat32: promptsInFloat32),
+                              reference: referenceRow))
             }
             row.append(reading(referenceRow, reference: referenceRow))
             firstTokens.append(row)
@@ -162,21 +166,117 @@ extension MLXChatModel {
     }
 
     /// The model's log-probabilities for the first token of its answer to `conversation`, computed on a copy of `state`
-    /// (the request must start with its beginning) the way `generate` computes a request.
-    private func firstTokenLogProbs(_ conversation: [ChatMessage], from state: BeginningState) throws -> MLXArray {
+    /// (the request must start with its beginning) the way `generate` computes a request: in one pass, in float32
+    /// (`computeInFloat32`), or in the weights' own types with `inFloat32: false` (as the app did before; the reference's
+    /// weights are all float32 then). `history`: the request's earlier turns are computed first, as the history computed
+    /// ahead (`chunk`: 64 tokens at a time) or in one pass (`chunk` nil) when a request goes back to the beginning, in
+    /// float32 or not (`historyInFloat32`).
+    private func firstTokenLogProbs(_ conversation: [ChatMessage], from state: BeginningState, inFloat32: Bool,
+                                    history: (chunk: Int?, inFloat32: Bool)? = nil) throws -> MLXArray
+    {
         let prompt = try render(conversation, generationPrompt: true)
         guard prompt.count > state.tokens.count, prompt.starts(with: state.tokens) else {
             throw BeginningsError(description: "a request does not start with the beginning")
         }
+        let cache = state.cache.map { $0.copy() }
+        var start = state.tokens.count
+        if let history {
+            guard let earlier = try earlierTurns(conversation, prompt: prompt, after: start) else {
+                throw BeginningsError(description: "a request has no earlier turns")
+            }
+            while start < earlier.count {
+                let end = min(start + (history.chunk ?? earlier.count), earlier.count)
+                let tokens = earlier[start..<end]
+                if history.inFloat32 {
+                    try computeInFloat32(cache) { try feed(tokens, into: $0) }
+                } else {
+                    try feed(tokens, into: cache)
+                }
+                start = end
+            }
+        }
         let captured = CapturedLogits()
         let components = GenerationComponents().appendingLogitProcessor { LogitCapture(captured: captured) }
-        let input = LMInput(tokens: MLXArray(prompt[state.tokens.count...].map { Int32($0) }))
-        _ = try TokenIterator(input: input, model: context.model, cache: state.cache.map { $0.copy() },
-                              parameters: parameters, components: components)
+        let input = LMInput(tokens: MLXArray(prompt[start...].map { Int32($0) }))
+        func read(_ cache: [KVCache]) throws {
+            _ = try TokenIterator(input: input, model: context.model, cache: cache, parameters: parameters,
+                                  components: components)
+            guard let logits = captured.logits else { throw BeginningsError(description: "no logits") }
+            eval(logits)
+        }
+        if inFloat32 { try computeInFloat32(cache, read) } else { try read(cache) }
         guard let logits = captured.logits?.asType(.float32) else { throw BeginningsError(description: "no logits") }
         let logProbs = logits - logSumExp(logits, axis: -1, keepDims: true)
         eval(logProbs)
         return logProbs
+    }
+
+    /// The tokens of `conversation`'s turns before its last user message, as `feedEarlierTurns` renders them, when there
+    /// are more of them than the `start` tokens of the beginning; nil otherwise.
+    private func earlierTurns(_ conversation: [ChatMessage], prompt: [Int], after start: Int) throws -> [Int]? {
+        guard let user = conversation.lastIndex(where: { $0.role == .user }), user > 0 else { return nil }
+        let earlier = try render(Array(conversation[..<user]), generationPrompt: false)
+        guard earlier.count > start, earlier.count < prompt.count, prompt.starts(with: earlier) else { return nil }
+        return earlier
+    }
+
+    /// Each request's first token from the beginning the model keeps, in several ways (`compareRequests`).
+    public struct RequestsComparison: Sendable {
+        /// The ways' names, the reference (float32) last.
+        public var names: [String]
+        /// For each request, for each way: its first token; nil when the way does not apply (only a request with earlier
+        /// turns can compute them on their own).
+        public var firstTokens: [[FirstToken?]]
+    }
+
+    /// Reads each request's first token from the beginning the model keeps (computed in float32, then rounded) in several
+    /// ways: the request's new tokens in one pass in bfloat16 (as the app computed them before) and in float32 (as it does
+    /// now, `readingPrompt`); for a request with earlier turns, those turns on their own first, as the history computed
+    /// ahead (64 tokens at a time, `computeAhead`) or in one pass (`feedEarlierTurns`), in bfloat16 or in float32, then its
+    /// own message in float32; and the reference: every weight in float32, the beginning and the request computed in one
+    /// pass each, nothing rounded.
+    public func compareRequests(_ requests: [[ChatMessage]]) throws -> RequestsComparison {
+        guard let beginning else { throw BeginningsError(description: "no beginning kept") }
+        let state = BeginningState(name: "kept", tokens: beginning.tokens, cache: beginning.cache)
+        let types = weightTypes()
+        let halfTypes = enterFloat32()
+        let referenceLogProbs: [MLXArray]
+        do {
+            defer { leaveFloat32(halfTypes) }
+            let cache = try context.model.newCache(parameters: parameters)
+            try feed(beginning.tokens[...], into: cache)
+            let reference = BeginningState(name: "reference", tokens: beginning.tokens, cache: cache)
+            referenceLogProbs = try requests.map { try firstTokenLogProbs($0, from: reference, inFloat32: false) }
+        }
+        guard weightTypes() == types else {
+            throw BeginningsError(description: "the weights did not go back to their types after the reference")
+        }
+        let ways: [(name: String, inFloat32: Bool, history: (chunk: Int?, inFloat32: Bool)?)] = [
+            ("one pass, bfloat16 (the app before)", false, nil),
+            ("one pass, float32 (the app now)", true, nil),
+            ("earlier turns ahead, 64 at a time, bfloat16; then float32", true, (64, false)),
+            ("earlier turns ahead, 64 at a time, float32; then float32", true, (64, true)),
+            ("earlier turns in one pass, bfloat16; then float32", true, (nil, false)),
+            ("earlier turns in one pass, float32; then float32", true, (nil, true)),
+        ]
+        var firstTokens: [[FirstToken?]] = []
+        for (request, referenceRow) in zip(requests, referenceLogProbs) {
+            let prompt = try render(request, generationPrompt: true)
+            let hasHistory = try earlierTurns(request, prompt: prompt, after: state.tokens.count) != nil
+            var row: [FirstToken?] = []
+            for way in ways {
+                guard way.history == nil || hasHistory else {
+                    row.append(nil)
+                    continue
+                }
+                row.append(reading(try firstTokenLogProbs(request, from: state, inFloat32: way.inFloat32,
+                                                          history: way.history), reference: referenceRow))
+            }
+            row.append(reading(referenceRow, reference: referenceRow))
+            firstTokens.append(row)
+        }
+        return RequestsComparison(names: ways.map(\.name) + ["float32, every weight converted (reference)"],
+                                  firstTokens: firstTokens)
     }
 
     private func reading(_ logProbs: MLXArray, reference: MLXArray) -> FirstToken {

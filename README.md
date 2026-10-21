@@ -370,7 +370,12 @@ offers the search tool with the other corpora too, to check that it does not cha
 tools) as the app does (in float32, then rounded: the same state at load and after a tools change), then in bfloat16 as
 it was computed before and with every weight in float32 as a reference, compares the model's memory after each, and
 gives every request's chance of a call at its first token from each, read as the app reads it (from the state at load,
-the same as `--watch-calls`; a request whose decision moves with mere rounding is one the model hesitates on). One
+the same as `--watch-calls`; a request whose decision moves with mere rounding is one the model hesitates on).
+`--compare-requests` generates nothing either: from the beginning the app keeps, it reads each request's first token
+computed as the app computes it (its new tokens in float32, the same as `--watch-calls`), as it was computed before (in
+bfloat16), and for a request with earlier exchanges with those computed first on their own (as the history computed
+ahead, or in one pass), against the same float32 reference. `--bfloat16-prompts` (also for `cache-check`) computes the
+requests' new tokens and the history in bfloat16, as the app did before, to compare both in one build. One
 search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 ```bash
