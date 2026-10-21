@@ -27,6 +27,10 @@
 //   voice-cli read-sizes [--from 32] [--to 96] [--runs 5] [--compare-padding]
 //                                                       how long the model takes to read a request's new tokens, by
 //                                                       their number (text only; see ReadSizes.swift)
+//   voice-cli memory-bench [--corpus Tests/Fixtures/memory-fr.json] [--out folder]
+//                                                       how well the memory's journal finds past exchanges: recall@4
+//                                                       and MRR per kind of query, speed and size on 20,000 exchanges
+//                                                       (no model; see MemoryBench.swift)
 //   voice-cli cut-off-bench [--repeats 10] [--cut-off ahead|after-user-words|marker|none]
 //                           [--drop written|heard|cut-off|none|whole]
 //                                                       answers cut off one after the other: does the model write
@@ -176,6 +180,8 @@ struct Options {
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
     var agents = false
+    /// actions-bench, dialogue-bench, cache-check: the memory's tool offered too (`memoire`, with the journal).
+    var memory = false
     var searxng: String?
     var searxngUser: String?
     var record: String?
@@ -256,6 +262,7 @@ struct Options {
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
+            case "--memory": o.memory = true
             case "--searxng": o.searxng = it.next()
             case "--searxng-user": o.searxngUser = it.next()
             case "--record": o.record = it.next()
@@ -706,7 +713,7 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "cut-off-bench",
-    "read-sizes", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+    "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -718,6 +725,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "cache-check": try await runCacheCheck(options, arguments: CommandLine.arguments)
         case "cut-off-bench": try await runCutOffBench(options, arguments: CommandLine.arguments)
         case "read-sizes": try await runReadSizes(options, arguments: CommandLine.arguments)
+        case "memory-bench": try await runMemoryBench(options)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)

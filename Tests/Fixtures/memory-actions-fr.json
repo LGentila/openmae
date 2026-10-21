@@ -1,0 +1,577 @@
+{
+ "_comment": "French requests for voice-cli actions-bench --memory: does the model call the memory tool (memoire) when, and only when, it should? The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). memorySheet: what the user already asked Maé to remember, as the sheet in the system prompt shows it. expected.action: \"retenir\", the user explicitly asks Maé to remember something (mentions: words the call's texte must contain, whatever the accents and case); \"chercher\", the user asks about past exchanges (mentions: words the search must contain; when: the period's words the call must carry in quand); \"oublier\", a sheet entry the user names in their own words (mentions: words of that entry, which the call names as written in reference) or a period of the journal (when). \"before\": earlier exchanges of the conversation, where the user said the fact that « Retiens ça » refers to. The other cases are traps: a fact said in passing without asking Maé to remember it, small talk and general knowledge, a question the sheet in the prompt already answers (no tool: \"aucun\"), a search for current information (chercher_web), a calendar, reminder or timer action, two of them « rappelle-moi… » or « n'oublie pas de… » with a time, which are reminders, not memory.",
+ "now": "2026-10-15T18:42",
+ "shortcuts": [],
+ "web": true,
+ "memory": true,
+ "memorySheet": [
+  "Allergique à la pénicilline",
+  "Sa fille s'appelle Margaux, elle a 9 ans",
+  "Son chien est un border collie qui s'appelle Câpre",
+  "Ne mange pas de porc",
+  "Sa voiture est une Zoé bleue"
+ ],
+ "cases": [
+  {
+   "phrase": "Retiens que mon frère Bastien habite à Bordeaux.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Bastien",
+     "Bordeaux"
+    ]
+   }
+  },
+  {
+   "phrase": "Souviens-toi que je suis intolérante au lactose.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "lactose"
+    ]
+   }
+  },
+  {
+   "phrase": "Note dans ta mémoire que la gardienne de l'immeuble s'appelle madame Ferreira.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Ferreira"
+    ]
+   }
+  },
+  {
+   "phrase": "Mémorise que ma place de parking, c'est la 42.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "parking",
+     "42"
+    ]
+   }
+  },
+  {
+   "phrase": "Garde en tête que je préfère le thé au café le matin.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "thé",
+     "café"
+    ]
+   }
+  },
+  {
+   "phrase": "N'oublie pas que Margaux fait de la natation le jeudi soir.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "natation"
+    ]
+   }
+  },
+  {
+   "phrase": "Retiens que ma belle-mère s'appelle Françoise.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Françoise"
+    ]
+   }
+  },
+  {
+   "phrase": "Souviens-toi que je suis végétarienne depuis la rentrée.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "végétarien"
+    ]
+   }
+  },
+  {
+   "phrase": "Mémorise que notre anniversaire de mariage, c'est le 14 juin.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "mariage",
+     "juin"
+    ]
+   }
+  },
+  {
+   "phrase": "Note dans ta mémoire que le pédiatre de Margaux, c'est le docteur Lambert.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Lambert"
+    ]
+   }
+  },
+  {
+   "phrase": "Garde en mémoire que je ne supporte pas la coriandre.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "coriandre"
+    ]
+   }
+  },
+  {
+   "phrase": "Je voudrais que tu retiennes que je chausse du 39.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "39"
+    ]
+   }
+  },
+  {
+   "phrase": "Remember that my manager is called Helen.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Helen"
+    ]
+   }
+  },
+  {
+   "phrase": "Remember that I take my coffee with oat milk.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "oat"
+    ]
+   }
+  },
+  {
+   "phrase": "Retiens ça.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Lisa"
+    ]
+   },
+   "before": [
+    {
+     "user": "Ma nièce Lisa entre en sixième au collège Pasteur.",
+     "answer": "Une grande étape pour elle ! J’espère que sa rentrée se passera bien."
+    }
+   ]
+  },
+  {
+   "phrase": "Souviens-toi de ça.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "galet"
+    ]
+   },
+   "before": [
+    {
+     "user": "La peinture de la cuisine, c'est le gris galet, référence 512.",
+     "answer": "Le gris galet, c’est une teinte douce et élégante pour une cuisine."
+    }
+   ]
+  },
+  {
+   "phrase": "Garde ça en mémoire.",
+   "expected": {
+    "tool": "memoire",
+    "action": "retenir",
+    "mentions": [
+     "Aubry"
+    ]
+   },
+   "before": [
+    {
+     "user": "Mon médecin traitant, maintenant, c'est le docteur Aubry, à la maison de santé du centre.",
+     "answer": "D’accord. C’est pratique, une maison de santé avec plusieurs praticiens au même endroit."
+    }
+   ]
+  },
+  {
+   "phrase": "Qu'est-ce que je t'avais dit sur le garage de ma voiture ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "garage"
+    ]
+   }
+  },
+  {
+   "phrase": "Tu te souviens de ce que je t'ai raconté sur le voyage de ma sœur au Canada ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "Canada"
+    ]
+   }
+  },
+  {
+   "phrase": "On avait parlé de quoi la semaine dernière à propos du jardin ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "jardin"
+    ],
+    "when": "la semaine dernière"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que je t'ai dit hier au sujet de la réunion avec mon chef ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "réunion"
+    ],
+    "when": "hier"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi ce que je t'avais expliqué sur la recette de la tarte tatin.",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "tatin"
+    ]
+   }
+  },
+  {
+   "phrase": "Tu te rappelles le nom du restaurant dont je t'ai parlé le mois dernier ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "restaurant"
+    ],
+    "when": "le mois dernier"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que je t'avais raconté sur les problèmes de sommeil de Margaux ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "sommeil"
+    ]
+   }
+  },
+  {
+   "phrase": "Je t'avais parlé d'un livre il y a deux semaines, c'était lequel ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "livre"
+    ],
+    "when": "il y a deux semaines"
+   }
+  },
+  {
+   "phrase": "Qu'est-ce que je t'avais dit sur le devis de la salle de bain ?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "devis"
+    ]
+   }
+  },
+  {
+   "phrase": "What did I tell you about my sister's wedding?",
+   "expected": {
+    "tool": "memoire",
+    "action": "chercher",
+    "mentions": [
+     "wedding"
+    ]
+   }
+  },
+  {
+   "phrase": "Oublie ce que je t'ai dit sur la pénicilline.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "mentions": [
+     "pénicilline"
+    ]
+   }
+  },
+  {
+   "phrase": "Tu peux oublier que je ne mange pas de porc, j'en remange maintenant.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "mentions": [
+     "porc"
+    ]
+   }
+  },
+  {
+   "phrase": "Efface de ta mémoire l'histoire de la Zoé, je l'ai vendue.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "mentions": [
+     "Zoé"
+    ]
+   }
+  },
+  {
+   "phrase": "Oublie le truc sur mon chien.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "mentions": [
+     "Câpre"
+    ]
+   }
+  },
+  {
+   "phrase": "Tu n'as plus besoin de retenir le prénom de ma fille, oublie-le.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "mentions": [
+     "Margaux"
+    ]
+   }
+  },
+  {
+   "phrase": "Efface tout ce qu'on s'est raconté hier soir.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "when": "hier"
+   }
+  },
+  {
+   "phrase": "Oublie tout ce dont on a parlé la semaine dernière.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "when": "la semaine dernière"
+   }
+  },
+  {
+   "phrase": "Supprime de ta mémoire ce que je t'ai dit avant-hier.",
+   "expected": {
+    "tool": "memoire",
+    "action": "oublier",
+    "when": "avant-hier"
+   }
+  },
+  {
+   "phrase": "Pff, je suis allergique aux acariens, j'éternue sans arrêt.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Ma voisine du dessus s'appelle Gisèle, elle est adorable.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Pff, encore l'orthodontiste mardi, j'en ai marre.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Mon frère vient d'acheter une maison à Angers.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Je fais du 38 en pantalon maintenant.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Au fait, mon fils a eu son permis de conduire.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Je travaille de chez moi le vendredi.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "On a adopté un deuxième chat, il s'appelle Pistache.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Je déteste les films d'horreur.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Margaux a perdu sa dent de devant ce matin.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "J'ai arrêté de fumer il y a trois mois.",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Tu as une bonne mémoire, toi ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "C'est quoi la mémoire à court terme ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "C'est vrai que les poissons rouges n'ont que trois secondes de mémoire ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Tu te souviens de ton enfance, toi ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Quelle est la capitale du Portugal ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Il s'appelle comment déjà, mon chien ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Je suis allergique à quoi, déjà ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Elle a quel âge, Margaux ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "C'est quoi comme voiture que j'ai, déjà ?",
+   "expected": {
+    "tool": "aucun"
+   }
+  },
+  {
+   "phrase": "Qui a gagné le match du Stade rennais ce soir ?",
+   "expected": {
+    "tool": "chercher_web",
+    "mentions": [
+     "rennais"
+    ]
+   }
+  },
+  {
+   "phrase": "À quelle heure ferme la médiathèque de Rezé le samedi ?",
+   "expected": {
+    "tool": "chercher_web",
+    "mentions": [
+     "médiathèque"
+    ]
+   }
+  },
+  {
+   "phrase": "Cherche sur internet le numéro du vétérinaire de garde à Nantes.",
+   "expected": {
+    "tool": "chercher_web",
+    "mentions": [
+     "vétérinaire"
+    ]
+   }
+  },
+  {
+   "phrase": "Quelles sont les dernières nouvelles sur la grève à la SNCF ?",
+   "expected": {
+    "tool": "chercher_web",
+    "mentions": [
+     "sncf"
+    ]
+   }
+  },
+  {
+   "phrase": "Lance un compte à rebours de 12 minutes.",
+   "expected": {
+    "tool": "minuteur",
+    "seconds": 720
+   }
+  },
+  {
+   "phrase": "Ajoute un dîner chez Bastien samedi à 20 h dans mon agenda.",
+   "expected": {
+    "tool": "creer_evenement",
+    "when": "2026-10-17T20:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi demain à 18 h d'acheter des croquettes pour Câpre.",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16T18:00"
+   }
+  },
+  {
+   "phrase": "Rappelle-moi demain d'appeler Bastien.",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-16"
+   }
+  },
+  {
+   "phrase": "N'oublie pas de me faire penser à sortir le poulet du congélateur ce soir à 19 h.",
+   "expected": {
+    "tool": "creer_rappel",
+    "when": "2026-10-15T19:00"
+   }
+  }
+ ]
+}

@@ -35,6 +35,15 @@ public enum AppIdentity {
             .appendingPathComponent("Tasks", isDirectory: true)
     }
 
+    /// ~/Library/Application Support/<name>/Memory — what Maé remembers (`memory.md`) and the journal of past exchanges
+    /// (`journal.sqlite`). Next to the models, never inside their folder: deleting the models never touches it. Never in
+    /// iCloud: Application Support is not synced.
+    public static var memoryDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(directoryName, isDirectory: true)
+            .appendingPathComponent("Memory", isDirectory: true)
+    }
+
     /// ~/OpenMae — where an agent gets a new folder for each task, unless the user named one of theirs. Plain
     /// letters, like the app's file name: agents run developer tools, and some of them still trip over accents.
     /// `URL.homeDirectory`, the same folder on the Mac: `FileManager.homeDirectoryForCurrentUser` does not exist on

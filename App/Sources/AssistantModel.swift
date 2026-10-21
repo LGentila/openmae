@@ -66,6 +66,8 @@ final class AssistantModel {
     /// What the web search's "Test" button found; nil before a test, or after a change of its settings.
     private(set) var webSearchTest: WebSearchTest?
     private(set) var isTestingWebSearch = false
+    /// What Maé remembers and how many exchanges the journal holds (the memory page); nil until the engine said.
+    private(set) var memory: MemoryOverview?
     /// Quitting would stop a task.
     var hasRunningTask: Bool { tasks.contains { $0.status == .running } }
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
@@ -235,6 +237,26 @@ final class AssistantModel {
         connection.send(.testWebSearch)
     }
 
+    /// The memory page opened: the engine reads the sheet and the journal again.
+    func refreshMemory() {
+        connection.send(.refreshMemory)
+    }
+
+    /// The memory page's delete button on one entry.
+    func forgetMemoryEntry(_ entry: String) {
+        connection.send(.forgetMemoryEntry(entry))
+    }
+
+    /// "Clear history": the journal of past exchanges, erased.
+    func clearMemoryJournal() {
+        connection.send(.clearMemoryJournal)
+    }
+
+    /// "Erase everything": the sheet and the journal.
+    func eraseMemory() {
+        connection.send(.eraseMemory)
+    }
+
     /// The Stop button of a task.
     func stopTask(_ id: UUID) {
         connection.send(.stopTask(id))
@@ -338,6 +360,8 @@ final class AssistantModel {
             claudeCode = availability
         case .tasks(let tasks):
             self.tasks = tasks
+        case .memory(let overview):
+            memory = overview
         case .webSearchTested(let test):
             if testedWebSearch.map({ $0 == settings.webSearch }) ?? true { webSearchTest = test }
             isTestingWebSearch = false

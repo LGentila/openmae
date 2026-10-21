@@ -15,11 +15,14 @@
 // item on the way that its later sentences must leave as it was, how often that item was changed or deleted.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
-//                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web]
+//                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web] [--memory]
 //                            [--examples app|none|file] [--addendum file] [--watch-calls] [--out measurements]
 //
 // --agents and --web offer Claude Code's tools and the web search too, as in the app when they are on (nothing is
-// handed over or searched: a call to them is declined). --now replaces every reference time of the corpus (a dialogue
+// handed over or searched: a call to them is declined). --memory (or "memory": true, as in
+// Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet and a journal kept in memory: a
+// dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet
+// read again), and its goal is checked once all its sentences are said (what the sheet holds, what the last answer says). --now replaces every reference time of the corpus (a dialogue
 // may have its own). --examples and --addendum are those of actions-bench. --watch-calls adds each first pass's chance
 // of opening a call (at its first token, and at its most tempted token).
 
@@ -33,6 +36,8 @@ private struct DialogueCorpus: Decodable {
     var agents: Bool?
     /// The web search switched on (as with --web).
     var web: Bool?
+    /// The memory switched on, with its journal (as with --memory).
+    var memory: Bool?
     var dialogues: [Dialogue]
 
     struct Dialogue: Decodable {
@@ -49,6 +54,8 @@ private struct DialogueCorpus: Decodable {
         /// of each: « Maison » and « Rappels »).
         var calendars: [String]?
         var lists: [String]?
+        /// The memory's sheet when the dialogue starts.
+        var sheet: [String]?
     }
 
     /// The item the user wants saved: by this tool, its title containing `title` (whatever the accents and case), at
@@ -60,6 +67,14 @@ private struct DialogueCorpus: Decodable {
         var title: String?
         var when: String?
         var calendar: String?
+        /// The memory (`memoire`), checked once the dialogue's sentences are all said: at the end, the sheet holds an
+        /// entry with this word (`remembered`), none (`forgotten`, `notRemembered`), or still one (`kept`); and the last
+        /// answer mentions one of `answerMentions` (whatever the accents and case).
+        var remembered: String?
+        var forgotten: String?
+        var kept: String?
+        var notRemembered: String?
+        var answerMentions: [String]?
     }
 }
 
@@ -124,8 +139,12 @@ func runDialogueBench(_ o: Options) async throws {
     let agents = corpus.agents == true || o.agents
     let web = corpus.web == true || o.web
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
+    // The memory last, as in the app; off, it offers nothing.
+    let memory = corpus.memory == true || o.memory
+    let memoryStore = TransientMemoryStore()
+    let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: true)
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (agents ? [DryAgents()] : [])
-        + (web ? [DryWebSearch()] : [])
+        + (web ? [DryWebSearch()] : []) + [memoryTools]
     let runner = ToolRunner(providers: providers)
     await model.useTools(await runner.tools())
     await model.watchToolCalls(o.watchCalls)
@@ -155,14 +174,36 @@ func runDialogueBench(_ o: Options) async throws {
             at = date
         }
         await calendar.use(calendars: dialogue.calendars, lists: dialogue.lists)
+        let memoryGoal = dialogue.goal.tool == MemoryCatalog.name
         for run in 1...repeats {
             print("■ \(dialogue.name) — run \(run)/\(repeats)" + (at == now ? "" : " · at \(LocalDateTime.format(at, in: timeZone))"))
-            var talk = Talk(model: model, runner: runner, calendar: calendar, conversation: base, now: at,
+            var start = base
+            if memory {
+                // The dialogue's sheet, read as at a new conversation (the beginning changes with it).
+                try await memoryStore.saveSheet(dialogue.sheet ?? [])
+                await runner.resetConversation()
+                start.systemAddenda = Array(base.systemAddenda.dropLast()) + [await memoryTools.promptAddendum() ?? ""]
+                try await model.prefillBeginning(start.beginning)
+            }
+            var talk = Talk(model: model, runner: runner, calendar: calendar, conversation: start, now: at,
                             timeZone: timeZone, watchCalls: o.watchCalls, maxCalls: maxCalls)
             var result = RunResult(dialogue: dialogue.name, run: run, turns: [])
             for (index, sentence) in dialogue.turns.enumerated() {
+                if sentence == "[nouvelle conversation]" {
+                    // As "Nouvelle conversation" in the app: the sheet read again, the beginning computed again if it
+                    // changed, the history gone.
+                    await runner.resetConversation()
+                    if memory {
+                        start.systemAddenda = Array(base.systemAddenda.dropLast())
+                            + [await memoryTools.promptAddendum() ?? ""]
+                    }
+                    try await model.prefillBeginning(start.beginning)
+                    talk.conversation = start
+                    print("  — new conversation")
+                    continue
+                }
                 var turn = try await talk.turn(sentence)
-                turn.goalReached = turn.passes.contains { reaches($0, dialogue.goal) }
+                turn.goalReached = memoryGoal ? false : turn.passes.contains { reaches($0, dialogue.goal) }
                 result.turns.append(turn)
                 show(turn, index: index + 1)
                 if let keep = dialogue.keep, result.keptItemTouchedAt == nil,
@@ -173,6 +214,24 @@ func runDialogueBench(_ o: Options) async throws {
                 if turn.goalReached {
                     result.goalAt = index + 1
                     break
+                }
+            }
+            if memoryGoal, let last = result.turns.last {
+                let sheet = MemoryText.folded(try await memoryStore.sheet().joined(separator: " | "))
+                let goal = dialogue.goal
+                var reached = true
+                if let word = goal.remembered { reached = reached && sheet.contains(MemoryText.folded(word)) }
+                if let word = goal.kept { reached = reached && sheet.contains(MemoryText.folded(word)) }
+                if let word = goal.forgotten { reached = reached && !sheet.contains(MemoryText.folded(word)) }
+                if let word = goal.notRemembered { reached = reached && !sheet.contains(MemoryText.folded(word)) }
+                if let words = goal.answerMentions {
+                    let answer = MemoryText.folded(last.answer)
+                    reached = reached && words.contains { answer.contains(MemoryText.folded($0)) }
+                }
+                print("  sheet at the end: \(try await memoryStore.sheet())")
+                if reached {
+                    result.goalAt = result.turns.count
+                    result.turns[result.turns.count - 1].goalReached = true
                 }
             }
             if let keep = dialogue.keep, let touchedAt = result.keptItemTouchedAt {

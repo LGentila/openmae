@@ -10,7 +10,7 @@ import VoiceCore
 final class SettingsNavigation {
     /// The pages of the sidebar, in its order.
     enum Page: Hashable, CaseIterable {
-        case voice, actions, agents, webSearch, tools, devices, inbound, advanced
+        case voice, actions, agents, webSearch, memory, tools, devices, inbound, advanced
     }
 
     /// The sheets of the pages; those of iPhone and iPad and of Received information follow PhoneAccess and
@@ -20,6 +20,8 @@ final class SettingsNavigation {
         case deleteModels
         case eraseWakeLog
         case removeBraveKey
+        case clearMemoryJournal
+        case eraseMemory
         case addTool
         case removeTool(ConnectedTool.ID)
     }
@@ -50,7 +52,7 @@ final class SettingsNavigation {
     }
 }
 
-/// The settings window: a sidebar of eight pages in three groups, and the page. 960 × 700 points at first.
+/// The settings window: a sidebar of nine pages in three groups, and the page. 960 × 700 points at first.
 struct SettingsWindowView: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
@@ -90,6 +92,7 @@ struct SettingsWindowView: View {
                 AgentsPage(model: model, navigation: navigation)
             }
         case .webSearch: WebSearchPage(model: model, navigation: navigation)
+        case .memory: MemoryPage(model: model, navigation: navigation)
         case .tools:
             if let id = navigation.tool, let tool = tools.tool(id) {
                 ToolPage(tools: tools, tool: tool, navigation: navigation)
@@ -139,6 +142,7 @@ private struct SettingsSidebar: View {
             item(.actions)
             item(.agents)
             item(.webSearch)
+            item(.memory)
             item(.tools)
             group("Devices and sources")
             if phone != nil { item(.devices) }
@@ -187,6 +191,7 @@ private struct SettingsSidebar: View {
         case .actions: ActionsPage.badge(model)
         case .agents: AgentsPage.badge(model)
         case .webSearch: WebSearchPage.badge(model)
+        case .memory: MemoryPage.badge(model)
         case .tools: ConnectedToolsAccess.isAvailable ? ToolsPage.badge(tools) : .soon
         case .devices: phone.map(DevicesPage.badge)
         case .inbound: inbound.flatMap(InboundPage.badge)
@@ -271,6 +276,7 @@ extension SettingsNavigation.Page {
         case .actions: Text("Actions")
         case .agents: Text("Agents")
         case .webSearch: Text("Search the internet")
+        case .memory: Text("Memory")
         case .tools: Text("Connected tools")
         case .devices: Text("iPhone and iPad")
         case .inbound: Text("Received information")
@@ -284,6 +290,7 @@ extension SettingsNavigation.Page {
         case .actions: .bolt
         case .agents: .robot
         case .webSearch: .search
+        case .memory: .bulb
         case .tools: .plug
         case .devices: .phone
         case .inbound: .inbox
@@ -295,7 +302,7 @@ extension SettingsNavigation.Page {
     var discColor: RGBA {
         switch self {
         case .voice: Palette.azureSoft
-        case .actions, .agents, .webSearch, .tools: Palette.sunSoft
+        case .actions, .agents, .webSearch, .memory, .tools: Palette.sunSoft
         case .devices, .inbound: Palette.turquoiseSoft
         case .advanced: Palette.advancedDisc
         }
@@ -337,6 +344,10 @@ private struct SettingsSheetLayer: View {
                 return Shown(view: AnyView(EraseWakeLogSheet(navigation: navigation)), top: 120)
             case .removeBraveKey:
                 return Shown(view: AnyView(RemoveBraveKeySheet(model: model, navigation: navigation)), top: 120)
+            case .clearMemoryJournal:
+                return Shown(view: AnyView(ClearMemoryJournalSheet(model: model, navigation: navigation)), top: 120)
+            case .eraseMemory:
+                return Shown(view: AnyView(EraseMemorySheet(model: model, navigation: navigation)), top: 120)
             case .addTool:
                 return Shown(view: AnyView(AddToolSheet(tools: tools, navigation: navigation)))
             case .removeTool(let id):

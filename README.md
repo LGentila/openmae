@@ -66,6 +66,16 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   once); a place you name wins. Only the place, or the currency or the crypto, leaves the Mac. Shares and indices
   have no source of this kind yet: they stay with the web search. Offered on the tiers whose model passed their
   benchmark (Gemma 4 E4B and 26B).
+- **Memory (optional).** Switch on Settings › Memory and say “retiens que je suis allergique aux noix” or
+  “souviens-toi que ma fille s'appelle Inès”: Maé keeps it on a short sheet (1,200 characters, one entry per line)
+  and uses it when it helps, from the next conversation on, without reciting it. She only remembers what you ask her
+  to, with your own words — never something said in passing, nor what a web page or an agent says. “Annule” takes back
+  what she just remembered; “oublie que…” forgets an entry once you say “oui”. The sheet is a Markdown file you can
+  read and edit (`memory.md`). With its own switch, off by default, the **history** keeps each exchange (your words
+  and her answer) for 30 days, a year or without limit, so that you can ask “qu'est-ce que je t'avais dit sur le
+  garagiste ?” or “efface ce qu'on s'est dit hier”; it is searched on the Mac by full-text search (SQLite).
+  Everything stays in `~/Library/Application Support/OpenMaé/Memory`, never online and never in iCloud; Settings ›
+  Memory lists what she remembers and erases the history or everything.
 - **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
   with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
   encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
@@ -73,7 +83,8 @@ on — the link with your iPhone and the web search. After that, OpenMaé works 
   never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
   the two being end-to-end encrypted. (Claude Code, when you hand it a task, goes online on its own, with your
   account; the web search, when you turn it on, sends its keywords to Brave Search or to your SearXNG; the weather,
-  rates and travel times send the place, the currency or the crypto to their services.)
+  rates and travel times send the place, the currency or the crypto to their services.) The memory and its history
+  never leave the Mac: no network, no iCloud.
 - **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
   be forced in Settings › Advanced.
 - **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
@@ -416,14 +427,31 @@ each turn, how many answers said nothing to the user and how often the item the 
 .build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10
 ```
 
+The memory's tool (`memoire`: remember, search the history, forget): requests to remember, search and forget, and above
+all traps — small talk, general knowledge, a real web search, an action, and facts said without asking Maé to remember
+them, which must not be remembered; `--memory` offers the tool with the other corpora too (with an empty sheet):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/memory-actions-fr.json
+```
+
+The memory's history search, without a model: recall@4 and MRR by kind of query (the exchange's own words, paraphrases,
+a period, speech-to-text mistakes, traps) on a synthetic corpus, the same with the French sentence embedding macOS
+already has (to decide on searching by meaning), then the search's speed and the database's size at 20,000 exchanges:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli memory-bench
+```
+
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the
 model computes in the background once said, and a request sent meanwhile), a refused call and its second try, a long
 result summed up (as after a web search), a turn dropped after a second try, a speculative or interrupted answer, an
 answer in paragraphs, a speculative answer abandoned after an answer cut off, the tools changing, the history
-shortened, a new conversation. Text only, nothing is created; run it again after any change to `MLXChatModel`. With
-`VOICE_DEBUG=1`, it also shows where each request stops matching that memory, and what differs. `--cut-off ahead` or
-`--cut-off after-user-words` puts the note of an answer cut off where another tier does (see below):
+shortened, a new conversation (with `--memory`: the memory's sheet unchanged, then changed). Text only, nothing is
+created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it also shows where each request stops
+matching that memory, and what differs. `--cut-off ahead` or `--cut-off after-user-words` puts the note of an answer cut
+off where another tier does (see below):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli cache-check
@@ -513,7 +541,8 @@ The app's name is defined in one place for the engine (`Sources/VoiceCore/AppIde
 
 Move the app to the Trash. To get back the space taken by the models, either use Settings › Advanced ›
 "Delete the models…" first, or delete these folders by hand:
-- `~/Library/Application Support/OpenMaé` (the models);
+- `~/Library/Application Support/OpenMaé` (the models, and in its `Memory` folder what Maé remembers and the history
+  of exchanges: "Delete the models…" leaves that folder alone, Settings › Memory › "Erase everything…" empties it);
 - `~/Library/Caches/io.github.lgentilla.openmae` (the models compiled for the chip, about 2 GB).
 
 The settings live in `~/Library/Preferences/io.github.lgentilla.openmae.plist`.

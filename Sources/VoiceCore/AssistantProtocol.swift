@@ -47,13 +47,15 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
     /// The built-in sources (the weather, currencies and cryptos, travel times; with the actions on or off). Off by
     /// default: a place, a currency or a crypto leaves the Mac for Open-Meteo, Apple, the ECB's rates or CoinGecko.
     public var builtInSources = false
+    /// What Maé remembers when the user asks her to, and the journal of past exchanges (`MemorySettings`).
+    public var memory = MemorySettings()
     public init() {}
 
     /// `pushToTalk`: how earlier versions, which only knew hands-free and push-to-talk, saved the way of talking. It is
     /// still written, so that an earlier version (on this Mac, or the iPhone app) keeps push-to-talk.
     private enum CodingKeys: String, CodingKey {
         case audioMode, listening, pushToTalk, wakeLog, tierOverride, actionsEnabled, shortcutsToConfirm, claudeCode,
-             webSearch, builtInSources
+             webSearch, builtInSources, memory
     }
 
     /// Settings saved by an earlier version lack the newer fields: they get their default value.
@@ -72,6 +74,7 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         claudeCode = try c.decodeIfPresent(AgentSettings.self, forKey: .claudeCode) ?? AgentSettings()
         webSearch = (try? c.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch)) ?? WebSearchSettings()
         builtInSources = try c.decodeIfPresent(Bool.self, forKey: .builtInSources) ?? false
+        memory = (try? c.decodeIfPresent(MemorySettings.self, forKey: .memory)) ?? MemorySettings()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -86,6 +89,69 @@ public struct AssistantSettings: Sendable, Codable, Equatable {
         try c.encode(claudeCode, forKey: .claudeCode)
         try c.encode(webSearch, forKey: .webSearch)
         try c.encode(builtInSources, forKey: .builtInSources)
+        try c.encode(memory, forKey: .memory)
+    }
+}
+
+/// How long the journal keeps past exchanges.
+public enum MemoryRetention: String, Sendable, Codable, CaseIterable {
+    case thirtyDays, oneYear, unlimited
+
+    /// nil: kept until the user erases them.
+    public var days: Int? {
+        switch self {
+        case .thirtyDays: 30
+        case .oneYear: 365
+        case .unlimited: nil
+        }
+    }
+}
+
+/// Maé's memory, kept on this Mac only (Application Support/<name>/Memory), never sent anywhere: a sheet of what the user
+/// asked her to remember, which goes into the beginning of each conversation, and, with its own switch, a journal of past
+/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…").
+public struct MemorySettings: Sendable, Codable, Equatable {
+    /// Off by default. On, the sheet is on.
+    public var enabled = false
+    /// The journal of past exchanges, off by default even with the memory on.
+    public var journal = false
+    public var retention = MemoryRetention.thirtyDays
+    /// Searching the journal by meaning too (embeddings): off, and not built while the plain search is enough.
+    public var semanticSearch = false
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey { case enabled, journal, retention, semanticSearch }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        journal = try c.decodeIfPresent(Bool.self, forKey: .journal) ?? false
+        retention = (try? c.decodeIfPresent(MemoryRetention.self, forKey: .retention)) ?? .thirtyDays
+        semanticSearch = try c.decodeIfPresent(Bool.self, forKey: .semanticSearch) ?? false
+    }
+
+    /// The journal is written and searched: the memory and the journal both switched on.
+    public var journalOn: Bool { enabled && journal }
+}
+
+/// What the memory page shows (`AssistantEvent.memory`).
+public struct MemoryOverview: Sendable, Codable, Equatable {
+    /// The sheet, one entry per line, in the order they were added.
+    public var entries: [String]
+    /// Characters the sheet takes, and its limit (`MemorySheet.capacity`).
+    public var characters: Int
+    public var capacity: Int
+    /// Exchanges in the journal.
+    public var exchanges: Int
+    /// The memory's folder, shown to the user.
+    public var folder: String
+
+    public init(entries: [String], characters: Int, capacity: Int, exchanges: Int, folder: String) {
+        self.entries = entries
+        self.characters = characters
+        self.capacity = capacity
+        self.exchanges = exchanges
+        self.folder = folder
     }
 }
 
@@ -201,6 +267,14 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     /// Search once with the web search's settings and the key or password in the keychain (the "Test" button),
     /// switched on or not; answered by `.webSearchTested`.
     case testWebSearch
+    /// Read the memory again for its settings page; answered by `.memory`.
+    case refreshMemory
+    /// Forget one entry of the sheet (the memory page's delete button); answered by `.memory`.
+    case forgetMemoryEntry(String)
+    /// Erase the journal of past exchanges ("Clear history"); answered by `.memory`.
+    case clearMemoryJournal
+    /// Erase the sheet and the journal ("Erase everything"); answered by `.memory`.
+    case eraseMemory
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -428,6 +502,8 @@ public enum AssistantEvent: Sendable, Codable {
     case tasks([AgentTask])
     /// What `.testWebSearch` found.
     case webSearchTested(WebSearchTest)
+    /// What Maé remembers, for the memory page: sent at start-up, after `.refreshMemory` and after every change.
+    case memory(MemoryOverview)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)

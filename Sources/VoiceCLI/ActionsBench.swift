@@ -79,6 +79,9 @@ private struct Corpus: Decodable {
     var sources: Bool?
     /// Where "here" is for them.
     var here: Place?
+    /// The memory's tool is offered too (`memoire`, with the journal), with this sheet in the prompt.
+    var memory: Bool?
+    var memorySheet: [String]?
     /// What a source answered for a request (by its phrase), as the model reads it: summed up by the model.
     var recordedSources: [String: JSONValue]?
     /// The news' tool is offered too (a source of received information exists).
@@ -141,6 +144,8 @@ private struct Corpus: Decodable {
         var here: Bool?
         var instrument: String?
         var mode: String?
+        /// The memory: the action expected (`retenir`, `chercher`, `oublier`).
+        var action: String?
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -258,7 +263,9 @@ func runActionsBench(_ o: Options) async throws {
         print("the actions left out, as in the app when they are off")
     }
     let news = corpus.news == true || o.news
-    // In the app's order: the actions, the agents, the web search, the built-in sources, the news.
+    let memory = corpus.memory == true || o.memory
+    let sheet = corpus.memorySheet ?? []
+    // In the app's order: the actions, the agents, the web search, the built-in sources, the news, the memory (last).
     let tools = (actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : [])
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
@@ -266,6 +273,7 @@ func runActionsBench(_ o: Options) async throws {
         + (web ? [WebSearchCatalog.search] : [])
         + (sources ? BuiltInSources.tools : [])
         + (news ? [NewsCatalog.read] : [])
+        + (memory ? [MemoryCatalog.tool(journal: true)] : [])
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
         WeatherCatalog.name: WeatherTools(on: true, here: here),
@@ -316,6 +324,8 @@ func runActionsBench(_ o: Options) async throws {
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
         + (news ? [try o.newsAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) } ?? NewsCatalog.promptAddendum]
             : [])
+        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: true)] : [])
+    if memory { print("memory: on, with the journal, \(sheet.count) entries in the sheet") }
     let examples = o.examples ?? (actions && ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
@@ -450,6 +460,21 @@ func runActionsBench(_ o: Options) async throws {
             }
         } else if let call, call.name == NewsCatalog.readName {
             // The news: no argument, nothing for the app to refuse; the app reads them itself.
+        } else if let call, call.name == MemoryCatalog.name {
+            // The memory: the action, the words the corpus expects, and whether the app accepts the call (a fact the
+            // user did not say is refused).
+            let action = MemoryCatalog.action(call)
+            result.resolved = action?.rawValue ?? "no action"
+            do {
+                try checkMemory(call, sheet: sheet, context: context)
+                if result.toolOK, let expected = item.expected {
+                    result.argumentsOK = (expected.action == nil || expected.action == action?.rawValue)
+                        && memoryMentions(call, expected)
+                }
+            } catch let refused as ToolRefusal {
+                result.refusal = refused.forModel
+                if result.toolOK, item.expected != nil { result.argumentsOK = false }
+            }
         } else if let call, BuiltInSources.names.contains(call.name) {
             // A built-in source: whether the app accepts the call and reads it as the corpus expects, then the model's
             // summary of what the source answered (recorded, or asked for real).
@@ -1084,6 +1109,41 @@ private func mentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
     let text = folded(call.text("consigne") ?? call.text("message") ?? WebSearchCatalog.query(call)
         ?? WeatherCatalog.place(call) ?? QuoteCatalog.words(call) ?? TravelTimeCatalog.destination(call) ?? "")
     return mentions.allSatisfy { text.contains(folded($0)) }
+}
+
+/// Whether a memory call holds the expected words (in `texte`, `reference` or `quand`), whatever the accents and case;
+/// `when`: the period's words expected in `quand`.
+private func memoryMentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
+    let text = MemoryText.folded([call.text("texte"), call.text("reference"), call.text("quand"), call.text("fait"),
+                                  call.text("requete")].compactMap { $0 }.joined(separator: " "))
+    let mentions = (expected.mentions ?? []).allSatisfy { text.contains(MemoryText.folded($0)) }
+    let when = expected.when.map { MemoryText.folded(call.text("quand") ?? "").contains(MemoryText.folded($0)) } ?? true
+    return mentions && when
+}
+
+/// What the app would check of a memory call, without a store: the fact rests on the user's words; a period it can read;
+/// an entry of the sheet to forget.
+private func checkMemory(_ call: ToolCall, sheet: [String], context: ToolContext) throws {
+    let refusal = { (why: String) in ToolRefusal(forModel: why, spoken: ActionPhrases.notUnderstood(.french)) }
+    guard let action = MemoryCatalog.action(call) else { throw refusal("Il manque « action ».") }
+    if let words = call.text("quand"), MemoryPeriod.read(words, now: context.now, calendar: context.calendar) == nil {
+        throw refusal("« quand » (« \(words) ») : période illisible.")
+    }
+    let text = call.text("texte") ?? call.text("fait")
+    switch action {
+    case .retenir:
+        guard let text else { throw refusal("Il manque « texte ».") }
+        guard MemoryCatalog.wordsAreTheUser(text, said: context.userSaid) else {
+            throw refusal("Ce texte ne reprend pas les mots de l'utilisateur.")
+        }
+    case .chercher:
+        guard text != nil || call.text("quand") != nil else { throw refusal("Il manque « texte ».") }
+    case .oublier:
+        if call.text("quand") != nil, call.text("reference") == nil { return }
+        guard let wanted = call.text("reference") ?? text, MemoryTools.entry(wanted, in: sheet) != nil else {
+            throw refusal("Aucune entrée de la mémoire ne correspond.")
+        }
+    }
 }
 
 /// A search's words, whatever their order, accents and case.

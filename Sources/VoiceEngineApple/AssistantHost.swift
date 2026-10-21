@@ -74,6 +74,14 @@ public actor AssistantHost: AssistantConnection {
     private var actionsStatus: ActionsStatus?
     /// Counts the checks of Claude Code (`reportClaudeCode`): only the last one's answer goes to the app.
     private var claudeCodeChecks = 0
+    /// What Maé remembers when asked, and the journal of past exchanges, in `AppIdentity.memoryDirectory` (opened on
+    /// first use). The provider is always among the tools, last, and offers its tool only while the memory is on.
+    private let memoryStore = LazyMemoryStore()
+    private let memoryTools: MemoryTools
+    /// Writes the exchanges into the journal while it is on.
+    private var journalWriter: StoreJournal?
+    /// Forgets the exchanges older than the retention, at start-up and once a day.
+    private var purge: Task<Void, Never>?
 
     /// `actionsTestCollection`: put every event and reminder in a calendar and a list of this name (created on
     /// first use) instead of the user's own, and read only those (for trying the feature). `agentsTestFolder`: keep
@@ -82,6 +90,7 @@ public actor AssistantHost: AssistantConnection {
         calendarTools = CalendarTools(testCollection: actionsTestCollection)
         weatherTools = WeatherTools(here: here)
         travelTools = TravelTimeTools(here: here, estimator: MapKitTravel())
+        memoryTools = MemoryTools(store: memoryStore)
         agentTools = agentsTestFolder.map {
             AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
         } ?? AgentTools()
@@ -162,6 +171,17 @@ public actor AssistantHost: AssistantConnection {
         case .testWebSearch:
             // Not awaited either: a search can take up to five seconds.
             Task { await testWebSearch() }
+        case .refreshMemory:
+            await reportMemory()
+        case .forgetMemoryEntry(let entry):
+            do { try await memoryStore.removeFromSheet(entry) } catch { emit.yield(.warning("\(error)")) }
+            await reportMemory()
+        case .clearMemoryJournal:
+            do { try await memoryStore.clearJournal() } catch { emit.yield(.warning("\(error)")) }
+            await reportMemory()
+        case .eraseMemory:
+            do { try await memoryStore.eraseAll() } catch { emit.yield(.warning("\(error)")) }
+            await reportMemory()
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:
@@ -268,6 +288,7 @@ public actor AssistantHost: AssistantConnection {
 
         self.model = model
         self.pipeline = pipeline
+        await configureMemory()  // the journal, when it is on
         stage = .running
         let emit = emit
         tasks = [
@@ -510,17 +531,25 @@ public actor AssistantHost: AssistantConnection {
         if new.webSearch != old.webSearch { searchChanged = await configureWebSearch() }
         var sourcesChanged = false
         if new.builtInSources != old.builtInSources { sourcesChanged = await configureSources() }
-        if agentsChanged || searchChanged || sourcesChanged, new.actionsEnabled == old.actionsEnabled {
+        var memoryChanged = false
+        if new.memory != old.memory {
+            memoryChanged = await configureMemory()
+            DebugLog.log("memory: \(new.memory.enabled ? "on" : "off"), journal \(new.memory.journalOn ? "on" : "off")")
+            if new.memory.retention != old.memory.retention { Task { await self.purgeJournal() } }
+            await reportMemory()
+        }
+        if agentsChanged || searchChanged || sourcesChanged || memoryChanged, new.actionsEnabled == old.actionsEnabled {
             if searchChanged {
                 DebugLog.log("web search: \(new.webSearch.isReady ? "on (\(new.webSearch.source.rawValue))" : "off")")
             }
             if sourcesChanged { DebugLog.log("built-in sources: \(new.builtInSources ? "on" : "off")") }
-            // With the actions, a tool comes or goes and the conversation goes on. On their own, Claude Code, the search
-            // and the sources are the only tools: when one of them comes or goes, the tools are set again and a new
-            // conversation starts, as when the actions are switched on or off (the app clears its transcript on the
-            // pipeline's `conversationCleared`). A folder added for Claude Code only changes its tool: the conversation
-            // goes on.
+            // With the actions, a tool comes or goes and the conversation goes on. On their own, Claude Code, the search,
+            // the sources and the memory are the only tools: when one of them comes or goes, the tools are set again and
+            // a new conversation starts, as when the actions are switched on or off (the app clears its transcript on the
+            // pipeline's `conversationCleared`). A folder added for Claude Code, or the memory's journal switched, only
+            // changes a tool: the conversation goes on.
             let comeOrGo = searchChanged || sourcesChanged || new.claudeCode.enabled != old.claudeCode.enabled
+                || new.memory.enabled != old.memory.enabled
             do {
                 if new.actionsEnabled || !comeOrGo {
                     try await pipeline?.toolsChanged()
@@ -547,24 +576,89 @@ public actor AssistantHost: AssistantConnection {
     // MARK: - Actions
 
     /// The tools for a new pipeline or conversation: the actions when they are on; Claude Code, the web search, the
-    /// built-in sources and the news when they are, with the actions or on their own; nil when all are off.
+    /// built-in sources, the news and the memory when they are, with the actions or on their own; nil when all are off.
     private func toolRunner() async -> ToolRunner? {
         await configureWebSearch()
         await configureSources()
         await configureAgents()
         let sources: [any ToolProvider] = [weatherTools, quoteTools, travelTools]
+        await configureMemory()
+        // Last: the sheet it adds to the prompt changes between conversations, what comes before it does not.
+        let memory: [any ToolProvider] = [memoryTools]
         guard settings.actionsEnabled else {
             // In the same order as with the actions.
             let agents: [any ToolProvider] = settings.claudeCode.enabled ? [agentTools] : []
             let search: [any ToolProvider] = settings.webSearch.isReady ? [webSearchTools] : []
             let on = agents + search + (sourcesOn ? sources : []) + (await newsTools.isOn ? [newsTools] : [])
+                + (settings.memory.enabled ? memory : [])
             return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
         await calendarTools.offerMoves(ActionCatalog.movesItems(on: tier))
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
         return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources
-            + [newsTools])
+            + [newsTools] + memory)
+    }
+
+    // MARK: - Memory
+
+    /// Switches the memory and its journal as the settings say. Returns true when what the model sees changed (its tool,
+    /// or `chercher` with the journal).
+    @discardableResult
+    private func configureMemory() async -> Bool {
+        let memory = settings.memory
+        let changed = await memoryTools.configure(enabled: memory.enabled, journal: memory.journal)
+        if memory.journalOn {
+            let writer = journalWriter ?? StoreJournal(store: memoryStore)
+            journalWriter = writer
+            await pipeline?.setJournal(writer)
+            schedulePurge()
+        } else {
+            await pipeline?.setJournal(nil)
+            purge?.cancel()
+            purge = nil
+        }
+        return changed
+    }
+
+    /// Forgets the exchanges older than the retention: now, then once a day; never during an exchange (it waits for
+    /// the rest).
+    private func schedulePurge() {
+        guard purge == nil else { return }
+        purge = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.purgeJournal()
+                try? await Task.sleep(for: .seconds(24 * 3600))
+            }
+        }
+    }
+
+    private func purgeJournal() async {
+        guard let days = settings.memory.retention.days, settings.memory.journalOn else { return }
+        while pipelineState != .listening {
+            try? await Task.sleep(for: .seconds(60))
+            if Task.isCancelled { return }
+        }
+        do {
+            let count = try await memoryStore.purgeJournal(keepingDays: days)
+            if count > 0 { DebugLog.log("memory: \(count) exchanges older than \(days) days forgotten") }
+        } catch {
+            DebugLog.log("memory: purge failed: \(error)")
+        }
+    }
+
+    /// What the memory page shows. Nothing is created on disk while the memory was never switched on.
+    private func reportMemory() async {
+        guard settings.memory.enabled || memoryStore.exists else {
+            emit.yield(.memory(MemoryOverview(entries: [], characters: 0, capacity: MemorySheet.capacity, exchanges: 0,
+                                              folder: memoryStore.folder.path)))
+            return
+        }
+        let entries = (try? await memoryStore.loadSheet()) ?? []
+        let exchanges = (try? await memoryStore.countJournal(from: nil, to: nil)) ?? 0
+        emit.yield(.memory(MemoryOverview(entries: entries, characters: MemorySheet(entries: entries).characters,
+                                          capacity: MemorySheet.capacity, exchanges: exchanges,
+                                          folder: memoryStore.folder.path)))
     }
 
     /// The built-in sources are offered: switched on, on a tier whose model passed their benchmark.

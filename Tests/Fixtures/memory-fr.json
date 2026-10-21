@@ -1,0 +1,2385 @@
+{
+ "_comment": "Synthetic journal for voice-cli memory-bench, written for the benchmark: no real person's data (the household, its names, places and exchanges are invented). The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). exchanges: one household user's past exchanges with Maé, oldest first, from 16 August to 15 October 2026 at 18:00, local time (a few days without any), mostly in French, 15 in English (\"language\": \"en\"); the user's words as speech-to-text writes them, the answers as Maé said them. queries: 40 searches of the journal, 8 per category. \"lexical\": the query uses the key words of the exchanges it looks for. \"paraphrase\": the same thing in other words, with no content word in common with them. \"period\": words and a period in the user's words (\"quand\"); the exchanges looked for are inside the period, and the same words also match exchanges outside it (hier = Wednesday 14 October, avant-hier = Tuesday 13 October, la semaine dernière = Monday 5 to Sunday 11 October, cette semaine = Monday 12 October to now, le mois dernier = September, samedi dernier = Saturday 10 October, il y a 3 jours = Monday 12 October, il y a deux semaines = Thursday 1 October, each day whole). \"transcription\": the query as speech-to-text may garble it (missing accents, split words, homophones, a misheard name), the exchanges looked for still findable by some of its words. \"trap\": a topic the journal never mentions. expected: every exchange that answers the query (none for a trap).",
+ "now": "2026-10-15T18:42",
+ "exchanges": [
+  {
+   "id": "e1",
+   "date": "2026-08-16T10:05",
+   "user": "Bonjour Maé, on vient d'arriver à Morgat pour une semaine de vacances",
+   "answer": "Bonjour ! Profite bien de la presqu’île de Crozon, la lumière y est superbe en fin de journée.",
+   "language": "fr"
+  },
+  {
+   "id": "e2",
+   "date": "2026-08-16T12:40",
+   "user": "Il y a une plage pas loin où les enfants peuvent se baigner sans danger ?",
+   "answer": "Je ne connais pas les plages de Morgat en détail. Choisis une plage surveillée, avec un poste de secours, et regarde la couleur du drapeau en arrivant.",
+   "language": "fr"
+  },
+  {
+   "id": "e3",
+   "date": "2026-08-16T15:30",
+   "user": "Les enfants veulent une glace, c'est quoi ton parfum préféré à toi ?",
+   "answer": "Si je devais choisir, je dirais caramel au beurre salé, on est en Bretagne après tout !",
+   "language": "fr"
+  },
+  {
+   "id": "e4",
+   "date": "2026-08-16T18:30",
+   "user": "La maison qu'on a louée a une vue incroyable sur la baie, par contre le lit est horrible",
+   "answer": "Une vue sur la baie, ça compense un peu ! Pour le lit, un plaid plié sous le drap peut adoucir le matelas.",
+   "language": "fr"
+  },
+  {
+   "id": "e5",
+   "date": "2026-08-16T20:00",
+   "user": "Gabin a vu un phoque près des rochers",
+   "answer": "Quelle chance ! Les phoques gris passent souvent le long de la côte de Crozon, surtout autour des îles.",
+   "language": "fr"
+  },
+  {
+   "id": "e6",
+   "date": "2026-08-16T21:50",
+   "user": "Raconte-moi une blague pour les enfants",
+   "answer": "Pourquoi les plongeurs plongent-ils toujours en arrière ? Parce que sinon, ils tombent dans le bateau !",
+   "language": "fr"
+  },
+  {
+   "id": "e7",
+   "date": "2026-08-17T09:15",
+   "user": "Mets un minuteur de 9 minutes pour les œufs",
+   "answer": "C’est parti pour 9 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e8",
+   "date": "2026-08-17T11:30",
+   "user": "Gabin a 13 ans et il veut faire du kayak de mer, c'est possible ?",
+   "answer": "Oui, à 13 ans il peut faire une sortie encadrée par un club, avec un gilet et un encadrant diplômé.",
+   "language": "fr"
+  },
+  {
+   "id": "e9",
+   "date": "2026-08-17T14:00",
+   "user": "Mathieu a pêché trois maquereaux depuis la jetée",
+   "answer": "Bravo à lui ! Des maquereaux grillés avec un filet de citron, c’est parfait pour ce soir.",
+   "language": "fr"
+  },
+  {
+   "id": "e10",
+   "date": "2026-08-17T19:45",
+   "user": "Lou s'est fait piquer par une vive sur la plage, elle hurle de douleur",
+   "answer": "Aïe, la piqûre de vive fait très mal. Plonge vite son pied dans de l’eau bien chaude, sans la brûler, pendant une vingtaine de minutes, et consulte si ça gonfle beaucoup.",
+   "language": "fr"
+  },
+  {
+   "id": "e11",
+   "date": "2026-08-17T21:00",
+   "user": "How do you say marée basse in English?",
+   "answer": "You say low tide. And marée haute is high tide.",
+   "language": "en"
+  },
+  {
+   "id": "e12",
+   "date": "2026-08-17T22:10",
+   "user": "Bonne nuit, à demain Maé",
+   "answer": "Bonne nuit, dors bien.",
+   "language": "fr"
+  },
+  {
+   "id": "e13",
+   "date": "2026-08-18T08:50",
+   "user": "Il va faire beau aujourd'hui à Crozon ?",
+   "answer": "Soleil le matin et 23 degrés, avec des nuages qui arrivent en fin d’après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e14",
+   "date": "2026-08-18T11:00",
+   "user": "Mets un minuteur de 30 minutes pour la crème solaire des enfants",
+   "answer": "C’est parti pour 30 minutes. Pense aussi aux chapeaux !",
+   "language": "fr"
+  },
+  {
+   "id": "e15",
+   "date": "2026-08-18T14:20",
+   "user": "On a mangé dans une crêperie géniale sur le port, Ty Gwenn, la galette aux Saint-Jacques était incroyable",
+   "answer": "Ça donne faim ! Les Saint-Jacques en galette, c’est un vrai classique breton.",
+   "language": "fr"
+  },
+  {
+   "id": "e16",
+   "date": "2026-08-18T17:00",
+   "user": "Les enfants ont fait un château de sable énorme, Lou veut dormir dedans",
+   "answer": "Ça doit être une sacrée construction ! Prends une photo avant la marée montante, le souvenir restera.",
+   "language": "fr"
+  },
+  {
+   "id": "e17",
+   "date": "2026-08-18T19:30",
+   "user": "Filou s'est roulé dans une algue morte, il sent horriblement mauvais",
+   "answer": "Le grand classique des chiens à la plage ! Un bon rinçage à l’eau claire avec un shampooing pour chien, et ce sera oublié.",
+   "language": "fr"
+  },
+  {
+   "id": "e18",
+   "date": "2026-08-18T21:30",
+   "user": "C'est quoi l'étoile très brillante au-dessus de la mer ?",
+   "answer": "En début de nuit, c’est sans doute Vénus ou Jupiter, plus brillantes que n’importe quelle étoile. Si elle ne scintille pas, c’est presque sûrement une planète.",
+   "language": "fr"
+  },
+  {
+   "id": "e19",
+   "date": "2026-08-20T09:40",
+   "user": "Gabin a fait une réaction après avoir mangé des crevettes hier soir, il avait les lèvres qui gonflaient",
+   "answer": "Ça a dû vous faire peur. Ça ressemble à une allergie aux crustacés : montre-le à un médecin au retour, et s’il a du mal à respirer, appelle tout de suite le 15.",
+   "language": "fr"
+  },
+  {
+   "id": "e20",
+   "date": "2026-08-20T10:05",
+   "user": "Le pharmacien lui a donné un antihistaminique, ça va déjà mieux",
+   "answer": "Tant mieux. D’ici là, évite-lui tous les crustacés, et parles-en à votre médecin pour savoir s’il faut faire des tests.",
+   "language": "fr"
+  },
+  {
+   "id": "e21",
+   "date": "2026-08-20T13:00",
+   "user": "Gabin a repris des couleurs, il veut retourner à la plage",
+   "answer": "C’est bon signe ! Prévoyez de l’eau et un goûter sans crustacés, et profitez de l’après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e22",
+   "date": "2026-08-20T16:30",
+   "user": "On a fait la pointe de Pen-Hir à pied avec Filou, il était ravi",
+   "answer": "Les falaises de Pen-Hir sont magnifiques. Pense à bien faire boire Filou après une balade pareille, surtout par cette chaleur.",
+   "language": "fr"
+  },
+  {
+   "id": "e23",
+   "date": "2026-08-20T18:00",
+   "user": "Lou veut garder un crabe dans un seau comme animal de compagnie",
+   "answer": "Un crabe a besoin de l’eau de mer et de ses rochers. Proposez-lui de l’observer un moment, puis de le relâcher là où vous l’avez trouvé.",
+   "language": "fr"
+  },
+  {
+   "id": "e24",
+   "date": "2026-08-20T20:15",
+   "user": "Combien de temps il faut pour cuire des moules ?",
+   "answer": "Quelques minutes à couvert et à feu vif : dès qu’elles sont toutes ouvertes, c’est prêt, en général entre 5 et 8 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e25",
+   "date": "2026-08-22T10:20",
+   "user": "Lou a perdu sa première dent de lait du haut, elle demande si la petite souris passe aussi en vacances",
+   "answer": "Bien sûr, la petite souris suit les enfants partout, même en Bretagne ! Il faut juste bien cacher la dent sous l’oreiller.",
+   "language": "fr"
+  },
+  {
+   "id": "e26",
+   "date": "2026-08-22T12:30",
+   "user": "On mange quoi ce midi avec ce qui reste, des œufs, des tomates et du fromage",
+   "answer": "Une omelette aux tomates et au fromage, avec une salade, et le tour est joué.",
+   "language": "fr"
+  },
+  {
+   "id": "e27",
+   "date": "2026-08-22T15:00",
+   "user": "On rentre demain, il faut que je pense à vider le frigo de la location",
+   "answer": "Tu peux faire un dernier repas avec les restes ce soir, et emporter le reste dans une glacière pour la route.",
+   "language": "fr"
+  },
+  {
+   "id": "e28",
+   "date": "2026-08-22T18:10",
+   "user": "Mathieu a regonflé les pneus de la Clio avant la route, 2,4 bars à l'avant et 2,2 à l'arrière comme c'est écrit sur la portière",
+   "answer": "Bonne idée avant quatre heures de route avec la voiture chargée. Une bonne pression, c’est plus sûr et ça consomme moins.",
+   "language": "fr"
+  },
+  {
+   "id": "e29",
+   "date": "2026-08-22T22:00",
+   "user": "C'était vraiment des belles vacances",
+   "answer": "Je suis contente pour toi. Une semaine au bord de la mer, ça recharge les batteries avant la rentrée.",
+   "language": "fr"
+  },
+  {
+   "id": "e30",
+   "date": "2026-08-23T11:00",
+   "user": "On fait le ménage de la maison de location avant de partir, motive-moi",
+   "answer": "Allez, une pièce à la fois, avec une bonne playlist ! Dans une heure, ce sera fini et vous serez sur la route.",
+   "language": "fr"
+  },
+  {
+   "id": "e31",
+   "date": "2026-08-23T16:00",
+   "user": "On fait une pause à Vannes pour manger",
+   "answer": "Bonne idée de couper le trajet. Le port de Vannes est joli pour se dégourdir les jambes.",
+   "language": "fr"
+  },
+  {
+   "id": "e32",
+   "date": "2026-08-23T19:30",
+   "user": "On est rentrés, quatre heures de route, je suis crevée",
+   "answer": "Bon retour à la maison ! Repose-toi ce soir, le déballage peut attendre demain.",
+   "language": "fr"
+  },
+  {
+   "id": "e33",
+   "date": "2026-08-23T20:10",
+   "user": "Le monstera a plein de feuilles jaunes depuis qu'on est partis",
+   "answer": "Des feuilles qui jaunissent après une absence, c’est souvent un manque d’eau, ou au contraire un pot resté dans l’eau. Touche la terre : si elle est sèche sur plusieurs centimètres, arrose bien, sinon attends.",
+   "language": "fr"
+  },
+  {
+   "id": "e34",
+   "date": "2026-08-23T21:30",
+   "user": "Mirabelle ne nous lâche plus depuis qu'on est rentrés",
+   "answer": "Elle vous a attendus ! Les chats montrent souvent leur attachement après une absence, profite de ses câlins.",
+   "language": "fr"
+  },
+  {
+   "id": "e35",
+   "date": "2026-08-24T07:45",
+   "user": "Quel temps il fait aujourd'hui ?",
+   "answer": "Couvert ce matin à Nantes, 19 degrés, et un peu de soleil l’après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e36",
+   "date": "2026-08-24T08:30",
+   "user": "C'est la reprise au boulot, j'ai 312 mails non lus",
+   "answer": "Courage ! Commence par ceux de ta cheffe et des clients, le reste peut attendre un peu.",
+   "language": "fr"
+  },
+  {
+   "id": "e37",
+   "date": "2026-08-24T12:45",
+   "user": "Sylvie Lefort m'a confié le catalogue de Maison Verlaine, le fabricant de meubles, c'est le gros projet de l'automne",
+   "answer": "Bravo, c’est une belle preuve de confiance ! Un catalogue de meubles, tu vas pouvoir soigner les photos et la mise en page.",
+   "language": "fr"
+  },
+  {
+   "id": "e38",
+   "date": "2026-08-24T18:40",
+   "user": "Mathieu a trouvé une tique sur Filou en rentrant de balade",
+   "answer": "Retire-la avec un tire-tique en tournant doucement, sans l’écraser, puis désinfecte. Surveille la zone quelques jours et appelle le vétérinaire si Filou devient abattu.",
+   "language": "fr"
+  },
+  {
+   "id": "e39",
+   "date": "2026-08-24T20:00",
+   "user": "Les enfants font la tête, ils ne veulent pas que les vacances se finissent",
+   "answer": "C’est bien normal ! Proposez-leur un dernier petit plaisir avant la rentrée, comme une sortie au cinéma.",
+   "language": "fr"
+  },
+  {
+   "id": "e40",
+   "date": "2026-08-24T21:15",
+   "user": "C'est quoi la différence entre un crocodile et un alligator ? Lou me pose la question",
+   "answer": "L’alligator a un museau large et arrondi, en U, alors que celui du crocodile est plus pointu, en V. Et quand le crocodile ferme la gueule, on voit encore ses dents du bas.",
+   "language": "fr"
+  },
+  {
+   "id": "e41",
+   "date": "2026-08-25T07:30",
+   "user": "Mets un minuteur de 4 minutes pour le thé",
+   "answer": "C’est parti pour 4 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e42",
+   "date": "2026-08-25T08:30",
+   "user": "J'ai rendez-vous chez l'ophtalmo le 9 septembre, mes lunettes ne sont plus adaptées",
+   "answer": "Ça tombe bien, il pourra refaire ta correction. Note les moments où ta vue te gêne, pour lui en parler.",
+   "language": "fr"
+  },
+  {
+   "id": "e43",
+   "date": "2026-08-25T12:30",
+   "user": "J'ai fait une tarte aux poireaux hier soir avec un peu de curry, c'était top",
+   "answer": "Poireaux et curry, c’est une très bonne association ! Avec un peu de crème et de fromage râpé, c’est parfait.",
+   "language": "fr"
+  },
+  {
+   "id": "e44",
+   "date": "2026-08-25T19:00",
+   "user": "Ma sœur Clémence vient d'apprendre qu'elle est enceinte, le bébé est prévu pour mars",
+   "answer": "Quelle belle nouvelle ! Félicitations à Clémence, et à toi, future tante.",
+   "language": "fr"
+  },
+  {
+   "id": "e45",
+   "date": "2026-08-25T22:00",
+   "user": "Je lis La Horde du Contrevent, c'est dense mais génial",
+   "answer": "C’est un roman à part, avec son vent et sa langue inventée. Les premières pages déroutent, puis on ne le lâche plus.",
+   "language": "fr"
+  },
+  {
+   "id": "e46",
+   "date": "2026-08-26T08:15",
+   "user": "Lou commence la danse modern jazz à la rentrée, le mercredi à 14 heures",
+   "answer": "Super ! Le mercredi après-midi, c’est parfait pour elle. Il lui faudra sûrement une tenue souple et des chaussons.",
+   "language": "fr"
+  },
+  {
+   "id": "e47",
+   "date": "2026-08-26T13:10",
+   "user": "La capitale de l'Australie, c'est Sydney ?",
+   "answer": "Non, c’est Canberra ! Beaucoup de gens pensent à Sydney, mais c’est Canberra qui a été choisie comme capitale.",
+   "language": "fr"
+  },
+  {
+   "id": "e48",
+   "date": "2026-08-26T16:30",
+   "user": "Il y a une guêpe dans la cuisine, comment je la fais sortir ?",
+   "answer": "Ouvre grand la fenêtre et éteins la lumière de la pièce si tu peux, elle ira vers le jour. Surtout, ne la frappe pas.",
+   "language": "fr"
+  },
+  {
+   "id": "e49",
+   "date": "2026-08-26T18:20",
+   "user": "Le docteur Benali veut que Gabin fasse des tests chez un allergologue, à cause de sa réaction aux crevettes",
+   "answer": "C’est plus prudent. En attendant les tests, mieux vaut qu’il évite tous les crustacés.",
+   "language": "fr"
+  },
+  {
+   "id": "e50",
+   "date": "2026-08-26T20:00",
+   "user": "I'm going to try speaking English with you this week, to practise for work",
+   "answer": "Great idea! I'm happy to chat in English whenever you like, just start talking.",
+   "language": "en"
+  },
+  {
+   "id": "e51",
+   "date": "2026-08-26T21:40",
+   "user": "Tu connais un bon film à voir en famille ce soir ?",
+   "answer": "Si vous ne l’avez pas vu, Le Voyage de Chihiro plaît souvent aux petits comme aux grands. Sinon, Paddington 2 fait rire tout le monde.",
+   "language": "fr"
+  },
+  {
+   "id": "e52",
+   "date": "2026-08-28T07:50",
+   "user": "Il fait frais dehors ce matin ?",
+   "answer": "Il fait 14 degrés, prends une petite veste.",
+   "language": "fr"
+  },
+  {
+   "id": "e53",
+   "date": "2026-08-28T12:20",
+   "user": "Nadia propose qu'on recommence à courir ensemble le dimanche matin au parc de Procé",
+   "answer": "C’est motivant de courir à deux. Le dimanche matin au parc, c’est calme et ombragé, idéal pour reprendre.",
+   "language": "fr"
+  },
+  {
+   "id": "e54",
+   "date": "2026-08-28T18:45",
+   "user": "Le figuier du jardin croule sous les figues, je ne sais plus quoi en faire",
+   "answer": "Tu peux en faire de la confiture, les rôtir au four avec du miel, ou les congeler coupées en deux.",
+   "language": "fr"
+  },
+  {
+   "id": "e55",
+   "date": "2026-08-28T20:30",
+   "user": "Mathieu veut repeindre la chambre de Lou, elle a choisi un vert sauge",
+   "answer": "Le vert sauge, c’est doux et apaisant, parfait pour une chambre d’enfant. Prévoyez une sous-couche si le mur actuel est foncé.",
+   "language": "fr"
+  },
+  {
+   "id": "e56",
+   "date": "2026-08-28T21:45",
+   "user": "Mathieu a fini le poulailler en palettes, on va chercher les poules demain au marché",
+   "answer": "Bravo à lui ! Un perchoir et un pondoir garni de paille, et elles seront bien installées.",
+   "language": "fr"
+  },
+  {
+   "id": "e57",
+   "date": "2026-08-29T09:30",
+   "user": "On a acheté trois poules ce matin au marché, elles s'appellent Paprika, Cannelle et Muscade",
+   "answer": "Bienvenue à Paprika, Cannelle et Muscade ! Laisse-leur quelques jours pour s’habituer au poulailler avant de compter sur les œufs.",
+   "language": "fr"
+  },
+  {
+   "id": "e58",
+   "date": "2026-08-29T11:00",
+   "user": "Il faut combien de place pour trois poules ?",
+   "answer": "Compte au moins 10 mètres carrés de parcours pour trois poules, et un poulailler bien fermé la nuit contre les renards.",
+   "language": "fr"
+  },
+  {
+   "id": "e59",
+   "date": "2026-08-29T13:00",
+   "user": "Gabin a passé deux heures sur son téléphone cet après-midi",
+   "answer": "C’est encore les vacances, mais vous pouvez fixer une règle simple pour la rentrée, par exemple pas d’écran après le dîner.",
+   "language": "fr"
+  },
+  {
+   "id": "e60",
+   "date": "2026-08-29T16:40",
+   "user": "Filou aboie sans arrêt après les poules",
+   "answer": "C’est la nouveauté, il est curieux. Présente-les-lui en laisse, calmement, plusieurs fois par jour, et récompense-le quand il reste tranquille.",
+   "language": "fr"
+  },
+  {
+   "id": "e61",
+   "date": "2026-08-29T21:10",
+   "user": "Comment on dit poulailler en anglais ?",
+   "answer": "On dit henhouse, ou chicken coop.",
+   "language": "fr"
+  },
+  {
+   "id": "e62",
+   "date": "2026-08-30T09:00",
+   "user": "Premier footing avec Nadia, 6 kilomètres, j'ai souffert",
+   "answer": "Bravo pour cette reprise ! Les premières sorties sont toujours dures, ça ira mieux dans deux ou trois semaines.",
+   "language": "fr"
+  },
+  {
+   "id": "e63",
+   "date": "2026-08-30T12:30",
+   "user": "Je fais un poulet rôti, il faut combien de temps pour un poulet d'un kilo huit ?",
+   "answer": "Compte environ 1 h 30 à 200 degrés. Quand c’est cuit, le jus qui sort de la cuisse est clair.",
+   "language": "fr"
+  },
+  {
+   "id": "e64",
+   "date": "2026-08-30T15:00",
+   "user": "Lou veut savoir pourquoi les poules n'ont pas de dents",
+   "answer": "Les oiseaux ont perdu leurs dents il y a très longtemps, au fil de l’évolution. Les poules avalent de petits cailloux qui broient la nourriture dans leur gésier.",
+   "language": "fr"
+  },
+  {
+   "id": "e65",
+   "date": "2026-08-30T17:20",
+   "user": "Gabin rentre en quatrième au collège Jules-Verne mardi, il est stressé",
+   "answer": "C’est normal, mais en quatrième il connaît déjà les lieux et beaucoup de monde. Dis-lui que la première journée passe toujours plus vite qu’on ne le croit.",
+   "language": "fr"
+  },
+  {
+   "id": "e66",
+   "date": "2026-08-30T19:30",
+   "user": "Les poules se sont couchées toutes seules dans le poulailler",
+   "answer": "C’est bon signe, elles l’ont adopté ! Il ne reste plus qu’à fermer la trappe chaque soir.",
+   "language": "fr"
+  },
+  {
+   "id": "e67",
+   "date": "2026-08-30T21:00",
+   "user": "On regarde Le Bureau des légendes avec Mathieu, on en est à la saison 2",
+   "answer": "Belle série ! La saison 2 monte bien en tension, vous allez vouloir enchaîner.",
+   "language": "fr"
+  },
+  {
+   "id": "e68",
+   "date": "2026-08-31T07:40",
+   "user": "Dernière journée avant la rentrée, il faut que j'étiquette toutes les affaires de Lou",
+   "answer": "Des étiquettes thermocollantes vont vite, sinon un feutre textile sur l’étiquette du vêtement suffit.",
+   "language": "fr"
+  },
+  {
+   "id": "e69",
+   "date": "2026-08-31T12:50",
+   "user": "I have a video call with Fiona from Dublin on Thursday, can you help me practise my small talk?",
+   "answer": "Of course! You could ask how her summer was, then how things are going at her shop. Shall we try a few lines together?",
+   "language": "en"
+  },
+  {
+   "id": "e70",
+   "date": "2026-08-31T16:00",
+   "user": "On a acheté les fournitures scolaires, 140 euros pour les deux",
+   "answer": "Ça chiffre vite ! L’allocation de rentrée scolaire aide, si vous y avez droit.",
+   "language": "fr"
+  },
+  {
+   "id": "e71",
+   "date": "2026-08-31T19:30",
+   "user": "Il y a combien de calories dans une figue ?",
+   "answer": "Une figue fraîche, c’est environ 40 calories.",
+   "language": "fr"
+  },
+  {
+   "id": "e72",
+   "date": "2026-08-31T22:15",
+   "user": "Quelle heure il est ?",
+   "answer": "Il est 22 h 15.",
+   "language": "fr"
+  },
+  {
+   "id": "e73",
+   "date": "2026-09-01T07:20",
+   "user": "Bonjour Maé, c'est la rentrée !",
+   "answer": "Bonjour ! Bonne rentrée à Gabin et Lou, et à toi aussi.",
+   "language": "fr"
+  },
+  {
+   "id": "e74",
+   "date": "2026-09-01T08:10",
+   "user": "Lou est en CE2 avec madame Roux cette année",
+   "answer": "Le CE2, c’est une belle année ! J’espère que Lou va bien s’entendre avec madame Roux.",
+   "language": "fr"
+  },
+  {
+   "id": "e75",
+   "date": "2026-09-01T12:30",
+   "user": "Je déjeune seule au bureau, tout le monde est encore en vacances",
+   "answer": "Profite du calme pour avancer tranquillement, ça ne va pas durer.",
+   "language": "fr"
+  },
+  {
+   "id": "e76",
+   "date": "2026-09-01T17:30",
+   "user": "Gabin trouve son nouveau prof principal sympa au collège, monsieur Kaddour, le prof de maths",
+   "answer": "Super nouvelle pour un premier jour ! Un prof principal sympa, ça aide pour toute l’année.",
+   "language": "fr"
+  },
+  {
+   "id": "e77",
+   "date": "2026-09-01T20:00",
+   "user": "Je crois que je suis allergique au kiwi, ça me pique la bouche à chaque fois",
+   "answer": "Ce picotement dans la bouche est assez fréquent avec le kiwi. Arrête d’en manger, et parles-en à ton médecin à la prochaine visite.",
+   "language": "fr"
+  },
+  {
+   "id": "e78",
+   "date": "2026-09-01T21:30",
+   "user": "Comment on calcule l'aire d'un cercle ?",
+   "answer": "Pi fois le rayon au carré. Pour un rayon de 3 centimètres, ça fait environ 28,3 centimètres carrés.",
+   "language": "fr"
+  },
+  {
+   "id": "e79",
+   "date": "2026-09-02T07:45",
+   "user": "Mets un minuteur de 20 minutes avant de partir à l'école",
+   "answer": "C’est parti pour 20 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e80",
+   "date": "2026-09-02T12:30",
+   "user": "What's the English word for devis?",
+   "answer": "You can say quote, or estimate. For example: could you send me a quote for the job?",
+   "language": "en"
+  },
+  {
+   "id": "e81",
+   "date": "2026-09-02T14:30",
+   "user": "Premier cours de danse de Lou, elle a adoré",
+   "answer": "Génial ! Si elle a aimé dès le premier cours, c’est bien parti pour l’année.",
+   "language": "fr"
+  },
+  {
+   "id": "e82",
+   "date": "2026-09-02T16:30",
+   "user": "Lou a déjà des devoirs, une poésie à apprendre",
+   "answer": "Une strophe par soir, récitée au coucher, et elle la saura en quelques jours.",
+   "language": "fr"
+  },
+  {
+   "id": "e83",
+   "date": "2026-09-02T18:00",
+   "user": "Cannelle a pondu son premier œuf !",
+   "answer": "Bravo Cannelle ! Le premier œuf est souvent petit, les suivants vont grossir peu à peu.",
+   "language": "fr"
+  },
+  {
+   "id": "e84",
+   "date": "2026-09-02T21:20",
+   "user": "Pourquoi la mer est salée ?",
+   "answer": "Les rivières dissolvent les minéraux des roches et les emportent jusqu’à la mer. L’eau s’évapore, mais le sel reste, alors il s’accumule depuis des millions d’années.",
+   "language": "fr"
+  },
+  {
+   "id": "e85",
+   "date": "2026-09-03T08:00",
+   "user": "Le monstera continue de jaunir, je crois que je l'ai noyé",
+   "answer": "Si la terre reste humide trop longtemps, les racines s’asphyxient. Laisse-le sécher, vide la soucoupe, et n’arrose que quand le dessus du terreau est sec.",
+   "language": "fr"
+  },
+  {
+   "id": "e86",
+   "date": "2026-09-03T10:30",
+   "user": "Fiona says the brochure for her shop in Dublin has to be ready by the end of October",
+   "answer": "That's a tight deadline. You could ask her which pages matter most, so those are ready first.",
+   "language": "en"
+  },
+  {
+   "id": "e87",
+   "date": "2026-09-03T12:45",
+   "user": "Le garage m'a rappelé que la Clio doit passer le contrôle technique avant le 20 novembre",
+   "answer": "Il te reste un peu de marge. Prends rendez-vous dès maintenant, les créneaux partent vite en fin d’année.",
+   "language": "fr"
+  },
+  {
+   "id": "e88",
+   "date": "2026-09-03T19:10",
+   "user": "C'est quoi un nombre premier ? Lou veut savoir",
+   "answer": "C’est un nombre qui ne se divise que par 1 et par lui-même, comme 2, 3, 5, 7 ou 11. Le 9 n’en est pas un, parce que 3 fois 3 font 9.",
+   "language": "fr"
+  },
+  {
+   "id": "e89",
+   "date": "2026-09-03T22:00",
+   "user": "Je n'arrive pas à dormir",
+   "answer": "Pose ton téléphone et respire lentement, quatre secondes pour inspirer, six pour expirer. Une lumière tamisée et quelques pages d’un livre peuvent aider aussi.",
+   "language": "fr"
+  },
+  {
+   "id": "e90",
+   "date": "2026-09-04T07:30",
+   "user": "Quel temps ce week-end ?",
+   "answer": "Samedi s’annonce ensoleillé avec 24 degrés, dimanche plus nuageux avec un risque d’averse l’après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e91",
+   "date": "2026-09-04T12:30",
+   "user": "Je dois déposer la Clio au garage Dumont lundi matin pour la vidange, c'est au 14 rue des Forges à Rezé",
+   "answer": "D’accord, prévois comment rentrer après l’avoir déposée. Une vidange, ça prend en général une petite heure.",
+   "language": "fr"
+  },
+  {
+   "id": "e92",
+   "date": "2026-09-04T16:30",
+   "user": "Lou a invité sa copine Jade à dormir samedi",
+   "answer": "Une soirée pyjama ! Prévoyez un film, des crêpes, et sûrement des fous rires tard le soir.",
+   "language": "fr"
+  },
+  {
+   "id": "e93",
+   "date": "2026-09-04T18:15",
+   "user": "Fais-moi rire, j'ai eu une semaine difficile",
+   "answer": "Tu sais pourquoi les squelettes ne se battent jamais entre eux ? Parce qu’ils n’ont pas de tripes ! Bon week-end, tu l’as bien mérité.",
+   "language": "fr"
+  },
+  {
+   "id": "e94",
+   "date": "2026-09-04T20:30",
+   "user": "Gabin rentre de son premier entraînement de hand",
+   "answer": "Alors, il a retrouvé ses copains d’équipe ? La reprise, ça fait toujours plaisir.",
+   "language": "fr"
+  },
+  {
+   "id": "e95",
+   "date": "2026-09-04T21:00",
+   "user": "On a fini la saison 2 du Bureau des légendes, quel final",
+   "answer": "Ce final est marquant ! La saison 3 change pas mal de décor, vous allez voir.",
+   "language": "fr"
+  },
+  {
+   "id": "e96",
+   "date": "2026-09-05T10:00",
+   "user": "Je fais le gâteau au yaourt de mamie avec Lou, un pot de yaourt, deux pots de sucre, trois pots de farine, trois œufs et un demi-pot d'huile",
+   "answer": "C’est la recette classique, simple et inratable. Compte environ 35 minutes à 180 degrés, et vérifie la cuisson avec la pointe d’un couteau.",
+   "language": "fr"
+  },
+  {
+   "id": "e97",
+   "date": "2026-09-05T10:20",
+   "user": "Mets un minuteur de 35 minutes",
+   "answer": "C’est parti pour 35 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e98",
+   "date": "2026-09-05T16:00",
+   "user": "On est allés à la jardinerie, on a acheté une orchidée et du terreau",
+   "answer": "Pour l’orchidée, une fenêtre lumineuse sans soleil direct, et un arrosage par semaine en trempant le pot quelques minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e99",
+   "date": "2026-09-05T18:00",
+   "user": "Jade et Lou font une cabane dans le salon",
+   "answer": "Le grand classique des soirées pyjama ! Des chaises, des draps, et le tour est joué.",
+   "language": "fr"
+  },
+  {
+   "id": "e100",
+   "date": "2026-09-05T20:40",
+   "user": "Mathieu veut refaire la cuisine, on a demandé un devis chez Cuisines Morel",
+   "answer": "Un projet de cuisine, c’est excitant ! Demandez au moins deux devis pour comparer, avec les mêmes éléments dedans.",
+   "language": "fr"
+  },
+  {
+   "id": "e101",
+   "date": "2026-09-06T09:10",
+   "user": "Footing avec Nadia, 7 kilomètres cette fois, ça va mieux",
+   "answer": "Belle progression ! Une semaine après, tu gagnes déjà un kilomètre.",
+   "language": "fr"
+  },
+  {
+   "id": "e102",
+   "date": "2026-09-06T12:15",
+   "user": "C'est l'anniversaire de mariage de mes parents aujourd'hui, 45 ans",
+   "answer": "45 ans, ce sont des noces de vermeil ! Passe-leur un beau coup de fil.",
+   "language": "fr"
+  },
+  {
+   "id": "e103",
+   "date": "2026-09-06T15:00",
+   "user": "Mon levain s'appelle Gaston, je le nourris avec 50 grammes de farine et 50 grammes d'eau tous les deux jours",
+   "answer": "Gaston a de la chance d’être si bien soigné ! S’il gonfle trop vite, garde-le au frais entre deux rafraîchis.",
+   "language": "fr"
+  },
+  {
+   "id": "e104",
+   "date": "2026-09-06T18:30",
+   "user": "Comment on fait une pâte à crêpes sans grumeaux ?",
+   "answer": "Verse le lait petit à petit dans la farine en fouettant, ou passe le tout au mixeur. Laisse reposer une heure, et c’est parfait.",
+   "language": "fr"
+  },
+  {
+   "id": "e105",
+   "date": "2026-09-06T21:45",
+   "user": "Gabin a un exposé sur les volcans pour dans deux semaines",
+   "answer": "Bon sujet ! Il peut parler du Piton de la Fournaise ou du Vésuve, avec un schéma de l’intérieur d’un volcan.",
+   "language": "fr"
+  },
+  {
+   "id": "e106",
+   "date": "2026-09-07T07:15",
+   "user": "Je dépose la Clio au garage ce matin",
+   "answer": "Bonne journée, et demande-leur s’ils ont remarqué autre chose sur la voiture.",
+   "language": "fr"
+  },
+  {
+   "id": "e107",
+   "date": "2026-09-07T12:40",
+   "user": "Thibault part en congé paternité, je récupère ses dossiers pendant trois semaines",
+   "answer": "Ça fait du travail en plus. Demande-lui la liste des urgences avant qu’il parte, ça t’évitera des surprises.",
+   "language": "fr"
+  },
+  {
+   "id": "e108",
+   "date": "2026-09-07T16:00",
+   "user": "Mathieu a eu sa réunion de rentrée au lycée, il a des secondes en SVT cette année",
+   "answer": "Les secondes, c’est un niveau sympa à enseigner. J’espère qu’il aura de bonnes classes.",
+   "language": "fr"
+  },
+  {
+   "id": "e109",
+   "date": "2026-09-07T18:50",
+   "user": "Le garage a fait la vidange de la Clio pour 95 euros, et ils disent que les freins avant seront à refaire d'ici quelques mois",
+   "answer": "Le prix est raisonnable. Pour les freins, ce n’est pas urgent, mais il ne faudra pas trop attendre.",
+   "language": "fr"
+  },
+  {
+   "id": "e110",
+   "date": "2026-09-07T21:15",
+   "user": "Pourquoi les chats ronronnent ?",
+   "answer": "Les chats ronronnent quand ils sont détendus, mais aussi pour se rassurer quand ils ont mal ou peur. Le son vient de la vibration de leur larynx.",
+   "language": "fr"
+  },
+  {
+   "id": "e111",
+   "date": "2026-09-09T08:20",
+   "user": "Mirabelle a ramené une souris vivante dans la cuisine",
+   "answer": "Classique, c’est un cadeau de chasseuse ! Ouvre la porte du jardin et guide la souris dehors avec un torchon.",
+   "language": "fr"
+  },
+  {
+   "id": "e112",
+   "date": "2026-09-09T13:00",
+   "user": "Lou a besoin d'un justaucorps noir pour la danse",
+   "answer": "Les magasins de sport en ont souvent, sinon les boutiques de danse en ligne. Prends une taille au-dessus pour qu’il dure l’année.",
+   "language": "fr"
+  },
+  {
+   "id": "e113",
+   "date": "2026-09-09T17:30",
+   "user": "L'ophtalmo dit que ma vue a un peu baissé, je vais prendre des nouvelles lunettes avec une monture bleue",
+   "answer": "Une monture bleue, c’est original ! Tu verras mieux, et sans maux de tête en fin de journée.",
+   "language": "fr"
+  },
+  {
+   "id": "e114",
+   "date": "2026-09-09T19:30",
+   "user": "J'ai mal au dos depuis que j'ai bougé le buffet du salon",
+   "answer": "Ça ressemble à une contracture. Repose-toi, mets du chaud, et si la douleur ne passe pas d’ici quelques jours, consulte ton médecin.",
+   "language": "fr"
+  },
+  {
+   "id": "e115",
+   "date": "2026-09-09T22:00",
+   "user": "Combien font 15 % de 240 ?",
+   "answer": "15 % de 240, ça fait 36.",
+   "language": "fr"
+  },
+  {
+   "id": "e116",
+   "date": "2026-09-10T07:45",
+   "user": "Le dos ne va pas mieux, j'ai pris rendez-vous chez le docteur Benali à 17 heures",
+   "answer": "Tu fais bien. En attendant, évite de porter des choses lourdes.",
+   "language": "fr"
+  },
+  {
+   "id": "e117",
+   "date": "2026-09-10T12:30",
+   "user": "My call with Fiona went well, she loved the first mock-ups for her shop",
+   "answer": "That's great news! It sounds like the project is off to a good start.",
+   "language": "en"
+  },
+  {
+   "id": "e118",
+   "date": "2026-09-10T15:00",
+   "user": "Combien de temps je dois laisser poser une coloration ?",
+   "answer": "En général 30 à 45 minutes, mais suis bien le temps indiqué sur la notice.",
+   "language": "fr"
+  },
+  {
+   "id": "e119",
+   "date": "2026-09-10T18:40",
+   "user": "Le docteur Benali m'a prescrit dix séances de kiné pour le dos",
+   "answer": "C’est souvent ce qui marche le mieux pour le dos. Commence vite, les premières séances soulagent beaucoup.",
+   "language": "fr"
+  },
+  {
+   "id": "e120",
+   "date": "2026-09-10T21:00",
+   "user": "C'est quoi la différence entre un kiné et un ostéopathe ?",
+   "answer": "Le kiné rééduque avec des exercices et des massages, souvent sur ordonnance. L’ostéopathe manipule pour relâcher des tensions, et il n’est en général pas remboursé par la Sécurité sociale.",
+   "language": "fr"
+  },
+  {
+   "id": "e121",
+   "date": "2026-09-11T08:00",
+   "user": "Il pleut ?",
+   "answer": "Oui, il bruine à Nantes ce matin, prends un parapluie.",
+   "language": "fr"
+  },
+  {
+   "id": "e122",
+   "date": "2026-09-11T12:20",
+   "user": "Une collègue m'a conseillé le podcast Affaires sensibles, tu connais ?",
+   "answer": "Oui, c’est un podcast de France Inter qui raconte de grandes affaires et des faits divers. Les épisodes durent une heure, parfait pour les trajets.",
+   "language": "fr"
+  },
+  {
+   "id": "e123",
+   "date": "2026-09-11T13:30",
+   "user": "Mathieu dit que ses élèves de seconde sont bavards mais sympas",
+   "answer": "C’est souvent le cas en début d’année ! Ils vont prendre le rythme.",
+   "language": "fr"
+  },
+  {
+   "id": "e124",
+   "date": "2026-09-11T17:00",
+   "user": "On a changé de vétérinaire, maintenant c'est le docteur Jourdain à la clinique des Tilleuls, à deux rues de chez nous",
+   "answer": "C’est pratique d’avoir un vétérinaire si proche. Pense à lui faire transférer le dossier de Filou et Mirabelle.",
+   "language": "fr"
+  },
+  {
+   "id": "e125",
+   "date": "2026-09-11T18:30",
+   "user": "Clémence a fait sa première échographie, tout va bien",
+   "answer": "Super nouvelle ! La première écho, c’est toujours un moment émouvant.",
+   "language": "fr"
+  },
+  {
+   "id": "e126",
+   "date": "2026-09-11T21:30",
+   "user": "On attaque la saison 3 du Bureau des légendes",
+   "answer": "Bonne soirée ! Prévoyez du temps, elle se regarde d’une traite.",
+   "language": "fr"
+  },
+  {
+   "id": "e127",
+   "date": "2026-09-12T09:30",
+   "user": "Gabin a son premier match de hand de la saison cet après-midi",
+   "answer": "Bon match à lui ! Tu vas l’encourager depuis les gradins ?",
+   "language": "fr"
+  },
+  {
+   "id": "e128",
+   "date": "2026-09-12T12:30",
+   "user": "Mirabelle vomit des boules de poils",
+   "answer": "C’est fréquent chez les chats, surtout pendant la mue. Brosse-la plus souvent, et demande au vétérinaire une pâte contre les boules de poils.",
+   "language": "fr"
+  },
+  {
+   "id": "e129",
+   "date": "2026-09-12T17:00",
+   "user": "Ils ont gagné 24 à 19, Gabin a marqué trois buts",
+   "answer": "Bravo à lui ! Trois buts pour le premier match, c’est une belle entrée en matière.",
+   "language": "fr"
+  },
+  {
+   "id": "e130",
+   "date": "2026-09-12T19:45",
+   "user": "Je fais un risotto ce soir, je mets le parmesan à la fin ?",
+   "answer": "Oui, hors du feu, avec une noix de beurre : c’est la mantecatura. Remue bien pour que ce soit crémeux.",
+   "language": "fr"
+  },
+  {
+   "id": "e131",
+   "date": "2026-09-12T22:30",
+   "user": "Tu as une idée de sortie pour demain avec les enfants ?",
+   "answer": "Une balade au jardin des Plantes, ou un tour au marché suivi d’un pique-nique si le temps le permet.",
+   "language": "fr"
+  },
+  {
+   "id": "e132",
+   "date": "2026-09-13T09:40",
+   "user": "J'ai fait mon 10 kilomètres en 58 minutes avec Nadia, record battu",
+   "answer": "Bravo ! Passer sous l’heure, c’est un vrai cap. Pense à bien t’étirer et à boire.",
+   "language": "fr"
+  },
+  {
+   "id": "e133",
+   "date": "2026-09-13T12:30",
+   "user": "Ma mère m'a appelée, mon père se fait opérer de la cataracte jeudi",
+   "answer": "J’espère que tout ira bien pour lui. C’est une opération courante, et on récupère souvent très vite.",
+   "language": "fr"
+  },
+  {
+   "id": "e134",
+   "date": "2026-09-13T15:30",
+   "user": "Les tomates du jardin sont finies, j'arrache les pieds",
+   "answer": "C’est le moment. Mets-les au compost s’ils n’étaient pas malades.",
+   "language": "fr"
+  },
+  {
+   "id": "e135",
+   "date": "2026-09-13T18:00",
+   "user": "Comment on garde des figues plus longtemps ?",
+   "answer": "Au réfrigérateur, elles tiennent deux ou trois jours. Pour plus longtemps, congèle-les ou fais-les sécher au four à basse température.",
+   "language": "fr"
+  },
+  {
+   "id": "e136",
+   "date": "2026-09-13T20:00",
+   "user": "On a mangé les dernières figues du jardin en dessert",
+   "answer": "La fin des figues, c’est toujours un peu triste ! Profitez-en bien.",
+   "language": "fr"
+  },
+  {
+   "id": "e137",
+   "date": "2026-09-13T21:15",
+   "user": "Quelle est la planète la plus chaude du système solaire ?",
+   "answer": "C’est Vénus, à cause de son atmosphère très épaisse qui piège la chaleur, même si Mercure est plus proche du Soleil.",
+   "language": "fr"
+  },
+  {
+   "id": "e138",
+   "date": "2026-09-14T07:30",
+   "user": "Mets un minuteur de 15 minutes",
+   "answer": "C’est parti pour 15 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e139",
+   "date": "2026-09-14T12:45",
+   "user": "Réunion de lancement du catalogue Verlaine ce matin, le client veut 120 pages et une sortie le 30 octobre",
+   "answer": "120 pages pour fin octobre, c’est un sacré défi. Découpe-le vite en étapes datées, le planning sera plus clair.",
+   "language": "fr"
+  },
+  {
+   "id": "e140",
+   "date": "2026-09-14T17:30",
+   "user": "Thibault m'a laissé un dossier en vrac, je ne m'y retrouve pas",
+   "answer": "Commence par lister ce qui est urgent, et envoie-lui un message court s’il peut répondre pendant son absence.",
+   "language": "fr"
+  },
+  {
+   "id": "e141",
+   "date": "2026-09-14T19:00",
+   "user": "Je suis fatiguée, la journée a été longue",
+   "answer": "Prends un moment pour toi ce soir, un bain chaud ou un épisode de série. Tu l’as bien mérité.",
+   "language": "fr"
+  },
+  {
+   "id": "e142",
+   "date": "2026-09-14T21:40",
+   "user": "Pourquoi les feuilles des arbres changent de couleur en automne ?",
+   "answer": "Quand les jours raccourcissent, l’arbre arrête de fabriquer la chlorophylle, qui est verte. Les pigments jaunes et orange, déjà là, deviennent alors visibles.",
+   "language": "fr"
+  },
+  {
+   "id": "e143",
+   "date": "2026-09-15T07:30",
+   "user": "Il fait beau aujourd'hui ?",
+   "answer": "Oui, grand soleil et 22 degrés cet après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e144",
+   "date": "2026-09-15T08:10",
+   "user": "Première séance de kiné ce soir avec Hugo, au cabinet de la place du Commerce",
+   "answer": "J’espère qu’il va te soulager. Dis-lui bien quels gestes te font mal.",
+   "language": "fr"
+  },
+  {
+   "id": "e145",
+   "date": "2026-09-15T12:30",
+   "user": "Thibault a eu une petite fille, elle s'appelle Rose",
+   "answer": "Félicitations à lui ! Rose, c’est un joli prénom.",
+   "language": "fr"
+  },
+  {
+   "id": "e146",
+   "date": "2026-09-15T19:30",
+   "user": "Hugo le kiné dit que j'ai une contracture dans le bas du dos et que je dois faire du gainage tous les jours",
+   "answer": "Le gainage renforce les muscles qui protègent le dos. Commence doucement, quelques séries de 20 secondes, et augmente petit à petit.",
+   "language": "fr"
+  },
+  {
+   "id": "e147",
+   "date": "2026-09-15T21:00",
+   "user": "Lou a un exercice sur les homophones, c'est quoi la différence entre a et à ?",
+   "answer": "« a » sans accent, c’est le verbe avoir : on peut le remplacer par « avait ». « à » avec un accent, c’est une préposition, comme dans « je vais à l’école ».",
+   "language": "fr"
+  },
+  {
+   "id": "e148",
+   "date": "2026-09-16T07:40",
+   "user": "Il faut que je trouve un cadeau pour l'anniversaire de Mathieu, le 28 octobre",
+   "answer": "Tu as encore un peu de temps. Il a une passion en ce moment, ou un objet qu’il regarde souvent en magasin ?",
+   "language": "fr"
+  },
+  {
+   "id": "e149",
+   "date": "2026-09-16T12:30",
+   "user": "Fiona wants to add a page about her new tea collection",
+   "answer": "That sounds lovely. Ask her for the photos and a short text early, so the layout isn't held up.",
+   "language": "en"
+  },
+  {
+   "id": "e150",
+   "date": "2026-09-16T16:00",
+   "user": "Lou est rentrée de danse avec un genou écorché",
+   "answer": "Nettoie à l’eau et au savon, désinfecte, et mets un pansement. Un petit câlin, et ce sera vite oublié.",
+   "language": "fr"
+  },
+  {
+   "id": "e151",
+   "date": "2026-09-16T18:20",
+   "user": "Muscade ne pond toujours pas, alors que Paprika et Cannelle font un œuf par jour",
+   "answer": "Chaque poule a son rythme, et le changement de maison peut retarder la ponte. Si Muscade mange bien et a l’air en forme, laisse-lui quelques semaines.",
+   "language": "fr"
+  },
+  {
+   "id": "e152",
+   "date": "2026-09-16T21:30",
+   "user": "Tu connais un bon roman policier ?",
+   "answer": "Tu pourrais essayer Pierre Lemaitre, par exemple Travail soigné, ou les enquêtes de Fred Vargas, comme L’Homme à l’envers.",
+   "language": "fr"
+  },
+  {
+   "id": "e153",
+   "date": "2026-09-17T07:30",
+   "user": "Mets un minuteur de 8 minutes",
+   "answer": "C’est parti pour 8 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e154",
+   "date": "2026-09-17T09:00",
+   "user": "Mon père se fait opérer de la cataracte ce matin à Quimper",
+   "answer": "Je croise les doigts pour lui. Ce genre d’opération dure en général moins d’une demi-heure.",
+   "language": "fr"
+  },
+  {
+   "id": "e155",
+   "date": "2026-09-17T12:30",
+   "user": "C'est quoi le plus long fleuve de France ?",
+   "answer": "C’est la Loire, avec un peu plus de 1 000 kilomètres, du mont Gerbier-de-Jonc jusqu’à l’océan, à Saint-Nazaire.",
+   "language": "fr"
+  },
+  {
+   "id": "e156",
+   "date": "2026-09-17T16:00",
+   "user": "Combien de temps on met des gouttes après une opération de la cataracte ?",
+   "answer": "En général quelques semaines, selon ce que l’ophtalmologue a prescrit. Le mieux est de suivre l’ordonnance à la lettre.",
+   "language": "fr"
+  },
+  {
+   "id": "e157",
+   "date": "2026-09-17T18:00",
+   "user": "L'opération de papa s'est bien passée, il voit déjà mieux",
+   "answer": "Quelle bonne nouvelle ! Il devra mettre ses gouttes et éviter de se frotter l’œil les premiers jours.",
+   "language": "fr"
+  },
+  {
+   "id": "e158",
+   "date": "2026-09-17T21:15",
+   "user": "Gabin a fini son exposé sur les volcans, il a choisi le Stromboli",
+   "answer": "Très bon choix, le Stromboli est actif presque en permanence ! Il peut montrer des photos de ses éruptions de nuit.",
+   "language": "fr"
+  },
+  {
+   "id": "e159",
+   "date": "2026-09-18T07:30",
+   "user": "On part demain à Lyon chez Clémence, train à 8 h 12 au départ de Nantes",
+   "answer": "Bon voyage ! Prenez de quoi occuper les enfants, le trajet est assez long.",
+   "language": "fr"
+  },
+  {
+   "id": "e160",
+   "date": "2026-09-18T12:15",
+   "user": "Mets un minuteur de 20 minutes, je fais une sieste",
+   "answer": "C’est parti pour 20 minutes, repose-toi bien.",
+   "language": "fr"
+  },
+  {
+   "id": "e161",
+   "date": "2026-09-18T17:00",
+   "user": "Je fais la valise pour Lyon, il va faire froid là-bas ?",
+   "answer": "À Lyon ce week-end, autour de 18 degrés l’après-midi et plus frais le matin. Prends un pull pour chacun.",
+   "language": "fr"
+  },
+  {
+   "id": "e162",
+   "date": "2026-09-18T19:00",
+   "user": "Notre voisin Jean-Pierre garde Filou et Mirabelle ce week-end et s'occupe des poules",
+   "answer": "C’est précieux, un voisin de confiance ! Laisse-lui les croquettes et les consignes bien en vue.",
+   "language": "fr"
+  },
+  {
+   "id": "e163",
+   "date": "2026-09-18T21:30",
+   "user": "C'est quoi exactement une quenelle ?",
+   "answer": "C’est une spécialité lyonnaise, une pâte à base de semoule ou de farine, d’œufs et de beurre, souvent au brochet, servie avec une sauce Nantua.",
+   "language": "fr"
+  },
+  {
+   "id": "e164",
+   "date": "2026-09-19T11:30",
+   "user": "On est arrivés à Lyon, Clémence a déjà un joli ventre",
+   "answer": "Ça doit être émouvant de la voir enceinte. Profitez bien de ce week-end en famille.",
+   "language": "fr"
+  },
+  {
+   "id": "e165",
+   "date": "2026-09-19T15:30",
+   "user": "Clémence et Arnaud cherchent un appartement plus grand à Villeurbanne pour l'arrivée du bébé",
+   "answer": "Avec un bébé en route, la place compte. Villeurbanne est bien desservie, c’est pratique pour rester près de Lyon.",
+   "language": "fr"
+  },
+  {
+   "id": "e166",
+   "date": "2026-09-19T17:30",
+   "user": "Arnaud nous fait visiter le parc de la Tête d'Or",
+   "answer": "C’est un très beau parc, avec son lac et son jardin zoologique gratuit. Les enfants vont adorer les girafes.",
+   "language": "fr"
+  },
+  {
+   "id": "e167",
+   "date": "2026-09-19T20:30",
+   "user": "On a mangé dans un bouchon lyonnais, j'ai pris la quenelle",
+   "answer": "Alors, verdict ? Un bouchon, c’est le meilleur endroit pour la goûter.",
+   "language": "fr"
+  },
+  {
+   "id": "e168",
+   "date": "2026-09-19T23:00",
+   "user": "Je vais me coucher, bonne nuit",
+   "answer": "Bonne nuit, profite bien de Lyon demain.",
+   "language": "fr"
+  },
+  {
+   "id": "e169",
+   "date": "2026-09-20T10:00",
+   "user": "On fait le marché de la Croix-Rousse avec Clémence avant de reprendre le train",
+   "answer": "Le marché du boulevard de la Croix-Rousse est très animé le dimanche matin. Bon retour ensuite !",
+   "language": "fr"
+  },
+  {
+   "id": "e170",
+   "date": "2026-09-20T11:45",
+   "user": "Clémence est sage-femme à la maternité de la Croix-Rousse, elle fait encore des gardes de nuit malgré sa grossesse",
+   "answer": "Les gardes de nuit doivent être éprouvantes enceinte. Elle pourra sûrement les arrêter dans quelques mois.",
+   "language": "fr"
+  },
+  {
+   "id": "e171",
+   "date": "2026-09-20T15:00",
+   "user": "Le train de retour a 30 minutes de retard",
+   "answer": "Pas de chance. Profitez-en pour prendre un goûter en gare, les enfants patienteront mieux.",
+   "language": "fr"
+  },
+  {
+   "id": "e172",
+   "date": "2026-09-20T19:40",
+   "user": "On est rentrés de Lyon, les enfants dorment déjà",
+   "answer": "Bon retour ! Après un week-end chargé, ils ont bien le droit de récupérer.",
+   "language": "fr"
+  },
+  {
+   "id": "e173",
+   "date": "2026-09-20T21:00",
+   "user": "Jean-Pierre dit que Filou a été très sage",
+   "answer": "Bravo Filou ! Il mérite une bonne balade demain.",
+   "language": "fr"
+  },
+  {
+   "id": "e174",
+   "date": "2026-09-22T07:50",
+   "user": "Quel temps aujourd'hui ?",
+   "answer": "Nuageux et 16 degrés, avec des éclaircies en fin de journée.",
+   "language": "fr"
+  },
+  {
+   "id": "e175",
+   "date": "2026-09-22T12:30",
+   "user": "Je n'avance pas sur le catalogue Verlaine, le photographe n'a toujours pas livré les photos",
+   "answer": "C’est frustrant. Fixe-lui une date limite claire, et avance la mise en page avec des visuels provisoires.",
+   "language": "fr"
+  },
+  {
+   "id": "e176",
+   "date": "2026-09-22T17:30",
+   "user": "Le portail grince, il faudrait le graisser",
+   "answer": "Un peu de graisse ou d’huile en spray sur les gonds, et il sera silencieux.",
+   "language": "fr"
+  },
+  {
+   "id": "e177",
+   "date": "2026-09-22T19:00",
+   "user": "Deuxième séance de kiné, Hugo m'a montré des étirements pour le dos",
+   "answer": "Fais-les tous les jours, même quand tu n’as plus mal : c’est là que ça compte.",
+   "language": "fr"
+  },
+  {
+   "id": "e178",
+   "date": "2026-09-22T21:30",
+   "user": "Gabin a eu 17 à son exposé sur les volcans",
+   "answer": "17 sur 20, félicitations à Gabin ! Il peut être fier de son travail.",
+   "language": "fr"
+  },
+  {
+   "id": "e179",
+   "date": "2026-09-22T22:30",
+   "user": "Tell me a fun fact about Ireland",
+   "answer": "Halloween comes from an old Irish festival called Samhain, which marked the end of the harvest.",
+   "language": "en"
+  },
+  {
+   "id": "e180",
+   "date": "2026-09-23T07:30",
+   "user": "Mathieu parle d'une platine vinyle depuis des mois, c'est l'idée parfaite pour son anniversaire",
+   "answer": "Une platine vinyle, c’est un très beau cadeau ! Ajoute un premier disque qu’il aime, et il sera ravi.",
+   "language": "fr"
+  },
+  {
+   "id": "e181",
+   "date": "2026-09-23T14:30",
+   "user": "Lou a mal au ventre, elle ne veut pas aller à la danse",
+   "answer": "Si c’est léger, un peu de repos et une bouillotte peuvent suffire. Si la douleur est forte ou dure, appelle le médecin.",
+   "language": "fr"
+  },
+  {
+   "id": "e182",
+   "date": "2026-09-23T18:45",
+   "user": "Le photographe a enfin envoyé les photos pour Verlaine, elles sont superbes",
+   "answer": "Enfin ! Tu vas pouvoir avancer sur la mise en page.",
+   "language": "fr"
+  },
+  {
+   "id": "e183",
+   "date": "2026-09-23T20:00",
+   "user": "Gabin a perdu sa carte de cantine",
+   "answer": "Il peut sûrement en redemander une à la vie scolaire. En attendant, ils ont souvent une liste pour le laisser passer.",
+   "language": "fr"
+  },
+  {
+   "id": "e184",
+   "date": "2026-09-23T22:00",
+   "user": "C'est quoi l'équinoxe ?",
+   "answer": "C’est le moment où le jour et la nuit ont presque la même durée partout sur Terre. Celui d’automne tombe autour du 22 ou 23 septembre.",
+   "language": "fr"
+  },
+  {
+   "id": "e185",
+   "date": "2026-09-24T06:45",
+   "user": "Je prends le train pour Paris, réunion chez Maison Verlaine à 11 heures",
+   "answer": "Bon voyage ! Profite du trajet pour relire tes notes avant la réunion.",
+   "language": "fr"
+  },
+  {
+   "id": "e186",
+   "date": "2026-09-24T07:30",
+   "user": "Le train a 20 minutes de retard",
+   "answer": "Pas de chance. Préviens ton client que tu risques d’arriver un peu juste.",
+   "language": "fr"
+  },
+  {
+   "id": "e187",
+   "date": "2026-09-24T18:00",
+   "user": "Lou a eu 7 sur 10 à sa dictée, elle confond encore les accents",
+   "answer": "Ce n’est pas mal du tout ! Les accents viennent avec la pratique, quelques mots par soir suffisent.",
+   "language": "fr"
+  },
+  {
+   "id": "e188",
+   "date": "2026-09-24T19:30",
+   "user": "La réunion chez Verlaine s'est bien passée, ils ont validé la couverture du catalogue",
+   "answer": "Bravo, c’est une étape importante de franchie !",
+   "language": "fr"
+  },
+  {
+   "id": "e189",
+   "date": "2026-09-24T22:15",
+   "user": "Quelle est la distance entre Paris et Nantes ?",
+   "answer": "Environ 385 kilomètres par la route, et un peu plus de deux heures en TGV.",
+   "language": "fr"
+  },
+  {
+   "id": "e190",
+   "date": "2026-09-25T08:00",
+   "user": "Nadia fête sa crémaillère demain soir, je ne sais pas quoi lui apporter",
+   "answer": "Une belle plante, une bouteille de vin ou un joli objet pour la cuisine, ça fait toujours plaisir pour une crémaillère.",
+   "language": "fr"
+  },
+  {
+   "id": "e191",
+   "date": "2026-09-25T12:30",
+   "user": "Fiona asked if we can move our next call to Monday at 3 pm her time",
+   "answer": "Dublin is one hour behind France, so 3 pm in Dublin is 4 pm for you.",
+   "language": "en"
+  },
+  {
+   "id": "e192",
+   "date": "2026-09-25T17:30",
+   "user": "Filou boite de la patte arrière depuis ce matin, il a dû se tordre quelque chose en courant",
+   "answer": "Garde-le au calme et regarde s’il a une épine ou une coupure entre les coussinets. S’il boite encore demain, emmène-le consulter.",
+   "language": "fr"
+  },
+  {
+   "id": "e193",
+   "date": "2026-09-25T19:00",
+   "user": "On a regardé un documentaire sur les orques, c'est fou ce qu'elles sont intelligentes",
+   "answer": "Oui, elles chassent ensemble avec des techniques qu’elles se transmettent, presque comme une culture.",
+   "language": "fr"
+  },
+  {
+   "id": "e194",
+   "date": "2026-09-25T21:40",
+   "user": "Raconte-moi un fait insolite",
+   "answer": "Les loutres de mer se tiennent par la patte quand elles dorment, pour ne pas dériver loin les unes des autres.",
+   "language": "fr"
+  },
+  {
+   "id": "e195",
+   "date": "2026-09-26T09:30",
+   "user": "Le vétérinaire, le docteur Jourdain, dit que Filou a juste une entorse, repos pendant une semaine",
+   "answer": "Ouf, rien de grave. Limite les balades à de petites sorties en laisse pendant sa convalescence.",
+   "language": "fr"
+  },
+  {
+   "id": "e196",
+   "date": "2026-09-26T10:30",
+   "user": "Je fais un risotto aux champignons ce soir chez Nadia, je prends des cèpes ?",
+   "answer": "Les cèpes donnent un goût formidable. Tu peux les mélanger avec des champignons de Paris pour réduire le coût.",
+   "language": "fr"
+  },
+  {
+   "id": "e197",
+   "date": "2026-09-26T15:00",
+   "user": "J'ai trouvé une lampe en céramique pour la crémaillère de Nadia",
+   "answer": "Bonne idée, c’est un cadeau joli et utile. Elle va adorer.",
+   "language": "fr"
+  },
+  {
+   "id": "e198",
+   "date": "2026-09-26T18:00",
+   "user": "Je mets combien de bouillon dans un risotto pour quatre ?",
+   "answer": "Compte environ un litre de bouillon chaud pour 300 grammes de riz, ajouté louche après louche.",
+   "language": "fr"
+  },
+  {
+   "id": "e199",
+   "date": "2026-09-26T23:30",
+   "user": "Super soirée chez Nadia, son appartement donne sur l'Erdre",
+   "answer": "Une vue sur l’Erdre, ça doit être très agréable. Contente que la soirée ait été réussie.",
+   "language": "fr"
+  },
+  {
+   "id": "e200",
+   "date": "2026-09-27T10:00",
+   "user": "Pas de footing ce matin, je suis trop fatiguée après hier soir",
+   "answer": "Tu peux bien t’accorder un dimanche de repos. Une petite marche cet après-midi fera du bien quand même.",
+   "language": "fr"
+  },
+  {
+   "id": "e201",
+   "date": "2026-09-27T12:30",
+   "user": "Mathieu fait des crêpes pour le goûter",
+   "answer": "Bonne idée pour un dimanche ! Avec du sucre, de la confiture de figues ou du caramel.",
+   "language": "fr"
+  },
+  {
+   "id": "e202",
+   "date": "2026-09-27T15:30",
+   "user": "Gabin veut s'inscrire au club d'astronomie du collège",
+   "answer": "Super idée ! Il apprendra plein de choses sur le ciel, et les nuits d’observation sont souvent magiques.",
+   "language": "fr"
+  },
+  {
+   "id": "e203",
+   "date": "2026-09-27T18:00",
+   "user": "J'ai repris le gainage, trois fois 30 secondes",
+   "answer": "Bravo, c’est la régularité qui compte. Ajoute 10 secondes chaque semaine.",
+   "language": "fr"
+  },
+  {
+   "id": "e204",
+   "date": "2026-09-27T21:00",
+   "user": "Comment on enlève une tache de vin rouge sur une nappe ?",
+   "answer": "Éponge tout de suite, puis couvre de sel ou de bicarbonate. Lave ensuite à l’eau froide avec un peu de savon, jamais à l’eau chaude d’abord.",
+   "language": "fr"
+  },
+  {
+   "id": "e205",
+   "date": "2026-09-28T07:30",
+   "user": "Il fait froid ce matin",
+   "answer": "Oui, 9 degrés seulement, prends une veste chaude.",
+   "language": "fr"
+  },
+  {
+   "id": "e206",
+   "date": "2026-09-28T12:40",
+   "user": "Thibault est revenu de congé paternité, il m'a montré des photos de sa fille Rose",
+   "answer": "Félicitations à lui ! Et tu vas pouvoir lui rendre ses dossiers.",
+   "language": "fr"
+  },
+  {
+   "id": "e207",
+   "date": "2026-09-28T16:00",
+   "user": "Combien de temps on peut garder des œufs frais ?",
+   "answer": "Environ quatre semaines après la ponte, au frais. Pour vérifier, plonge-les dans l’eau : s’ils flottent, jette-les.",
+   "language": "fr"
+  },
+  {
+   "id": "e208",
+   "date": "2026-09-28T18:30",
+   "user": "Gabin a rendez-vous chez l'orthodontiste mercredi pour poser son appareil dentaire",
+   "answer": "C’est un grand jour. Les premiers jours, il aura un peu mal aux dents : prévois de la purée et des yaourts.",
+   "language": "fr"
+  },
+  {
+   "id": "e209",
+   "date": "2026-09-28T21:10",
+   "user": "Pourquoi on a le hoquet ?",
+   "answer": "C’est le diaphragme qui se contracte brusquement, souvent après avoir mangé trop vite ou bu une boisson gazeuse. La glotte se ferme à chaque fois, d’où le petit bruit.",
+   "language": "fr"
+  },
+  {
+   "id": "e210",
+   "date": "2026-09-30T10:00",
+   "user": "Gabin a son appareil dentaire, l'orthodontiste, le docteur Vasseur, dit qu'il va le garder 18 mois",
+   "answer": "18 mois, ça passe vite. Il faudra bien brosser autour des bagues après chaque repas.",
+   "language": "fr"
+  },
+  {
+   "id": "e211",
+   "date": "2026-09-30T12:30",
+   "user": "How do I politely tell a client that a deadline isn't realistic?",
+   "answer": "You could say: to make sure we deliver the quality you expect, I'd suggest moving the deadline. Then offer a concrete new date.",
+   "language": "en"
+  },
+  {
+   "id": "e212",
+   "date": "2026-09-30T14:00",
+   "user": "Lou adore sa danse, elle prépare un spectacle pour décembre",
+   "answer": "Super ! Un spectacle, c’est un bel objectif pour elle.",
+   "language": "fr"
+  },
+  {
+   "id": "e213",
+   "date": "2026-09-30T19:30",
+   "user": "Gabin a mal aux dents avec son appareil, il ne veut rien manger",
+   "answer": "C’est normal les premiers jours. Propose-lui des soupes, de la purée, des compotes, et un antidouleur si besoin.",
+   "language": "fr"
+  },
+  {
+   "id": "e214",
+   "date": "2026-09-30T21:45",
+   "user": "Gabin me demande la différence entre un virus et une bactérie",
+   "answer": "Une bactérie est un être vivant d’une seule cellule, qui se multiplie seule et se soigne avec des antibiotiques. Un virus est bien plus petit et a besoin d’une cellule hôte pour se reproduire.",
+   "language": "fr"
+  },
+  {
+   "id": "e215",
+   "date": "2026-10-01T07:40",
+   "user": "Mets un minuteur de 10 minutes",
+   "answer": "C’est parti pour 10 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e216",
+   "date": "2026-10-01T12:30",
+   "user": "Point d'étape sur le catalogue Verlaine avec Sylvie, on en est à 40 pages sur 120",
+   "answer": "Un tiers du chemin à un mois de l’échéance : il va falloir accélérer, mais c’est faisable si toutes les photos sont arrivées.",
+   "language": "fr"
+  },
+  {
+   "id": "e217",
+   "date": "2026-10-01T13:00",
+   "user": "What's the difference between actually and currently?",
+   "answer": "Actually means in fact, like en fait. Currently means right now, like actuellement, which is a classic trap for French speakers.",
+   "language": "en"
+  },
+  {
+   "id": "e218",
+   "date": "2026-10-01T16:00",
+   "user": "Le collège organise une sortie au Mémorial de Caen pour les quatrièmes en novembre",
+   "answer": "Une belle sortie, le Mémorial est passionnant. Vérifie ce qu’il faut prévoir pour le pique-nique.",
+   "language": "fr"
+  },
+  {
+   "id": "e219",
+   "date": "2026-10-01T18:30",
+   "user": "Il faut que je rentre le citronnier avant les premières gelées",
+   "answer": "Oui, le citronnier craint le gel. Rentre-le dans une pièce lumineuse et fraîche, autour de 10 à 15 degrés.",
+   "language": "fr"
+  },
+  {
+   "id": "e220",
+   "date": "2026-10-01T21:00",
+   "user": "On a commencé Severance avec Mathieu, c'est bizarre mais captivant",
+   "answer": "C’est exactement ça ! L’ambiance est étrange, et chaque épisode donne envie de voir le suivant.",
+   "language": "fr"
+  },
+  {
+   "id": "e221",
+   "date": "2026-10-02T08:00",
+   "user": "Il va faire quel temps ce week-end ?",
+   "answer": "Pluvieux samedi, puis des éclaircies dimanche, autour de 15 degrés.",
+   "language": "fr"
+  },
+  {
+   "id": "e222",
+   "date": "2026-10-02T12:45",
+   "user": "J'ai réservé l'hôtel pour Lisbonne du 11 au 15 novembre, la Pensão Azulejo, dans l'Alfama",
+   "answer": "L’Alfama, c’est le quartier le plus pittoresque de Lisbonne ! Vous allez adorer vous perdre dans ses ruelles.",
+   "language": "fr"
+  },
+  {
+   "id": "e223",
+   "date": "2026-10-02T17:30",
+   "user": "Les résultats des tests de Gabin chez l'allergologue sont arrivés, il est bien allergique aux crustacés et doit toujours avoir sa trousse d'urgence",
+   "answer": "Au moins, c’est clair maintenant. Il faudra prévenir le collège et la cantine, et vérifier les étiquettes à chaque fois.",
+   "language": "fr"
+  },
+  {
+   "id": "e224",
+   "date": "2026-10-02T18:30",
+   "user": "Ma mère va garder les enfants pendant qu'on sera à Lisbonne avec Mathieu",
+   "answer": "Parfait, les enfants seront ravis d’aller chez leur grand-mère, et vous pourrez profiter tranquillement.",
+   "language": "fr"
+  },
+  {
+   "id": "e225",
+   "date": "2026-10-02T21:30",
+   "user": "Comment on dit merci en portugais ?",
+   "answer": "On dit obrigado si c’est un homme qui parle, et obrigada si c’est une femme.",
+   "language": "fr"
+  },
+  {
+   "id": "e226",
+   "date": "2026-10-03T10:15",
+   "user": "Je fais une soupe de potimarron, il faut l'éplucher ?",
+   "answer": "Pas besoin, la peau du potimarron se mange une fois cuite. Lave-le, enlève les graines, et coupe-le en morceaux.",
+   "language": "fr"
+  },
+  {
+   "id": "e227",
+   "date": "2026-10-03T10:40",
+   "user": "Lance un minuteur de 30 minutes pour la soupe",
+   "answer": "C’est parti pour 30 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e228",
+   "date": "2026-10-03T13:00",
+   "user": "Gabin a gagné son match de hand 30 à 22",
+   "answer": "Belle victoire ! L’équipe a l’air en forme cette saison.",
+   "language": "fr"
+  },
+  {
+   "id": "e229",
+   "date": "2026-10-03T16:00",
+   "user": "Paprika s'est échappée du poulailler, on l'a retrouvée chez le voisin",
+   "answer": "Une poule aventurière ! Vérifie le grillage, elle a peut-être trouvé un trou ou un endroit d’où sauter.",
+   "language": "fr"
+  },
+  {
+   "id": "e230",
+   "date": "2026-10-03T18:30",
+   "user": "Mon pain au levain n'a pas levé, il est tout plat",
+   "answer": "Ton levain manquait peut-être de vigueur. Rafraîchis-le et attends qu’il double de volume avant de l’utiliser, puis laisse la pâte pousser plus longtemps au chaud.",
+   "language": "fr"
+  },
+  {
+   "id": "e231",
+   "date": "2026-10-03T20:45",
+   "user": "Tu me conseilles quel vin avec une soupe de potimarron ?",
+   "answer": "Un blanc sec et fruité, comme un chenin de Loire, va très bien avec la douceur du potimarron.",
+   "language": "fr"
+  },
+  {
+   "id": "e232",
+   "date": "2026-10-04T09:30",
+   "user": "Footing de 8 kilomètres avec Nadia sous la pluie",
+   "answer": "Courir sous la pluie, ça forge le caractère ! Sèche-toi bien et bois quelque chose de chaud.",
+   "language": "fr"
+  },
+  {
+   "id": "e233",
+   "date": "2026-10-04T11:00",
+   "user": "Mets un minuteur de 18 minutes pour les lasagnes",
+   "answer": "C’est parti pour 18 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e234",
+   "date": "2026-10-04T14:00",
+   "user": "Nadia m'a inscrite avec elle à la course des Remparts le 18 octobre, 10 kilomètres",
+   "answer": "Super, un objectif concret ! Tu as deux semaines pour t’y préparer.",
+   "language": "fr"
+  },
+  {
+   "id": "e235",
+   "date": "2026-10-04T16:30",
+   "user": "Ma belle-sœur Agathe vient dîner samedi prochain, elle est végétarienne",
+   "answer": "Tu peux faire un curry de légumes ou des lasagnes aux épinards et à la ricotta, tout le monde aimera.",
+   "language": "fr"
+  },
+  {
+   "id": "e236",
+   "date": "2026-10-04T18:00",
+   "user": "Le citronnier est rentré dans la véranda",
+   "answer": "Parfait, il y sera bien à l’abri. Arrose-le peu cet hiver, juste quand la terre est sèche.",
+   "language": "fr"
+  },
+  {
+   "id": "e237",
+   "date": "2026-10-04T20:00",
+   "user": "Je relis Vingt mille lieues sous les mers avec Gabin, c'est sa lecture pour le collège",
+   "answer": "Un grand classique ! Le capitaine Nemo et le Nautilus, c’est une belle aventure à partager.",
+   "language": "fr"
+  },
+  {
+   "id": "e238",
+   "date": "2026-10-05T07:30",
+   "user": "Bonjour Maé, il fait quel temps ?",
+   "answer": "Bonjour ! Gris et 13 degrés ce matin, avec de la pluie en fin d’après-midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e239",
+   "date": "2026-10-05T12:30",
+   "user": "Le club de lecture de la médiathèque reprend ce soir, on parle de La Horde du Contrevent",
+   "answer": "Tu vas avoir plein de choses à dire ! C’est un livre qui divise, les débats devraient être animés.",
+   "language": "fr"
+  },
+  {
+   "id": "e240",
+   "date": "2026-10-05T16:30",
+   "user": "J'ai mal à la tête depuis ce midi",
+   "answer": "Bois un grand verre d’eau et fais une pause loin des écrans. Si ça ne passe pas, un antidouleur peut aider.",
+   "language": "fr"
+  },
+  {
+   "id": "e241",
+   "date": "2026-10-05T18:00",
+   "user": "La Clio grince quand je freine",
+   "answer": "Ce sont peut-être les plaquettes usées. Fais vérifier les freins au garage cette semaine, ne tarde pas trop.",
+   "language": "fr"
+  },
+  {
+   "id": "e242",
+   "date": "2026-10-05T19:30",
+   "user": "Le club de lecture a choisi Les Furtifs pour le mois prochain",
+   "answer": "Encore du Damasio, vous restez dans son univers ! C’est un roman plus récent, sur des créatures qui échappent à toute surveillance.",
+   "language": "fr"
+  },
+  {
+   "id": "e243",
+   "date": "2026-10-05T21:00",
+   "user": "Tu connais un bon exercice pour le dos à faire le soir ?",
+   "answer": "La posture de l’enfant, en yoga, étire doucement le bas du dos. Reste une minute en respirant calmement.",
+   "language": "fr"
+  },
+  {
+   "id": "e244",
+   "date": "2026-10-06T07:45",
+   "user": "Je dépose la Clio au garage Dumont demain matin pour les freins",
+   "answer": "D’accord, demande-leur un devis avant qu’ils changent quoi que ce soit.",
+   "language": "fr"
+  },
+  {
+   "id": "e245",
+   "date": "2026-10-06T08:30",
+   "user": "Je mets un manteau aujourd'hui ?",
+   "answer": "Oui, il fait 10 degrés ce matin et le vent est frais.",
+   "language": "fr"
+  },
+  {
+   "id": "e246",
+   "date": "2026-10-06T13:00",
+   "user": "Fiona sent me the texts for the brochure, but they're twice as long as planned",
+   "answer": "You could suggest cutting them down together, or adding two pages if the budget allows. Better to raise it now than at the last minute.",
+   "language": "en"
+  },
+  {
+   "id": "e247",
+   "date": "2026-10-06T17:00",
+   "user": "Gabin veut un téléphone plus récent pour Noël",
+   "answer": "Vous avez le temps d’y réfléchir. Un modèle reconditionné, c’est souvent un bon compromis.",
+   "language": "fr"
+  },
+  {
+   "id": "e248",
+   "date": "2026-10-06T19:30",
+   "user": "Yoga ce soir, la prof dit que j'ai fait des progrès",
+   "answer": "Bravo ! Le yoga régulier, ça aide aussi beaucoup pour le dos.",
+   "language": "fr"
+  },
+  {
+   "id": "e249",
+   "date": "2026-10-06T22:00",
+   "user": "Combien de temps on peut garder une soupe au frigo ?",
+   "answer": "Trois à quatre jours dans une boîte fermée. Au-delà, mieux vaut la congeler.",
+   "language": "fr"
+  },
+  {
+   "id": "e250",
+   "date": "2026-10-07T08:00",
+   "user": "La Clio est au garage, Mathieu me dépose au travail",
+   "answer": "Parfait, ça s’arrange bien.",
+   "language": "fr"
+  },
+  {
+   "id": "e251",
+   "date": "2026-10-07T12:30",
+   "user": "Minuteur de 7 minutes",
+   "answer": "C’est parti pour 7 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e252",
+   "date": "2026-10-07T14:00",
+   "user": "Lou a appris une nouvelle chorégraphie, elle veut nous la montrer ce soir",
+   "answer": "Installez-vous au premier rang ! Elle va adorer avoir un public.",
+   "language": "fr"
+  },
+  {
+   "id": "e253",
+   "date": "2026-10-07T16:30",
+   "user": "Les poules ne sortent plus quand il pleut",
+   "answer": "Elles n’aiment pas se mouiller les plumes. Un coin abrité dans le parcours leur permettra de gratter même par temps de pluie.",
+   "language": "fr"
+  },
+  {
+   "id": "e254",
+   "date": "2026-10-07T18:30",
+   "user": "Le garage a changé les plaquettes et les disques avant de la Clio, 280 euros",
+   "answer": "C’est un prix, mais les freins, ça ne se néglige pas. Au moins, tu repars en sécurité.",
+   "language": "fr"
+  },
+  {
+   "id": "e255",
+   "date": "2026-10-07T21:30",
+   "user": "Gabin a une interro de maths demain sur les fractions",
+   "answer": "Il peut faire trois ou quatre exercices ce soir, puis se coucher tôt. Le sommeil compte autant que les révisions.",
+   "language": "fr"
+  },
+  {
+   "id": "e256",
+   "date": "2026-10-08T07:30",
+   "user": "Mets un minuteur de 6 minutes pour les œufs mollets",
+   "answer": "C’est parti pour 6 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e257",
+   "date": "2026-10-08T12:30",
+   "user": "Sylvie Lefort a fixé mon entretien annuel au mardi 20 octobre",
+   "answer": "C’est bien d’avoir la date à l’avance. Note tes réussites de l’année et ce que tu aimerais pour la suivante.",
+   "language": "fr"
+  },
+  {
+   "id": "e258",
+   "date": "2026-10-08T13:00",
+   "user": "Fiona invited us to Dublin next spring, Mathieu is already looking at flights",
+   "answer": "How kind of her! Dublin is lovely in spring, and the flights from Nantes are short.",
+   "language": "en"
+  },
+  {
+   "id": "e259",
+   "date": "2026-10-08T18:45",
+   "user": "Nadia et moi on a couru 9 kilomètres, je me sens prête pour les Remparts",
+   "answer": "Belle préparation ! La semaine avant la course, réduis un peu et garde des forces.",
+   "language": "fr"
+  },
+  {
+   "id": "e260",
+   "date": "2026-10-08T21:15",
+   "user": "C'est quoi le mot le plus long de la langue française ?",
+   "answer": "On cite souvent anticonstitutionnellement, avec 25 lettres, même si certains termes scientifiques sont encore plus longs.",
+   "language": "fr"
+  },
+  {
+   "id": "e261",
+   "date": "2026-10-09T07:30",
+   "user": "Un minuteur de 5 minutes, s'il te plaît",
+   "answer": "C’est parti pour 5 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e262",
+   "date": "2026-10-09T08:10",
+   "user": "Mirabelle a mauvaise haleine, le vétérinaire veut lui faire un détartrage le 22 octobre",
+   "answer": "Un détartrage, c’est courant chez les chats. Elle devra sûrement être à jeun le matin de l’intervention.",
+   "language": "fr"
+  },
+  {
+   "id": "e263",
+   "date": "2026-10-09T12:30",
+   "user": "On a reçu le deuxième devis pour la cuisine, l'atelier Boisseau demande 11 000 euros",
+   "answer": "C’est un budget. Compare bien ce qui est compris dans chaque devis : la pose, l’électroménager et les finitions.",
+   "language": "fr"
+  },
+  {
+   "id": "e264",
+   "date": "2026-10-09T12:35",
+   "user": "Celui de Cuisines Morel était à 8 400 euros",
+   "answer": "Ça fait 2 600 euros d’écart. Regarde si l’atelier Boisseau propose du sur-mesure ou de meilleurs matériaux, ça peut justifier la différence.",
+   "language": "fr"
+  },
+  {
+   "id": "e265",
+   "date": "2026-10-09T18:30",
+   "user": "Lou a peur du noir depuis qu'elle a vu un film avec un fantôme",
+   "answer": "Une petite veilleuse peut la rassurer. Tu peux aussi lui proposer de chasser les monstres avec une lampe de poche avant de dormir.",
+   "language": "fr"
+  },
+  {
+   "id": "e266",
+   "date": "2026-10-09T21:30",
+   "user": "Je finis La Horde du Contrevent ce soir, les dernières pages sont incroyables",
+   "answer": "Quelle fin ! C’est le genre de livre qui reste longtemps en tête.",
+   "language": "fr"
+  },
+  {
+   "id": "e267",
+   "date": "2026-10-10T09:30",
+   "user": "Gabin a un match de hand à 11 heures contre Rezé",
+   "answer": "Bon match à Gabin ! Encourage-le bien depuis les tribunes.",
+   "language": "fr"
+  },
+  {
+   "id": "e268",
+   "date": "2026-10-10T13:00",
+   "user": "Gabin a perdu son match 21 à 25, il est déçu",
+   "answer": "Ça arrive, même aux meilleures équipes. Il peut être fier d’avoir tout donné.",
+   "language": "fr"
+  },
+  {
+   "id": "e269",
+   "date": "2026-10-10T14:30",
+   "user": "On fait un gâteau aux pommes avec Lou, je le laisse combien de temps au four ?",
+   "answer": "Environ 40 minutes à 180 degrés. Il est cuit quand la lame d’un couteau ressort sèche.",
+   "language": "fr"
+  },
+  {
+   "id": "e270",
+   "date": "2026-10-10T14:35",
+   "user": "Mets un minuteur de 40 minutes",
+   "answer": "C’est parti pour 40 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e271",
+   "date": "2026-10-10T19:00",
+   "user": "Muscade a enfin pondu son premier œuf, il est tout petit",
+   "answer": "Bravo Muscade, elle a pris son temps ! Les prochains œufs seront plus gros.",
+   "language": "fr"
+  },
+  {
+   "id": "e272",
+   "date": "2026-10-10T22:00",
+   "user": "Quelle est la différence entre un lapin et un lièvre ?",
+   "answer": "Le lièvre est plus grand, avec de longues oreilles à pointe noire, et il vit seul dans les champs. Le lapin vit en colonie dans des terriers.",
+   "language": "fr"
+  },
+  {
+   "id": "e273",
+   "date": "2026-10-11T09:30",
+   "user": "Dernière grosse sortie avant les Remparts, 10 kilomètres en 56 minutes",
+   "answer": "Tu progresses encore, bravo ! Repose-toi bien cette semaine, et vise un rythme régulier dimanche prochain.",
+   "language": "fr"
+  },
+  {
+   "id": "e274",
+   "date": "2026-10-11T12:30",
+   "user": "Mes parents viennent déjeuner, je fais un pot-au-feu",
+   "answer": "Un pot-au-feu, parfait pour un dimanche d’octobre ! Compte au moins trois heures de cuisson à petit feu.",
+   "language": "fr"
+  },
+  {
+   "id": "e275",
+   "date": "2026-10-11T15:00",
+   "user": "Mes parents repartent à Quimper, ils ont trois heures de route",
+   "answer": "Bonne route à eux ! Qu’ils t’envoient un message en arrivant.",
+   "language": "fr"
+  },
+  {
+   "id": "e276",
+   "date": "2026-10-11T17:00",
+   "user": "Mon père dit qu'il voit parfaitement depuis son opération de l'œil",
+   "answer": "Super ! Une cataracte opérée, ça change vraiment le quotidien.",
+   "language": "fr"
+  },
+  {
+   "id": "e277",
+   "date": "2026-10-11T21:00",
+   "user": "On a fini Severance, j'ai besoin d'en parler à quelqu'un",
+   "answer": "Ah, cette fin ! Qu’est-ce qui t’a le plus marquée ?",
+   "language": "fr"
+  },
+  {
+   "id": "e278",
+   "date": "2026-10-12T07:30",
+   "user": "Il fait combien ce matin ?",
+   "answer": "11 degrés et du brouillard, qui devrait se lever vers midi.",
+   "language": "fr"
+  },
+  {
+   "id": "e279",
+   "date": "2026-10-12T12:40",
+   "user": "Clémence a trouvé un appartement à Villeurbanne, un trois pièces avec balcon, elle déménage le 14 novembre",
+   "answer": "Super nouvelle ! Elle aura le temps de bien s’installer avant l’hiver.",
+   "language": "fr"
+  },
+  {
+   "id": "e280",
+   "date": "2026-10-12T13:00",
+   "user": "I've got a call with Fiona at four, wish me luck",
+   "answer": "Good luck! You know her project inside out by now, it'll go smoothly.",
+   "language": "en"
+  },
+  {
+   "id": "e281",
+   "date": "2026-10-12T16:00",
+   "user": "Gabin a été sélectionné dans l'équipe de hand pour le tournoi de Noël",
+   "answer": "Bravo à lui ! Tous ces entraînements paient.",
+   "language": "fr"
+  },
+  {
+   "id": "e282",
+   "date": "2026-10-12T18:30",
+   "user": "Lou a eu 10 sur 10 à sa dictée",
+   "answer": "Bravo à Lou ! Un sans-faute en dictée, ça se fête.",
+   "language": "fr"
+  },
+  {
+   "id": "e283",
+   "date": "2026-10-12T21:30",
+   "user": "C'est quoi la différence entre la météo et le climat ?",
+   "answer": "La météo, c’est le temps qu’il fera dans les prochains jours. Le climat, c’est la moyenne de ce temps sur des dizaines d’années dans une région.",
+   "language": "fr"
+  },
+  {
+   "id": "e284",
+   "date": "2026-10-13T07:40",
+   "user": "Mets un minuteur de 12 minutes",
+   "answer": "C’est parti pour 12 minutes.",
+   "language": "fr"
+  },
+  {
+   "id": "e285",
+   "date": "2026-10-13T12:30",
+   "user": "Fiona approved the final version of the brochure, we're sending it to print on Friday",
+   "answer": "Congratulations, that's a big step! Enjoy the moment before the next project.",
+   "language": "en"
+  },
+  {
+   "id": "e286",
+   "date": "2026-10-13T17:30",
+   "user": "Le citronnier a deux nouvelles fleurs depuis qu'il est dans la véranda",
+   "answer": "Il se plaît là où il est ! Une fleur de citronnier, ça sent divinement bon.",
+   "language": "fr"
+  },
+  {
+   "id": "e287",
+   "date": "2026-10-13T19:30",
+   "user": "Réunion parents-profs au collège ce soir, le prof principal de Gabin dit qu'il bavarde trop en anglais",
+   "answer": "Rien de grave, mais c’est bien d’en parler avec lui. Il pourrait peut-être changer de place en cours d’anglais.",
+   "language": "fr"
+  },
+  {
+   "id": "e288",
+   "date": "2026-10-13T21:15",
+   "user": "Mathieu a acheté un guide de Lisbonne, il veut absolument manger des pastéis de nata à Belém",
+   "answer": "Les pastéis de Belém, c’est presque un pèlerinage ! Allez-y en semaine, la queue est plus courte.",
+   "language": "fr"
+  },
+  {
+   "id": "e289",
+   "date": "2026-10-13T22:00",
+   "user": "Combien de temps faut-il pour digérer un repas ?",
+   "answer": "En moyenne deux à quatre heures pour que l’estomac se vide, et bien plus longtemps pour que tout traverse l’intestin.",
+   "language": "fr"
+  },
+  {
+   "id": "e290",
+   "date": "2026-10-14T07:30",
+   "user": "Il pleut aujourd'hui ?",
+   "answer": "Oui, des averses toute la journée et 14 degrés. Prends un parapluie.",
+   "language": "fr"
+  },
+  {
+   "id": "e291",
+   "date": "2026-10-14T08:30",
+   "user": "Mirabelle a dormi toute la nuit sur mon oreiller",
+   "answer": "Elle a choisi la meilleure place ! Les chats aiment l’odeur de leurs humains.",
+   "language": "fr"
+  },
+  {
+   "id": "e292",
+   "date": "2026-10-14T12:30",
+   "user": "Mathieu dit qu'on devrait choisir l'atelier Boisseau pour la cuisine, malgré le prix",
+   "answer": "Si leur devis comprend plus de choses, ça peut valoir le coup. Prenez le temps d’en parler tous les deux.",
+   "language": "fr"
+  },
+  {
+   "id": "e293",
+   "date": "2026-10-14T13:00",
+   "user": "Le spectacle de danse de Lou, c'est le 12 décembre au théâtre de la ville",
+   "answer": "Quel grand moment pour elle ! Toute la famille pourra venir l’applaudir.",
+   "language": "fr"
+  },
+  {
+   "id": "e294",
+   "date": "2026-10-14T18:45",
+   "user": "Dernière séance de kiné avec Hugo, mon dos va beaucoup mieux, il me conseille de continuer le gainage",
+   "answer": "Super nouvelle ! Continue le gainage quelques minutes par jour, c’est la meilleure façon d’éviter une rechute.",
+   "language": "fr"
+  },
+  {
+   "id": "e295",
+   "date": "2026-10-14T21:30",
+   "user": "Gabin et Lou partent samedi chez ma mère à Quimper, jusqu'au 25 octobre",
+   "answer": "Ils vont être gâtés par leur grand-mère ! Et toi, tu vas pouvoir souffler.",
+   "language": "fr"
+  },
+  {
+   "id": "e296",
+   "date": "2026-10-15T07:30",
+   "user": "Bonjour Maé",
+   "answer": "Bonjour ! Belle journée à toi.",
+   "language": "fr"
+  },
+  {
+   "id": "e297",
+   "date": "2026-10-15T09:00",
+   "user": "La course des Remparts c'est dimanche, j'ai le trac",
+   "answer": "C’est normal d’avoir un peu le trac ! Mange bien samedi soir, couche-toi tôt, et pars doucement les premiers kilomètres.",
+   "language": "fr"
+  },
+  {
+   "id": "e298",
+   "date": "2026-10-15T12:30",
+   "user": "J'ai commandé la platine vinyle pour Mathieu, elle arrive le 26",
+   "answer": "Parfait, juste à temps pour son anniversaire ! Pense à la cacher en arrivant.",
+   "language": "fr"
+  },
+  {
+   "id": "e299",
+   "date": "2026-10-15T15:30",
+   "user": "Mets un minuteur de 25 minutes, je me concentre sur le catalogue",
+   "answer": "C’est parti pour 25 minutes, bon courage.",
+   "language": "fr"
+  },
+  {
+   "id": "e300",
+   "date": "2026-10-15T17:45",
+   "user": "Il faut que je prépare le sac de Lou pour Quimper",
+   "answer": "Pense aux vêtements chauds, aux bottes, et à son doudou si elle dort avec. Une petite liste aide à ne rien oublier.",
+   "language": "fr"
+  }
+ ],
+ "queries": [
+  {
+   "category": "lexical",
+   "query": "résultats des tests d'allergie de Gabin",
+   "expected": [
+    "e223"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "nom du vétérinaire",
+   "expected": [
+    "e124",
+    "e195"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "pression des pneus de la Clio",
+   "expected": [
+    "e28"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "nom de l'hôtel à Lisbonne",
+   "expected": [
+    "e222"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "comment je nourris mon levain",
+   "expected": [
+    "e103"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "combien de temps Gabin garde son appareil dentaire",
+   "expected": [
+    "e210"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "idée cadeau anniversaire Mathieu",
+   "expected": [
+    "e180",
+    "e298"
+   ]
+  },
+  {
+   "category": "lexical",
+   "query": "when does Fiona's brochure go to print",
+   "expected": [
+    "e285"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "pourquoi mon toutou marchait de travers",
+   "expected": [
+    "e192",
+    "e195"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "la plante d'intérieur qui dépérit",
+   "expected": [
+    "e33",
+    "e85"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "en combien de temps j'ai couru la dizaine de bornes",
+   "expected": [
+    "e132",
+    "e273"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "le fruit qui me donne des démangeaisons",
+   "expected": [
+    "e77"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "où seront les petits pendant les congés de la Toussaint",
+   "expected": [
+    "e295"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "le bruit bizarre de la voiture quand je ralentis",
+   "expected": [
+    "e241"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "le métier de ma sœur",
+   "expected": [
+    "e170"
+   ]
+  },
+  {
+   "category": "paraphrase",
+   "query": "the copy for the Irish customer's flyer was too wordy",
+   "expected": [
+    "e246"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "kiné dos",
+   "quand": "hier",
+   "expected": [
+    "e294"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "Gabin collège",
+   "quand": "avant-hier",
+   "expected": [
+    "e287"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "prix des freins de la Clio",
+   "quand": "la semaine dernière",
+   "expected": [
+    "e254"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "Clémence appartement",
+   "quand": "le mois dernier",
+   "expected": [
+    "e165"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "gâteau Lou",
+   "quand": "samedi dernier",
+   "expected": [
+    "e269"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "catalogue Verlaine pages",
+   "quand": "il y a deux semaines",
+   "expected": [
+    "e216"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "Lou dictée",
+   "quand": "il y a 3 jours",
+   "expected": [
+    "e282"
+   ]
+  },
+  {
+   "category": "period",
+   "query": "Mathieu Lisbonne",
+   "quand": "cette semaine",
+   "expected": [
+    "e288"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "la dresse du garage dumont",
+   "expected": [
+    "e91"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "le rendez vous du veterinaire pour mira belle",
+   "expected": [
+    "e262"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "ce que mange ma belle soeur agate",
+   "expected": [
+    "e235"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "l'anniversaire de Matthieu c'est quand",
+   "expected": [
+    "e148"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "le gâteau au yaourt de ma mie",
+   "expected": [
+    "e96"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "faut il éplucher le poti marron",
+   "expected": [
+    "e226"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "la poule paprica qui s'est sauvée",
+   "expected": [
+    "e229"
+   ]
+  },
+  {
+   "category": "transcription",
+   "query": "what did fionna think of the mock ups for her shop",
+   "expected": [
+    "e117"
+   ]
+  },
+  {
+   "category": "trap",
+   "query": "le nom de mon moniteur d'auto-école",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "notre voyage au Japon",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "mon groupe sanguin",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "la marque de ma moto",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "le prénom de mon parrain",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "la recette du couscous de ma belle-mère",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "la date du vaccin de Mirabelle contre la rage",
+   "expected": []
+  },
+  {
+   "category": "trap",
+   "query": "what did I tell you about my piano lessons",
+   "expected": []
+  }
+ ]
+}

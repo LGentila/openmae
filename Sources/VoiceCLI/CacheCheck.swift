@@ -55,7 +55,7 @@ private struct Step {
 
 private actor CacheCheck {
     let model: MLXChatModel
-    let base: Conversation
+    var base: Conversation
     let dateLine: String
     /// The calls the app carries out in one request (`PipelineConfig.actionsPerRequest`).
     let maxCalls: Int
@@ -76,12 +76,22 @@ private actor CacheCheck {
     }
 
     /// As "Nouvelle conversation" in the app: the model goes back to the beginning it keeps.
-    func newConversation() async throws {
+    func newConversation(_ label: String = "new conversation") async throws {
         conversation = base
         let start = clock.now
         try await model.prefillBeginning(conversation.beginning)
+        let ms = milliseconds(clock.now - start)
+        newConversations.append((label, ms))
         print(String(format: "  %-46@ prefill of the system prompt: %.0f ms · GPU memory %.2f GB",
-                     "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
+                     label as NSString, ms, MLXChatModel.activeMemoryGB))
+    }
+
+    /// Each new conversation: its label and the time to its beginning.
+    var newConversations: [(String, Double)] = []
+
+    /// The memory's sheet changed (an entry remembered or forgotten): the next conversations begin with the new one.
+    func setBase(_ new: Conversation) {
+        base = new
     }
 
     /// The user's message as the app makes it: after an answer cut off, with the note after their words when it goes
@@ -408,6 +418,7 @@ private final class PrefillProgress: Sendable {
 func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let scenario = arguments.firstIndex(of: "--scenario").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     let agents = arguments.contains("--agents")
+    let memory = arguments.contains("--memory")
     let timeZone = TimeZone.current
     guard let now = LocalDateTime.parse(o.now ?? "2026-10-15T18:42", in: timeZone)?.date else {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
@@ -437,14 +448,35 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let tools = ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
+        + (memory ? [MemoryCatalog.tool(journal: true)] : [])
     await model.useTools(tools)
     let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
     await model.limitToolCalls(maxCalls)
     print("calls carried out in one request: \(maxCalls) at most")
     var base = Conversation()
     base.cutOffPlacement = placement
-    base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
+    let fixedAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         + (agents ? [AgentCatalog.promptAddendum] : [])
+    base.systemAddenda = fixedAddenda + (memory ? [MemoryCatalog.promptAddendum(sheet: memorySheet, journal: true)] : [])
+    /// The beginning with this sheet (the memory's part last, as in the app).
+    func withSheet(_ sheet: [String]) -> Conversation {
+        var conversation = base
+        conversation.systemAddenda = fixedAddenda + [MemoryCatalog.promptAddendum(sheet: sheet, journal: true)]
+        return conversation
+    }
+    if memory {
+        // What the sheet costs in the beginning: empty, as in the scenarios, and full (1,200 characters).
+        var none = base
+        none.systemAddenda = fixedAddenda
+        let without = try await model.tokenCount(none.messages)
+        let empty = try await model.tokenCount(withSheet([]).messages)
+        let usual = try await model.tokenCount(withSheet(memorySheet).messages)
+        let full = try await model.tokenCount(withSheet(fullSheet).messages)
+        print("memory: the prompt without it \(without) tokens; its rules with an empty sheet +\(empty - without); with "
+              + "\(memorySheet.count) entries (\(MemorySheet(entries: memorySheet).characters) characters) +\(usual - without); "
+              + "with a full sheet (\(fullSheet.count) entries, \(MemorySheet(entries: fullSheet).characters) characters) "
+              + "+\(full - without), of which the entries \(full - empty)")
+    }
     if ActionCatalog.showsExamples(on: tier) { base.examples = ActionCatalog.examples(now: now, timeZone: timeZone) }
     // As the app does at start: the model computes the beginning of every conversation, and keeps it.
     let computeStart = ContinuousClock.now
@@ -457,7 +489,23 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
 
     let check = CacheCheck(model: model, base: base, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone),
                            maxCalls: maxCalls)
-    let scenarios: [(String, () async throws -> Void)] = [
+    let memoryScenarios: [(String, () async throws -> Void)] = !memory ? [] : [
+        ("memory", {
+            // As the app does at each new conversation: the sheet read again. Unchanged, the beginning is the same; an
+            // entry remembered during the conversation changes it once, for the next one.
+            try await check.newConversation("new conversation, sheet unchanged")
+            try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
+            try await check.turn("plain answer", "Donne-moi une idée de dessert facile à faire.")
+            await check.setBase(withSheet(memorySheet + ["Préfère les desserts sans gluten"]))
+            try await check.newConversation("new conversation, sheet changed")
+            try await check.turn("plain answer", "Et sans four, qu'est-ce que je peux faire ?")
+            try await check.newConversation("new conversation, sheet unchanged")
+            try await check.turn("plain answer", "Merci, c'est parfait.")
+            await check.setBase(withSheet(memorySheet))
+            try await check.newConversation("new conversation, sheet changed back")
+        }),
+    ]
+    let scenarios: [(String, () async throws -> Void)] = memoryScenarios + [
         ("plain", {
             try await check.newConversation()
             try await check.turn("plain answer 1", "Bonjour, tu vas bien aujourd'hui ?")
@@ -656,7 +704,34 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         print("")
     }
     await check.summary()
+    let starts = await check.newConversations
+    for label in Set(starts.map(\.0)).sorted() {
+        let times = starts.filter { $0.0 == label }.map(\.1).sorted()
+        print(String(format: "%@: %d times, median %.0f ms, max %.0f ms", label, times.count, times[times.count / 2],
+                     times.last ?? 0))
+    }
 }
+
+/// A sheet of five entries, as the memory's scenario starts with it.
+private let memorySheet = [
+    "Allergique aux noix de cajou", "Sa fille s'appelle Inès et a 7 ans", "Préfère le thé vert au café",
+    "Travaille à Nantes le mardi et le jeudi", "Son chat s'appelle Biscotte",
+]
+
+/// A sheet at its limit (1,200 characters, 20 entries of about 60).
+private let fullSheet = [
+    "Allergique aux noix de cajou et aux pistaches, pas aux amandes", "Sa fille s'appelle Inès, elle a 7 ans et fait du judo",
+    "Son fils Tom est en CM2 à l'école Jules Ferry, rentre à 16 h 30", "Préfère le thé vert au café, sans sucre, le matin",
+    "Travaille à Nantes le mardi et le jeudi, télétravail le reste", "Son chat s'appelle Biscotte, vaccin à faire en mars",
+    "Sa sœur Claire habite à Lyon, anniversaire le 12 février", "Code du portail de l'immeuble à demander à la gardienne",
+    "Voiture : Clio grise, révision faite en septembre au garage", "Médecin traitant : docteur Martin, rue des Lilas",
+    "Joue de la guitare depuis deux ans, prend des cours le lundi", "N'aime pas la coriandre ni les plats trop épicés",
+    "Court 10 km le dimanche matin au parc de Procé avec Paul", "Veut visiter le Japon au printemps, budget à prévoir",
+    "Lit en ce moment un roman de Fred Vargas, prêté par Léa", "Plante préférée : le basilic sur le balcon, arroser",
+    "Préfère être appelé par son prénom, Antoine, pas Toto", "Rendez-vous chez le kiné pour le dos, exercices le soir",
+    "Mère : Monique, habite à Vannes, appelle le dimanche", "Projet de cuisine : refaire le plan de travail en bois",
+    "Aime les films de Miyazaki, a revu Totoro avec les enfants le mois dernier", "Prend le bus 23 pour le travail",
+]
 
 /// A long result to sum up (about 600 tokens, like a web search's).
 private let weekAgenda: JSONValue = ["evenements": [

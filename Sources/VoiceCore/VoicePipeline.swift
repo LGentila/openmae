@@ -196,6 +196,8 @@ public actor VoicePipeline {
     private let extensions: [any ConversationExtension]
     /// Actions (reminders, calendar…); nil when they are off.
     private var tools: ToolRunner?
+    /// Where the exchanges are also written (`setJournal`): the memory's journal, when it is on.
+    private var journal: (any ExchangeJournal)?
     public private(set) var config: PipelineConfig
 
     private var conversation: Conversation
@@ -544,6 +546,13 @@ public actor VoicePipeline {
     /// config asks for them. Set with the tools, and kept for the conversations that follow, so the model's memory of
     /// them stays valid.
     private func updatePrompt() async {
+        conversation.systemAddenda = await promptAddenda()
+        conversation.examples = tools?.offersActions == true && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
+    }
+
+    /// What follows the system prompt: the extensions' sentences, the actions' part (or the date line's rule), then what
+    /// the tools' providers add, the memory's sheet last.
+    private func promptAddenda() async -> [String] {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         if let tools {
             if tools.offersActions {
@@ -553,8 +562,7 @@ public actor VoicePipeline {
             }
             addenda += await tools.promptAddenda()
         }
-        conversation.systemAddenda = addenda
-        conversation.examples = tools?.offersActions == true && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
+        return addenda
     }
 
     /// Call once after creation: pre-computes the system prompt so the first answer is fast.
@@ -789,8 +797,31 @@ public actor VoicePipeline {
         conversation.clear()
         emit.yield(.conversationCleared)
         await tools?.resetConversation()
+        // What the providers add is read again: the memory's sheet may have changed since the last conversation (an
+        // entry remembered or forgotten, the user's own edits). Unchanged, the beginning is the same and the model finds
+        // it whole in its memory (a few milliseconds); changed, it is computed once (seconds on the largest model). The
+        // tools and the example exchanges stay as they were.
+        conversation.systemAddenda = await promptAddenda()
         if stopped { restAfterStoppedTurn() }
         try await model.prefillBeginning(conversation.beginning)
+    }
+
+    /// Where each exchange the pipeline processed is also written (the memory's journal); nil: nowhere.
+    public func setJournal(_ journal: (any ExchangeJournal)?) {
+        self.journal = journal
+    }
+
+    /// An exchange for the journal: the user's own words (no date line, no English hint), what Maé answered (what was
+    /// heard of it when cut off), and whether its answer used something from outside (a web search, an agent). Never an
+    /// announcement, nor a sentence the wake-word mode ignored: neither is a turn with the user's words.
+    private func journalExchange(user: String, answer: String, language: SpeechLanguage, interrupted: Bool,
+                                 steps: [ChatMessage])
+    {
+        guard let journal, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let tools = Set(steps.flatMap(\.toolCalls).map(\.name))
+        let external = tools.contains(WebSearchCatalog.searchName) || !tools.isDisjoint(with: AgentCatalog.names)
+        journal.record(JournalEntry(date: Date(), user: user, answer: answer, language: language,
+                                    interrupted: interrupted, source: external ? .external : .normal))
     }
 
     /// A new conversation starts (`resetConversation`, `setTools`): the turn under way stops, its sound with it, and is
@@ -2064,6 +2095,8 @@ public actor VoicePipeline {
     private func recordHeard(_ resume: Resume) {
         conversation.record(user: resume.userMessage, steps: resume.steps, assistant: resume.written,
                             ending: resume.dropped)
+        journalExchange(user: resume.userText, answer: resume.heard, language: resume.language, interrupted: true,
+                        steps: resume.steps)
         language = resume.language
         letModelCatchUp()
     }
@@ -2306,6 +2339,10 @@ public actor VoicePipeline {
         var recorded = false
         if let metrics, let message = turn.userMessage {
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: false)
+            if !turn.isAnnouncement, !turn.isSilent {
+                journalExchange(user: turn.userText, answer: turn.answer, language: metrics.language, interrupted: false,
+                                steps: turn.steps)
+            }
             recorded = true
             if !turn.isAnnouncement { language = metrics.language }
             Task { await self.keepHistoryInBudget(reporting: metrics) }
@@ -2403,6 +2440,8 @@ public actor VoicePipeline {
             let lastHeard = turn.cut.map { SpokenPiece.lastHeard(in: turn.pieces[..<$0.from]) }
             conversation.record(user: message, steps: turn.steps, assistant: turn.answer,
                                 ending: lastHeard.map { .dropped(lastHeard: $0) } ?? .cutOff)
+            journalExchange(user: turn.userText, answer: turn.answerHeard, language: turn.language, interrupted: true,
+                            steps: turn.steps)
             letModelCatchUp()  // the model's memory holds what it wrote, the history the answer cut off
             var metrics = TurnMetrics()
             metrics.userText = turn.userText

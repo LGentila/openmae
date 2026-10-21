@@ -1,0 +1,76 @@
+{
+ "_comment": "French dialogues for voice-cli dialogue-bench --memory, with the memory switched on. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue starts with its sheet (\"sheet\": what the user already asked Maé to remember; empty when absent) and sends its turns in order; « [nouvelle conversation] » starts a new conversation, which reads the sheet again; the app answers « Oui. », « Non. » and « Annule. » itself. The goal is checked at the end, whatever the accents and case: remembered, the sheet holds an entry containing that word, and with answerMentions, the last answer names one of those words; forgotten, no entry contains it any more (the user said yes); kept, an entry still contains it (the user said no); notRemembered, no entry contains it (the user undid it, or said it in passing without asking Maé to remember it).",
+ "now": "2026-10-15T18:42",
+ "memory": true,
+ "dialogues": [
+  {
+   "name": "remember, then a new conversation that knows it",
+   "turns": [
+    "Retiens que ma filleule s'appelle Romane et qu'elle a six ans.",
+    "[nouvelle conversation]",
+    "Comment s'appelle ma filleule, déjà ?"
+   ],
+   "goal": {
+    "tool": "memoire",
+    "remembered": "Romane",
+    "answerMentions": [
+     "Romane"
+    ]
+   }
+  },
+  {
+   "name": "remember, then undo",
+   "turns": [
+    "Souviens-toi que je suis allergique au latex.",
+    "Annule."
+   ],
+   "goal": {
+    "tool": "memoire",
+    "notRemembered": "latex"
+   }
+  },
+  {
+   "name": "forget, answering yes",
+   "sheet": [
+    "Allergique aux fruits de mer",
+    "Son fils s'appelle Noé",
+    "Joue au tennis le samedi matin"
+   ],
+   "turns": [
+    "Oublie que je fais du tennis, j'ai arrêté.",
+    "Oui."
+   ],
+   "goal": {
+    "tool": "memoire",
+    "forgotten": "tennis"
+   }
+  },
+  {
+   "name": "forget, answering no",
+   "sheet": [
+    "Allergique aux fruits de mer",
+    "Son fils s'appelle Noé",
+    "Joue au tennis le samedi matin"
+   ],
+   "turns": [
+    "Enlève Noé de ta mémoire, s'il te plaît.",
+    "Non."
+   ],
+   "goal": {
+    "tool": "memoire",
+    "kept": "Noé"
+   }
+  },
+  {
+   "name": "a fact said in passing",
+   "turns": [
+    "Au fait, mon beau-père s'est cassé le poignet en tombant de vélo.",
+    "Bon, tu peux me donner une idée de dîner ?"
+   ],
+   "goal": {
+    "tool": "memoire",
+    "notRemembered": "poignet"
+   }
+  }
+ ]
+}

@@ -111,12 +111,32 @@
         }
       }
     },
+    "%lld exchanges kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld échanges gardés."
+          }
+        }
+      }
+    },
     "%lld min %lld s": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "%lld min %lld s"
+          }
+        }
+      }
+    },
+    "%lld of %lld characters used.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld caractères utilisés sur %2$lld."
           }
         }
       }
@@ -167,6 +187,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "1 outil"
+          }
+        }
+      }
+    },
+    "1 year": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 an"
+          }
+        }
+      }
+    },
+    "30 days": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 jours"
           }
         }
       }
@@ -921,6 +961,36 @@
         }
       }
     },
+    "Clear": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer"
+          }
+        }
+      }
+    },
+    "Clear history…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer l’historique…"
+          }
+        }
+      }
+    },
+    "Clear the history?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer l’historique ?"
+          }
+        }
+      }
+    },
     "Comfort (32 to 36 GB)": {
       "localizations": {
         "fr": {
@@ -1381,6 +1451,26 @@
         }
       }
     },
+    "Erase everything?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tout effacer ?"
+          }
+        }
+      }
+    },
+    "Erase everything…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tout effacer…"
+          }
+        }
+      }
+    },
     "Erase the log?": {
       "localizations": {
         "fr": {
@@ -1397,6 +1487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer le journal…"
+          }
+        }
+      }
+    },
+    "Every exchange kept is erased from this Mac. What Maé remembers stays.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tous les échanges gardés sont effacés de ce Mac. Ce que Maé retient reste."
           }
         }
       }
@@ -1531,6 +1631,16 @@
         }
       }
     },
+    "Forget “%@”": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oublier « %@ »"
+          }
+        }
+      }
+    },
     "Found in the “OpenMaé” folder · %lld": {
       "localizations": {
         "fr": {
@@ -1647,6 +1757,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Masque les détails"
+          }
+        }
+      }
+    },
+    "History of exchanges": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Historique des échanges"
           }
         }
       }
@@ -2051,12 +2171,42 @@
         }
       }
     },
+    "Keep for": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder pendant"
+          }
+        }
+      }
+    },
     "Keep for later": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Garder pour plus tard"
+          }
+        }
+      }
+    },
+    "Keep the history": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder l’historique"
+          }
+        }
+      }
+    },
+    "Keep the history for": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder l’historique pendant"
           }
         }
       }
@@ -2387,6 +2537,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix. Ce que tu cherches part chez le moteur choisi ; le reste de la conversation reste sur ton Mac."
+          }
+        }
+      }
+    },
+    "Maé remembers what you ask her to (“remember that…”), and uses it when it helps, in every new conversation. With the history on, she can also find what you told her before (“what did I tell you about…”). Everything stays on your Mac, in a folder of its own, and never goes to the internet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé retient ce que tu lui demandes de retenir (« retiens que… ») et s’en sert quand c’est utile, à chaque nouvelle conversation. Avec l’historique, elle retrouve aussi ce que tu lui as dit avant (« qu’est-ce que je t’avais dit sur… »). Tout reste sur ton Mac, dans un dossier à part, et ne passe jamais par internet."
           }
         }
       }
@@ -2947,6 +3107,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rien reçu pour l’instant."
+          }
+        }
+      }
+    },
+    "Nothing yet. Say “remember that…” and Maé keeps it here.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien pour l’instant. Dis « retiens que… » et Maé le garde ici."
           }
         }
       }
@@ -4411,6 +4581,16 @@
         }
       }
     },
+    "The models are not touched, and deleting the models never erases the memory.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les modèles ne sont pas touchés, et supprimer les modèles n’efface jamais la mémoire."
+          }
+        }
+      }
+    },
     "The models are saved in %@. You can quit the app during the download: it will resume where it stopped.": {
       "localizations": {
         "fr": {
@@ -4821,6 +5001,16 @@
         }
       }
     },
+    "Turn the memory on to see what Maé remembers.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active la mémoire pour voir ce que Maé retient."
+          }
+        }
+      }
+    },
     "Turn the search on to choose its engine.": {
       "localizations": {
         "fr": {
@@ -4857,6 +5047,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réponse inattendue"
+          }
+        }
+      }
+    },
+    "Unlimited": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans limite"
           }
         }
       }
@@ -5027,6 +5227,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce que Maé a noté des phrases entendues est effacé de ce Mac."
+          }
+        }
+      }
+    },
+    "What Maé remembers": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que Maé retient"
+          }
+        }
+      }
+    },
+    "What Maé remembers and the history of exchanges are erased from this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que Maé retient et l’historique des échanges sont effacés de ce Mac."
           }
         }
       }
@@ -5467,6 +5687,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton essai"
+          }
+        }
+      }
+    },
+    "Your words and Maé’s answers, to find them again when you ask. Off, nothing is written.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tes mots et les réponses de Maé, pour les retrouver quand tu le demandes. Désactivé, rien n’est écrit."
           }
         }
       }
