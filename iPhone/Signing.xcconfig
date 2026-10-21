@@ -1,5 +1,6 @@
 // Code signing of the iPhone app: automatic, with the Apple Developer team of App/Signing.local.xcconfig (not
 // published, see App/Signing.xcconfig). Xcode makes the development profile for the iPhones registered with the team.
+// In a new git worktree, scripts/build-iphone.sh copies that file from the main checkout before a device build.
 
 #include? "../App/Signing.local.xcconfig"
 

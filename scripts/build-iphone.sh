@@ -2,7 +2,9 @@
 # Builds the iPhone and iPad app and installs it on the iPhone or iPad connected to this Mac (cable or Wi-Fi, unlocked).
 #   1. generates the Xcode project from iPhone/project.yml (xcodegen: brew install xcodegen)
 #   2. compiles it for the device (Debug by default; CONFIGURATION=Release for a release build), signed
-#      automatically with the team of App/Signing.local.xcconfig
+#      automatically with the team of App/Signing.local.xcconfig (ignored by git); a new git worktree does not have
+#      that file, so the script copies the main checkout's one (SIGNING_CHECKOUT=<absolute folder> looks in another
+#      checkout instead), and stops when there is none
 #   3. installs it and opens it with devicectl
 # DEVICE=<identifier> picks the device when several are connected (xcrun devicectl list devices); DEVICE=iPad or
 # DEVICE=iPhone picks the first one of that kind.
@@ -11,6 +13,7 @@
 # identifier) also starts that simulator, installs the app on it and opens it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/signing-file.zsh
 configuration=${CONFIGURATION:-Debug}
 
 xcodegen generate --spec iPhone/project.yml --quiet
@@ -39,6 +42,16 @@ if [[ -n "${SIMULATOR:-}" ]]; then
   xcrun simctl install "$simulator" "$app"
   xcrun simctl launch "$simulator" com.openmae.ios
   exit 0
+fi
+
+if ! find_signing_file; then
+  cat >&2 <<EOF
+Not built: no signing file. $signing_file is missing here, and in ${signing_checkout:-the main checkout (no git repository found)} too.
+An iPhone or iPad only runs the app signed with your Apple Developer team: copy App/Signing.local.xcconfig.example to
+$signing_file and put your team ID in it, or point SIGNING_CHECKOUT at the folder of a checkout that
+has one. SIMULATOR=1 zsh scripts/build-iphone.sh builds for the simulator without it.
+EOF
+  exit 1
 fi
 
 # The first iPhone or iPad that devicectl can reach (its state "available" or "connected", not "unavailable"); with

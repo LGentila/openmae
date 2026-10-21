@@ -210,9 +210,15 @@ open .build/app/Build/Products/Release/OpenMae.app
 ```
 
 The app's file name has no accent (`codesign` rejects one in an executable's name); macOS shows "OpenMaé"
-through the localized display name. To sign with your own Apple Developer team, copy
-`App/Signing.local.xcconfig.example` to `App/Signing.local.xcconfig` and fill it in; without it, the app is
-signed for local use only.
+through the localized display name.
+
+The app is signed with your Apple Developer team: copy `App/Signing.local.xcconfig.example` to
+`App/Signing.local.xcconfig` (ignored by git) and put your team ID in it. In a new git worktree,
+`scripts/build-app.sh` copies that file from the main checkout. Without one, it stops rather than sign the app
+for local use only (ad hoc): such a copy has the same bundle id as the normal app, so macOS asks again for the
+microphone, calendars and reminders, and once they are allowed, the permissions move to that copy and leave the
+normally signed app. `ADHOC=1 zsh scripts/build-app.sh` builds ad hoc on purpose. The script ends by printing the
+identity the app is signed with.
 
 To see a timestamped log of every stage, launch it with:
 

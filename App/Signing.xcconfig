@@ -1,8 +1,13 @@
 // Code signing of the app.
 //
-// Without Signing.local.xcconfig the app is signed "to run locally" (ad hoc): it works on this Mac, but
-// macOS asks again for the microphone after every build. To sign with your Apple Developer team, copy
-// Signing.local.xcconfig.example to Signing.local.xcconfig (ignored by git) and put your team ID in it.
+// Signing.local.xcconfig (ignored by git, so the team stays private) holds this Mac's Apple Developer team: copy
+// Signing.local.xcconfig.example to Signing.local.xcconfig and put your team ID in it. A new git worktree does not
+// have it: scripts/build-app.sh copies the main checkout's one, and stops when there is none.
+//
+// Without it, the settings below sign the app "to run locally" (ad hoc), which scripts/build-app.sh only does when
+// asked to with ADHOC=1. An ad hoc copy has the same bundle id as the normally signed app, so macOS asks again for
+// the microphone, calendars and reminders; once they are allowed, the permissions follow the ad hoc copy and leave
+// the normally signed app, which asks again in turn. Every new ad hoc build asks again too.
 
 CODE_SIGN_STYLE = Manual
 CODE_SIGN_IDENTITY = -
