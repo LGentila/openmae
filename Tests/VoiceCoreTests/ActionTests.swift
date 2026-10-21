@@ -712,7 +712,8 @@ struct TimerToolTests {
 
         _ = try await timers.perform(timer(seconds: 1), context: context())
         #expect(reports.running == [true, false, true])
-        await waitFor { reports.running.count == 4 }
+        // A timer that rings reports that none runs any more, then that it rang: wait for both.
+        await waitFor { reports.running.count == 4 && reports.finished.count == 2 }
         #expect(reports.running == [true, false, true, false])  // it rang
         #expect(reports.finished.count == 2)
     }
@@ -1157,7 +1158,9 @@ struct PipelineActionTests {
         Task { for await event in pipeline.events { await log.record(event) } }
         try await pipeline.start()
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
-        await waitFor { !(await log.pieces.isEmpty) }
+        // The question is two sentences, so two pieces, and the recorder reads the events on its own task: wait for
+        // the turn to be over, not for its first piece.
+        await waitFor { await log.finished.count == 1 }
         #expect(await model.requests.count == 2)
         let second = try #require(await model.requests.last)
         #expect(second.suffix(2).map(\.role) == [.assistant, .tool])  // the model sees why it was refused
@@ -1215,7 +1218,7 @@ struct PipelineActionTests {
         Task { for await event in pipeline.events { await log.record(event) } }
         try await pipeline.start()
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
-        await waitFor { !(await log.pieces.isEmpty) }
+        await waitFor { await log.finished.count == 1 }  // the question is two pieces: wait for the turn to be over
         #expect(await log.pieces.joined(separator: " ") == ActionPhrases.datePassed(.french))
         #expect(await model.requests.count == 1)  // no second try
         await waitFor { await log.states.last == .listening }
@@ -1241,6 +1244,9 @@ struct PipelineActionTests {
         try await pipeline.start()
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
         await waitFor { await tools.performed.count == 1 }
+        // The recorder reads the events on its own task: without this, its first state (at rest) could pass for the
+        // end of the turn, and « Annule. » would come while the confirmation is still said.
+        await waitFor { await log.finished.count == 1 }
         await waitFor { await log.states.last == .listening }
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
         await waitFor { await tools.undone.count == 1 }
@@ -1324,6 +1330,7 @@ struct PipelineActionTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(await speaker.played == 0)
         #expect(await log.pieces.isEmpty)
+        await waitFor { await !log.states.isEmpty }  // the recorder reads the events on its own task
         #expect(await log.states == [.listening])
         await pipeline.setOutputReachable(true)  // it is back: the chime, then the sentence
         await waitFor { await log.pieces.contains("Ton minuteur de 10 minutes est terminé.") }
