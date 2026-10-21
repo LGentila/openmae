@@ -423,6 +423,9 @@ public actor VoicePipeline {
         var firstPieceTime: ContinuousClock.Instant?
         /// When the first action's own sentence went to the voice.
         var firstConfirmationTime: ContinuousClock.Instant?
+        /// How many pieces were said (`pieces`) right after the last action's confirmation (`confirm`): if none was said
+        /// since, the next confirmation follows it, and may be linked to it.
+        var confirmationEnd: Int?
         /// Pieces of a speculative answer, announced only if the turn is committed.
         var unannouncedPieces: [String] = []
         var language = SpeechLanguage.french
@@ -1500,7 +1503,8 @@ public actor VoicePipeline {
     /// The model's answer to the user's message, with the tools it calls (`turn.userMessage`): its words go to the voice
     /// as it writes them, and its calls are carried out one after the other, in the order it wrote them, at most
     /// `PipelineConfig.actionsPerRequest` of them, each as soon as it is written (once the user's turn is really over),
-    /// while the model writes the next one, so that its sentence can be said meanwhile. Then, in this order: the model's
+    /// while the model writes the next one, so that its sentence can be said meanwhile; the last of several such sentences
+    /// is linked to the one before (« Et c’est noté : … », see `confirm`). Then, in this order: the model's
     /// second try for the calls refused for their arguments (one for the request, holding every result already
     /// obtained, and only those calls carried out from it); one pass where it sums up every result that came from outside
     /// (no call carried out then); the app's questions about the refused calls; the one question for the sensitive calls,
@@ -1616,7 +1620,12 @@ public actor VoicePipeline {
                             if reply.modelSpeaks {
                                 toSum.append(reply.spoken)
                             } else {
-                                confirm(reply.spoken, turn)
+                                // The request's last action, when no other can be carried out after it: no other call
+                                // of this pass (from a second try, only corrections of refused calls), and no second
+                                // try to follow (it could carry one out).
+                                let more = followed && calls.count < maxCalls && (pass == .first || !toCorrect.isEmpty)
+                                let last = !more && !(pass == .first && !refused.isEmpty && toSum.isEmpty)
+                                confirm(reply, turn, last: last)
                             }
                         }
                     }
@@ -1723,9 +1732,16 @@ public actor VoicePipeline {
     }
 
     /// An action's own sentence, said as soon as it is carried out; the first one's time is measured (`TurnMetrics`).
-    private func confirm(_ sentence: String, _ turn: Turn) {
+    /// `last`: no other action of the request can be carried out after it. When it confirms the action and follows
+    /// another confirmation with nothing said between them, it is linked to it (`ActionPhrases.linked`): « C’est parti
+    /// pour 10 minutes. Je te préviens à la fin. Et c’est noté : … ». A failure is no confirmation: never linked, nor
+    /// linked to.
+    private func confirm(_ reply: ToolRunner.Reply, _ turn: Turn, last: Bool) {
         if turn.firstConfirmationTime == nil { turn.firstConfirmationTime = clock.now }
-        say(sentence, to: turn)
+        let follows = turn.confirmationEnd == turn.pieces.count
+        let link = last && follows && reply.confirms
+        say(link ? ActionPhrases.linked(reply.spoken, turn.language) : reply.spoken, to: turn)
+        turn.confirmationEnd = reply.confirms ? turn.pieces.count : nil
     }
 
     /// The voice of an answer: one utterance, started again if its opening stays near-silent too long

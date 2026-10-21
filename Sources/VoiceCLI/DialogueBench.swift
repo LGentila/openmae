@@ -261,6 +261,8 @@ private struct Talk {
             var toSum: [String] = []
             var summedUpAgain = false
             var several = false
+            /// How long the answer was right after the last action's confirmation: the next one may be linked to it.
+            var confirmationEnd: Int?
             let alone = ToolContext(now: now, timeZone: timeZone, language: .french)
             while true {
                 var calls: [ToolCall] = []
@@ -325,7 +327,17 @@ private struct Talk {
                             waitsForYes = true
                         } else {
                             carriedOut.append(call)
-                            if reply.modelSpeaks { toSum.append(reply.spoken) } else { say(reply.spoken) }
+                            if reply.modelSpeaks {
+                                toSum.append(reply.spoken)
+                            } else {
+                                // As the app (`VoicePipeline.confirm`): the last of several confirmations said one
+                                // after the other is linked to the one before.
+                                let more = followed && calls.count < maxCalls && (kind == .first || !toCorrect.isEmpty)
+                                let last = !more && !(kind == .first && !refusedHere.isEmpty && toSum.isEmpty)
+                                let link = last && confirmationEnd == answer.count && reply.confirms
+                                say(link ? ActionPhrases.linked(reply.spoken, .french) : reply.spoken)
+                                confirmationEnd = reply.confirms ? answer.count : nil
+                            }
                         }
                         passes.append(callPass)
                     case .moreToolCalls where kind != .summing:

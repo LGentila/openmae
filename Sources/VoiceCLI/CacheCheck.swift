@@ -185,10 +185,11 @@ private actor CacheCheck {
 
     /// One turn as the pipeline runs it (`VoicePipeline.answerWithTools`): the answer goes into the history the way the
     /// pipeline records it (pieces cut and cleaned for the voice, `SpeakableText.record`). The calls the model writes, at
-    /// most `maxCalls`, succeed, and the app says "C'est noté." for each; with `refuse`, the first one is refused and the
-    /// model gets a second try (its calls then succeed); with `summarize`, the first one gets that result and the model
-    /// sums it up (as after a web search or an agent's report). Each pass's calls go into the history as the model wrote
-    /// them, in one assistant message, then their results. When the model asked for more calls than `maxCalls`, the app
+    /// most `maxCalls`, succeed, and the app says "C'est noté." for each ("Et c'est noté." for the last of several in a
+    /// row); with `refuse`, the first one is refused and the model gets a second try (its calls then succeed); with
+    /// `summarize`, the first one gets that result and the model sums it up (as after a web search or an agent's report).
+    /// Each pass's calls go into the history as the model wrote them, in one assistant message, then their results.
+    /// When the model asked for more calls than `maxCalls`, the app
     /// then says how many it does at a time. `record: false`: the turn is dropped (the user spoke again before any voice);
     /// `interrupted`: the answer is recorded as cut off. `cancelSumming`: the summing up is cancelled while the model reads
     /// the result (`cancelledRequest`). `wentBackBefore`: see `request`. `catchingUp: false`: recorded without catching up.
@@ -208,6 +209,8 @@ private actor CacheCheck {
         var secondTry = false
         var summing = false
         var askedForMore = false
+        /// How long the answer was right after the last confirmation: the next one may be linked to it.
+        var confirmationEnd: Int?
         while true {
             let pass = summing ? " (summing up)" : secondTry ? " (second try)" : ""
             if summing, cancelSumming {
@@ -232,7 +235,12 @@ private actor CacheCheck {
                     results.append(summarize)
                 } else {
                     results.append(["ok": .bool(true), "id": .string("r\(self.steps.count)-\(index + 1)")])
-                    SpeakableText.record("C'est noté.", in: &answer)
+                    // As the app: the last of several confirmations said one after the other is linked to the one
+                    // before (`VoicePipeline.confirm`); not before a second try, which could carry out another.
+                    let last = index == calls.count - 1 && !(refuse && !secondTry)
+                    let link = last && confirmationEnd == answer.count
+                    SpeakableText.record(link ? ActionPhrases.linked("C'est noté.", .french) : "C'est noté.", in: &answer)
+                    confirmationEnd = answer.count
                 }
             }
             steps += [.calls(calls)] + zip(calls, results).map { .result(of: $0, $1) }

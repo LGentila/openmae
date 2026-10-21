@@ -21,6 +21,8 @@ private func note(_ title: String?) -> ToolCall {
 }
 
 private func noted(_ title: String) -> String { "C’est noté\(nb): \(title)." }
+/// The last of several confirmations in a row, linked to the one before.
+private func andNoted(_ title: String) -> String { "Et c’est noté\(nb): \(title)." }
 
 /// "envoyer" waits for a yes, and says what it would send.
 actor SendingTools: ToolProvider {
@@ -76,7 +78,7 @@ struct SeveralActionsRunnerTests {
         #expect(await sending.sent.isEmpty)
         #expect(await runner.interception(for: "oui", now: now) == .confirm)
         let reply = await runner.resolve(.confirm, context: context())
-        #expect(reply?.spoken == "C’est envoyé\(nb): A. C’est envoyé\(nb): B.")
+        #expect(reply?.spoken == "C’est envoyé\(nb): A. Et c’est envoyé\(nb): B.")
         #expect(await sending.sent == ["A", "B"])
         #expect(await runner.interception(for: "oui", now: now) == nil)  // nothing waits any more
     }
@@ -183,6 +185,37 @@ struct SeveralActionsRunnerTests {
         #expect(ActionPhrases.undone(["la tâche de Claude Code", "la tâche de Claude Code"], .french)
                 == "C’est annulé\(nb): les deux tâches de Claude Code.")
     }
+
+    /// « Et » before the last of several confirmations: the first word keeps its capital only when it has it for its own
+    /// sake (a name, an English day or "I").
+    @Test func linkingWord() {
+        #expect(ActionPhrases.linked(ActionPhrases.timerStarted(seconds: 600, label: nil, .french), .french)
+                == "Et c’est parti pour 10 minutes. Je te préviens à la fin.")
+        #expect(ActionPhrases.linked(noted("Pain"), .french) == andNoted("Pain"))
+        #expect(ActionPhrases.linked(AgentPhrases.started(.french), .french)
+                == "Et c’est parti\(nb): tu auras une notification quand ce sera fini.")
+        #expect(ActionPhrases.linked("Demain, tu as une seule chose\(nb): Dentiste à 10\(nb)h.", .french)
+                == "Et demain, tu as une seule chose\(nb): Dentiste à 10\(nb)h.")
+        #expect(ActionPhrases.linked("L'alarme du salon est réglée.", .french) == "Et l'alarme du salon est réglée.")
+        #expect(ActionPhrases.linked(AgentPhrases.severalRunning(agent: "Claude Code", titles: ["A", "B"], .french),
+                                     .french).hasPrefix("Et Claude Code travaille sur deux tâches"))
+        #expect(ActionPhrases.linked("Noted: bread.", .english) == "And noted: bread.")
+        #expect(ActionPhrases.linked(AgentPhrases.started(.english), .english)
+                == "And it’s started: you’ll get a notification when it’s done.")
+        #expect(ActionPhrases.linked("Friday, October 16, you have just one thing: Dentist.", .english)
+                == "And Friday, October 16, you have just one thing: Dentist.")
+        #expect(ActionPhrases.linked("I ran the shortcut.", .english) == "And I ran the shortcut.")
+    }
+}
+
+/// "casser" fails when it is carried out (an error, not a refusal), as a calendar that cannot save.
+private actor BrokenTools: ToolProvider {
+    nonisolated let identifier = "broken"
+    struct Broken: Error {}
+
+    func tools() -> [ToolSpec] { [ToolSpec(name: "casser", description: "Casse.", parameters: [], risk: .undoable)] }
+
+    func perform(_ call: ToolCall, context: ToolContext) throws -> ToolOutcome { throw Broken() }
 }
 
 @Suite("Several actions: pipeline", .serialized)
@@ -235,7 +268,11 @@ struct SeveralActionsPipelineTests {
         await say(pipeline, log)
         #expect(await model.callLimit == 3)
         #expect(await tools.performed.map { $0.text("titre") } == titles)
-        #expect(await log.pieces.joined(separator: " ") == titles.map(noted).joined(separator: " "))
+        // The last one linked to the one before: « … Et c’est noté : … ».
+        let said = (titles.dropLast().map(noted) + [andNoted(titles.last!)]).joined(separator: " ")
+        #expect(said == (count == 2 ? "C’est noté\(nb): Pain. Et c’est noté\(nb): Lait."
+                         : "C’est noté\(nb): Pain. C’est noté\(nb): Lait. Et c’est noté\(nb): Œufs."))
+        #expect(await log.pieces.joined(separator: " ") == said)
         #expect(await model.requests.count == 1)
         await say(pipeline, log)
         let history = try #require(await model.requests.last)
@@ -243,7 +280,7 @@ struct SeveralActionsPipelineTests {
                 + [.assistant, .user])
         #expect(history[2].toolCalls == titles.map(note))
         #expect(history[3..<(3 + count)].map(\.toolResult) == (1...count).map { ["id": .string("n\($0)")] })
-        #expect(history[3 + count].content == titles.map(noted).joined(separator: " "))
+        #expect(history[3 + count].content == said)
     }
 
     /// More calls than the app carries out at once: the first ones, then « Je fais trois choses à la fois au plus »,
@@ -260,7 +297,8 @@ struct SeveralActionsPipelineTests {
         #expect(await tools.performed.map { $0.text("titre") } == titles)
         let atMost = ActionPhrases.atMost(3, .french)
         #expect(atMost == "Je fais trois choses à la fois au plus\(nb): redis-moi la suite.")
-        #expect(await log.pieces.joined(separator: " ") == (titles.map(noted) + [atMost]).joined(separator: " "))
+        #expect(await log.pieces.joined(separator: " ")
+                == [noted("Pain"), noted("Lait"), andNoted("Œufs"), atMost].joined(separator: " "))
         await say(pipeline, log)
         let history = try #require(await model.requests.last)
         #expect(history[2].toolCalls == titles.map(note))  // what was carried out, not the fourth
@@ -281,7 +319,7 @@ struct SeveralActionsPipelineTests {
         #expect(await calendar.created.count == 1)
         #expect(await calendar.items["e1"]?.arguments["quand"] == "à 11 h")
         #expect(await log.pieces.joined(separator: " ")
-                == "C’est dans ton agenda\(nb): Garagiste. C’est modifié\(nb): Garagiste.")
+                == "C’est dans ton agenda\(nb): Garagiste. Et c’est modifié\(nb): Garagiste.")
     }
 
     /// One call refused among two, and the model's second try corrects it: the valid one is carried out at once, the
@@ -294,7 +332,7 @@ struct SeveralActionsPipelineTests {
         try await pipeline.start()
         await say(pipeline, log)
         #expect(await tools.performed.map { $0.text("titre") } == ["Lait", "Pain"])
-        #expect(await log.pieces.joined(separator: " ") == noted("Lait") + " " + noted("Pain"))
+        #expect(await log.pieces.joined(separator: " ") == noted("Lait") + " " + andNoted("Pain"))
         #expect(await model.requests.count == 2)
         let retry = try #require(await model.requests.last)
         #expect(retry.suffix(3).map(\.role) == [.assistant, .tool, .tool])
@@ -334,6 +372,67 @@ struct SeveralActionsPipelineTests {
         #expect(await model.requests.count == 1)
     }
 
+    /// The last of the confirmations is linked to the one before; the question about a refused call, said after them,
+    /// never is.
+    @Test func questionAfterTheConfirmationsIsNotLinked() async throws {
+        let first: [ModelOutput] = [
+            .toolCall(ToolCall(name: "creer_evenement", arguments: ["titre": "Dentiste", "quand": "hier à 15 h"])),
+            .toolCall(ToolCall(name: "minuteur", arguments: ["duree": "10 minutes"])),
+            .toolCall(ToolCall(name: "creer_rappel", arguments: ["titre": "Pain"])),
+        ]
+        let (model, calendar, timers) = (ScriptedModel(scripts: [first]), CheckedCalendar(), TimerTools())
+        let (pipeline, log) = make(model, ["Ajoute le dentiste hier à 15 h, un minuteur de dix minutes et le pain",
+                                           "Annule."], [calendar, timers])
+        try await pipeline.start()
+        await say(pipeline, log)
+        #expect(await timers.count == 1)
+        #expect(await calendar.created.map { $0.text("titre") } == ["Pain"])
+        #expect(await log.pieces.joined(separator: " ")
+                == "C’est parti pour 10 minutes. Je te préviens à la fin. Et c’est noté\(nb): Pain. "
+                + ActionPhrases.datePassed(.french))
+        await say(pipeline, log)  // « Annule. »: the timer does not go on after the test
+        #expect(await timers.count == 0)
+    }
+
+    /// A failure is no confirmation: the confirmation after it is not linked to it (a question came between them).
+    @Test func confirmationAfterAFailureIsNotLinked() async throws {
+        let first: [ModelOutput] = [.toolCall(note("Pain")), .toolCall(ToolCall(name: "casser")), .toolCall(note("Lait"))]
+        let (model, tools) = (ScriptedModel(scripts: [first]), RecordingTools())
+        let (pipeline, log) = make(model, ["Note le pain, casse tout et note le lait"], [tools, BrokenTools()])
+        try await pipeline.start()
+        await say(pipeline, log)
+        #expect(await tools.performed.map { $0.text("titre") } == ["Pain", "Lait"])
+        #expect(await log.pieces.joined(separator: " ")
+                == [noted("Pain"), ActionPhrases.saveFailed(.french), noted("Lait")].joined(separator: " "))
+    }
+
+    /// While a second try may still carry out a corrected call, the confirmations before it are not linked; the
+    /// correction's is, when nothing was said between them.
+    @Test func correctionFromTheSecondTryIsTheOneLinked() async throws {
+        let first: [ModelOutput] = [.toolCall(note(nil)), .toolCall(note("Pain")), .toolCall(note("Lait"))]
+        let secondTry: [ModelOutput] = [.toolCall(note("Pain")), .toolCall(note("Œufs"))]
+        let (model, tools) = (ScriptedModel(scripts: [first, secondTry]), RecordingTools())
+        let (pipeline, log) = make(model, ["Note les œufs, le pain et le lait"], [tools])
+        try await pipeline.start()
+        await say(pipeline, log)
+        #expect(await tools.performed.map { $0.text("titre") } == ["Pain", "Lait", "Œufs"])
+        #expect(await log.pieces.joined(separator: " ")
+                == [noted("Pain"), noted("Lait"), andNoted("Œufs")].joined(separator: " "))
+    }
+
+    /// Words of the model's between two confirmations: the second one no longer follows the first, it is not linked.
+    @Test func confirmationAfterTheModelsWordsIsNotLinked() async throws {
+        let first: [ModelOutput] = [.toolCall(note(nil)), .toolCall(note("Pain"))]
+        let secondTry: [ModelOutput] = [.text("Je note aussi le lait pour toi."), .toolCall(note("Lait"))]
+        let (model, tools) = (ScriptedModel(scripts: [first, secondTry]), RecordingTools())
+        let (pipeline, log) = make(model, ["Note le lait et le pain"], [tools])
+        try await pipeline.start()
+        await say(pipeline, log)
+        #expect(await tools.performed.map { $0.text("titre") } == ["Pain", "Lait"])
+        #expect(await log.pieces.joined(separator: " ")
+                == noted("Pain") + " Je note aussi le lait pour toi. " + noted("Lait"))
+    }
+
     /// The second try writes again the call already carried out: it is not carried out twice, and the model reads why.
     @Test func secondTryDoesNotCarryOutACallTwice() async throws {
         let first: [ModelOutput] = [.toolCall(note("Lait")), .toolCall(note(nil))]
@@ -368,7 +467,7 @@ struct SeveralActionsPipelineTests {
         #expect(await sending.sent == (yes ? ["A", "B"] : []))
         #expect(await sending.dropped == (yes ? [] : ["A", "B"]))
         let answer = await log.finished.last?.assistantText
-        #expect(answer == (yes ? "C’est envoyé\(nb): A. C’est envoyé\(nb): B." : ActionPhrases.declined(.french)))
+        #expect(answer == (yes ? "C’est envoyé\(nb): A. Et c’est envoyé\(nb): B." : ActionPhrases.declined(.french)))
         #expect(await model.requests.count == 1)  // the answer never reached the model
     }
 

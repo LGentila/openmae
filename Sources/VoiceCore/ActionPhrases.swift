@@ -376,6 +376,47 @@ public enum ActionPhrases {
             : "I do \(Self.count(count, english: true)) things at a time at most: tell me the rest again."
     }
 
+    /// The last of several confirmations said one after the other, linked to the one before it: « C’est parti pour
+    /// 10 minutes. Je te préviens à la fin. Et c’est noté : du pain. » With three, only the third is linked. It links
+    /// actions carried out, never a question (the callers see to it). The first word loses its capital only when it had
+    /// it for starting the sentence: « Et Claude Code y travaille… », "And Friday, October 16, …" keep theirs.
+    public static func linked(_ sentence: String, _ language: SpeechLanguage) -> String {
+        let text = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return sentence }
+        let firstWord = text.prefix { !$0.isWhitespace && !",;:.!?".contains($0) }
+        let rest = capitalizedToStart(firstWord, language) ? lowercasedFirst(text) : text
+        return (language == .french ? "Et " : "And ") + rest
+    }
+
+    /// Words that only have a capital when they start a sentence (lowercase, typographic apostrophe): the app's
+    /// confirmations start with them. A word not listed (a name, the words of a shortcut's own answer) keeps its capital.
+    private static let frenchStarts: Set<String> = [
+        "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "ce", "cet", "cette", "ces", "ça", "cela", "le",
+        "la", "les", "un", "une", "des", "du", "de", "au", "aux", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa",
+        "ses", "notre", "votre", "nos", "vos", "leur", "leurs", "rien", "tout", "toute", "tous", "toutes", "plus", "sans",
+        "voilà", "demain", "aujourd’hui", "hier", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+    ]
+    /// French words cut before a vowel: « C’est », « J’ajoute », « L’événement ».
+    private static let frenchElisions: Set<String> = ["c", "d", "j", "l", "m", "n", "qu", "s", "t"]
+    private static let englishStarts: Set<String> = [
+        "it", "it’s", "noted", "moved", "changed", "done", "sent", "timer", "cancelled", "today", "tomorrow", "from",
+        "you", "you’re", "you’ll", "your", "the", "a", "an", "this", "that", "that’s", "these", "those", "there",
+        "there’s", "here", "here’s", "nothing", "no", "all", "okay", "without", "we", "they", "he", "she", "my", "our",
+        "their", "his", "her", "its",
+    ]
+
+    private static func capitalizedToStart(_ word: Substring, _ language: SpeechLanguage) -> Bool {
+        let word = word.lowercased().replacingOccurrences(of: "'", with: "’")
+        switch language {
+        case .french:
+            if frenchStarts.contains(word) { return true }
+            guard let apostrophe = word.firstIndex(of: "’") else { return false }
+            return frenchElisions.contains(String(word[..<apostrophe]))
+        case .english:
+            return englishStarts.contains(word)
+        }
+    }
+
     /// The one question for the sensitive calls of one request, which wait together for the user's "oui": a single one's
     /// own sentence (`ToolProvider.summary`), or each one's without its question, then one « on y va ? » (« Je lance le
     /// raccourci « Salon » et je confie « relire le README » à Claude Code : on y va ? »).

@@ -22,6 +22,12 @@ public actor ToolRunner {
         /// A sensitive call, which waits for the user's "oui": `spoken` is its question (`ToolProvider.summary`). With
         /// other sensitive calls in the same request, the app asks one question for them all (`pendingQuestion`).
         public var waitsForYes = false
+        /// The action could not be carried out (an error, not a refusal): `spoken` says so, and asks to try again.
+        public var failed = false
+
+        /// An action carried out, which `spoken` confirms: the last of several such sentences said one after the other
+        /// is linked to the one before (`ActionPhrases.linked`); a question never is.
+        public var confirms: Bool { refusal == nil && !waitsForYes && !modelSpeaks && !failed }
     }
 
     /// A short answer the app handles itself.
@@ -146,8 +152,13 @@ public actor ToolRunner {
                 replies.append(await perform(action.call, with: action.provider, risk: .sensitive, context: context))
             }
             guard replies.count > 1 else { return replies.first }
-            return Reply(spoken: replies.map(\.spoken).joined(separator: " "),
-                         forModel: .array(replies.map(\.forModel)), retryable: false)
+            // The last confirmation linked to the one just before it: « C’est envoyé : A. Et c’est envoyé : B. »
+            var spoken = replies.map(\.spoken)
+            if let last = replies.lastIndex(where: \.confirms), last > 0, replies[last - 1].confirms {
+                spoken[last] = ActionPhrases.linked(spoken[last], context.language)
+            }
+            return Reply(spoken: spoken.joined(separator: " "), forModel: .array(replies.map(\.forModel)),
+                         retryable: false)
         case .decline:
             await dropPending()
             return Reply(spoken: ActionPhrases.declined(context.language),
@@ -280,7 +291,7 @@ public actor ToolRunner {
         } catch {
             DebugLog.log("tool \(call.name) failed: \(error)")
             return Reply(spoken: ActionPhrases.saveFailed(context.language),
-                         forModel: ["erreur": .string("\(error)")], retryable: false)
+                         forModel: ["erreur": .string("\(error)")], retryable: false, failed: true)
         }
     }
 
