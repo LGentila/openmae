@@ -5,16 +5,20 @@ import VoiceCore
 
 // Diagnostics for `voice-cli actions-bench --compare-beginnings`: the beginning every conversation starts with (the
 // system prompt with its tools, and the example exchanges when there are), computed in several ways and compared with a
-// float32 reference: the caches layer by layer, and the first token the model gives each request of a corpus from each.
+// float32 reference: the caches layer by layer, and the first token the model gives each request of a corpus from each,
+// read as the app reads it (the request computed by `generate`'s path, in bfloat16; the reference's in float32).
 //
 // Why: the same beginning, computed in bfloat16 at load (on the warm-up's first 2 tokens) or again from scratch (when the
 // tools change), made the model decide differently afterwards. Measured with Gemma 4 26B: no way of computing it is
 // wrong, but every one in bfloat16 drifts from the float32 computation, the same amount whichever way: tiny roundings at
 // first (3e-4 in layer 1), a third of the keys and values in the last layers. The requests the model hesitates on follow
-// that drift ("Cherche-moi une recette de crumble aux pommes": a search at 100 % from the state at load, 5 % from the one
-// computed from scratch, 100 % in float32); the other 227 of 228 requests of the corpora kept their decision. So the app
-// computes it in float32 and rounds it (`MLXChatModel.beginningCache`): the comparison checks that its states, at load and
-// after a tools change, are the reference's own computation, rounded.
+// that drift (in the app, "Cherche-moi une recette de crumble aux pommes" opened a search at 99 % from the state at load,
+// 19 % from the one computed from scratch; of web-fr's 80 requests, 4 moved by 20 points or more between two bfloat16
+// ways, from scratch and in the chunks of the load, and 1 changed its decision). So the app computes it in float32 and
+// rounds it (`MLXChatModel.beginningCache`): the comparison checks that its states, at load and after a tools change, are
+// the reference's own computation, rounded. The requests themselves are computed in bfloat16 on it, so the app's first
+// tokens are not quite the reference's: on web-fr, the call chances are 0.87 off in all from the state at load, one
+// decision changed; 0.93 to 2.49 off, up to two decisions changed, from the bfloat16 ways.
 
 extension MLXChatModel {
     /// A beginning as one way of computing it left the model's memory.
@@ -77,8 +81,8 @@ extension MLXChatModel {
     /// computation at load, without the warm-up), in chunks of 256 tokens and in one pass, in float32 with every weight
     /// converted (the reference, also rounded to the usual precision), and the app's way again (`beginningCache`), which
     /// is also compared with the reference before its rounding. Then compares every pair of caches, and reads each
-    /// request's first token from every state: in float32 from the reference, as usual from the others (once for states
-    /// that are identical).
+    /// request's first token from every state: in float32 from the reference, as the app reads it from the others, with
+    /// the weights back in their own types (once for states that are identical).
     public func compareBeginnings(_ given: [BeginningState], requests: [[ChatMessage]]) throws -> BeginningsComparison {
         guard let tokens = given.first?.tokens, given.allSatisfy({ $0.tokens == tokens }), tokens.count > 2 else {
             throw BeginningsError(description: "no beginning to compare, or different ones")
@@ -101,6 +105,7 @@ extension MLXChatModel {
         whole.prefill.chunking = .unchunked
         states.append(try computed("bfloat16, one pass") { try feed(tokens[...], into: $0, parameters: whole) })
 
+        let types = weightTypes()
         let halfTypes = enterFloat32()
         let reference: BeginningState
         let referenceLogProbs: [MLXArray]
@@ -108,6 +113,10 @@ extension MLXChatModel {
             defer { leaveFloat32(halfTypes) }
             reference = try computed("float32, every weight converted (reference)") { try feed(tokens[...], into: $0) }
             referenceLogProbs = try requests.map { try firstTokenLogProbs($0, from: reference) }
+        }
+        // The other states' first tokens are read as the app reads them: with the weights as they are.
+        guard weightTypes() == types else {
+            throw BeginningsError(description: "the weights did not go back to their types after the reference")
         }
         let appWay = try beginningCache(tokens, rounded: false)
         let unrounded = compare(appWay, reference.cache)
@@ -179,12 +188,22 @@ extension MLXChatModel {
     }
 
     /// Puts the model's half-precision weights (scales, biases, norms: 2.7 GB with Gemma 4 26B) in float32, so that every
-    /// computation is, until `leaveFloat32`. Returns their types.
+    /// computation is, until `leaveFloat32`. Returns their types, read before the update: it puts the new values into the
+    /// very arrays `parameters()` gave. Read after it, they were all float32, `leaveFloat32` kept the weights in float32,
+    /// and every first token read after the reference was computed in float32 on top of the state, unlike the app's
+    /// (Gemma 4 26B, web-fr: from the state at load, 6 of 80 requests more than half a point away from the app's chance
+    /// of a call, up to 42 points: 27 % instead of 70 %).
     private func enterFloat32() -> [String: DType] {
         let half = context.model.parameters().flattened().filter { $0.1.dtype == .bfloat16 || $0.1.dtype == .float16 }
+        let types = Dictionary(uniqueKeysWithValues: half.map { ($0.0, $0.1.dtype) })
         let float32 = half.map { ($0.0, $0.1.asType(.float32)) }
         context.model.update(parameters: NestedDictionary<String, MLXArray>.unflattened(float32))
-        return Dictionary(uniqueKeysWithValues: half.map { ($0.0, $0.1.dtype) })
+        return types
+    }
+
+    /// The type of every weight, by name.
+    private func weightTypes() -> [String: DType] {
+        Dictionary(uniqueKeysWithValues: context.model.parameters().flattened().map { ($0.0, $0.1.dtype) })
     }
 
     /// Puts the weights back as they were (exactly: a float32 made from a half-precision value goes back to it).

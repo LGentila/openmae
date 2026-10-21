@@ -69,8 +69,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// conversations are computed in bfloat16 on it. Computed in bfloat16 like them, it drifted far from the model's exact
     /// computation (a third of the keys and values in Gemma 4 26B's last layers), differently at load (after the warm-up)
     /// and when the tools changed, and the requests the model hesitates on followed that draw: "Cherche-moi une recette de
-    /// crumble aux pommes" opened a search at its first token 100 % of the time from the beginning computed at load, 5 %
-    /// from the one computed when the tools changed, 100 % from a float32 computation. In float32 it took less time on the
+    /// crumble aux pommes" opened a search at its first token 99 % of the time from the beginning computed at load, 19 %
+    /// from the one computed when the tools changed (100 % from a float32 computation). In float32 it took less time on the
     /// reference Mac (Gemma 4 26B: 5.0 s instead of 5.4 s at load; E4B: 2.6 s instead of 3.0 s), but more GPU memory
     /// while it lasts (0.8 GB more with Gemma 4 26B, 0.4 to 0.5 GB with E4B, 0.6 to 0.8 GB with E2B).
     private(set) var beginning: (tokens: [Int], cache: [KVCache])?

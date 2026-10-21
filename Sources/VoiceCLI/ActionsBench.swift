@@ -38,7 +38,8 @@
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
 // as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
-// layer by layer, and each request's chance of a call at its first token.
+// layer by layer, and each request's chance of a call at its first token, read as the app reads it (from the state at
+// load, the same as --watch-calls).
 
 import Foundation
 import VoiceCore

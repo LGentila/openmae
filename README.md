@@ -355,8 +355,9 @@ offers the search tool with the other corpora too, to check that it does not cha
 `--compare-beginnings` generates nothing: it computes the beginning of the conversations (the system prompt with its
 tools) as the app does (in float32, then rounded: the same state at load and after a tools change), then in bfloat16 as
 it was computed before and with every weight in float32 as a reference, compares the model's memory after each, and
-gives every request's chance of a call at its first token from each (a request whose decision moves with mere rounding
-is one the model hesitates on). One search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
+gives every request's chance of a call at its first token from each, read as the app reads it (from the state at load,
+the same as `--watch-calls`; a request whose decision moves with mere rounding is one the model hesitates on). One
+search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise
