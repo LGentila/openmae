@@ -271,6 +271,8 @@ struct InboundTests {
         #expect(again.status == 200)
         #expect(again.json == ["status": "duplicate"])
         #expect(await rig.log().first?.result == .duplicate)
+        // The first is said from a task of its own: wait for it, then give a second one time to show up.
+        #expect(await eventually { await rig.announcer.said.count == 1 })
         try? await Task.sleep(for: .milliseconds(100))
         #expect(await rig.announcer.said.count == 1)
     }
@@ -300,7 +302,8 @@ struct InboundTests {
         let tube = await rig.post(#"{"text": "Le bus passe dans deux minutes", "expires": 10}"#)
         #expect(tube.json == ["status": "queued"])
         #expect(await eventually { await rig.log().first?.result == .expired })
-        #expect(await rig.announcer.notifications.first?.body == "Le bus passe dans deux minutes")
+        // The notification is posted from a task of its own: the log may say expired before it arrives.
+        #expect(await eventually { await rig.announcer.notifications.first?.body == "Le bus passe dans deux minutes" })
         // Taken back from the engine: it will not be said.
         #expect(await rig.announcer.said.count == 1)
     }
