@@ -67,9 +67,9 @@ private actor CacheCheck {
                      "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
     }
 
-    /// The user's message as the app makes it: after an answer cut off, it says so (`Conversation.cutOffNote`).
+    /// The user's message as the app makes it.
     private func message(_ text: String) -> ChatMessage {
-        Conversation.userMessage(text, language: .french, dateLine: dateLine, afterCutOff: conversation.endsCutOff)
+        Conversation.userMessage(text, language: .french, dateLine: dateLine)
     }
 
     /// The model's counts of requests computed from scratch, gone back to a snapshot, and to the conversations' beginning.
@@ -264,20 +264,24 @@ private actor CacheCheck {
     private func recordAnnouncement(note: String, said: String) {
         var answer = ""
         SpeakableText.record(said, in: &answer)
-        conversation.record(user: Conversation.noteMessage(note, afterCutOff: conversation.endsCutOff), steps: [],
-                            assistant: answer, interrupted: false)
+        conversation.record(user: ChatMessage(.user, note), steps: [], assistant: answer, interrupted: false)
         print(String(format: "  %-46@ recorded, no request", "announcement" as NSString))
     }
 
     /// As the pipeline does once an exchange is recorded: the model computes what of the history its memory no longer
-    /// holds, and what it never wrote (`MLXChatModel.catchUp`), while nobody waits for an answer.
+    /// holds, and what it never wrote (`MLXChatModel.catchUp`), while nobody waits for an answer. After an answer cut off,
+    /// the user speaks over it: background work is not allowed meanwhile, as in the app (`allowBackgroundWork`).
     private func catchUp() async {
+        let userSpeaks = conversation.messages.last == Conversation.cutOffMessage
+        if userSpeaks { await model.allowBackgroundWork(false) }
         await model.catchUp(with: conversation.messages)
+        if userSpeaks { await model.allowBackgroundWork(true) }
         let done = await model.lastCatchUp
         guard done.computed > 0 else { return }
         catchUps.append(done.ms)
-        print(String(format: "  %-46@ %5d tokens computed while nobody waits, in %6.0f ms · GPU memory %.2f GB",
-                     "  the history caught up" as NSString, done.computed, done.ms, MLXChatModel.activeMemoryGB))
+        print(String(format: "  %-46@ %5d tokens computed while %@, in %6.0f ms · GPU memory %.2f GB",
+                     "  the history caught up" as NSString, done.computed,
+                     (userSpeaks ? "the user speaks" : "nobody waits") as NSString, done.ms, MLXChatModel.activeMemoryGB))
     }
 
     /// The tools changed (a shortcut added): the prompt is computed again, the conversation goes on (as the app does:

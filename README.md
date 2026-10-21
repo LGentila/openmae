@@ -397,11 +397,13 @@ shortened, a new conversation. Text only, nothing is created; run it again after
 
 Answers cut off one after the other, as when the user speaks over Maé: the dialogues of `Tests/Fixtures/cut-offs-fr.json`
 (twelve answers cut off in a row; answers cut early, then what a user who did not hear their end would ask), text only.
-Each answer cut off goes into the history as the app records it: what the voice had been given, and a note in the next
-message saying that the user cut Maé off. The report prints every answer, and counts those in which the model
+Each answer cut off goes into the history as the app records it: what the voice had been given, then a note of its own
+saying that the user cut Maé off. The report prints every answer, and counts those in which the model
 wrote the mark of a cut itself (« […] », which the history once ended such answers with: the model copied it, dozens in a
-row, and the voice read them), copied the note, or went round in circles and was stopped. `--cut-off marker` records the
-answers cut off as the app did before (« […] » at their end), `--cut-off none` without saying anything, for comparison:
+row, and the voice read them), copied the note, or went round in circles and was stopped. For comparison,
+`--cut-off in-message` puts the note in the next message instead, after the user's words, as the app did before;
+`--cut-off marker` records the answers cut off as it did before that (« […] » at their end), `--cut-off none` without
+saying anything:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli cut-off-bench --repeats 10

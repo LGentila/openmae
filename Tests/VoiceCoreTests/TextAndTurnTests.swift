@@ -165,18 +165,20 @@ struct TierAndConversationTests {
     }
 
     /// An answer cut off goes into the history as it went to the voice, without any mark of the cut in its words (the
-    /// model copied such a mark into its own answers); the next message says it, after the user's words, before the
-    /// date line and the language hint, and stays in the history with it.
-    @Test func englishHintStaysInHistoryAndTheMessageAfterACutSaysSo() {
+    /// model copied such a mark into its own answers); a note of its own follows it, so that the model reads it before
+    /// the user's next message, which stays their words (with the language hint). Dropping the exchange drops its note.
+    @Test func englishHintStaysInHistoryAndANoteFollowsAnAnswerCutOff() {
         var c = Conversation(systemPrompt: "S")
         c.record(user: "Hello there my friend", language: .english, assistant: "Hi", interrupted: true)
-        #expect(c.messages.map(\.content) == ["S", "Hello there my friend" + Conversation.englishHint, "Hi"])
-        #expect(c.endsCutOff)
-        let next = c.messages(addingUser: "Sorry, go on", language: .english).last?.content
-        #expect(next == "Sorry, go on\n" + Conversation.cutOffNote + Conversation.englishHint)
+        #expect(c.messages.map(\.content)
+            == ["S", "Hello there my friend" + Conversation.englishHint, "Hi", Conversation.cutOffNote])
+        #expect(c.messages.last == Conversation.cutOffMessage)
+        #expect(Conversation.cutOffMessage.role == .system)
+        let next = c.messages(addingUser: "Sorry, go on", language: .english)
+        #expect(next.suffix(2)
+            == [Conversation.cutOffMessage, ChatMessage(.user, "Sorry, go on" + Conversation.englishHint)])
         c.record(user: "Sorry, go on", language: .english, assistant: "Sure.", interrupted: false)
-        #expect(c.messages.last(where: { $0.role == .user })?.content == next)
-        #expect(!c.endsCutOff)
+        #expect(c.messages == next + [ChatMessage(.assistant, "Sure.")])  // the history holds what the request read
         #expect(c.messages(addingUser: "Thanks", language: .english).last?.content == "Thanks" + Conversation.englishHint)
         // The answer cut off dropped, the note about it goes too.
         let dropped = c.dropOldestExchange()
@@ -189,20 +191,21 @@ struct TierAndConversationTests {
         #expect(!droppedAgain)
     }
 
-    /// With the actions on, the date line still ends the message after a cut; an announcement's note says it too; a new
-    /// conversation forgets it.
-    @Test func theNoteOfACutComesBeforeTheDateLine() {
+    /// With the actions on, the message after a cut is the user's words then the date line: its first line is their words
+    /// alone (`ToolContext.userSaid`). The last exchange cut off, then dropped: nothing of it is left. A new conversation
+    /// forgets the note.
+    @Test func theMessageAfterACutIsTheUsersWordsAlone() {
         let dateLine = "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)"
-        let message = Conversation.userMessage("Attends, attends.", language: .french, dateLine: dateLine, afterCutOff: true)
-        #expect(message.content == "Attends, attends.\n" + Conversation.cutOffNote + "\n" + dateLine)
-        #expect(message.content.components(separatedBy: "\n").first == "Attends, attends.")  // the user's words alone
-        #expect(Conversation.noteMessage("(Le minuteur a sonné.)", afterCutOff: true).content
-            == "(Le minuteur a sonné.)\n" + Conversation.cutOffNote)
-        #expect(Conversation.noteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)")
         var c = Conversation(systemPrompt: "S")
         c.record(user: "Raconte-moi une histoire.", language: .french, assistant: "Il était une fois", interrupted: true)
+        let message = Conversation.userMessage("Attends, attends.", language: .french, dateLine: dateLine)
+        #expect(message.content == "Attends, attends.\n" + dateLine)
+        #expect(c.messages(adding: message).map(\.role) == [.system, .user, .assistant, .system, .user])
+        var dropped = c
+        let droppedIt = dropped.dropOldestExchange()
+        #expect(droppedIt)
+        #expect(dropped.messages.map(\.content) == ["S"])
         c.clear()
-        #expect(!c.endsCutOff)
-        #expect(c.messages(addingUser: "Bonjour", language: .french).last?.content == "Bonjour")
+        #expect(c.messages(addingUser: "Bonjour", language: .french).map(\.content) == ["S", "Bonjour"])
     }
 }

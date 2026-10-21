@@ -378,13 +378,19 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// 185 ms), the turn after an action 52 in 465 ms (E4B: 48 in 187 ms). Nothing is computed ahead after an answer the
     /// model ended itself: only the end of its turn follows (the `\n` after `<turn|>`, no token the model stops at), which
     /// the next request computes with its own message.
+    ///
+    /// After an answer cut off, the history ends with a note rather than an answer (`Conversation.cutOffMessage`): the user
+    /// speaks over the answer, and their request comes as soon as they stop. That history is computed at once, while they
+    /// speak, like an answer cut off, even when the cache holds all of it but the note (an answer the model had written to
+    /// its end, cut while the voice said it): computed ahead, it would wait for nobody speaking, which comes after their
+    /// request, and that request would read the note with their words.
     /// `async` like the protocol's default (see `useTools`).
     public func catchUp(with conversation: [ChatMessage]) async {
         lastCatchUp = (0, 0)
         guard let tokens = try? render(conversation, generationPrompt: false) else { return }
         let common = commonPrefix(cachedTokens, tokens, answering: false)
         guard common < tokens.count else { return }
-        if common == cachedTokens.count {
+        if common == cachedTokens.count, conversation.last?.role == .assistant {
             // A turn the model did not end follows when the rest holds a token it stops at (`<turn|>`, `<|tool_response>`).
             guard tokens[common...].contains(where: stopTokens.contains) else { return }
             lastCatchUp = await computeAhead(tokens, from: common)

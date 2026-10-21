@@ -1369,8 +1369,7 @@ public actor VoicePipeline {
             }
             let now = Date()
             turn.userMessage = Conversation.userMessage(
-                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now),
-                afterCutOff: conversation.endsCutOff)
+                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now))
             // "oui", "non", "annule": answered by the app, not the model.
             let interception = await tools?.interception(for: text, now: now)
 
@@ -1874,7 +1873,7 @@ public actor VoicePipeline {
         turn.elsewhere = announcementOutput != nil
         turn.announcement = announcement
         turn.language = announcement.language
-        turn.userMessage = Conversation.noteMessage(announcement.note, afterCutOff: conversation.endsCutOff)
+        turn.userMessage = ChatMessage(.user, announcement.note)
         self.turn = turn
         commit(turn)
         turn.task = Task { await self.runAnnouncement(turn, announcement) }
@@ -2009,11 +2008,11 @@ public actor VoicePipeline {
     }
 
     /// Once an exchange is recorded, the model computes what of the history its memory no longer holds (an answer cut
-    /// off, or kept otherwise than it wrote it) right away, while the user speaks or nobody does, rather than in the
-    /// next answer's time; then a speculative answer abandoned, and the user's message heard in full after it, only cost
-    /// that message (`LanguageModel.catchUp`). So does it what it never wrote (an announcement once said, a tool's result
-    /// and the app's own sentences), if nobody speaks: it knows by then whether someone does (`backgroundPermission`).
-    /// One after the other, in the order the exchanges were recorded.
+    /// off and the note after it, or an answer kept otherwise than it wrote it) right away, while the user speaks or
+    /// nobody does, rather than in the next answer's time; then a speculative answer abandoned, and the user's message
+    /// heard in full after it, only cost that message (`LanguageModel.catchUp`). So does it what it never wrote (an
+    /// announcement once said, a tool's result and the app's own sentences), if nobody speaks: it knows by then whether
+    /// someone does (`backgroundPermission`). One after the other, in the order the exchanges were recorded.
     private func letModelCatchUp() {
         let messages = conversation.messages
         let (previous, permission) = (catchUpTask, backgroundPermission)
