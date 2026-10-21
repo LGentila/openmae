@@ -392,7 +392,8 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     await log.attach(model)
     Task { for await event in pipeline.events { await log.record(event) } }
     try await pipeline.start()
-    print(String(format: "memory after loading: %.2f GB\n", ProcessMemory.footprintGB))
+    print(String(format: "memory after loading: %.2f GB", ProcessMemory.footprintGB))
+    print("ready: \(secondsSinceLaunch().map { String(format: "%.2f s", $0) } ?? "—") after launch\n")
     return Engine(pipeline: pipeline, speaker: speaker, log: log, model: model)
 }
 
@@ -401,6 +402,16 @@ private func preparedKernels(_ model: MLXChatModel) async throws -> Duration {
     let start = ContinuousClock.now
     try await model.prepareKernels()
     return ContinuousClock.now - start
+}
+
+/// How long ago the kernel started this process: the launch, as `buildEngine`'s "ready" line counts from it.
+func secondsSinceLaunch() -> Double? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var request: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    guard sysctl(&request, UInt32(request.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    let start = info.kp_proc.p_starttime
+    return Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1e6)
 }
 
 /// `--actions`: the app's actions as the model sees them (the same tools and instructions, the date line in the user's
