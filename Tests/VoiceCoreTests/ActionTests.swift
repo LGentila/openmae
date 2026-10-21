@@ -507,24 +507,35 @@ struct ActionCallTests {
         #expect(withExample.hasSuffix("« Mets un minuteur de 5 minutes pour le thé », ta réponse entière est <call>"))
     }
 
-    @Test func examplesAreExchangesTheAppCouldHaveHad() {
+    @Test func examplesAreExchangesTheAppCouldHaveHad() throws {
         let examples = ActionCatalog.examples(now: now, timeZone: paris)
         let exchange: [ChatMessage.Role] = [.user, .assistant, .tool, .assistant]
-        #expect(examples.map(\.role) == exchange + exchange + exchange)
+        #expect(examples.map(\.role) == exchange + exchange + exchange + exchange)
         #expect(examples.filter { $0.role == .user }.map(\.content)
                 == [ActionCatalog.example.request, "Rappelle-moi d'acheter du lait",
-                    "Ajoute un rendez-vous chez le kiné mardi à 18 h 15"])  // no date line
+                    "Ajoute un rendez-vous chez le kiné après la piscine dans mon calendrier Famille",
+                    "Mardi à 18 h 15."])  // no date line
         // Each call comes at once, with the user's words.
         #expect(examples[1].content.isEmpty && examples[1].toolCalls == [ActionCatalog.example.call])
-        #expect(examples[9].toolCalls.first?.arguments == ["titre": "Rendez-vous chez le kiné", "quand": "mardi à 18 h 15"])
+        // Even with a moment the app cannot place: the call is refused as the app refuses it, then a question about the
+        // day and the hour alone. At the answer, the event's call again, with the request's title and calendar.
+        let refused = try #require(examples[9].toolCalls.first)
+        #expect(refused.arguments == ["titre": "Rendez-vous chez le kiné", "quand": "après la piscine",
+                                      "calendrier": "Famille"])
+        let refusal = try #require(checkRefusal(refused))
+        #expect(refusal.detailGivenAgain && examples[10].toolResult == refusal.result(for: refused))
+        #expect(examples[13].toolCalls.first?.arguments == ["titre": "Rendez-vous chez le kiné", "quand": "mardi à 18 h 15",
+                                                             "calendrier": "Famille"])
         // The result and the sentence the app would have given (the coming Tuesday), with ids it never gives.
-        #expect(examples[10].toolResult == ["id": "e0", "titre": "Rendez-vous chez le kiné", "debut": "2026-10-20T18:15",
-                                            "fin": "2026-10-20T19:15", "calendrier": "Maison"])
+        #expect(examples[14].toolResult == ["id": "e0", "titre": "Rendez-vous chez le kiné", "debut": "2026-10-20T18:15",
+                                            "fin": "2026-10-20T19:15", "calendrier": "Famille"])
         #expect(examples.compactMap { $0.toolResult?.objectID } == ["t0", "r0", "e0"])
         #expect(examples.filter { $0.role == .assistant && $0.toolCalls.isEmpty }.map(\.content)
                 == ["C’est parti pour 5 minutes\(nb): le thé. Je te préviens à la fin.",
                     "C’est noté dans tes rappels\(nb): acheter du lait.",
-                    "C’est dans ton agenda\(nb): Rendez-vous chez le kiné, mardi 20 octobre de 18\(nb)h\(nb)15 à 19\(nb)h\(nb)15."])
+                    "Quel jour et à quelle heure, pour ce rendez-vous\(nb)?",
+                    "C’est dans ton calendrier «\(nb)Famille\(nb)»\(nb): Rendez-vous chez le kiné, mardi 20 octobre de "
+                        + "18\(nb)h\(nb)15 à 19\(nb)h\(nb)15."])
         #expect(ActionCatalog.showsExamples(on: .minimum) && !ActionCatalog.showsExamples(on: .comfort))
     }
 
