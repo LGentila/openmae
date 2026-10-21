@@ -4,8 +4,8 @@ import Testing
 @testable import VoiceCore
 
 /// A new conversation (the interface's « New conversation », the actions or the web search switched on or off) while
-/// Maé thinks or speaks: the turn stops, and the state goes back to rest. One the pipeline starts on its own (the tools
-/// came or went) is reported, for the interfaces to clear their transcript.
+/// Maé thinks or speaks: the turn stops, and the state goes back to rest. Each one is reported, whoever asked for it, for
+/// the interfaces to clear their transcript: after everything of the earlier conversation, before anything of the new.
 @Suite("New conversation during a turn", .serialized)
 struct NewConversationTests {
     static let sentence = "Ton minuteur de 10 minutes est terminé."
@@ -55,6 +55,10 @@ struct NewConversationTests {
         try await Task.sleep(for: .milliseconds(300))
         #expect(await states(log, after: before) == [.listening])  // and it stays there
         #expect(await model.catchUps.isEmpty)  // the stopped answer is not recorded
+        // The interfaces are told, once, after the last piece of the stopped answer and before the state at rest.
+        let pieces = await log.pieces.count
+        #expect(pieces > 0)
+        #expect(await log.clears == [EventRecorder.Moment(pieces: pieces, states: before)])
     }
 
     /// The same while the model is still thinking (nothing written, nothing said yet).
@@ -71,6 +75,7 @@ struct NewConversationTests {
         await waitFor { await log.states.count > before }
         #expect(await states(log, after: before) == [.listening])
         #expect(await speaker.played == 0)
+        #expect(await log.clears == [EventRecorder.Moment(pieces: 0, states: before)])
     }
 
     /// The actions switched on, then off, while an answer plays: the same, each time.
@@ -96,22 +101,57 @@ struct NewConversationTests {
         }
     }
 
-    /// Only a change of tools reports a new conversation (`conversationCleared`), at rest too: not the one the interface
-    /// asks for (it clears its own transcript), nor a change of the tools' list, after which the conversation goes on.
-    @Test func onlyAChangeOfToolsReportsANewConversation() async throws {
+    /// Every new conversation is reported (`conversationCleared`), at rest too, whoever asked for it: an interface's
+    /// « New conversation » (an iPhone's: the Mac's screen clears on it), a change of tools. Not a change of the tools'
+    /// list, after which the conversation goes on.
+    @Test func everyNewConversationIsReported() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
         let (pipeline, log) = make(model, speaker, tools: ToolRunner(providers: [TimerTools()]))
         try await pipeline.start()
         await waitFor { await log.states == [.listening] }
-        try await pipeline.resetConversation()
         try await pipeline.toolsChanged()
         try await Task.sleep(for: .milliseconds(100))
         #expect(await log.clears.isEmpty)
+        try await pipeline.resetConversation()
+        await waitFor { await log.clears.count == 1 }
+        #expect(await log.clears.count == 1)
         try await pipeline.setTools(nil)  // the actions switched off
         try await pipeline.setTools(ToolRunner(providers: [WebSearchTools()], actions: false))  // the search alone
-        await waitFor { await log.clears.count == 2 }
-        #expect(await log.clears.count == 2)
+        await waitFor { await log.clears.count == 3 }
+        #expect(await log.clears.count == 3)
         #expect(await log.states == [.listening])  // at rest all along
+        await pipeline.stop()
+    }
+
+    /// The user speaks right after « New conversation », while the pipeline still sets the new one up (the model
+    /// computes its beginning): the report comes before anything of their turn. An interface that clears its transcript
+    /// on it (the Mac app does, after clearing it at the click already) keeps the whole turn on screen.
+    @Test func aTurnRightAfterANewConversationComesAfterItsReport() async throws {
+        let (model, speaker) = (ScriptedModel(beginningTakes: .milliseconds(800)), FakeSpeaker())
+        let (pipeline, log) = make(model, speaker)
+        try await answerPlaying(pipeline, speaker, log)
+        let reset = Task { try await pipeline.resetConversation() }
+        // The new conversation's beginning is being computed (the start's was the first): the user speaks meanwhile.
+        await waitFor { await model.beginningsAsked == 2 }
+        #expect(await model.prefills.filter(\.beginning).count == 1)
+        let (speech, silence) = ([Float](repeating: 0.5, count: 512), [Float](repeating: 0, count: 512))
+        for chunk in Array(repeating: speech, count: 10) + Array(repeating: silence, count: 20) {
+            await pipeline.push(chunk)
+        }
+        try await reset.value
+        await waitFor { await model.catchUps.count == 1 }  // the new turn, answered and recorded
+        await waitFor { await log.states.last == .listening }
+        let timeline = await log.timeline
+        let cleared = try #require(timeline.firstIndex(of: "cleared"))
+        #expect(timeline.filter { $0 == "cleared" }.count == 1)
+        // Before it: the earlier exchange, stopped while Maé spoke. After it: the state at rest, then the whole turn.
+        #expect(timeline[..<cleared].contains("user Bonjour"))
+        #expect(timeline[..<cleared].contains("state speaking"))
+        let after = Array(timeline[(cleared + 1)...])
+        #expect(after.prefix(2) == ["state listening", "state userSpeaking"])
+        #expect(after.filter { $0.hasPrefix("user ") }.count == 1)
+        #expect(after.filter { $0.hasPrefix("piece ") } == ["piece Bonjour, je suis bien là.",
+                                                            "piece Comment vas-tu ce matin ?"])
         await pipeline.stop()
     }
 
@@ -145,6 +185,7 @@ struct NewConversationTests {
         await waitFor { await model.catchUps.count == 2 }
         await waitFor { await log.pieces.count >= 2 }
         #expect(await log.pieces == ["Bonjour !", Self.sentence])
+        #expect(await log.clears.map(\.pieces) == [1])  // reported between the two: the sentence is the new one's
         #expect(await speaker.played == played + Self.announcementSamples)  // its chime, then its sentence, once
         let history = try #require(await model.catchUps.last)
         #expect(history.filter { $0.role == .user }.map(\.content) == [Self.note])

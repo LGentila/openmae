@@ -143,9 +143,10 @@ public enum PipelineEvent: Sendable {
     case awake(Bool)
     /// Wake-word mode: what Maé made of a sentence she heard.
     case wakeDecision(WakeDecision)
-    /// A new conversation started because the tools came or went (`setTools`): the model no longer has the earlier
-    /// exchanges, and the interfaces stop showing them. Sent once the turn under way has stopped, so that nothing of the
-    /// earlier conversation comes after it. Not sent for `resetConversation`: the interface asking for it clears its own.
+    /// A new conversation started (`resetConversation`, whoever asked for it, or `setTools`, the tools came or went):
+    /// the model no longer has the earlier exchanges, and the interfaces stop showing them. Sent once the turn under way
+    /// has stopped, so that nothing of the earlier conversation comes after it, and before anything of the new one (the
+    /// state at rest, an announcement said in it, the user's next turn).
     case conversationCleared
     case failure(String)
 }
@@ -723,12 +724,15 @@ public actor VoicePipeline {
         emit.finish()
     }
 
-    /// Forget the conversation (new session). The model starts again from the beginning it keeps.
+    /// Forget the conversation (new session). The model starts again from the beginning it keeps. Reported
+    /// (`conversationCleared`) whoever asked for it: the Mac's « New conversation », an iPhone's, the other interfaces
+    /// clear their transcript too.
     public func resetConversation() async throws {
         let stopped = await stopTurnForNewConversation()
-        resetPartials()  // the interface cleared the conversation: words found for it before are not shown
+        resetPartials()  // the conversation is cleared: words found for it before are not shown
         forgetUnheard()
         conversation.clear()
+        emit.yield(.conversationCleared)
         await tools?.resetConversation()
         if stopped { restAfterStoppedTurn() }
         try await model.prefillBeginning(conversation.beginning)

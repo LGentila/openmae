@@ -30,13 +30,19 @@ actor ScriptedModel: LanguageModel {
     /// After this many outputs the model stops writing until it is cancelled, then ends its stream without an error,
     /// as the real one does: an answer in the middle of a sentence.
     private let pauseAfter: Int?
-    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"], pauseAfter: Int? = nil) {
+    /// How long computing a beginning to keep takes (`prefillBeginning`): a new prompt, after the tools changed.
+    private let beginningTakes: Duration
+    init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"], pauseAfter: Int? = nil,
+         beginningTakes: Duration = .zero)
+    {
         scripts = [answer.map { .text($0) }]
         self.pauseAfter = pauseAfter
+        self.beginningTakes = beginningTakes
     }
     init(scripts: [[ModelOutput]]) {
         self.scripts = scripts
         pauseAfter = nil
+        beginningTakes = .zero
     }
 
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
@@ -65,7 +71,13 @@ actor ScriptedModel: LanguageModel {
     /// What was computed ahead, in order: conversations (`prefill`) and beginnings to keep (`prefillBeginning`).
     private(set) var prefills: [(beginning: Bool, messages: [ChatMessage])] = []
     func prefill(_ conversation: [ChatMessage]) async throws { prefills.append((false, conversation)) }
-    func prefillBeginning(_ beginning: [ChatMessage]) async throws { prefills.append((true, beginning)) }
+    /// How many beginnings it was asked to compute, finished or not.
+    private(set) var beginningsAsked = 0
+    func prefillBeginning(_ beginning: [ChatMessage]) async throws {
+        beginningsAsked += 1
+        if beginningTakes > .zero { try await Task.sleep(for: beginningTakes) }
+        prefills.append((true, beginning))
+    }
     /// The histories the pipeline asked the model to catch up with, in order.
     private(set) var catchUps: [[ChatMessage]] = []
     /// Whether background work was allowed (`allowBackgroundWork`) when each of them came.
@@ -586,8 +598,18 @@ actor EventRecorder {
         var pieces: Int
         var states: Int
     }
+    /// What an interface's transcript is made of, in order, written short: "state listening", "user Bonjour",
+    /// "piece Bonjour !", and "cleared" for each new conversation reported.
+    private(set) var timeline: [String] = []
 
     func record(_ event: PipelineEvent) {
+        switch event {
+        case .state(let state): timeline.append("state \(state.rawValue)")
+        case .userTranscript(let text, _): timeline.append("user \(text)")
+        case .assistantPiece(let piece): timeline.append("piece \(piece)")
+        case .conversationCleared: timeline.append("cleared")
+        default: break
+        }
         switch event {
         case .conversationCleared: clears.append(Moment(pieces: pieces.count, states: states.count))
         case .turnFinished(let metrics): finished.append(metrics)

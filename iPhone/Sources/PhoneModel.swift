@@ -530,9 +530,13 @@ final class PhoneModel {
     }
 
     func newConversation() {
+        clearTranscript()
+        phoneLink?.send(.newConversation)
+    }
+
+    private func clearTranscript() {
         transcript.removeAll()
         answerIndex = nil
-        phoneLink?.send(.newConversation)
     }
 
     private func sendSettings() {
@@ -600,6 +604,10 @@ final class PhoneModel {
             if metrics.interrupted, let answerIndex, transcript.indices.contains(answerIndex) {
                 transcript[answerIndex].interrupted = true
             }
+        case .conversationCleared:
+            // The Mac started a new conversation (its own « New conversation », its tools that came or went, another
+            // model, or this iPhone's own, cleared already): the screen no longer shows what Maé no longer has.
+            clearTranscript()
         default:
             break
         }

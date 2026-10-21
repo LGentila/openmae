@@ -17,6 +17,9 @@ public actor AssistantHost: AssistantConnection {
     private var stage = Stage.idle
     /// The tier changed while the models were loading: start again once they are loaded.
     private var restartWhenLoaded = false
+    /// A pipeline was stopped (another tier chosen, the models deleted) and its conversation went with it: the next one
+    /// says so once it is ready (`conversationCleared`), for the interfaces to clear what they still show of it.
+    private var conversationDropped = false
 
     private var settings = AssistantSettings()
     private let store = ModelStore()
@@ -276,6 +279,13 @@ public actor AssistantHost: AssistantConnection {
         // `KeepAwake` (iPhone access, the wake-word mode), on mains.
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Conversation vocale")
+        if conversationDropped {
+            // The new model starts a new conversation: the screens stop showing the exchanges of the one before it.
+            // Before anything of the new pipeline (its events are forwarded once this method waits for something).
+            conversationDropped = false
+            DebugLog.log("new conversation: another language model is ready")
+            emit.yield(.conversationCleared)
+        }
         emit.yield(.ready(EngineInfo(
             chip: hardware.chipName, memoryGiB: hardware.memoryGiB, tier: tier, recommendedTier: recommended,
             languageModel: languageModel.displayName,
@@ -317,6 +327,7 @@ public actor AssistantHost: AssistantConnection {
 
     /// Stops everything, before another tier is loaded or the models are deleted.
     private func stopEngine() async {
+        if pipeline != nil { conversationDropped = true }
         let running = tasks
         tasks = []
         running.forEach { $0.cancel() }
@@ -783,7 +794,7 @@ public actor AssistantHost: AssistantConnection {
         case .awake(let awake): emit.yield(.awake(awake))
         case .wakeDecision(let decision): emit.yield(.wakeDecision(decision))
         case .conversationCleared:
-            DebugLog.log("new conversation: the tools came or went")
+            DebugLog.log("new conversation")
             emit.yield(.conversationCleared)
         case .failure(let message): emit.yield(.warning(message))
         }

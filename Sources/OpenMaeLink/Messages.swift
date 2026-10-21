@@ -28,6 +28,9 @@ public enum LinkMessage: Sendable {
     /// the user's words while they speak (`AssistantEvent.partialTranscript`). Only a device that lists one is sent it:
     /// the first versions of the app closed the session on an event they did not know.
     public static let partialTranscriptFeature = "partialTranscript"
+    /// Another optional event: the engine started a new conversation (`AssistantEvent.conversationCleared`), and the
+    /// device clears its transcript.
+    public static let conversationClearedFeature = "conversationCleared"
 
     private enum Kind: String, Codable { case command, event, audio, ping, pong, paired, removed, mac, device }
     private enum Keys: String, CodingKey { case type, command, event, op, stream, frames, name, relay, station }
@@ -165,8 +168,8 @@ public enum HandshakePayload {
     /// The iPhone, in the first message of a session.
     public struct Session: Codable, Sendable, Equatable {
         public var v: Int
-        /// The optional events this iPhone (or iPad) understands (`LinkMessage.partialTranscriptFeature`); nil from one
-        /// from before them, which must not be sent any.
+        /// The optional events this iPhone (or iPad) understands (`LinkMessage.partialTranscriptFeature`,
+        /// `LinkMessage.conversationClearedFeature`); nil from one from before them, which must not be sent any.
         public var features: [String]?
         public init(v: Int = 1, features: [String]? = nil) {
             self.v = v
@@ -176,7 +179,8 @@ public enum HandshakePayload {
         public func understands(_ feature: String) -> Bool { features?.contains(feature) == true }
 
         /// What this version's iPhone and iPad app says.
-        public static let current = Session(features: [LinkMessage.partialTranscriptFeature])
+        public static let current = Session(features: [LinkMessage.partialTranscriptFeature,
+                                                       LinkMessage.conversationClearedFeature])
     }
 
     static func encode<T: Encodable>(_ value: T) -> Data {
@@ -203,8 +207,8 @@ public enum RemoteCommandPolicy {
     /// download or the models' storage: they belong to the Mac's screens. An allow-list too.
     public static func isRelayed(_ event: AssistantEvent) -> Bool {
         switch event {
-        case .state, .partialTranscript, .userTranscript, .assistantPiece, .turnFinished, .ready, .loading, .warning,
-             .problem, .setupNeeded:
+        case .state, .partialTranscript, .userTranscript, .assistantPiece, .turnFinished, .conversationCleared, .ready,
+             .loading, .warning, .problem, .setupNeeded:
             true
         default: false
         }
@@ -213,8 +217,11 @@ public enum RemoteCommandPolicy {
     /// The feature a device must list (`HandshakePayload.Session.features`) to be sent the event; nil: any device gets
     /// it.
     public static func neededFeature(_ event: AssistantEvent) -> String? {
-        if case .partialTranscript = event { return LinkMessage.partialTranscriptFeature }
-        return nil
+        switch event {
+        case .partialTranscript: LinkMessage.partialTranscriptFeature
+        case .conversationCleared: LinkMessage.conversationClearedFeature
+        default: nil
+        }
     }
 
     /// The event as the iPhone gets it: a finished turn without its detailed measurements.

@@ -287,7 +287,7 @@ actor EventLog {
         case .wakeDecision(let decision):
             print("  🔎 \(decision.moment.rawValue), \(decision.accepted ? "for Maé" : "ignored"): \(decision.heard)")
         case .conversationCleared:
-            print("  🆕 new conversation: the tools came or went")
+            print("  🆕 new conversation")
         case .failure(let message):
             failures.append(message)
             print("  ⚠️  \(message)")

@@ -200,6 +200,8 @@ final class AssistantModel {
         connection.send(.stopSpeaking)
     }
 
+    /// The screen clears at once; the engine says it started the new conversation (`conversationCleared`) once the turn
+    /// under way has stopped, and before anything of the next one.
     func newConversation() {
         clearTranscript()
         connection.send(.newConversation)
@@ -321,8 +323,9 @@ final class AssistantModel {
         case .wakeDecision(let decision):
             if settings.wakeLog { WakeLog.append(decision) }
         case .conversationCleared:
-            // The engine started a new conversation (the actions, or on their own Claude Code, the web search or the
-            // built-in sources, switched on or off): the screen no longer shows what the model no longer has.
+            // The engine started a new conversation (an iPhone's « New conversation », the tools that came or went,
+            // another model ready after a change of tier; after the Mac's own « New conversation », a second time,
+            // before anything of the next turn): the screen no longer shows what the model no longer has.
             clearTranscript()
         case .levels(let input, let output):
             inputLevel = input

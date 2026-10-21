@@ -156,8 +156,12 @@ struct MessageTests {
     @Test func relayedEvents() {
         #expect(RemoteCommandPolicy.relayed(.levels(input: 1, output: 0)) == nil)
         #expect(RemoteCommandPolicy.relayed(.diagnostics(EngineDiagnostics())) == nil)
-        // The Mac's own: an iPhone app from before it would not understand it.
-        #expect(RemoteCommandPolicy.relayed(.conversationCleared) == nil)
+        // Relayed, but only to the devices that list it (`neededFeature`): an iPhone app from before it would not
+        // understand it (ConversationClearedLinkTests).
+        guard case .conversationCleared? = RemoteCommandPolicy.relayed(.conversationCleared) else {
+            Issue.record("conversationCleared not relayed")
+            return
+        }
         var metrics = TurnMetrics()
         metrics.userText = "Salut"
         metrics.latencyMs = 1234
