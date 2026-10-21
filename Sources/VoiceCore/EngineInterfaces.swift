@@ -103,11 +103,12 @@ public protocol LanguageModel: Sendable {
     func prefill(_ conversation: [ChatMessage]) async throws
     /// The history as the next request will start, once an exchange is recorded. A model that keeps its working memory
     /// between requests computes now what of it that memory no longer matches (an answer cut off, or recorded otherwise
-    /// than the model wrote it), while nobody waits for an answer. What the model never wrote, after what its memory
-    /// holds (an announcement, a tool's result and the app's own sentences), it computes in the background, while that is
-    /// allowed (`allowBackgroundWork`), and it gives way to any request sent meanwhile, which then computes the rest.
-    /// Nothing when the memory holds the history (or went past it), or when only the end of an answer the model wrote
-    /// follows. Returns once that is done, or given up.
+    /// than the model wrote it), while nobody waits for an answer; and so a history that ends with a note rather than an
+    /// answer (`Conversation.cutOffMessage`, the note read ahead: the user speaks over the answer, and their request comes
+    /// as soon as they stop). What the model never wrote, after what its memory holds (an announcement, a tool's result
+    /// and the app's own sentences), it computes in the background, while that is allowed (`allowBackgroundWork`), and it
+    /// gives way to any request sent meanwhile, which then computes the rest. Nothing when the memory holds the history
+    /// (or went past it), or when only the end of an answer the model wrote follows. Returns once done, or given up.
     func catchUp(with conversation: [ChatMessage]) async
     /// Processes the beginning every conversation starts with (`Conversation.beginning`: the system prompt, and the
     /// example exchanges when there are) and keeps it, so that a new conversation starts from it without computing it

@@ -12,14 +12,16 @@
 // (`RepetitionGuard`).
 //
 //   voice-cli cut-off-bench [--tier tier] [--llm folder] [--corpus Tests/Fixtures/cut-offs-fr.json] [--repeats 10]
-//                           [--actions] [--now 2026-10-15T18:42] [--cut-off note|marker|none] [--note "(…)"]
-//                           [--dialogue name] [--out measurements]
+//                           [--actions] [--now 2026-10-15T18:42] [--cut-off ahead|after-user-words|marker|none]
+//                           [--note "(…)"] [--note-role system|user] [--dialogue name] [--out measurements]
 //
 // --actions offers the app's actions as the model sees them when they are on (their instructions and tools, the date
 // line in the user's messages; nothing is carried out: a call ends the answer). --cut-off says how the history tells the
-// model that an answer was cut off: "note" as the app does (a note in the next message, `Conversation.cutOffNote`);
-// for comparison, "marker" as the app did before (« […] » at the end of the answer), "none" not at all. --note tries
-// another wording of the note. --dialogue runs those dialogues alone (their names, separated by commas).
+// model that an answer was cut off; by default as the app does on the tier (`Conversation.cutOffPlacement(on:)`): "ahead",
+// a note of its own right after the answer (`Conversation.cutOffMessage`), or "after-user-words", the note in the next
+// message, after the user's words. For comparison, "marker" as the app did before (« […] » at the end of the answer),
+// "none" not at all. --note tries another wording of the note, --note-role another role for its message when it is read
+// ahead. --dialogue runs those dialogues alone (their names, separated by commas).
 
 import Foundation
 import VoiceCore
@@ -65,12 +67,30 @@ private struct CutOffRun: Encodable {
 
 /// How the history tells the model that an answer was cut off.
 private enum CutOffStyle: String {
-    /// As the app: a note in the next message (`Conversation.cutOffNote`).
-    case note
+    /// A note of its own right after the answer, read ahead (`Conversation.CutOffPlacement.ahead`).
+    case ahead
+    /// The note in the next message, after the user's words (`Conversation.CutOffPlacement.afterUserWords`).
+    case afterUserWords = "after-user-words"
     /// As the app did before: « […] » at the end of the answer.
     case marker
     /// Nothing.
     case none
+
+    init(_ placement: Conversation.CutOffPlacement) {
+        switch placement {
+        case .ahead: self = .ahead
+        case .afterUserWords: self = .afterUserWords
+        }
+    }
+
+    /// Where the note goes, when there is one.
+    var placement: Conversation.CutOffPlacement? {
+        switch self {
+        case .ahead: .ahead
+        case .afterUserWords: .afterUserWords
+        case .marker, .none: nil
+        }
+    }
 }
 
 /// An ellipsis in brackets: « […] », « [...] », « (…) », « ( ... ) ».
@@ -83,11 +103,26 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
     func value(_ name: String) -> String? {
         arguments.firstIndex(of: name).flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     }
-    guard let style = CutOffStyle(rawValue: value("--cut-off") ?? CutOffStyle.note.rawValue) else {
-        throw CLIError("--cut-off: note, marker or none")
+    let tier = try tierOption(o)
+    let style: CutOffStyle
+    if let name = value("--cut-off") {
+        guard let chosen = CutOffStyle(rawValue: name) else {
+            throw CLIError("--cut-off: ahead, after-user-words, marker or none")
+        }
+        style = chosen
+    } else {
+        style = CutOffStyle(Conversation.cutOffPlacement(on: tier))  // as the app on this tier
     }
     let only = value("--dialogue").map { Set($0.split(separator: ",").map(String.init)) }
     let note = value("--note")
+    let noteRole: ChatMessage.Role?
+    switch value("--note-role") {
+    case nil: noteRole = nil
+    case "system": noteRole = .system
+    case "user": noteRole = .user
+    default: throw CLIError("--note-role: system or user")
+    }
+    if noteRole != nil, style != .ahead { throw CLIError("--note-role: only with the note read ahead (--cut-off ahead)") }
     let corpusURL = URL(fileURLWithPath: o.corpus ?? "Tests/Fixtures/cut-offs-fr.json")
     let corpus = try JSONDecoder().decode(CutOffCorpus.self, from: Data(contentsOf: corpusURL))
     let dialogues = corpus.dialogues.filter { only?.contains($0.name) ?? true }
@@ -98,7 +133,6 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
     guard let now = LocalDateTime.parse(o.now ?? "2026-10-15T18:42", in: timeZone)?.date else {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
     }
-    let tier = try tierOption(o)
     let store = ModelStore()
     guard let pack = ModelCatalog.languageModel(for: tier) else { throw CLIError("no language model for this tier") }
     let folder = o.llm.map { URL(fileURLWithPath: $0) } ?? store.folder(pack)
@@ -106,13 +140,28 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
         throw CLIError("\(pack.displayName) is not on this Mac: run “voice-cli download --tier \(tier.rawValue)” first")
     }
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · an answer cut off: \(style.rawValue)"
-          + (o.actions ? " · with the actions" : "") + (note.map { " · note: \($0)" } ?? ""))
+          + (o.actions ? " · with the actions" : "") + (note.map { " · note: \($0)" } ?? "")
+          + (noteRole.map { " · the note's role: \($0.rawValue)" } ?? ""))
     // What the model would hardly write unless it copied the note.
     let copies = noteParts + (note.map { [$0.trimmingCharacters(in: CharacterSet(charactersIn: "()"))] } ?? [])
     let model = try await MLXChatModel.load(directory: folder)
+    /// The history as the model reads it: with --note or --note-role, the note after an answer cut off says that
+    /// instead, or comes in that role.
+    func shown(_ messages: [ChatMessage]) -> [ChatMessage] {
+        guard note != nil || noteRole != nil else { return messages }
+        let replaced = ChatMessage(noteRole ?? Conversation.cutOffMessage.role, note ?? Conversation.cutOffNote)
+        return messages.map { message in
+            if message == Conversation.cutOffMessage { return replaced }
+            guard let note, message.role == .user else { return message }
+            var shown = message
+            shown.content = message.content.replacingOccurrences(of: "\n" + Conversation.cutOffNote, with: "\n" + note)
+            return shown
+        }
+    }
 
     // As the app: its system prompt; with the actions, their instructions and tools, and the date line.
     var base = Conversation()
+    if let placement = style.placement { base.cutOffPlacement = placement }
     var dateLine: String?
     if o.actions {
         await model.useTools(ActionCatalog.calendarTools + [ActionCatalog.timer])
@@ -130,18 +179,14 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
             var conversation = base
             var result = CutOffRun(dialogue: dialogue.name, run: run, turns: [])
             for (index, turn) in dialogue.turns.enumerated() {
-                let afterCutOff = style == .note && conversation.endsCutOff
-                let message = if let note, afterCutOff {
-                    Conversation.userMessage(turn.user + "\n" + note, language: .french, dateLine: dateLine)
-                } else {
-                    Conversation.userMessage(turn.user, language: .french, dateLine: dateLine, afterCutOff: afterCutOff)
-                }
+                let message = conversation.nextUserMessage(turn.user, language: .french, dateLine: dateLine)
                 let loopsBefore = await model.loopsStopped
-                let said = try await cutOffAnswer(model, conversation.messages(adding: message), cutAfter: turn.cutAfter)
+                let said = try await cutOffAnswer(model, shown(conversation.messages(adding: message)),
+                                                  cutAfter: turn.cutAfter)
                 let looped = await model.loopsStopped > loopsBefore
                 let cut = turn.cutAfter != nil
                 switch style {
-                case .note:
+                case .ahead, .afterUserWords:
                     conversation.record(user: message, steps: [], assistant: said.recorded, interrupted: cut)
                 case .marker:
                     conversation.record(user: message, steps: [], assistant: said.recorded + (cut ? " […]" : ""),
@@ -149,7 +194,7 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
                 case .none:
                     conversation.record(user: message, steps: [], assistant: said.recorded, interrupted: false)
                 }
-                await model.catchUp(with: conversation.messages)
+                await model.catchUp(with: shown(conversation.messages))
                 let marks = said.written.occurrences(of: bracketedEllipsis)
                 let copiedNote = copies.contains { said.written.localizedCaseInsensitiveContains($0) }
                 let outcome = CutOffTurn(user: turn.user, written: said.written, recorded: said.recorded, cut: cut,

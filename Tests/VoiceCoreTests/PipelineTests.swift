@@ -291,11 +291,15 @@ struct PipelineTests {
         #expect(await speaker.stops >= 1)
         #expect(await speaker.remainingMs < 50)  // ~10 s of answer were left: the voice was cut
         // While the user speaks, the model catches up with the history, which keeps the answer as it went to the voice,
-        // without any mark of the cut in its words.
+        // without any mark of the cut in its words, then a note of its own: background work is not allowed then (the
+        // user speaks), so the model computes that history at once (`MLXChatModel.catchUp`).
         await waitFor { await !model.catchUps.isEmpty }
         let history = try #require(await model.catchUps.last)
-        #expect(history.last?.role == .assistant && history.last?.content.hasPrefix("Phrase numéro 1 de la réponse.") == true)
-        #expect(history.last?.content.contains("[…]") == false)
+        #expect(history.last == Conversation.cutOffMessage)
+        let answer = history.dropLast().last
+        #expect(answer?.role == .assistant && answer?.content.hasPrefix("Phrase numéro 1 de la réponse.") == true)
+        #expect(answer?.content.contains("[…]") == false)
+        #expect(await model.backgroundAllowedAtCatchUps.last == false)
     }
 
     /// The model has written the whole answer, the voice is still saying it, and the user talks over it. Stopping the
@@ -317,10 +321,11 @@ struct PipelineTests {
         await push(pipeline, "11111111" + String(repeating: "0", count: 20))  // the user talks over it, then stops
         await waitFor { await model.requests.count == 2 }
         let request = try #require(await model.requests.last)
-        #expect(request.map(\.role) == [.system, .user, .assistant, .user])
-        // The whole answer, as the model wrote it; the next message says it was cut off.
+        #expect(request.map(\.role) == [.system, .user, .assistant, .system, .user])
+        // The whole answer, as the model wrote it; a note of its own says it was cut off.
         #expect(request[2].content == long.joined().trimmingCharacters(in: .whitespaces))
-        #expect(request[3].content.hasSuffix("\n" + Conversation.cutOffNote))
+        #expect(request[3] == Conversation.cutOffMessage)
+        #expect(!request[4].content.contains(Conversation.cutOffNote))
         try await Task.sleep(for: .milliseconds(100))
         let reported = await log.finished.map(\.interrupted)
         #expect(reported == [true])
@@ -341,18 +346,55 @@ struct PipelineTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(await speaker.played == 500)  // the first sentence only
         let history = try #require(await model.catchUps.last)
-        #expect(history.last?.role == .assistant)
-        #expect(history.last?.content == "Voici la première phrase de la réponse.")
+        #expect(history.suffix(2).map(\.role) == [.assistant, .system])
+        #expect(history.dropLast().last?.content == "Voici la première phrase de la réponse.")
+        #expect(history.last == Conversation.cutOffMessage)
     }
 
-    /// After an answer cut off, the user's next message tells the model (`Conversation.cutOffNote`), and stays in the
-    /// history so; the answer itself holds no mark of the cut, which the model copied into its own answers. The message
-    /// after an answer heard to its end says nothing of the kind.
-    @Test func theMessageAfterAnAnswerCutOffSaysSo() async throws {
+    /// After an answer cut off, a note of its own tells the model (`Conversation.cutOffMessage`), before the user's next
+    /// message, which stays their words; the answer itself holds no mark of the cut, which the model copied into its own
+    /// answers. Nothing of the kind follows an answer heard to its end.
+    @Test func aNoteFollowsAnAnswerCutOff() async throws {
         let long = (1...20).map { "Phrase numéro \($0) de la réponse. " }
         let model = ScriptedModel(scripts: [long.map { .text($0) }, [.text("Oui, je t'écoute avec plaisir.")]])
         let (stt, speaker) = (CountingTranscriber(), FakeSpeaker())
         let pipeline = make(model, stt, speaker)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await speaker.played > 0 }
+        await push(pipeline, "11111111" + String(repeating: "0", count: 20))  // the user talks over it, then stops
+        await waitFor { await model.requests.count == 2 }
+        let request = try #require(await model.requests.last)
+        #expect(request.map(\.role) == [.system, .user, .assistant, .system, .user])
+        #expect(request[2].content.hasPrefix("Phrase numéro 1 de la réponse."))
+        #expect(!request[2].content.contains("[…]"))
+        #expect(request[3] == Conversation.cutOffMessage)
+        #expect(request[4].content.hasPrefix("phrase de "))  // the user's words alone
+        #expect(!request[4].content.contains(Conversation.cutOffNote))
+        // The model had the note before the user's message: it caught up with it while they spoke.
+        #expect(await model.catchUps.first == Array(request.dropLast()))
+        await waitFor { await log.finished.count == 2 }  // the answer cut off, then this one, heard to its end
+        #expect(await log.finished.map(\.interrupted) == [true, false])
+        await pipeline.submit(text: "Merci.")
+        await waitFor { await model.requests.count == 3 }
+        let next = try #require(await model.requests.last)
+        #expect(Array(next.prefix(5)) == request)  // kept as the model read it
+        #expect(next.map(\.role) == [.system, .user, .assistant, .system, .user, .assistant, .user])  // no note
+        #expect(next.last?.content == "Merci.")
+    }
+
+    /// On a tier that keeps the note after the user's words (E4B, E2B: `Conversation.cutOffPlacement(on:)`): nothing
+    /// follows the answer cut off, and the user's next message says it, after their words; it stays in the history so.
+    /// The message after an answer heard to its end says nothing of the kind.
+    @Test func afterTheUsersWordsTheMessageAfterAnAnswerCutOffSaysSo() async throws {
+        let long = (1...20).map { "Phrase numéro \($0) de la réponse. " }
+        let model = ScriptedModel(scripts: [long.map { .text($0) }, [.text("Oui, je t'écoute avec plaisir.")]])
+        let (stt, speaker) = (CountingTranscriber(), FakeSpeaker())
+        var config = PipelineConfig()
+        config.cutOffPlacement = .afterUserWords
+        let pipeline = make(model, stt, speaker, config: config)
         let log = EventRecorder()
         Task { for await event in pipeline.events { await log.record(event) } }
         try await pipeline.start()
@@ -366,13 +408,16 @@ struct PipelineTests {
         #expect(!request[2].content.contains("[…]"))
         #expect(request[3].content.hasPrefix("phrase de "))  // the user's words first
         #expect(request[3].content.hasSuffix("\n" + Conversation.cutOffNote))
+        // While the user spoke, the model caught up with the answer cut off, the last message of the history.
+        await waitFor { await !model.catchUps.isEmpty }
+        #expect(await model.catchUps.first == Array(request.dropLast()))
         await waitFor { await log.finished.count == 2 }  // the answer cut off, then this one, heard to its end
         #expect(await log.finished.map(\.interrupted) == [true, false])
         await pipeline.submit(text: "Merci.")
         await waitFor { await model.requests.count == 3 }
         let next = try #require(await model.requests.last)
-        #expect(next[3].content == request[3].content)  // kept as the model read it
-        #expect(next.last?.content == "Merci.")
+        #expect(Array(next.prefix(4)) == request)  // kept as the model read it
+        #expect(next.last?.content == "Merci.")  // no note
     }
 
     @Test func quietEchoDoesNotInterruptTheAssistant() async throws {

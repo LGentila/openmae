@@ -13,6 +13,11 @@
 // carried out: an action "succeeds" or is refused as each scenario says.
 //
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
+//                         [--cut-off ahead|after-user-words]
+//
+// --cut-off says where the history tells the model that an answer was cut off; by default as the app does on the tier
+// (`Conversation.cutOffPlacement(on:)`): "ahead", a note of its own right after the answer, or "after-user-words", the
+// note in the next message, after the user's words.
 //
 // Each request prints the tokens found in memory ("reused"), the tokens computed, the time to compute them, and the GPU
 // memory in use after it (and how long it waited for the model, when it did); and after an exchange is recorded, what the
@@ -67,9 +72,10 @@ private actor CacheCheck {
                      "new conversation" as NSString, milliseconds(clock.now - start), MLXChatModel.activeMemoryGB))
     }
 
-    /// The user's message as the app makes it: after an answer cut off, it says so (`Conversation.cutOffNote`).
+    /// The user's message as the app makes it: after an answer cut off, with the note after their words when it goes
+    /// there (`Conversation.CutOffPlacement.afterUserWords`).
     private func message(_ text: String) -> ChatMessage {
-        Conversation.userMessage(text, language: .french, dateLine: dateLine, afterCutOff: conversation.endsCutOff)
+        conversation.nextUserMessage(text, language: .french, dateLine: dateLine)
     }
 
     /// The model's counts of requests computed from scratch, gone back to a snapshot, and to the conversations' beginning.
@@ -228,7 +234,7 @@ private actor CacheCheck {
         chunker.remainingPieces().forEach(send)
         if record {
             conversation.record(user: user, steps: steps, assistant: answer, interrupted: interrupted)
-            if catchingUp { await catchUp() }
+            if catchingUp { await catchUp(userSpeaks: interrupted) }
         }
     }
 
@@ -264,20 +270,24 @@ private actor CacheCheck {
     private func recordAnnouncement(note: String, said: String) {
         var answer = ""
         SpeakableText.record(said, in: &answer)
-        conversation.record(user: Conversation.noteMessage(note, afterCutOff: conversation.endsCutOff), steps: [],
-                            assistant: answer, interrupted: false)
+        conversation.record(user: conversation.nextNoteMessage(note), steps: [], assistant: answer, interrupted: false)
         print(String(format: "  %-46@ recorded, no request", "announcement" as NSString))
     }
 
     /// As the pipeline does once an exchange is recorded: the model computes what of the history its memory no longer
-    /// holds, and what it never wrote (`MLXChatModel.catchUp`), while nobody waits for an answer.
-    private func catchUp() async {
+    /// holds, and what it never wrote (`MLXChatModel.catchUp`), while nobody waits for an answer. `userSpeaks`: after an
+    /// answer cut off, the user speaks over it, and background work is not allowed meanwhile, as in the app
+    /// (`allowBackgroundWork`).
+    private func catchUp(userSpeaks: Bool = false) async {
+        if userSpeaks { await model.allowBackgroundWork(false) }
         await model.catchUp(with: conversation.messages)
+        if userSpeaks { await model.allowBackgroundWork(true) }
         let done = await model.lastCatchUp
         guard done.computed > 0 else { return }
         catchUps.append(done.ms)
-        print(String(format: "  %-46@ %5d tokens computed while nobody waits, in %6.0f ms · GPU memory %.2f GB",
-                     "  the history caught up" as NSString, done.computed, done.ms, MLXChatModel.activeMemoryGB))
+        print(String(format: "  %-46@ %5d tokens computed while %@, in %6.0f ms · GPU memory %.2f GB",
+                     "  the history caught up" as NSString, done.computed,
+                     (userSpeaks ? "the user speaks" : "nobody waits") as NSString, done.ms, MLXChatModel.activeMemoryGB))
     }
 
     /// The tools changed (a shortcut added): the prompt is computed again, the conversation goes on (as the app does:
@@ -370,10 +380,17 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
     }
     let tier = try tierOption(o)
+    var placement = Conversation.cutOffPlacement(on: tier)  // as the app on this tier
+    if let name = arguments.firstIndex(of: "--cut-off").flatMap({ $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }) {
+        guard let chosen = Conversation.CutOffPlacement(rawValue: name) else {
+            throw CLIError("--cut-off: ahead or after-user-words")
+        }
+        placement = chosen
+    }
     let store = ModelStore()
     guard let pack = ModelCatalog.languageModel(for: tier) else { throw CLIError("no language model for this tier") }
     let folder = o.llm.map { URL(fileURLWithPath: $0) } ?? store.folder(pack)
-    print("model: \(folder.lastPathComponent) (tier \(tier.rawValue))")
+    print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · the note of an answer cut off: \(placement.rawValue)")
     let model = try await MLXChatModel.load(directory: folder)
 
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
@@ -381,6 +398,7 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             : [])
     await model.useTools(tools)
     var base = Conversation()
+    base.cutOffPlacement = placement
     base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         + (agents ? [AgentCatalog.promptAddendum] : [])
     if ActionCatalog.showsExamples(on: tier) { base.examples = ActionCatalog.examples(now: now, timeZone: timeZone) }

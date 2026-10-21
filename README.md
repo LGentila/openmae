@@ -403,7 +403,8 @@ model computes in the background once said, and a request sent meanwhile), a ref
 result summed up (as after a web search), a turn dropped after a second try, a speculative or interrupted answer, an
 answer in paragraphs, a speculative answer abandoned after an answer cut off, the tools changing, the history
 shortened, a new conversation. Text only, nothing is created; run it again after any change to `MLXChatModel`. With
-`VOICE_DEBUG=1`, it also shows where each request stops matching that memory, and what differs:
+`VOICE_DEBUG=1`, it also shows where each request stops matching that memory, and what differs. `--cut-off ahead` or
+`--cut-off after-user-words` puts the note of an answer cut off where another tier does (see below):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli cache-check
@@ -411,11 +412,14 @@ shortened, a new conversation. Text only, nothing is created; run it again after
 
 Answers cut off one after the other, as when the user speaks over Maé: the dialogues of `Tests/Fixtures/cut-offs-fr.json`
 (twelve answers cut off in a row; answers cut early, then what a user who did not hear their end would ask), text only.
-Each answer cut off goes into the history as the app records it: what the voice had been given, and a note in the next
-message saying that the user cut Maé off. The report prints every answer, and counts those in which the model
-wrote the mark of a cut itself (« […] », which the history once ended such answers with: the model copied it, dozens in a
-row, and the voice read them), copied the note, or went round in circles and was stopped. `--cut-off marker` records the
-answers cut off as the app did before (« […] » at their end), `--cut-off none` without saying anything, for comparison:
+Each answer cut off goes into the history as the app records it on the tier: what the voice had been given, then a note
+saying that the user cut Maé off, which Gemma 4 26B reads ahead (a message of its own right after the answer, computed
+while the user still speaks) and E4B and E2B after the user's words, in their next message. The report prints every
+answer, and counts those in which the model wrote the mark of a cut itself (« […] », which the history once ended such
+answers with: the model copied it, dozens in a row, and the voice read them), copied the note, or went round in circles
+and was stopped. `--cut-off ahead` or `--cut-off after-user-words` puts the note where another tier does; for
+comparison, `--cut-off marker` records the answers cut off as the app did before (« […] » at their end),
+`--cut-off none` without saying anything:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli cut-off-bench --repeats 10

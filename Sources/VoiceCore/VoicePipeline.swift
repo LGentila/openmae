@@ -82,6 +82,9 @@ public struct PipelineConfig: Sendable {
     public var toolCallFiller = true
     /// With actions on, every conversation starts with `ActionCatalog.examples` (see `ActionCatalog.showsExamples`).
     public var actionExamples = false
+    /// Where the history tells the model that an answer was cut off: a setting of the tier
+    /// (`Conversation.cutOffPlacement(on:)`).
+    public var cutOffPlacement = Conversation.CutOffPlacement.ahead
     /// While the user speaks to Maé, what they said so far is transcribed again with the same speech recognition, once
     /// this much of their audio (seconds) has come after the previous pass ended, so that their words show as they speak
     /// (`PipelineEvent.partialTranscript`). It reads a 3–5 s phrase in 0.1–0.15 s on the reference Mac. nil = never.
@@ -492,6 +495,7 @@ public actor VoicePipeline {
         self.turnDetector = TurnDetector(config: config.turn)
         var conversation = Conversation(systemPrompt: systemPrompt)
         conversation.systemAddenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
+        conversation.cutOffPlacement = config.cutOffPlacement
         self.conversation = conversation
     }
 
@@ -1386,9 +1390,8 @@ public actor VoicePipeline {
                 showPartial(text, samples: audio.count)
             }
             let now = Date()
-            turn.userMessage = Conversation.userMessage(
-                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now),
-                afterCutOff: conversation.endsCutOff)
+            turn.userMessage = conversation.nextUserMessage(
+                text, language: lang, dateLine: tools == nil ? nil : ActionCatalog.dateLine(now))
             // "oui", "non", "annule": answered by the app, not the model.
             let interception = await tools?.interception(for: text, now: now)
 
@@ -1952,7 +1955,7 @@ public actor VoicePipeline {
         turn.elsewhere = announcementOutput != nil
         turn.announcement = announcement
         turn.language = announcement.language
-        turn.userMessage = Conversation.noteMessage(announcement.note, afterCutOff: conversation.endsCutOff)
+        turn.userMessage = conversation.nextNoteMessage(announcement.note)
         self.turn = turn
         commit(turn)
         turn.task = Task { await self.runAnnouncement(turn, announcement) }
@@ -2087,11 +2090,11 @@ public actor VoicePipeline {
     }
 
     /// Once an exchange is recorded, the model computes what of the history its memory no longer holds (an answer cut
-    /// off, or kept otherwise than it wrote it) right away, while the user speaks or nobody does, rather than in the
-    /// next answer's time; then a speculative answer abandoned, and the user's message heard in full after it, only cost
-    /// that message (`LanguageModel.catchUp`). So does it what it never wrote (an announcement once said, a tool's result
-    /// and the app's own sentences), if nobody speaks: it knows by then whether someone does (`backgroundPermission`).
-    /// One after the other, in the order the exchanges were recorded.
+    /// off, and the note after it when it is read ahead, or an answer kept otherwise than it wrote it) right away, while
+    /// the user speaks or nobody does, rather than in the next answer's time; then a speculative answer abandoned, and the
+    /// user's message heard in full after it, only cost that message (`LanguageModel.catchUp`). So does it what it never
+    /// wrote (an announcement once said, a tool's result and the app's own sentences), if nobody speaks: it knows by then
+    /// whether someone does (`backgroundPermission`). One after the other, in the order the exchanges were recorded.
     private func letModelCatchUp() {
         let messages = conversation.messages
         let (previous, permission) = (catchUpTask, backgroundPermission)

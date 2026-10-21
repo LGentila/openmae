@@ -22,7 +22,7 @@
 //   voice-cli cache-check [--scenario name] [--agents]  how much of each request the model finds in its memory,
 //                                                       in the app's sequences of requests (text only; see
 //                                                       CacheCheck.swift)
-//   voice-cli cut-off-bench [--repeats 10] [--cut-off note|marker|none]
+//   voice-cli cut-off-bench [--repeats 10] [--cut-off ahead|after-user-words|marker|none]
 //                                                       answers cut off one after the other: does the model write
 //                                                       the cut-off mark itself? (text only; see CutOffBench.swift)
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
@@ -347,6 +347,7 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
         config.historyTrimTarget = budget * 2 / 3
     }
     config.actionExamples = ActionCatalog.showsExamples(on: tier)
+    config.cutOffPlacement = Conversation.cutOffPlacement(on: tier)
     if let voices = o.racingVoices { config.racingVoices = max(1, voices) }
     if let seconds = o.voiceRestartAfter { config.voiceRestartAfterSeconds = seconds }
     if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
@@ -728,8 +729,10 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]
                voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
+                                     [--cut-off ahead|after-user-words]
                voice-cli cut-off-bench [--tier tier] [--llm folder] [--corpus file.json] [--repeats 10] [--actions]
-                                       [--cut-off note|marker|none] [--note "(…)"] [--dialogue name]
+                                       [--cut-off ahead|after-user-words|marker|none] [--note "(…)"]
+                                       [--note-role system|user] [--dialogue name]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
