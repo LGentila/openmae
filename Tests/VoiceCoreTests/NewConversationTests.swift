@@ -4,7 +4,8 @@ import Testing
 @testable import VoiceCore
 
 /// A new conversation (the interface's « New conversation », the actions or the web search switched on or off) while
-/// Maé thinks or speaks: the turn stops, and the state goes back to rest.
+/// Maé thinks or speaks: the turn stops, and the state goes back to rest. One the pipeline starts on its own (the tools
+/// came or went) is reported, for the interfaces to clear their transcript.
 @Suite("New conversation during a turn", .serialized)
 struct NewConversationTests {
     static let sentence = "Ton minuteur de 10 minutes est terminé."
@@ -86,8 +87,32 @@ struct NewConversationTests {
             #expect(await speaker.stops >= 1)
             #expect(await (model.tools.isEmpty) == (runner == nil))
             #expect(await model.prefills.last?.beginning == true)  // the new beginning, computed after
+            // The interfaces are told, once, after the last piece of the stopped answer and before the state at rest.
+            try await Task.sleep(for: .milliseconds(200))
+            let pieces = await log.pieces.count
+            #expect(pieces > 0)
+            #expect(await log.clears == [EventRecorder.Moment(pieces: pieces, states: before)])
             await pipeline.stop()
         }
+    }
+
+    /// Only a change of tools reports a new conversation (`conversationCleared`), at rest too: not the one the interface
+    /// asks for (it clears its own transcript), nor a change of the tools' list, after which the conversation goes on.
+    @Test func onlyAChangeOfToolsReportsANewConversation() async throws {
+        let (model, speaker) = (ScriptedModel(), FakeSpeaker())
+        let (pipeline, log) = make(model, speaker, tools: ToolRunner(providers: [TimerTools()]))
+        try await pipeline.start()
+        await waitFor { await log.states == [.listening] }
+        try await pipeline.resetConversation()
+        try await pipeline.toolsChanged()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await log.clears.isEmpty)
+        try await pipeline.setTools(nil)  // the actions switched off
+        try await pipeline.setTools(ToolRunner(providers: [WebSearchTools()], actions: false))  // the search alone
+        await waitFor { await log.clears.count == 2 }
+        #expect(await log.clears.count == 2)
+        #expect(await log.states == [.listening])  // at rest all along
+        await pipeline.stop()
     }
 
     /// No turn: a new conversation reports no state (Maé was at rest already).

@@ -534,9 +534,16 @@ actor EventRecorder {
     private(set) var bargeIns = 0
     /// The turns reported over, completed or interrupted.
     private(set) var finished: [TurnMetrics] = []
+    /// Each new conversation reported (`conversationCleared`): how many pieces and states had come before it.
+    private(set) var clears: [Moment] = []
+    struct Moment: Equatable {
+        var pieces: Int
+        var states: Int
+    }
 
     func record(_ event: PipelineEvent) {
         switch event {
+        case .conversationCleared: clears.append(Moment(pieces: pieces.count, states: states.count))
         case .turnFinished(let metrics): finished.append(metrics)
         case .assistantPiece(let piece):
             pieces.append(piece)

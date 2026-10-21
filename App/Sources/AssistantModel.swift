@@ -78,14 +78,9 @@ final class AssistantModel {
             guard settings != oldValue else { return }
             Self.save(settings)
             connection.send(.updateSettings(engineSettings))
-            // The engine starts a new conversation when the tools come or go (they are part of the model's
-            // instructions): the actions, or the web search on its own.
-            let searchAlone = !settings.actionsEnabled && settings.webSearch.isReady != oldValue.webSearch.isReady
-            if settings.actionsEnabled != oldValue.actionsEnabled || searchAlone {
-                transcript.removeAll()
-                answerIndex = nil
-                if !settings.actionsEnabled { actions = nil }
-            }
+            // When the tools come or go (they are part of the model's instructions), the engine starts a new
+            // conversation and says so: the transcript goes then (`conversationCleared`), not here.
+            if settings.actionsEnabled != oldValue.actionsEnabled, !settings.actionsEnabled { actions = nil }
             if settings.webSearch != oldValue.webSearch { webSearchTest = nil }
             if settings.listening != .wakeWord { isAwake = false }
         }
@@ -203,9 +198,13 @@ final class AssistantModel {
     }
 
     func newConversation() {
+        clearTranscript()
+        connection.send(.newConversation)
+    }
+
+    private func clearTranscript() {
         transcript.removeAll()
         answerIndex = nil
-        connection.send(.newConversation)
     }
 
     /// The app is in front again: a shortcut may have been added, an access granted in System Settings; or the web
@@ -317,6 +316,10 @@ final class AssistantModel {
             isAwake = awake
         case .wakeDecision(let decision):
             if settings.wakeLog { WakeLog.append(decision) }
+        case .conversationCleared:
+            // The engine started a new conversation (the actions, or on their own the web search or the built-in
+            // sources, switched on or off): the screen no longer shows what the model no longer has.
+            clearTranscript()
         case .levels(let input, let output):
             inputLevel = input
             outputLevel = output

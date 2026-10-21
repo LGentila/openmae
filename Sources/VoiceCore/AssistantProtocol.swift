@@ -409,6 +409,12 @@ public enum AssistantEvent: Sendable, Codable {
     case awake(Bool)
     /// Wake-word mode: what Maé made of a sentence she heard.
     case wakeDecision(WakeDecision)
+    /// The engine started a new conversation on its own because the tools came or went: the actions switched on or off,
+    /// or, with them off, the web search or the built-in sources (only when the model sees the change: not for the
+    /// sources on a tier that does not offer them, nor for a search without its key). The interface clears its
+    /// transcript, whose exchanges the model no longer has; nothing of them comes after this event. Not sent when the
+    /// interface asked for it (`newConversation`). Not relayed to the iPhone (`RemoteCommandPolicy.isRelayed`).
+    case conversationCleared
     /// Sound levels (0…1), about 20 times per second, for the animated indicator.
     case levels(input: Float, output: Float)
     case diagnostics(EngineDiagnostics)

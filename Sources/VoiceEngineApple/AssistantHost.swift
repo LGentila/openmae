@@ -481,7 +481,7 @@ public actor AssistantHost: AssistantConnection {
             if sourcesChanged { DebugLog.log("built-in sources: \(new.builtInSources ? "on" : "off")") }
             // With the actions, its tool comes or goes and the conversation goes on. On their own, the search and the
             // sources are the only tools: the tools come or go, and a new conversation starts, as when the actions are
-            // switched on or off.
+            // switched on or off (the app clears its transcript on the pipeline's `conversationCleared`).
             do {
                 if new.actionsEnabled {
                     try await pipeline?.toolsChanged()
@@ -752,6 +752,9 @@ public actor AssistantHost: AssistantConnection {
         case .bargeIn(let stopMs, let detectionMs): emit.yield(.bargeIn(stopMs: stopMs, detectionMs: detectionMs))
         case .awake(let awake): emit.yield(.awake(awake))
         case .wakeDecision(let decision): emit.yield(.wakeDecision(decision))
+        case .conversationCleared:
+            DebugLog.log("new conversation: the tools came or went")
+            emit.yield(.conversationCleared)
         case .failure(let message): emit.yield(.warning(message))
         }
     }

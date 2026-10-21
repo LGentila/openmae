@@ -127,6 +127,10 @@ public enum PipelineEvent: Sendable {
     case awake(Bool)
     /// Wake-word mode: what Maé made of a sentence she heard.
     case wakeDecision(WakeDecision)
+    /// A new conversation started because the tools came or went (`setTools`): the model no longer has the earlier
+    /// exchanges, and the interfaces stop showing them. Sent once the turn under way has stopped, so that nothing of the
+    /// earlier conversation comes after it. Not sent for `resetConversation`: the interface asking for it clears its own.
+    case conversationCleared
     case failure(String)
 }
 
@@ -510,6 +514,7 @@ public actor VoicePipeline {
         tools = runner
         await updatePrompt()
         conversation.clear()
+        emit.yield(.conversationCleared)
         await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])
         if stopped { restAfterStoppedTurn() }

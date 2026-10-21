@@ -156,6 +156,8 @@ struct MessageTests {
     @Test func relayedEvents() {
         #expect(RemoteCommandPolicy.relayed(.levels(input: 1, output: 0)) == nil)
         #expect(RemoteCommandPolicy.relayed(.diagnostics(EngineDiagnostics())) == nil)
+        // The Mac's own: an iPhone app from before it would not understand it.
+        #expect(RemoteCommandPolicy.relayed(.conversationCleared) == nil)
         var metrics = TurnMetrics()
         metrics.userText = "Salut"
         metrics.latencyMs = 1234

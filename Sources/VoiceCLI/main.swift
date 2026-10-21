@@ -251,6 +251,8 @@ actor EventLog {
             print(awake ? "  👂 awake: any voice starts a turn" : "  💤 asleep: waiting for the wake phrase")
         case .wakeDecision(let decision):
             print("  🔎 \(decision.moment.rawValue), \(decision.accepted ? "for Maé" : "ignored"): \(decision.heard)")
+        case .conversationCleared:
+            print("  🆕 new conversation: the tools came or went")
         case .failure(let message):
             failures.append(message)
             print("  ⚠️  \(message)")
