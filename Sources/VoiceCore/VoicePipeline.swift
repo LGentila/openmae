@@ -583,10 +583,11 @@ public actor VoicePipeline {
         forgetUnheard()
         await tools?.resetConversation()  // an action waiting for its "oui" is dropped (its read-back leaves the screen)
         tools = runner
+        // The new tools start a conversation (the memory reads its sheet again) before their part of the prompt is read.
+        await runner?.resetConversation()
         await updatePrompt()
         conversation.clear()
         emit.yield(.conversationCleared)
-        await runner?.resetConversation()
         await model.useTools(await runner?.tools() ?? [])
         if stopped { restAfterStoppedTurn() }
         try await model.prefillBeginning(conversation.beginning)

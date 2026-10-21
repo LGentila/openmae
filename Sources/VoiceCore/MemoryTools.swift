@@ -276,6 +276,7 @@ public actor MemoryTools: ToolProvider {
     @discardableResult
     public func configure(enabled: Bool, journal: Bool) -> Bool {
         let before = (self.enabled, self.enabled && self.journal)
+        if enabled, !self.enabled { frozen = nil }  // switched on: the sheet as it is now
         self.enabled = enabled
         self.journal = journal
         return before != (enabled, enabled && journal)
