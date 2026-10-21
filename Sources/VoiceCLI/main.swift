@@ -184,8 +184,10 @@ struct Options {
     var sources = false
     var liveSources = false
     var recordSources: String?
-    /// actions-bench: the news' tool (lire_nouvelles) offered with any corpus.
+    /// actions-bench: the news' tool (lire_nouvelles) offered with any corpus; its part of the system prompt, read from
+    /// this file.
     var news = false
+    var newsAddendum: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -259,6 +261,7 @@ struct Options {
             case "--record": o.record = it.next()
             case "--sources": o.sources = true
             case "--news": o.news = true
+            case "--news-addendum": o.newsAddendum = it.next()
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
@@ -767,8 +770,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--addendum file] [--web-addendum file] [--sources] [--live-sources]
-                                       [--record-sources file.json] [--news] [--compare-beginnings]
-                                       [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
+                                       [--record-sources file.json] [--news] [--news-addendum file]
+                                       [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]

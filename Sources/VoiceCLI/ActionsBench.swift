@@ -28,6 +28,7 @@
 //
 // The news' tool, lire_nouvelles (a corpus with "news": true, or --news with any corpus, to check that it does not change
 // the choice of the other tools), takes no argument: choosing it is all there is to check. Tests/Fixtures/news-fr.json.
+// --news-addendum <file> replaces its part of the system prompt.
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -313,7 +314,8 @@ func runActionsBench(_ o: Options) async throws {
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
-        + (news ? [NewsCatalog.promptAddendum] : [])
+        + (news ? [try o.newsAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) } ?? NewsCatalog.promptAddendum]
+            : [])
     let examples = o.examples ?? (actions && ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
