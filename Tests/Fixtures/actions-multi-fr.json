@@ -1,0 +1,1004 @@
+{
+ "_comment": "French requests that ask for several actions in one sentence, for voice-cli actions-bench (--corpus Tests/Fixtures/actions-multi-fr.json). The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). The model gets every action tool, the delegation tools (Claude Code) and chercher_web, as in the app with Claude Code and the web search switched on. expected: the list of the actions asked for, in the order the user says them, which is the order the app carries them out in; each as in actions-fr.json: when, the date the call must carry (to the minute, or the day when no time is given; \"none\" = no date; for modifier_element, the new start or due date of the item created just before in the same request); end, an event's end, given only when the user says a length or an end (an hour otherwise); seconds, a timer; name, a shortcut; mentions, words a task's instruction or a search's keywords must contain, whatever the accents and case. The app carries out three actions at most per request: for a request with four, expected still lists all four, and the bench expects the first three calls, then the model's \"more calls\" for the fourth. refused: the app refuses that call and carries out the others; the call is still expected, with the user's words (the app checks the date, not the model): \"past\" = its moment is already gone (when = the moment the words give: « d'hier à 18 h » = 2026-10-14T18:00), \"weekday\" = the weekday said does not match the date (« mardi 29 octobre », the 29th being a Thursday; when = that date, with the time as said). The last ten requests, whose expected holds a single action, sound like two (« et » in a list, a length, a time range, a task, a search, or an appointment the user only mentions) but ask for one.",
+ "now": "2026-10-15T18:42",
+ "shortcuts": [
+  "Allumer le salon",
+  "Mode concentration",
+  "Lancer la playlist du soir"
+ ],
+ "agents": true,
+ "web": true,
+ "cases": [
+  {
+   "phrase": "Mets un minuteur de 8 minutes pour les œufs et ajoute du dentifrice à mes rappels",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 480
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance un minuteur de vingt-cinq minutes et rappelle-moi demain à 9 h de téléphoner au garage",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 1500
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T09:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi ce soir à 22 h 30 de fermer le portail, et mets un minuteur de quinze minutes pour la tarte",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T22:30"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 900
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur d'une demi-heure pour le linge et rappelle-moi dans une heure d'appeler Yasmine",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 1800
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T19:42"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi de racheter des ampoules et lance un compte à rebours de 90 secondes",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 90
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur d'une heure pour la pâte à pain, et rappelle-moi samedi matin à 10 h 30 de tondre la pelouse",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 3600
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T10:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute l'ophtalmo jeudi 22 octobre à 11 h 30 et mets un minuteur de 6 minutes",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-22T11:30"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 360
+    }
+   ]
+  },
+  {
+   "phrase": "Tu peux mettre un minuteur de 20 minutes pour le gratin et ajouter un dîner chez Karim samedi à 20 h 30 ?",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 1200
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-17T20:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance un minuteur de 7 minutes, et note dans mon agenda la réunion de copropriété le 3 novembre à 18 h 30",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 420
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-11-03T18:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Crée un événement entraînement de basket mercredi de 18 h à 20 h et lance un minuteur de 4 minutes",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-21T18:00",
+     "end": "2026-10-21T20:00"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 240
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez la pédiatre demain à 16 h 45 et mets un minuteur d'un quart d'heure",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T16:45"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 900
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi de déposer le colis demain matin à 8 h 30 et d'appeler mon frère ce soir à 21 h 15",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T08:30"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T21:15"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi lundi à 9 h d'envoyer le devis et mardi à 14 h de relancer le client",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-19T09:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-20T14:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi vendredi de payer la cantine, et ajoute aussi un rappel pour prendre rendez-vous chez le vétérinaire",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi dans 25 minutes d'éteindre le four et à 23 h de mettre mon téléphone à charger",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T19:07"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T23:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Fais-moi penser à acheter un cadeau pour Inès samedi, et à réserver le train pour Bordeaux le 2 novembre",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-11-02"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur de 9 minutes pour les pâtes et un autre de 20 minutes pour le poulet",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 540
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1200
+    }
+   ]
+  },
+  {
+   "phrase": "Lance deux minuteurs, un de 3 minutes et un de 12 minutes",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 180
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 720
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur d'une heure et demie pour le rôti, et un de 35 minutes pour les pommes de terre",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 5400
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 2100
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez le notaire mardi à 10 h 30 et rappelle-moi lundi soir à 20 h de préparer les papiers",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-20T10:30"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-19T20:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi d'acheter des bougies et mets l'anniversaire de Chloé dans mon agenda le 9 novembre",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-11-09"
+    }
+   ]
+  },
+  {
+   "phrase": "Inscris le vide-grenier dimanche à 8 h dans mon calendrier et rappelle-moi samedi à 18 h de charger la voiture",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-18T08:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T18:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Note un déjeuner avec Hugo demain à 12 h 30, et rappelle-moi dans un quart d'heure d'appeler le restaurant",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T12:30"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T18:57"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets dans mon agenda le cours de guitare d'hier à 18 h, et lance un minuteur de 11 minutes",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-14T18:00",
+     "refused": "past"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 660
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur de 13 minutes et rappelle-moi ce matin à 10 h de vérifier la chaudière",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 780
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T10:00",
+     "refused": "past"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un rendez-vous chez l'orthodontiste mardi 29 octobre à 17 h 15 et un minuteur de 2 minutes",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-29T17:15",
+     "refused": "weekday"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 120
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi demain à 11 h de commander les croquettes du chat, et mardi 4 novembre à 9 h de renouveler ma carte d'identité",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T11:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-11-04T09:00",
+     "refused": "weekday"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance un minuteur de 50 minutes et demande à Claude Code d'ajouter une page de tarifs à mon site de photographe",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 3000
+    },
+    {
+     "tool": "deleguer_tache",
+     "mentions": [
+      "tarif"
+     ]
+    }
+   ]
+  },
+  {
+   "phrase": "Tu peux activer le mode concentration et me mettre un minuteur de 45 minutes ?",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Mode concentration"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 2700
+    }
+   ]
+  },
+  {
+   "phrase": "Allume le salon et rappelle-moi à 22 h de fermer les volets",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Allumer le salon"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T22:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi demain à 9 h 15 de relire le rapport, et confie à Claude Code l'écriture d'un script qui sauvegarde mes photos sur le disque externe",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T09:15"
+    },
+    {
+     "tool": "deleguer_tache",
+     "mentions": [
+      "photo",
+      "disque"
+     ]
+    }
+   ]
+  },
+  {
+   "phrase": "Lance la playlist du soir et mets un minuteur de 30 minutes pour couper la musique",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Lancer la playlist du soir"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1800
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez le serrurier demain à 9 h, puis déplace-le lundi à 14 h",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T09:00"
+    },
+    {
+     "tool": "modifier_element",
+     "when": "2026-10-19T14:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Crée un rappel pour arroser le jardin samedi à 9 h, puis change-le pour dimanche à 11 h",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T09:00"
+    },
+    {
+     "tool": "modifier_element",
+     "when": "2026-10-18T11:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets la réunion de parents d'élèves jeudi prochain à 18 h dans l'agenda, puis décale-la à 18 h 30",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-22T18:00"
+    },
+    {
+     "tool": "modifier_element",
+     "when": "2026-10-22T18:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Cherche à quelle heure ferme la médiathèque de Pontoise et rappelle-moi samedi d'y rapporter les DVD",
+   "expected": [
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "médiathèque",
+      "pontoise"
+     ]
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17"
+    }
+   ]
+  },
+  {
+   "phrase": "Regarde sur internet le score du dernier match de Lyon et lance un minuteur de 10 minutes",
+   "expected": [
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "lyon"
+     ]
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 600
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un dîner chez Bastien samedi à 19 h 45 et cherche une recette de tiramisu sans œufs",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-17T19:45"
+    },
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "tiramisu"
+     ]
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un rendez-vous chez le dermatologue le 28 octobre à 9 h 15 et le pot de départ de Nadia vendredi à 18 h",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-28T09:15"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T18:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Dis-moi ce que j'ai demain et rappelle-moi ce soir à 21 h 30 de préparer mon sac",
+   "expected": [
+    {
+     "tool": "lire_agenda",
+     "when": "2026-10-16"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T21:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Lis-moi mes rappels, puis mets un minuteur de 17 minutes",
+   "expected": [
+    {
+     "tool": "lister_rappels"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1020
+    }
+   ]
+  },
+  {
+   "phrase": "Allume le salon et lance la playlist du soir",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Allumer le salon"
+    },
+    {
+     "tool": "lancer_raccourci",
+     "name": "Lancer la playlist du soir"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur de 22 minutes, rappelle-moi demain à 8 h de sortir le poisson du congélateur et ajoute un dîner avec les Martin samedi à 20 h",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 1320
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T08:00"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-17T20:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Allume le salon, active le mode concentration et lance un minuteur de 20 minutes",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Allumer le salon"
+    },
+    {
+     "tool": "lancer_raccourci",
+     "name": "Mode concentration"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1200
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute la foire aux vins samedi 1er novembre à 14 h, rappelle-moi demain d'acheter les billets et mets un minuteur de 12 minutes",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-11-01T14:00",
+     "refused": "weekday"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 720
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi aujourd'hui à 17 h 30 d'appeler l'école, mets un minuteur de 3 minutes et demie et ajoute une réunion lundi à 9 h 15",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T17:30",
+     "refused": "past"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 210
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-19T09:15"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi de payer la facture d'eau vendredi, de prendre rendez-vous chez le coiffeur lundi et d'acheter des timbres",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-19"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets trois minuteurs : un de 4 minutes, un de 9 minutes et un de 16 minutes",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 240
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 540
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 960
+    }
+   ]
+  },
+  {
+   "phrase": "Demande à Claude Code de traduire mon CV en anglais, rappelle-moi mardi à 11 h 45 de l'envoyer et mets un minuteur de 25 minutes",
+   "expected": [
+    {
+     "tool": "deleguer_tache",
+     "mentions": [
+      "cv",
+      "anglais"
+     ]
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-20T11:45"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1500
+    }
+   ]
+  },
+  {
+   "phrase": "Cherche les horaires du marché de Cergy, rappelle-moi samedi à 8 h 30 d'y aller et lance la playlist du soir",
+   "expected": [
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "marché",
+      "cergy"
+     ]
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T08:30"
+    },
+    {
+     "tool": "lancer_raccourci",
+     "name": "Lancer la playlist du soir"
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute le dentiste mardi à 11 h, la réunion de chantier mercredi à 8 h 30 et l'anniversaire de Mamie le 6 novembre",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-20T11:00"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-21T08:30"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-11-06"
+    }
+   ]
+  },
+  {
+   "phrase": "Lis-moi mon agenda de samedi, rappelle-moi vendredi à 20 h de faire le plein et mets un minuteur de 6 minutes",
+   "expected": [
+    {
+     "tool": "lire_agenda",
+     "when": "2026-10-17"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T20:00"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 360
+    }
+   ]
+  },
+  {
+   "phrase": "Crée un rendez-vous chez l'ostéopathe lundi à 17 h, puis décale-le à 18 h, et rappelle-moi dimanche à 21 h de prendre mon ordonnance",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-19T17:00"
+    },
+    {
+     "tool": "modifier_element",
+     "when": "2026-10-19T18:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-18T21:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Active le mode concentration, ajoute une séance de travail sur mon mémoire demain de 9 h 30 à 11 h 30, et rappelle-moi à 23 h 15 d'éteindre l'ordinateur",
+   "expected": [
+    {
+     "tool": "lancer_raccourci",
+     "name": "Mode concentration"
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T09:30",
+     "end": "2026-10-16T11:30"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T23:15"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance un minuteur de 18 minutes pour le flan, un autre de 30 minutes pour la quiche, et rappelle-moi dans trois quarts d'heure de sortir la pâte du frigo",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 1080
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 1800
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-15T19:27"
+    }
+   ]
+  },
+  {
+   "phrase": "Cherche le score du match du Stade Rennais, demande à Claude Code de classer les morceaux de mon dossier Musique par artiste et mets un minuteur de 14 minutes",
+   "expected": [
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "renn"
+     ]
+    },
+    {
+     "tool": "deleguer_tache",
+     "mentions": [
+      "musique",
+      "artiste"
+     ]
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 840
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute une randonnée dimanche à 9 h pendant trois heures, rappelle-moi samedi à 21 h de préparer le pique-nique et demain d'acheter des piles pour la lampe",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-18T09:00",
+     "end": "2026-10-18T12:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T21:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance quatre minuteurs : 2 minutes, 7 minutes, 15 minutes et 1 heure",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 120
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 420
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 900
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 3600
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi demain à 8 h d'appeler l'électricien, samedi à 11 h de récupérer le costume, dimanche à 18 h de préparer le sac de piscine et lundi à 10 h 15 de rendre le dossier d'inscription",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T08:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-17T11:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-18T18:00"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-19T10:15"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur de 8 minutes, ajoute le dîner chez Hélène samedi à 19 h 30, rappelle-moi vendredi à 18 h d'acheter du vin et lance un deuxième minuteur de 35 minutes",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 480
+    },
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-17T19:30"
+    },
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T18:00"
+    },
+    {
+     "tool": "minuteur",
+     "seconds": 2100
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi d'acheter des œufs, de la farine et du beurre",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "none"
+    }
+   ]
+  },
+  {
+   "phrase": "Mets un minuteur de 12 minutes pour le riz et les brocolis",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 720
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un déjeuner avec Claire et Antoine mardi à midi",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-20T12:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi lundi à 9 h 30 d'appeler l'assurance et de leur demander où en est mon dossier",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-19T09:30"
+    }
+   ]
+  },
+  {
+   "phrase": "Lance un minuteur de 2 minutes et 30 secondes",
+   "expected": [
+    {
+     "tool": "minuteur",
+     "seconds": 150
+    }
+   ]
+  },
+  {
+   "phrase": "Bloque-moi demain entre 14 h et 16 h pour faire le ménage",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T14:00",
+     "end": "2026-10-16T16:00"
+    }
+   ]
+  },
+  {
+   "phrase": "Ajoute un rendez-vous au garage pour la vidange et les pneus vendredi à 8 h 15",
+   "expected": [
+    {
+     "tool": "creer_evenement",
+     "when": "2026-10-16T08:15"
+    }
+   ]
+  },
+  {
+   "phrase": "Demande à Claude Code de faire un site pour mon club de théâtre, avec une page des spectacles et une page d'inscription",
+   "expected": [
+    {
+     "tool": "deleguer_tache",
+     "mentions": [
+      "théâtre"
+     ]
+    }
+   ]
+  },
+  {
+   "phrase": "Cherche les horaires et les tarifs de la patinoire d'Argenteuil",
+   "expected": [
+    {
+     "tool": "chercher_web",
+     "mentions": [
+      "patinoire",
+      "argenteuil"
+     ]
+    }
+   ]
+  },
+  {
+   "phrase": "Rappelle-moi demain à 8 h 30 que j'ai le dentiste à 11 h",
+   "expected": [
+    {
+     "tool": "creer_rappel",
+     "when": "2026-10-16T08:30"
+    }
+   ]
+  }
+ ]
+}

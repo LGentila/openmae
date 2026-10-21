@@ -191,6 +191,14 @@ public struct ToolOutcome: Sendable {
     public static let noCallWhileSummingUp = "Appel non fait : plus aucun outil pour ce message. Réponds maintenant à "
         + "l'utilisateur avec ce que tu as, et dis-le simplement si ça ne répond pas à sa question."
 
+    /// Told the model when its second try, after calls refused for their arguments, writes again a call already carried
+    /// out in the request: it is not carried out twice.
+    public static let alreadyDone = "Déjà fait plus haut dans cette demande : pas refait."
+
+    /// Told the model when its second try writes a call that corrects none of the refused ones: only those are carried
+    /// out from that try.
+    public static let onlyRefusedCalls = "Appel non fait : seuls les appels refusés plus haut peuvent être corrigés."
+
     public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil,
                 modelSpeaks: Bool = false)
     {
@@ -258,7 +266,8 @@ public struct ToolContext: Sendable {
     public var timeZone: TimeZone
     public var language: SpeechLanguage
     /// What the user said in this turn, then in the ones before (without the date line): when the model changed the
-    /// user's words about a moment, the app reads it from theirs.
+    /// user's words about a moment, the app reads it from theirs. Empty for a call that is one of several the user asked
+    /// for at once: their sentence then holds the other actions' moments too.
     public var userSaid: [String]
     /// Says a sentence at once, before the outcome (e.g. just before macOS asks for a permission).
     public var say: @Sendable (String) async -> Void
@@ -296,7 +305,9 @@ public protocol ToolProvider: Sendable {
     /// What the app says while the model writes a call to this tool, instead of "Un instant, je m'en occupe tout de
     /// suite." (nil).
     func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String?
-    /// What the app says before asking "On y va ?" for a sensitive call.
+    /// What the app says to ask for the user's "oui" for a sensitive call, ending with "On y va ?". Several sensitive calls
+    /// of one request wait together for one "oui": the app then asks one question for them all, made of these sentences
+    /// without their question (`ActionPhrases.pendingQuestion`).
     func summary(of call: ToolCall, context: ToolContext) async -> String
     /// A sensitive call that waited for the user's "oui" will not be carried out: they said no, it expired, another
     /// request replaced it or a new conversation began.
@@ -305,6 +316,10 @@ public protocol ToolProvider: Sendable {
     func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome
     /// Takes back an action; returns what to say.
     func undo(_ token: UndoToken, context: ToolContext) async throws -> String
+    /// What `undo` would take back, in a few words, for « annule » after a request that did several things: the app then
+    /// says one sentence for them all (« C’est annulé : le minuteur et le rappel. »). nil when there is nothing it can take
+    /// back any more (a task already over), or no such words: `undo`'s own sentence is said, whole. Asked before `undo`.
+    func undoneName(_ token: UndoToken, language: SpeechLanguage) async -> String?
     /// A new conversation: forget the items created in the previous one.
     func resetConversation() async
 }
@@ -321,5 +336,6 @@ extension ToolProvider {
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {
         ActionPhrases.cannotUndo(context.language)
     }
+    public func undoneName(_ token: UndoToken, language: SpeechLanguage) async -> String? { nil }
     public func resetConversation() async {}
 }

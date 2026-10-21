@@ -67,6 +67,9 @@ actor ScriptedModel: LanguageModel {
         return scripts.count > 1 ? scripts.removeFirst() : scripts[0]
     }
     func useTools(_ tools: [ToolSpec]) { self.tools = tools }
+    /// The calls an answer may write (`limitToolCalls`): the scripts are written whatever it is.
+    private(set) var callLimit = 1
+    func limitToolCalls(_ count: Int) { callLimit = count }
     func toolCallText(_ call: ToolCall) async -> String? { "[\(call.name)]" }
     /// What was computed ahead, in order: conversations (`prefill`) and beginnings to keep (`prefillBeginning`).
     private(set) var prefills: [(beginning: Bool, messages: [ChatMessage])] = []

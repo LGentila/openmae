@@ -95,6 +95,10 @@ public struct PipelineConfig: Sendable {
     /// Where the history tells the model that an answer was cut off: a setting of the tier
     /// (`Conversation.cutOffPlacement(on:)`).
     public var cutOffPlacement = Conversation.CutOffPlacement.ahead
+
+    /// The most actions carried out in one request, in the order the model wrote their calls (`ActionCatalog
+    /// .actionsPerRequest`); beyond them, the app says it does that many at a time.
+    public var actionsPerRequest = 1
     /// While the user speaks to Maé, what they said so far is transcribed again with the same speech recognition, once
     /// this much of their audio (seconds) has come after the previous pass ended, so that their words show as they speak
     /// (`PipelineEvent.partialTranscript`). It reads a 3–5 s phrase in 0.1–0.15 s on the reference Mac. nil = never.
@@ -134,8 +138,10 @@ public struct TurnMetrics: Sendable, Codable {
     /// THE number: end of the user's speech → first audio sent to the speakers.
     public var latencyMs: Double?
     public var historyTokens: Int?
-    /// The tool the model called, if any.
+    /// The tools the model called, if any, in order.
     public var tool: String?
+    /// End of the user's speech → the first action's own sentence given to the voice (an action carried out at once).
+    public var firstConfirmationMs: Double?
     public init() {}
 }
 
@@ -415,6 +421,8 @@ public actor VoicePipeline {
         var commitTime: ContinuousClock.Instant?
         var audioStartTime: ContinuousClock.Instant?
         var firstPieceTime: ContinuousClock.Instant?
+        /// When the first action's own sentence went to the voice.
+        var firstConfirmationTime: ContinuousClock.Instant?
         /// Pieces of a speculative answer, announced only if the turn is committed.
         var unannouncedPieces: [String] = []
         var language = SpeechLanguage.french
@@ -548,6 +556,7 @@ public actor VoicePipeline {
         wakeModelsUp()  // what loading the other models pushed out of memory comes back meanwhile
         await updatePrompt()
         if let tools { await model.useTools(await tools.tools()) }
+        await model.limitToolCalls(config.actionsPerRequest)
         try await model.prefillBeginning(conversation.beginning)
         emit.yield(.state(.listening))
         keepModelsWarm(true)  // from now on, not only after the first turn
@@ -1442,124 +1451,8 @@ public actor VoicePipeline {
                 metrics.firstTokenMs = ms(clock.now - t1)
                 say(reply.spoken, to: turn)
             } else {
-                var request = conversation.messages(adding: turn.userMessage!)
-                /// Set once a call is refused for its arguments and the model gets its second try: what the app asks
-                /// the user about that refusal (`ToolRefusal.spoken`), said if the second try says nothing.
-                var refusalQuestion: String?
-                /// The model asked for more than one call (two calls written, or `ModelOutput.moreToolCalls`), on its
-                /// first try or its second. Only one call is handled per turn: however that call ends the turn (the
-                /// app's sentence, the model's summary, a question after a refusal), the user then hears, once, that
-                /// the app does one thing at a time.
-                var askedForMore = false
-                var fillerSaid = false
-                /// Summing up a text that came from outside (an agent's report, search results, see
-                /// `ToolOutcome.modelSpeaks`): what the model writes is said, but no call it writes then is carried
-                /// out, since that text could carry instructions of its own. Holds what to say if the model says nothing.
-                var summing: String?
-                /// The model, summing up, wrote a call and nothing else, and was told to sum up once more.
-                var summedUpAgain = false
-                while true {
-                    var calls: [ToolCall] = []
-                    /// The model went on to another call after the first (`ModelOutput.moreToolCalls`).
-                    var moreCalls = false
-                    var unreadable = false
-                    /// The first call written while summing up (not carried out).
-                    var ignored: ToolCall?
-                    let answered = turn.answer
-                    DebugLog.log("turn \(turn.id): LLM request")
-                    for try await output in model.reply(to: request) {
-                        if metrics.firstTokenMs == nil { metrics.firstTokenMs = ms(clock.now - t1) }
-                        switch output {
-                        case .text(let raw): chunker.pieces(adding: filter.push(raw)).forEach(send)
-                        case .toolCallStarted where summing == nil:
-                            DebugLog.log("turn \(turn.id): tool call started")
-                            if !fillerSaid, let phrase = await waitingPhrase(for: nil, turn) {
-                                fillerSaid = true
-                                // Not in the history: the model would start saying it in its own answers.
-                                deliver(phrase, to: turn, inHistory: false)
-                            }
-                        case .toolCallNamed(let name) where summing == nil:
-                            if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
-                                fillerSaid = true
-                                deliver(phrase, to: turn, inHistory: false)
-                            }
-                        case .toolCall(let call) where summing == nil: calls.append(call)
-                        case .moreToolCalls where summing == nil:
-                            DebugLog.log("turn \(turn.id): the model went on to another call")
-                            moreCalls = true
-                        case .unreadableToolCall(let raw) where summing == nil:
-                            DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
-                            unreadable = true
-                        case .toolCallStarted, .toolCallNamed, .moreToolCalls: break
-                        case .toolCall(let call):
-                            DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
-                            if ignored == nil { ignored = call }
-                        case .unreadableToolCall: break
-                        }
-                    }
-                    chunker.pieces(adding: filter.flush()).forEach(send)
-                    // Calls are only read outside a summing up (see above), so only those passes count.
-                    if calls.count > 1 || moreCalls { askedForMore = true }
-                    if let fallback = summing {
-                        chunker.remainingPieces().forEach(send)
-                        if turn.answer == answered, let ignored, !summedUpAgain {
-                            // A call instead of a summary (often another search, when the results do not hold the
-                            // answer): rather than the app's sentence, the model is told it is not carried out and
-                            // sums up once more, still without any call carried out.
-                            DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
-                            summedUpAgain = true
-                            turn.steps += [.call(ignored), .result(of: ignored,
-                                                                   ["erreur": .string(ToolOutcome.noCallWhileSummingUp)])]
-                            request = conversation.messages(adding: turn.userMessage!) + turn.steps
-                            continue
-                        }
-                        if turn.answer == answered { say(fallback, to: turn) }
-                        if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
-                        break
-                    }
-                    guard let tools, !calls.isEmpty || unreadable else {
-                        if let question = refusalQuestion {
-                            // The second try wrote no call. Unless the model said something itself, the user hears the
-                            // app's question, not silence after the waiting phrase.
-                            chunker.remainingPieces().forEach(send)
-                            if turn.answer == answered {
-                                DebugLog.log("turn \(turn.id): the second try said nothing, the app asks")
-                                say(question, to: turn)
-                            }
-                            // The first call was handled (refused): the rest of the request was not carried out either.
-                            if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
-                        }
-                        break
-                    }
-                    // Nothing is ever carried out before the user's turn is really over.
-                    try await waitForCommit(turn)
-                    chunker.remainingPieces().forEach(send)
-                    guard let written = calls.first else {
-                        say(ActionPhrases.notUnderstood(lang), to: turn)
-                        break
-                    }
-                    let call = await tools.named(written)  // a misspelled tool name, read as the tool's
-                    DebugLog.log("turn \(turn.id): tool call \(call.name) \(call.arguments)")
-                    metrics.tool = call.name
-                    let reply = await tools.handle(call, context: toolContext(turn, now: now))
-                    turn.steps += [.call(call), .result(of: call, reply.forModel)]
-                    if reply.retryable, refusalQuestion == nil {
-                        // The arguments were refused: the model sees why and gets one more try.
-                        DebugLog.log("turn \(turn.id): tool call refused, second try: \(reply.forModel)")
-                        refusalQuestion = reply.spoken
-                        request = conversation.messages(adding: turn.userMessage!) + turn.steps
-                        continue
-                    }
-                    if reply.modelSpeaks {
-                        DebugLog.log("turn \(turn.id): the model sums up the result")
-                        summing = reply.spoken
-                        request = conversation.messages(adding: turn.userMessage!) + turn.steps
-                        continue
-                    }
-                    say(reply.spoken, to: turn)
-                    if askedForMore { say(ActionPhrases.oneThingAtATime(lang), to: turn) }
-                    break
-                }
+                try await answerWithTools(turn, now: now, t1: t1, metrics: &metrics, filter: &filter, chunker: &chunker,
+                                          send: send)
             }
             chunker.remainingPieces().forEach(send)
             stream.finish()
@@ -1582,6 +1475,7 @@ public actor VoicePipeline {
             if let speechEnd = turn.speechEnd {
                 if let commit = turn.commitTime { metrics.endOfTurnMs = ms(commit - speechEnd) }
                 if let start = turn.audioStartTime { metrics.latencyMs = ms(start - speechEnd) }
+                if let confirmation = turn.firstConfirmationTime { metrics.firstConfirmationMs = ms(confirmation - speechEnd) }
             }
             metrics.assistantText = turn.answer
             finish(turn, metrics: metrics)
@@ -1591,6 +1485,247 @@ public actor VoicePipeline {
             emit.yield(.failure("\(error)"))
             if self.turn === turn { finish(turn, metrics: nil) }
         }
+    }
+
+    /// What a pass of the model is for (`answerWithTools`).
+    private enum Pass {
+        /// The request's first answer: its calls are carried out.
+        case first
+        /// The request's second try, after calls refused for their arguments: only those calls are carried out from it.
+        case secondTry
+        /// Summing up the results that came from outside: no call is carried out.
+        case summing
+    }
+
+    /// The model's answer to the user's message, with the tools it calls (`turn.userMessage`): its words go to the voice
+    /// as it writes them, and its calls are carried out one after the other, in the order it wrote them, at most
+    /// `PipelineConfig.actionsPerRequest` of them, each as soon as it is written (once the user's turn is really over),
+    /// while the model writes the next one, so that its sentence can be said meanwhile. Then, in this order: the model's
+    /// second try for the calls refused for their arguments (one for the request, holding every result already
+    /// obtained, and only those calls carried out from it); one pass where it sums up every result that came from outside
+    /// (no call carried out then); the app's questions about the refused calls; the one question for the sensitive calls,
+    /// which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out at
+    /// once, how many it does (`ActionPhrases.atMost`), once.
+    ///
+    /// The history keeps each pass's calls as the model wrote them, one assistant message with all of them, then their
+    /// results in the same order, as Gemma 4's template renders them: the next request goes on from the model's memory.
+    private func answerWithTools(_ turn: Turn, now: Date, t1: ContinuousClock.Instant, metrics: inout TurnMetrics,
+                                 filter: inout ReasoningFilter, chunker: inout SentenceChunker,
+                                 send: (SentenceChunker.Piece) -> Void) async throws
+    {
+        let lang = turn.language
+        var request = conversation.messages(adding: turn.userMessage!)
+        let maxCalls = max(1, config.actionsPerRequest)
+        var pass = Pass.first
+        /// The model asked for more calls than the app carries out in one request (`ModelOutput.moreToolCalls`, or more
+        /// calls written), on its first try or its second: said once, at the end of the turn, however it ends.
+        var askedForMore = false
+        var fillerSaid = false
+        /// The runner's request has begun (`ToolRunner.beginRequest`): the calls after the first are part of it.
+        var begun = false
+        /// The calls carried out in this request: one that the second try writes again is not carried out twice.
+        var carriedOut: [ToolCall] = []
+        /// The calls refused for their arguments that the second try may correct: their tools (one each), and the app's
+        /// questions about them (`ToolRefusal.spoken`), said if that try does not correct them and says nothing.
+        var toCorrect: [(tool: String, question: String)] = []
+        /// The app's questions about refused calls the model gets no (more) try for, said after the confirmations.
+        var questions: [String] = []
+        /// Some sensitive call waits for the user's "oui": the question for all of them ends the turn.
+        var waitsForYes = false
+        /// What came from outside for the model to sum up (an agent's report, search results, see
+        /// `ToolOutcome.modelSpeaks`): what to say for each when the model says nothing. The summing pass carries out
+        /// none of the calls the model writes, since such a text could carry instructions of its own; and once such a
+        /// result is in the request, no other pass carries any out either (no second try then).
+        var toSum: [String] = []
+        /// The model, summing up, wrote calls and nothing else, and was told to sum up once more.
+        var summedUpAgain = false
+        /// The user asked for several actions at once (the model's first answer wrote more than one call, or went on to
+        /// another): their sentence holds the other actions' moments and lengths too, so the app reads only each call's
+        /// own words (`ToolContext.userSaid` empty), never a moment or a length of the sentence it would give the wrong
+        /// action (« Rappelle-moi vendredi de payer la cantine et ajoute un rappel pour le vétérinaire »: the second
+        /// reminder, without a moment, got Friday).
+        var several = false
+        while true {
+            /// This pass's calls carried out or refused, as named, in order, and what each one gave the model.
+            var calls: [ToolCall] = []
+            var results: [JSONValue] = []
+            /// Refused calls of this pass that a second try may correct: where they are in `calls`, and why.
+            var refused: [(index: Int, question: String, refusal: ToolRefusal)] = []
+            var unreadable = false
+            /// The calls written while summing up (not carried out).
+            var ignored: [ToolCall] = []
+            /// The model's own words in this pass.
+            var said = ""
+            DebugLog.log("turn \(turn.id): LLM request" + (pass == .first ? "" : pass == .secondTry ? " (second try)"
+                                                            : " (summing up)"))
+            /// A call written, carried out at the model's next output (a token later at most): whether another call
+            /// follows tells whether the user asked for several actions at once.
+            var written: ToolCall?
+            var outputs = model.reply(to: request).makeAsyncIterator()
+            while true {
+                let output = try await outputs.next()
+                if metrics.firstTokenMs == nil, output != nil { metrics.firstTokenMs = ms(clock.now - t1) }
+                if let call = written, let tools {
+                    written = nil
+                    let followed = switch output {
+                    case .toolCallStarted?, .toolCallNamed?, .toolCall?, .moreToolCalls?, .unreadableToolCall?: true
+                    case .text?, nil: false
+                    }
+                    carryingOut: do {
+                        guard calls.count < maxCalls else {
+                            DebugLog.log("turn \(turn.id): more calls than the app carries out at once: \(call.name)")
+                            askedForMore = true
+                            break carryingOut
+                        }
+                        if pass == .first, followed || !calls.isEmpty { several = true }
+                        // Nothing is ever carried out before the user's turn is really over.
+                        try await waitForCommit(turn)
+                        chunker.remainingPieces().forEach(send)
+                        let named = await tools.named(call)  // a misspelled tool name, read as the tool's
+                        calls.append(named)
+                        metrics.tool = (metrics.tool.map { $0 + ", " } ?? "") + named.name
+                        if pass == .secondTry {
+                            if carriedOut.contains(named) {
+                                DebugLog.log("turn \(turn.id): already carried out, not again: \(named.name)")
+                                results.append(["statut": .string(ToolOutcome.alreadyDone)])
+                                break carryingOut
+                            }
+                            guard let index = toCorrect.firstIndex(where: { $0.tool == named.name }) else {
+                                DebugLog.log("turn \(turn.id): not a refused call, not carried out: \(named.name)")
+                                results.append(["erreur": .string(ToolOutcome.onlyRefusedCalls)])
+                                break carryingOut
+                            }
+                            toCorrect.remove(at: index)
+                        }
+                        DebugLog.log("turn \(turn.id): tool call \(named.name) \(named.arguments)"
+                                     + (several ? " (one of several)" : ""))
+                        let reply = await tools.handle(named, context: toolContext(turn, now: now, oneOfSeveral: several),
+                                                       sameRequest: begun)
+                        begun = true
+                        results.append(reply.forModel)
+                        if let refusal = reply.refusal {
+                            if reply.retryable, pass == .first {
+                                refused.append((calls.count - 1, reply.spoken, refusal))
+                            } else {
+                                questions.append(reply.spoken)
+                            }
+                        } else if reply.waitsForYes {
+                            waitsForYes = true
+                        } else {
+                            carriedOut.append(named)
+                            if reply.modelSpeaks {
+                                toSum.append(reply.spoken)
+                            } else {
+                                confirm(reply.spoken, turn)
+                            }
+                        }
+                    }
+                }
+                guard let output else { break }
+                switch output {
+                case .text(let raw):
+                    said += raw
+                    chunker.pieces(adding: filter.push(raw)).forEach(send)
+                case .toolCallStarted where pass != .summing:
+                    DebugLog.log("turn \(turn.id): tool call started")
+                    if !fillerSaid, let phrase = await waitingPhrase(for: nil, turn) {
+                        fillerSaid = true
+                        // Not in the history: the model would start saying it in its own answers.
+                        deliver(phrase, to: turn, inHistory: false)
+                    }
+                case .toolCallNamed(let name) where pass != .summing:
+                    if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
+                        fillerSaid = true
+                        deliver(phrase, to: turn, inHistory: false)
+                    }
+                case .toolCall(let call) where pass != .summing: written = call
+                case .moreToolCalls where pass != .summing:
+                    DebugLog.log("turn \(turn.id): the model went on to another call")
+                    askedForMore = true
+                    if pass == .first { several = true }
+                case .unreadableToolCall(let raw) where pass != .summing:
+                    DebugLog.log("turn \(turn.id): unreadable tool call: \(raw)")
+                    unreadable = true
+                case .toolCallStarted, .toolCallNamed, .moreToolCalls, .unreadableToolCall: break
+                case .toolCall(let call):
+                    DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
+                    ignored.append(call)
+                }
+            }
+            chunker.pieces(adding: filter.flush()).forEach(send)
+            var cleaned = ReasoningFilter()
+            let modelSpoke = !SpeakableText.clean(cleaned.push(said) + cleaned.flush()).isEmpty
+            if pass == .summing {
+                chunker.remainingPieces().forEach(send)
+                if !modelSpoke, !ignored.isEmpty, !summedUpAgain {
+                    // Calls instead of a summary (often another search, when the results do not hold the answer): rather
+                    // than the app's sentence, the model is told they are not carried out and sums up once more, still
+                    // without any call carried out.
+                    DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
+                    summedUpAgain = true
+                    turn.steps += [.calls(ignored)]
+                        + ignored.map { .result(of: $0, ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]) }
+                    request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                    continue
+                }
+                if !modelSpoke { for fallback in toSum.uniqued() { say(fallback, to: turn) } }
+                break
+            }
+            // A second try only before anything from outside is in the request (see `toSum`): otherwise the refusals
+            // are asked to the user, and the model reads them without being asked for another call.
+            let secondTry = !refused.isEmpty && toSum.isEmpty
+            if !secondTry {
+                for refusal in refused {
+                    results[refusal.index] = ["erreur": .string(refusal.refusal.forModel)]
+                    questions.append(refusal.question)
+                }
+            }
+            if !calls.isEmpty {
+                turn.steps += [.calls(calls)] + zip(calls, results).map { .result(of: $0, $1) }
+            }
+            if pass == .secondTry {
+                // Refused calls the second try did not correct: unless the model said something itself, the user hears
+                // the app's questions about them, not silence after the waiting phrase.
+                chunker.remainingPieces().forEach(send)
+                if !modelSpoke, !toCorrect.isEmpty {
+                    DebugLog.log("turn \(turn.id): the second try left refused calls, the app asks")
+                    questions = toCorrect.map(\.question) + questions
+                }
+                toCorrect = []
+            }
+            if calls.isEmpty, unreadable, tools != nil {
+                try await waitForCommit(turn)
+                chunker.remainingPieces().forEach(send)
+                say(ActionPhrases.notUnderstood(turn.language), to: turn)
+                break
+            }
+            if secondTry {
+                // The arguments were refused: the model sees why, with every result already obtained, and gets one more
+                // try, for the request.
+                DebugLog.log("turn \(turn.id): \(refused.count) call(s) refused, second try")
+                toCorrect = refused.map { (calls[$0.index].name, $0.question) }
+                pass = .secondTry
+                request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                continue
+            }
+            if !toSum.isEmpty, !calls.isEmpty {
+                DebugLog.log("turn \(turn.id): the model sums up the results")
+                pass = .summing
+                request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                continue
+            }
+            break
+        }
+        chunker.remainingPieces().forEach(send)
+        for question in questions.uniqued() { say(question, to: turn) }
+        if waitsForYes, let question = await tools?.pendingQuestion(lang) { say(question, to: turn) }
+        if askedForMore { say(ActionPhrases.atMost(maxCalls, lang), to: turn) }
+    }
+
+    /// An action's own sentence, said as soon as it is carried out; the first one's time is measured (`TurnMetrics`).
+    private func confirm(_ sentence: String, _ turn: Turn) {
+        if turn.firstConfirmationTime == nil { turn.firstConfirmationTime = clock.now }
+        say(sentence, to: turn)
     }
 
     /// The voice of an answer: one utterance, started again if its opening stays near-silent too long
@@ -1798,12 +1933,13 @@ public actor VoicePipeline {
         return await tools.resolve(interception, context: toolContext(turn, now: now))
     }
 
-    private func toolContext(_ turn: Turn, now: Date) -> ToolContext {
+    /// `oneOfSeveral`: the call is one of several the user asked for at once (see `answerWithTools`): no words of theirs.
+    private func toolContext(_ turn: Turn, now: Date, oneOfSeveral: Bool = false) -> ToolContext {
         // The user's words, this turn's then the two before (their message without the date line; the examples' are
         // not theirs, and not in `exchanges`).
         let earlier = conversation.exchanges.filter { $0.role == .user }.suffix(2).reversed()
             .map { $0.content.components(separatedBy: "\n").first ?? "" }
-        return ToolContext(now: now, language: turn.language, userSaid: [turn.userText] + earlier) {
+        return ToolContext(now: now, language: turn.language, userSaid: oneOfSeveral ? [] : [turn.userText] + earlier) {
             [weak self] sentence in
             await self?.deliver(sentence, to: turn)
         }

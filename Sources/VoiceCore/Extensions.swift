@@ -21,3 +21,11 @@ extension ConversationExtension {
     public func systemPromptAddendum(language: SpeechLanguage) -> String? { nil }
     public func answer(to userText: String, language: SpeechLanguage) async -> String? { nil }
 }
+
+extension Array where Element: Hashable {
+    /// The elements in order, each once.
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}

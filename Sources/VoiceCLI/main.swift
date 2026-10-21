@@ -48,7 +48,8 @@
 //   --no-speculative         disable speculative start (for comparison)
 //   --silence-ms <n>         end-of-turn silence (default 500)
 //   --history-budget <n>     history size in tokens before the oldest exchanges are dropped
-//   --actions                the actions in the model's instructions, as in the app (none is carried out)
+//   --actions                the actions as in the app, the calendar and reminders kept in memory (nothing saved),
+//                            the timers running in voice-cli (they ring nowhere)
 //   --racing-voices <n>      voices starting each answer at once, the first audible one says it (default 1)
 //   --no-voice-restart       never start the voice again after a long near-silent opening (the app does, after 1.2 s)
 //   --voice-restart-after <s> seconds of near-silent opening before the voice starts again (default 1.2)
@@ -71,6 +72,7 @@
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
 //   --talk-key               conversation: the talk key is held while each phrase is said, released after it
 //   --release-after <s>      with --talk-key: seconds between the end of the recording and the release (default 0.25)
+//   --max-calls <n>          the most actions carried out in one request (default: the tier's, 3 or 1)
 //   --barge-in mac|iphone    what it takes to interrupt Maé: the Mac's (default), or an iPhone's as the app has it while
 //                            an iPhone has the conversation (BargeInProfile; VOICE_BARGE_IN_IPHONE_DB/_MS apply)
 //   --out <folder>           where reports and audio go (default ./measurements)
@@ -151,6 +153,9 @@ struct Options {
     var corpus: String?
     var showPrompt = false
     var watchCalls = false
+    /// The most calls the model writes, and the app carries out, in one request (default: the tier's,
+    /// `ActionCatalog.actionsPerRequest`).
+    var maxCalls: Int?
     var compareBeginnings = false
     /// actions-bench: each request's first token from the kept beginning in several ways, against a float32 reference.
     var compareRequests = false
@@ -235,6 +240,7 @@ struct Options {
             case "--corpus": o.corpus = it.next()
             case "--show-prompt": o.showPrompt = true
             case "--watch-calls": o.watchCalls = true
+            case "--max-calls": o.maxCalls = Int(it.next() ?? "")
             case "--compare-beginnings": o.compareBeginnings = true
             case "--compare-requests": o.compareRequests = true
             case "--bfloat16-prompts": o.bfloat16Prompts = true
@@ -290,6 +296,8 @@ actor EventLog {
                 print("  ✋ interrupted after: “\(m.assistantText)”")
             } else {
                 print("  ⏱  end of speech → first sound: \(fmt(m.latencyMs))"
+                      + (m.firstConfirmationMs.map { " · → first action's sentence: \(fmt($0))" } ?? "")
+                      + (m.tool.map { " (\($0))" } ?? "")
                       + "  [silence \(fmt(m.endOfTurnMs)) · transcription \(fmt(m.transcriptionMs))"
                       + " · first word \(fmt(m.firstTokenMs)) · first piece \(fmt(m.firstPieceMs))"
                       + " · voice \(fmt(m.synthesisFirstAudioMs))]"
@@ -371,6 +379,7 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     }
     config.actionExamples = ActionCatalog.showsExamples(on: tier)
     config.cutOffPlacement = Conversation.cutOffPlacement(on: tier)
+    config.actionsPerRequest = o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier)
     if let voices = o.racingVoices { config.racingVoices = max(1, voices) }
     if let seconds = o.voiceRestartAfter { config.voiceRestartAfterSeconds = seconds }
     if o.noVoiceRestart { config.voiceRestartAfterSeconds = nil }
@@ -391,7 +400,8 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     let speaker = SimulatedSpeaker(logsPlays: logPlays)
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
-                                 tools: o.actions ? ToolRunner(providers: [DryActions()]) : nil, config: config)
+                                 tools: o.actions ? ToolRunner(providers: [MemoryCalendar(), TimerTools()]) : nil,
+                                 config: config)
     let log = EventLog()
     await log.attach(model)
     Task { for await event in pipeline.events { await log.record(event) } }
@@ -415,17 +425,6 @@ func secondsSinceLaunch() -> Double? {
     guard sysctl(&request, UInt32(request.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
     let start = info.kp_proc.p_starttime
     return Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1e6)
-}
-
-/// `--actions`: the app's actions as the model sees them (the same tools and instructions, the date line in the user's
-/// messages), none carried out: a call is declined.
-private struct DryActions: ToolProvider {
-    let identifier = "dry-actions"
-    func tools() async -> [ToolSpec] { ActionCatalog.calendarTools + [ActionCatalog.timer] }
-    func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
-        throw ToolRefusal(forModel: "Action non effectuée (essai).", spoken: ActionPhrases.declined(context.language),
-                          retryable: false)
-    }
 }
 
 struct CLIError: Error, CustomStringConvertible {
@@ -470,6 +469,11 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
     print("\n=== Summary: \(turns.count) turns ===")
     print("end of speech → first sound: median \(fmt(median(latencies)))"
           + "  min \(fmt(latencies.min()))  max \(fmt(latencies.max()))")
+    let confirmations = turns.compactMap(\.firstConfirmationMs)
+    if !confirmations.isEmpty {
+        print("end of speech → first action's sentence: median \(fmt(median(confirmations)))"
+              + "  min \(fmt(confirmations.min()))  max \(fmt(confirmations.max()))")
+    }
     for (label, values) in [("waiting for silence", turns.compactMap(\.endOfTurnMs)),
                             ("transcription", turns.compactMap(\.transcriptionMs)),
                             ("model's first word", turns.compactMap(\.firstTokenMs)),

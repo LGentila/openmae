@@ -45,8 +45,15 @@ public struct ChatMessage: Sendable, Equatable, Codable {
 
     /// The assistant's tool call, as it goes into the history.
     public static func call(_ call: ToolCall) -> ChatMessage {
+        calls([call])
+    }
+
+    /// The tool calls the assistant wrote one after the other in one answer, as they go into the history: one message,
+    /// followed by their results in the same order (`result(of:_:)`), as Gemma 4's template renders them and the model
+    /// wrote them (all its calls, then all their results).
+    public static func calls(_ calls: [ToolCall]) -> ChatMessage {
         var message = ChatMessage(.assistant, "")
-        message.toolCalls = [call]
+        message.toolCalls = calls
         return message
     }
 
@@ -79,9 +86,9 @@ public enum ModelOutput: Sendable, Equatable {
     case toolCall(ToolCall)
     /// A call the model wrote but that could not be read (the raw text, for the model's second try).
     case unreadableToolCall(String)
-    /// After the call just reported, the model went on to another one (the user asked for two things at once). The app
-    /// carries out one action per request, so the answer ends there, without that call: the app says it does one thing
-    /// at a time.
+    /// After the call just reported, the model went on to another one (the user asked for several things at once) while
+    /// it had written as many calls as the app carries out in one request (`LanguageModel.limitToolCalls`): the answer
+    /// ends there, without that call, and the app says how many things it does at a time.
     case moreToolCalls
 }
 
@@ -96,6 +103,9 @@ public protocol LanguageModel: Sendable {
     /// The tools the model may call. They are part of the system prompt: change them only between
     /// conversations, then `prefillBeginning` again.
     func useTools(_ tools: [ToolSpec]) async
+    /// How many calls an answer may write one after the other (1: the first one only), the calls the app carries out in
+    /// one request: past them, the answer ends with `ModelOutput.moreToolCalls`.
+    func limitToolCalls(_ count: Int) async
     /// A tool call written the way this model writes it, to show it an example in its instructions; nil when
     /// it has no such written form.
     func toolCallText(_ call: ToolCall) async -> String?
@@ -126,6 +136,7 @@ public protocol LanguageModel: Sendable {
 
 extension LanguageModel {
     public func useTools(_ tools: [ToolSpec]) async {}
+    public func limitToolCalls(_ count: Int) async {}
     public func toolCallText(_ call: ToolCall) async -> String? { nil }
     public func catchUp(with conversation: [ChatMessage]) async {}
     public func prefillBeginning(_ beginning: [ChatMessage]) async throws { try await prefill(beginning) }

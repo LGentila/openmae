@@ -33,6 +33,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private let toolCallEnd: Int?
     /// The tools, as the chat template wants them (in the system turn).
     private var tools: [VoiceCore.ToolSpec] = []
+    /// The calls an answer may write one after the other (`limitToolCalls`).
+    private var callsPerAnswer = 1
     private var toolSchemas: [[String: any Sendable]]?
     /// The arguments of recent calls exactly as the model wrote them, so that the history renders them
     /// identically and the cache stays valid.
@@ -337,6 +339,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public struct ReadTimesError: Error, CustomStringConvertible {
         public let message: String
         public var description: String { message }
+    }
+
+    /// `async` like the protocol's default (see `useTools`).
+    public func limitToolCalls(_ count: Int) async {
+        callsPerAnswer = max(1, count)
     }
 
     /// Diagnostics (`voice-cli cache-check`): `observer` is called on the request's own task each time the model has read
@@ -851,6 +858,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var produced: [Int] = []
         var callTokens: [Int]?  // inside a tool call
         var callNamed = false
+        /// The calls written so far that could be read.
+        var callsWritten = 0
         /// An answer that goes round in circles ends there, rather than at the token limit after the voice read it all.
         var repetition = RepetitionGuard()
         defer {
@@ -878,20 +887,23 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                     callTokens = nil
                     DebugLog.log("LLM: call closed, next token drawn: \(upcoming.token.map { tokenTrace([$0]) } ?? "none")")
                     let call = toolCall(from: tokens)
+                    if case .toolCall = call { callsWritten += 1 }
                     onOutput(call)
-                    // The history goes on from here with the tool's result (`<|tool_response>`), while E4B and E2B
+                    // The history goes on from here with the tools' results (`<|tool_response>`), while E4B and E2B
                     // would write `<eos>` next: once in the cache, that token no longer matches the history, and the
-                    // request after the call goes back to a snapshot. So the answer ends right after the call, its
-                    // last token already in the cache.
+                    // request after the calls goes back to a snapshot. So the answer ends right after the last call,
+                    // its last token already in the cache.
                     guard upcoming.token == toolCallStart else { break }
-                    // Another call follows: the user asked for two things at once. The app carries out one action per
-                    // request, so that call was written for nothing (0.6 to 1.2 s before the first action could start,
-                    // with E4B and Gemma 4 26B in voice-cli conversation on the reference Mac), and since the history
-                    // keeps only the first call and its result, the cache no longer matched it from there: the model
-                    // went back to a snapshot to compute the history again (110 to 140 tokens, 0.5 to 1 s). It is
-                    // not written: the pipeline says the app does one thing at a time. After a call that could not be
-                    // read, the next one is written, as it can be carried out instead.
-                    if case .toolCall = call {
+                    // Another call follows: the user asked for several things at once. The pipeline carries out each
+                    // call as soon as it is reported, while the next one is written (`reply` writes into a stream of
+                    // its own), and the history keeps them all, as written, then their results. Beyond the calls the
+                    // app carries out in one request (`limitToolCalls`), the next one is not written: it would be
+                    // written for nothing (0.6 to 1.2 s per call, with E4B and Gemma 4 26B in voice-cli conversation on
+                    // the reference Mac), and since the history would not keep it, the cache would no longer match the
+                    // history from there (the request after it went back to a snapshot to compute it again, 110 to 140
+                    // tokens, 0.5 to 1 s). The pipeline says how many things the app does at once. After a call that
+                    // could not be read, the next one is written, as it can be carried out instead.
+                    if case .toolCall = call, callsWritten >= callsPerAnswer {
                         onOutput(.moreToolCalls)
                         break
                     }

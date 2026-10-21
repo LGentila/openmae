@@ -303,7 +303,9 @@ struct ActionPhraseTests {
                 ActionPhrases.confirmShortcut(name: "Salon", language),
                 ActionPhrases.morningOrAfternoon(hour: 3, minute: 0, context(language)),
                 ActionPhrases.wrongWeekday(date("2026-10-22"), context(language)),
-                ActionPhrases.earlierOrLater(language),
+                ActionPhrases.earlierOrLater(language), ActionPhrases.atMost(3, language),
+                ActionPhrases.undone(.deletion, language),
+                ActionPhrases.undone(Array(repeating: ActionPhrases.undoneName(.timer, language), count: 2), language),
             ]
             for sentence in sentences {
                 #expect(ActionPhrases.wordCount(SpeakableText.forVoice(sentence, language: language)) >= 5, "\(sentence)")
@@ -668,6 +670,8 @@ actor RecordingTools: ToolProvider {
         undone.append(token.id)
         return ActionPhrases.undone(.reminder, context.language)
     }
+
+    func undoneName(_ token: UndoToken, language: SpeechLanguage) -> String? { ActionPhrases.undoneName(.reminder, language) }
 }
 
 /// The calendar's tools with the app's checks (`ActionCatalog.check`), and two calendars, « Maison » and « Perso »: an

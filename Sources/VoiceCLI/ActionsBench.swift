@@ -81,7 +81,23 @@ private struct Corpus: Decodable {
     struct Case: Decodable {
         var phrase: String
         var expected: Expected?
+        /// `expected` written as a list: the actions the request asks for, in the order said (several at once).
+        var expectedList: [Expected]?
         var before: Before?
+
+        private enum CodingKeys: String, CodingKey { case phrase, expected, before }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            phrase = try c.decode(String.self, forKey: .phrase)
+            before = try c.decodeIfPresent(Before.self, forKey: .before)
+            if let list = try? c.decode([Expected].self, forKey: .expected) {
+                expectedList = list
+                expected = list.first
+            } else {
+                expected = try c.decodeIfPresent(Expected.self, forKey: .expected)
+            }
+        }
     }
 
     /// The exchanges themselves, or the name of one of `histories`.
@@ -109,8 +125,9 @@ private struct Corpus: Decodable {
         /// Words a delegation's instruction (or a follow-up's message, or a search's keywords) must contain, whatever
         /// the accents and case.
         var mentions: [String]?
-        /// The app must refuse the call: "past" for a date already gone. The call is still expected, with the user's
-        /// words (the app checks the date, not the model), and `when` is the date they give.
+        /// The app must refuse the call: "past" for a date already gone, "weekday" for a weekday that is not the date's.
+        /// The call is still expected, with the user's words (the app checks the date, not the model), and `when` is the
+        /// date they give.
         var refused: String?
         /// A built-in source: the call names no place (where the user is); the instrument the app must find ("EUR/USD",
         /// "bitcoin/EUR"); the travel mode ("car", "transit"). `when` is then the forecast's day ("none" for now) or the
@@ -271,6 +288,9 @@ func runActionsBench(_ o: Options) async throws {
     if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
     await model.computeExpertsInHalfPrecision(o.bfloat16Experts)
     if o.bfloat16Experts { print("experts' products in bfloat16 in the requests and the history (--bfloat16-experts)") }
+    let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
+    await model.limitToolCalls(maxCalls)
+    print("calls carried out in one request: \(maxCalls) at most")
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     // As `VoicePipeline` puts it together: the actions' part, or without them what the date line is; then the tools'.
@@ -305,6 +325,13 @@ func runActionsBench(_ o: Options) async throws {
     if o.compareRequests {
         try await compareRequests(corpus, conversation: conversation, dateLine: dateLine, context: reference,
                                   model: model, folder: folder, options: o)
+        return
+    }
+
+    if corpus.cases.contains(where: { $0.expectedList != nil }) {
+        try await runSeveralActions(corpus, conversation: conversation, tools: tools, dateLine: dateLine, now: now,
+                                    timeZone: timeZone, model: model, maxCalls: maxCalls, tier: tier,
+                                    modelName: folder.lastPathComponent, options: o)
         return
     }
 
@@ -365,7 +392,7 @@ func runActionsBench(_ o: Options) async throws {
         }
         // As in the app: what the user said, this request then the earlier ones.
         let context = ToolContext(now: now, timeZone: timeZone, language: .french,
-                                  userSaid: [item.phrase] + before.reversed().map(\.user))
+                                  userSaid: moreCalls ? [] : [item.phrase] + before.reversed().map(\.user))
         let created = before.last
         var refusal: ToolRefusal?
         if let call, !tools.contains(where: { $0.name == call.name }) {
@@ -1058,6 +1085,12 @@ private func keywords(_ query: String) -> Set<String> {
 private func refusedAsExpected(_ call: ToolCall, _ refusal: ToolRefusal, _ expected: Corpus.Expected,
                                _ context: ToolContext) -> Bool
 {
+    if expected.refused == "weekday" {
+        guard let when = expected.when, let wanted = LocalDateTime.parse(when, in: context.timeZone) else {
+            return refusal.forModel.contains(" est un ")
+        }
+        return refusal.spoken == ActionPhrases.wrongWeekday(wanted.date, context)
+    }
     guard expected.refused == "past", refusal.spoken == ActionPhrases.datePassed(context.language) else { return false }
     guard let when = expected.when else { return true }
     let raw = call.text("quand") ?? call.text("debut") ?? call.text("echeance") ?? ""
@@ -1118,6 +1151,9 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     print("requests without an action that triggered one: \(falseTriggers.count) / \(others.count)"
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
+    let more = results.filter { $0.moreCalls == true }
+    print("requests with another call after the first (an action more than asked when one is expected): \(more.count)"
+          + more.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined())
     print("calls the app would refuse: \(results.filter { $0.refusal != nil }.count)")
     let misspelled = results.filter { $0.writtenName != nil }
     print("misspelled tool names read as the tool's: \(misspelled.count)"
@@ -1316,4 +1352,196 @@ private func percent(_ part: Int, _ whole: Int) -> Double { whole == 0 ? 0 : Dou
 
 private func milliseconds(_ d: Duration) -> Double {
     Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+}
+
+// MARK: - Several actions in one request
+
+/// One call of a request with several actions, as the bench scores it.
+private struct CallResult: Encodable {
+    var expected: String
+    var chosen: String
+    var arguments: [String: JSONValue]?
+    var toolOK: Bool
+    var argumentsOK: Bool?
+    var resolved: String?
+    var refusal: String?
+    var callMs: Double?
+}
+
+private struct SeveralResult: Encodable {
+    var phrase: String
+    /// The actions expected, in order.
+    var expected: [String]
+    var calls: [CallResult]
+    /// The model went on to one more call than the app carries out in one request (`ModelOutput.moreToolCalls`).
+    var moreCalls: Bool
+    var unreadable: Int
+    var text: String
+    /// Every action right, in order, and nothing more (beyond the app's limit: the first ones, then `moreCalls`).
+    var allRight: Bool
+    /// Calls written beyond the ones expected.
+    var extra: Int
+    var firstCallMs: Double?
+    var lastCallMs: Double?
+}
+
+/// A corpus whose requests ask for several actions at once (`expected` written as a list): every call the model writes is
+/// scored, in order, against the action expected at its place (the tool its name stands for, and what the app would make
+/// of it: the date to the minute, the length, the shortcut, the words of a task or a search), as `runActionsBench` scores
+/// one. A call more than expected counts as an extra action. A change or a deletion of « le dernier » refers to the item
+/// created by the call before it in the same request. Nothing is carried out, and no second pass is asked for (no
+/// second try, no summary). With `maxCalls` lower than the actions asked for, the request is right when the first ones are
+/// and the model went on to another call (the app then says how many it does at a time).
+private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
+                               now: Date, timeZone: TimeZone, model: MLXChatModel, maxCalls: Int, tier: HardwareTier,
+                               modelName: String, options o: Options) async throws
+{
+    let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
+    func named(_ call: ToolCall) -> ToolCall {
+        var named = call
+        named.name = ToolNames.match(call.name, among: tools.map(\.name)) ?? call.name
+        return named
+    }
+    let clock = ContinuousClock()
+    var results: [SeveralResult] = []
+    for (index, item) in corpus.cases.enumerated() {
+        let expected = item.expectedList ?? item.expected.map { [$0] } ?? []
+        let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine, context: reference)
+        var written: [(call: ToolCall, ms: Double)] = []
+        var text = ""
+        var moreCalls = false
+        var unreadable = 0
+        let start = clock.now
+        for try await output in model.reply(to: request) {
+            switch output {
+            case .text(let piece): text += piece
+            case .toolCall(let call): written.append((call, milliseconds(clock.now - start)))
+            case .moreToolCalls: moreCalls = true
+            case .unreadableToolCall: unreadable += 1
+            case .toolCallStarted, .toolCallNamed: break
+            }
+        }
+        var filter = ReasoningFilter()
+        text = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+        // As the app: for a request with several calls, only each call's own words (`VoicePipeline.answerWithTools`).
+        let several = written.count > 1 || moreCalls
+        let context = ToolContext(now: now, timeZone: timeZone, language: .french,
+                                  userSaid: several ? [] : [item.phrase] + corpus.exchanges(before: item).reversed().map(\.user))
+        var calls: [CallResult] = []
+        /// The item the calls before created, for a change of « le dernier » after it (or the case's earlier exchange).
+        var created = corpus.exchanges(before: item).last
+        for (place, entry) in written.enumerated() {
+            let call = named(entry.call)
+            let wanted = place < expected.count ? expected[place] : nil
+            var result = CallResult(expected: wanted?.tool ?? "aucun", chosen: call.name, arguments: call.arguments,
+                                    toolOK: call.name == wanted?.tool, callMs: entry.ms)
+            if AgentCatalog.names.contains(call.name) {
+                do {
+                    try AgentCatalog.check(call, context: context, agents: [ClaudeCode.displayName], folders: [])
+                    if result.toolOK, let wanted { result.argumentsOK = mentions(call, wanted) }
+                } catch let refused as ToolRefusal {
+                    result.refusal = refused.forModel
+                    if result.toolOK { result.argumentsOK = false }
+                }
+            } else if call.name == WebSearchCatalog.searchName {
+                do {
+                    try WebSearchCatalog.check(call, context: context)
+                    if result.toolOK, let wanted { result.argumentsOK = mentions(call, wanted) }
+                } catch let refused as ToolRefusal {
+                    result.refusal = refused.forModel
+                    if result.toolOK { result.argumentsOK = false }
+                }
+            } else {
+                do {
+                    let resolved = try resolve(call, created: created, context: context, shortcuts: corpus.shortcuts)
+                    result.resolved = resolved.description(timeZone)
+                    if result.toolOK, let wanted { result.argumentsOK = wanted.refused == nil && matches(resolved, wanted, context) }
+                    if [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(call.name) {
+                        created = createdExchange(call, resolved, number: place + 1, timeZone: timeZone)
+                    }
+                } catch let refused as ToolRefusal {
+                    result.refusal = refused.forModel
+                    if result.toolOK, let wanted { result.argumentsOK = refusedAsExpected(call, refused, wanted, context) }
+                }
+            }
+            calls.append(result)
+        }
+        let carriedOut = min(expected.count, maxCalls)
+        let rightCalls = calls.prefix(carriedOut).filter { $0.toolOK && $0.argumentsOK != false }.count
+        let extra = max(0, calls.count - expected.count)
+        let allRight = calls.count == carriedOut && rightCalls == carriedOut && (expected.count > maxCalls) == moreCalls
+        let result = SeveralResult(phrase: item.phrase, expected: expected.map(\.tool), calls: calls, moreCalls: moreCalls,
+                                   unreadable: unreadable, text: text, allRight: allRight, extra: extra,
+                                   firstCallMs: written.first?.ms, lastCallMs: written.last?.ms)
+        results.append(result)
+        print(String(format: "%3d %@ %@", index + 1, allRight ? "✓" : "✗", item.phrase))
+        for (place, call) in calls.enumerated() {
+            let mark = call.toolOK ? (call.argumentsOK == false ? "~" : "✓") : "✗"
+            print("      \(mark) \(describe(written[place].call, written: nil))" + (call.resolved.map { " = \($0)" } ?? "")
+                  + (call.refusal.map { "  [refused: \($0)]" } ?? "") + "  \(fmt(call.callMs))"
+                  + (call.toolOK ? "" : "  (expected: \(call.expected))"))
+        }
+        if calls.count < expected.count {
+            print("      missing: \(expected[calls.count...].map(\.tool).joined(separator: ", "))"
+                  + (moreCalls ? "  [then another call, not written]" : ""))
+        } else if moreCalls {
+            print("      [then another call, not written]")
+        }
+        if unreadable > 0 { print("      unreadable calls: \(unreadable)") }
+        if !text.isEmpty { print("      said: “\(text.prefix(120))”") }
+    }
+
+    print("\n=== \(modelName) — \(results.count) requests, at most \(maxCalls) action(s) carried out per request ===")
+    let several = results.filter { $0.expected.count > 1 }
+    let rightSeveral = several.filter(\.allRight).count
+    print(String(format: "requests with several actions, every action right: %d / %d (%.0f %%)", rightSeveral,
+                 several.count, percent(rightSeveral, several.count)))
+    for count in Set(several.map(\.expected.count)).sorted() {
+        let group = several.filter { $0.expected.count == count }
+        print("  \(count) actions: \(group.filter(\.allRight).count) / \(group.count)")
+    }
+    let single = results.filter { $0.expected.count == 1 }
+    if !single.isEmpty {
+        print("requests with one action (sounding like two): right \(single.filter(\.allRight).count) / \(single.count), "
+              + "extra actions \(single.map(\.extra).reduce(0, +))"
+              + single.filter { $0.extra > 0 }.map { "\n    · \($0.phrase) → \($0.calls.map(\.chosen).joined(separator: ", "))" }
+                  .joined())
+    }
+    let allCalls = results.flatMap(\.calls)
+    print("calls written: \(allCalls.count) · right tool \(allCalls.filter(\.toolOK).count) · right tool and arguments "
+          + "\(allCalls.filter { $0.toolOK && $0.argumentsOK != false }.count) · beyond the actions expected "
+          + "\(results.map(\.extra).reduce(0, +)) · unreadable \(results.map(\.unreadable).reduce(0, +))")
+    let short = several.filter { $0.calls.count < min($0.expected.count, maxCalls) }
+    print("requests with fewer calls than asked for: \(short.count)"
+          + short.map { "\n    · \($0.phrase) → \($0.calls.map(\.chosen).joined(separator: ", "))" }.joined())
+    let shortPhrases = Set(short.map(\.phrase))
+    let wrong = several.filter { !$0.allRight && !shortPhrases.contains($0.phrase) }
+    print("other requests with several actions not all right: \(wrong.count)"
+          + wrong.map { "\n    · \($0.phrase)" }.joined())
+    let firsts = several.compactMap(\.firstCallMs)
+    let lasts = several.filter { $0.calls.count > 1 }.compactMap(\.lastCallMs)
+    print("first call complete: median \(fmt(median(firsts))) · last call complete (with several): median "
+          + "\(fmt(median(lasts))), worst \(fmt(lasts.max()))")
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+    let url = o.out.appendingPathComponent("actions-bench-several-\(tier.rawValue)-max\(maxCalls)-\(stamp).json")
+    try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
+    try encoder.encode(results).write(to: url)
+    print("report: \(url.path)")
+}
+
+/// An item created by a call of the request, as the app describes it to the model: what a change of « le dernier » after it
+/// in the same request starts from.
+private func createdExchange(_ call: ToolCall, _ resolved: Resolved, number: Int, timeZone: TimeZone) -> Corpus.Exchange {
+    let event = call.name == ActionCatalog.createEvent.name
+    var fields: [String: JSONValue] = ["id": .string((event ? "e" : "r") + String(number))]
+    if let start = resolved.start {
+        fields[event ? "debut" : "echeance"] = .string(LocalDateTime.format(start, in: timeZone, withTime: resolved.hasTime))
+    }
+    if event, let end = resolved.end {
+        fields["fin"] = .string(LocalDateTime.format(end, in: timeZone, withTime: resolved.hasTime))
+    }
+    return Corpus.Exchange(user: "", call: call, result: .object(fields), found: nil, answer: "", dateLine: nil)
 }

@@ -201,6 +201,13 @@ actor MemoryCalendar: ToolProvider {
         }
     }
 
+    func undoneName(_ token: UndoToken, language: SpeechLanguage) -> String? {
+        guard let undo = undos[token.id] else { return nil }
+        // A change or a deletion: the item as it was comes back.
+        if undo.before != nil { return ActionPhrases.undoneName(items[undo.reference] == nil ? .deletion : .change, language) }
+        return items[undo.reference].map { ActionPhrases.undoneName($0.isEvent ? .event : .reminder, language) }
+    }
+
     func undo(_ token: UndoToken, context: ToolContext) throws -> String {
         guard let undo = undos.removeValue(forKey: token.id) else { return ActionPhrases.cannotUndo(context.language) }
         let current = items[undo.reference]

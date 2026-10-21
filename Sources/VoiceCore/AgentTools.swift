@@ -48,8 +48,9 @@ public actor AgentTools: ToolProvider {
     /// Tasks being stopped at the user's request.
     private var stopping: Set<UUID> = []
     private var availabilities: [String: (value: AgentAvailability, at: Date)] = [:]
-    /// The task read back to the user, waiting for their "oui": shown on screen meanwhile, sent by `perform`.
-    private var draft: (call: ToolCall, id: UUID)?
+    /// The tasks read back to the user, waiting for their "oui" (several when one request hands over several): shown on
+    /// screen meanwhile, each sent by `perform`.
+    private var drafts: [(call: ToolCall, id: UUID)] = []
     private var onChange: @Sendable ([AgentTask]) -> Void = { _ in }
     private var onEnd: @Sendable (AgentTask) -> Void = { _ in }
     private var onFirstTask: @Sendable () async -> Void = {}
@@ -156,8 +157,11 @@ public actor AgentTools: ToolProvider {
         case AgentCatalog.delegateName:
             // Shown on screen while it waits for the "oui": the whole instruction can be read there.
             let task = newTask(call, status: .awaitingConfirmation, language: language)
-            if let previous = draft { tasks.removeAll { $0.id == previous.id } }
-            draft = (call, task.id)
+            // The same call read back again replaces its draft; other drafts wait with it (the runner drops them when a
+            // new request comes).
+            for previous in drafts where previous.call == call { tasks.removeAll { $0.id == previous.id } }
+            drafts.removeAll { $0.call == call }
+            drafts.append((call, task.id))
             tasks.append(task)
             publish()
             return AgentPhrases.review(agent: task.agentName, title: task.title, folder: call.text("dossier"), language)
@@ -171,8 +175,8 @@ public actor AgentTools: ToolProvider {
     }
 
     public func dropped(_ call: ToolCall) async {
-        guard let draft, draft.call == call else { return }
-        self.draft = nil
+        guard let index = drafts.firstIndex(where: { $0.call == call }) else { return }
+        let draft = drafts.remove(at: index)
         tasks.removeAll { $0.id == draft.id }
         publish()
     }
@@ -184,6 +188,11 @@ public actor AgentTools: ToolProvider {
         case AgentCatalog.followUpName: try followUp(call, context)
         default: try await cancel(call, context)
         }
+    }
+
+    public func undoneName(_ token: UndoToken, language: SpeechLanguage) async -> String? {
+        guard let id = UUID(uuidString: token.id), let task = task(id), task.status == .running else { return nil }
+        return AgentPhrases.undoneName(agent: task.agentName, language)
     }
 
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {
@@ -198,13 +207,14 @@ public actor AgentTools: ToolProvider {
     private func delegate(_ call: ToolCall, _ context: ToolContext) throws -> ToolOutcome {
         let language = context.language
         var task: AgentTask
-        if let draft, draft.call == call, let drafted = self.task(draft.id) {
+        if let index = drafts.firstIndex(where: { $0.call == call }), let drafted = self.task(drafts[index].id) {
             task = drafted
+            drafts.remove(at: index)
         } else {
+            drafts.removeAll { $0.call == call }
             task = newTask(call, status: .awaitingConfirmation, language: language)
             tasks.append(task)
         }
-        draft = nil
         let folder: URL
         do {
             if let name = call.text("dossier"), let named = folders.first(where: { $0.lastPathComponent == name }) {

@@ -129,6 +129,9 @@ func runDialogueBench(_ o: Options) async throws {
     let runner = ToolRunner(providers: providers)
     await model.useTools(await runner.tools())
     await model.watchToolCalls(o.watchCalls)
+    let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
+    await model.limitToolCalls(maxCalls)
+    print("calls carried out in one request: \(maxCalls) at most")
     var base = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     base.systemAddenda = [try o.addendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
@@ -155,7 +158,7 @@ func runDialogueBench(_ o: Options) async throws {
         for run in 1...repeats {
             print("■ \(dialogue.name) — run \(run)/\(repeats)" + (at == now ? "" : " · at \(LocalDateTime.format(at, in: timeZone))"))
             var talk = Talk(model: model, runner: runner, calendar: calendar, conversation: base, now: at,
-                            timeZone: timeZone, watchCalls: o.watchCalls)
+                            timeZone: timeZone, watchCalls: o.watchCalls, maxCalls: maxCalls)
             var result = RunResult(dialogue: dialogue.name, run: run, turns: [])
             for (index, sentence) in dialogue.turns.enumerated() {
                 var turn = try await talk.turn(sentence)
@@ -202,9 +205,11 @@ private struct Talk {
     let now: Date
     let timeZone: TimeZone
     let watchCalls: Bool
+    /// The calls the app carries out in one request (`PipelineConfig.actionsPerRequest`).
+    let maxCalls: Int
 
     init(model: MLXChatModel, runner: ToolRunner, calendar: MemoryCalendar, conversation: Conversation, now: Date,
-         timeZone: TimeZone, watchCalls: Bool)
+         timeZone: TimeZone, watchCalls: Bool, maxCalls: Int)
     {
         self.model = model
         self.runner = runner
@@ -213,6 +218,7 @@ private struct Talk {
         self.now = now
         self.timeZone = timeZone
         self.watchCalls = watchCalls
+        self.maxCalls = maxCalls
     }
 
     mutating func turn(_ text: String) async throws -> TurnResult {
@@ -240,89 +246,162 @@ private struct Talk {
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
             func send(_ piece: SentenceChunker.Piece) { SpeakableText.record(piece.text, after: piece.separator, in: &answer) }
-            /// As the app: the question of the refusal that gave the model its second try, said if that try says
-            /// nothing.
-            var refusalQuestion: String?
-            /// As the app: the model asked for more than one call in this turn, which then ends saying that the app
-            /// does one thing at a time.
+            // As the app (`VoicePipeline.answerWithTools`): the calls carried out in order, at most `maxCalls`; one second
+            // try for the refused ones, only they carried out from it, none twice; one summing up of what came from outside,
+            // no call carried out then; the app's questions, the one for the sensitive calls, and how many things it does
+            // at a time when the model asked for more.
+            enum Kind { case first, secondTry, summing }
+            var kind = Kind.first
             var askedForMore = false
-            var summing: String?
+            var begun = false
+            var carriedOut: [ToolCall] = []
+            var toCorrect: [(tool: String, question: String)] = []
+            var questions: [String] = []
+            var waitsForYes = false
+            var toSum: [String] = []
+            var summedUpAgain = false
+            var several = false
+            let alone = ToolContext(now: now, timeZone: timeZone, language: .french)
             while true {
-                var pass = Pass(text: "")
                 var calls: [ToolCall] = []
-                var moreCalls = false
-                let answered = answer
-                for try await output in model.reply(to: request) {
+                var results: [JSONValue] = []
+                var refusedHere: [(index: Int, question: String, refusal: ToolRefusal)] = []
+                var ignored: [ToolCall] = []
+                var pass = Pass(text: "")
+                var passes: [Pass] = []
+                // The whole pass first: whether another call follows a call tells whether the user asked for several
+                // actions (the app knows it at the model's next output, before carrying the call out).
+                var outputs: [ModelOutput] = []
+                for try await output in model.reply(to: request) { outputs.append(output) }
+                for (place, output) in outputs.enumerated() {
+                    let followed = outputs[(place + 1)...].first.map { if case .text = $0 { false } else { true } } ?? false
                     switch output {
                     case .text(let raw):
                         pass.text += raw
                         chunker.pieces(adding: filter.push(raw)).forEach(send)
-                    case .toolCall(let call) where summing == nil: calls.append(call)
-                    case .moreToolCalls where summing == nil: moreCalls = true
-                    case .unreadableToolCall(let raw) where summing == nil: pass.unreadable = raw
+                    case .toolCall(let written) where kind != .summing:
+                        guard calls.count < maxCalls else {
+                            askedForMore = true
+                            break
+                        }
+                        if kind == .first, followed || !calls.isEmpty { several = true }
+                        chunker.remainingPieces().forEach(send)
+                        let call = await runner.named(written)
+                        calls.append(call)
+                        var callPass = Pass(text: "", call: call, writtenName: written.name == call.name ? nil : written.name)
+                        if kind == .secondTry {
+                            if carriedOut.contains(call) {
+                                results.append(["statut": .string(ToolOutcome.alreadyDone)])
+                                callPass.result = results.last
+                                passes.append(callPass)
+                                continue
+                            }
+                            guard let index = toCorrect.firstIndex(where: { $0.tool == call.name }) else {
+                                results.append(["erreur": .string(ToolOutcome.onlyRefusedCalls)])
+                                callPass.result = results.last
+                                passes.append(callPass)
+                                continue
+                            }
+                            toCorrect.remove(at: index)
+                        }
+                        let creationsBefore = await calendar.creations.count
+                        let touchedBefore = await calendar.touched.count
+                        // As the app: for one of several actions, only the call's own words.
+                        let reply = await runner.handle(call, context: several ? alone : context, sameRequest: begun)
+                        begun = true
+                        if await calendar.creations.count > creationsBefore { callPass.created = true }
+                        let touched = await calendar.touched
+                        if touched.count > touchedBefore { callPass.touched = touched.last }
+                        results.append(reply.forModel)
+                        callPass.result = reply.forModel
+                        if case .object(let fields) = reply.forModel, fields["erreur"] != nil { callPass.refused = true }
+                        if let refusal = reply.refusal {
+                            if reply.retryable, kind == .first {
+                                refusedHere.append((calls.count - 1, reply.spoken, refusal))
+                            } else {
+                                questions.append(reply.spoken)
+                            }
+                        } else if reply.waitsForYes {
+                            waitsForYes = true
+                        } else {
+                            carriedOut.append(call)
+                            if reply.modelSpeaks { toSum.append(reply.spoken) } else { say(reply.spoken) }
+                        }
+                        passes.append(callPass)
+                    case .moreToolCalls where kind != .summing:
+                        askedForMore = true
+                        if kind == .first { several = true }
+                    case .unreadableToolCall(let raw) where kind != .summing: pass.unreadable = raw
+                    case .toolCall(let call): ignored.append(call)
                     default: break
                     }
                 }
                 chunker.pieces(adding: filter.flush()).forEach(send)
                 var cleaned = ReasoningFilter()
                 pass.text = (cleaned.push(pass.text) + cleaned.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
+                let modelSpoke = !SpeakableText.clean(pass.text).isEmpty
                 if result.passes.isEmpty, watchCalls, let chances = await model.lastToolCallChances {
                     result.firstCallChance = chances.first
                     result.bestCallChance = chances.best
                 }
-                if calls.count > 1 || moreCalls { askedForMore = true }
-                if let fallback = summing {
+                if askedForMore { pass.moreCalls = true }
+                // The pass's text on its first call (or alone), each call after it.
+                if var first = passes.first {
+                    first.text = pass.text
+                    first.moreCalls = pass.moreCalls
+                    first.unreadable = pass.unreadable
+                    passes[0] = first
+                    result.passes += passes
+                } else {
                     result.passes.append(pass)
+                }
+                if kind == .summing {
                     chunker.remainingPieces().forEach(send)
-                    if answer == answered { say(fallback) }
-                    if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
-                    break
-                }
-                guard !calls.isEmpty || pass.unreadable != nil else {
-                    result.passes.append(pass)
-                    if let question = refusalQuestion {
-                        chunker.remainingPieces().forEach(send)
-                        if answer == answered { say(question) }
-                        if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
+                    if !modelSpoke, !ignored.isEmpty, !summedUpAgain {
+                        summedUpAgain = true
+                        steps += [.calls(ignored)]
+                            + ignored.map { .result(of: $0, ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]) }
+                        request = conversation.messages(adding: message) + steps
+                        continue
                     }
+                    if !modelSpoke { for fallback in toSum.uniquedStrings() { say(fallback) } }
                     break
                 }
-                chunker.remainingPieces().forEach(send)
-                guard let written = calls.first else {
-                    result.passes.append(pass)
+                let secondTry = !refusedHere.isEmpty && toSum.isEmpty
+                if !secondTry {
+                    for refusal in refusedHere {
+                        results[refusal.index] = ["erreur": .string(refusal.refusal.forModel)]
+                        questions.append(refusal.question)
+                    }
+                }
+                if !calls.isEmpty { steps += [.calls(calls)] + zip(calls, results).map { .result(of: $0, $1) } }
+                if kind == .secondTry {
+                    chunker.remainingPieces().forEach(send)
+                    if !modelSpoke, !toCorrect.isEmpty { questions = toCorrect.map(\.question) + questions }
+                    toCorrect = []
+                }
+                if calls.isEmpty, pass.unreadable != nil {
+                    chunker.remainingPieces().forEach(send)
                     say(ActionPhrases.notUnderstood(.french))
                     break
                 }
-                let call = await runner.named(written)
-                let creationsBefore = await calendar.creations.count
-                let touchedBefore = await calendar.touched.count
-                let reply = await runner.handle(call, context: context)
-                if await calendar.creations.count > creationsBefore { pass.created = true }
-                let touched = await calendar.touched
-                if touched.count > touchedBefore { pass.touched = touched.last }
-                steps += [.call(call), .result(of: call, reply.forModel)]
-                pass.call = call
-                pass.writtenName = written.name == call.name ? nil : written.name
-                pass.result = reply.forModel
-                if case .object(let fields) = reply.forModel, fields["erreur"] != nil { pass.refused = true }
-                if calls.count > 1 || moreCalls { pass.moreCalls = true }
-                result.passes.append(pass)
-                if reply.retryable, refusalQuestion == nil {
-                    // The arguments were refused: the model sees why and gets one more try.
-                    refusalQuestion = reply.spoken
+                if secondTry {
+                    toCorrect = refusedHere.map { (calls[$0.index].name, $0.question) }
+                    kind = .secondTry
                     request = conversation.messages(adding: message) + steps
                     continue
                 }
-                if reply.modelSpeaks {
-                    summing = reply.spoken
+                if !toSum.isEmpty, !calls.isEmpty {
+                    kind = .summing
                     request = conversation.messages(adding: message) + steps
                     continue
                 }
-                say(reply.spoken)
-                if askedForMore { say(ActionPhrases.oneThingAtATime(.french)) }
                 break
             }
             chunker.remainingPieces().forEach(send)
+            for question in questions.uniquedStrings() { say(question) }
+            if waitsForYes, let question = await runner.pendingQuestion(.french) { say(question) }
+            if askedForMore { say(ActionPhrases.atMost(maxCalls, .french)) }
         }
         result.answer = answer
         conversation.record(user: message, steps: steps, assistant: answer, interrupted: false)
@@ -519,5 +598,13 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
                              (median(chances) ?? 0) * 100, (chances.min() ?? 0) * 100, (chances.max() ?? 0) * 100))
             }
         }
+    }
+}
+
+extension Array where Element == String {
+    /// The sentences in order, each once.
+    fileprivate func uniquedStrings() -> [String] {
+        var seen = Set<String>()
+        return filter { seen.insert($0).inserted }
     }
 }

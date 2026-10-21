@@ -384,6 +384,16 @@ public actor CalendarTools: ToolProvider {
         return UndoToken(provider: identifier, id: id)
     }
 
+    public func undoneName(_ token: UndoToken, language: SpeechLanguage) async -> String? {
+        switch undos[token.id] {
+        case nil: nil
+        case .delete(.event)?: ActionPhrases.undoneName(.event, language)
+        case .delete(.reminder)?: ActionPhrases.undoneName(.reminder, language)
+        case .restore?: ActionPhrases.undoneName(.change, language)
+        case .recreate?: ActionPhrases.undoneName(.deletion, language)
+        }
+    }
+
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {
         guard let undo = undos.removeValue(forKey: token.id) else { return ActionPhrases.cannotUndo(context.language) }
         switch undo {

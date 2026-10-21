@@ -61,6 +61,11 @@ public enum AgentPhrases {
             : "Cancelled, I stopped the task \(agent) was doing."
     }
 
+    /// A task stopped by « annule » after a request that did several things (`ActionPhrases.undone`).
+    public static func undoneName(agent: String, _ language: SpeechLanguage) -> String {
+        language == .french ? "la tâche de \(agent)" : "the \(agent) task"
+    }
+
     public static func alreadyOver(_ language: SpeechLanguage) -> String {
         language == .french ? "Cette tâche est déjà terminée, il n’y a rien à arrêter."
             : "That task is already over, there’s nothing to stop."

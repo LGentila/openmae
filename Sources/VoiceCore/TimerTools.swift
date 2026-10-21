@@ -74,6 +74,10 @@ public actor TimerTools: ToolProvider {
         return ActionPhrases.undone(.timer, context.language)
     }
 
+    public func undoneName(_ token: UndoToken, language: SpeechLanguage) -> String? {
+        ActionPhrases.undoneName(.timer, language)
+    }
+
     /// Timers still running.
     public var count: Int { running.count }
 

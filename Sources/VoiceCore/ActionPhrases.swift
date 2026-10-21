@@ -192,17 +192,17 @@ public enum ActionPhrases {
         }
     }
 
-    public enum UndoneKind { case event, reminder, change, timer }
+    public enum UndoneKind { case event, reminder, change, deletion, timer }
 
     public static func undone(_ kind: UndoneKind, _ language: SpeechLanguage) -> String {
         switch (kind, language) {
         case (.event, .french): "C’est annulé\(nb): j’ai retiré l’événement."
         case (.reminder, .french): "C’est annulé\(nb): j’ai retiré le rappel."
-        case (.change, .french): "C’est annulé\(nb): tout est revenu comme avant."
+        case (.change, .french), (.deletion, .french): "C’est annulé\(nb): tout est revenu comme avant."
         case (.timer, .french): "C’est annulé, j’ai arrêté le minuteur."
         case (.event, .english): "Cancelled: I removed the event."
         case (.reminder, .english): "Cancelled: I removed the reminder."
-        case (.change, .english): "Cancelled: everything is back as before."
+        case (.change, .english), (.deletion, .english): "Cancelled: everything is back as before."
         case (.timer, .english): "Cancelled, I stopped the timer."
         }
     }
@@ -363,6 +363,110 @@ public enum ActionPhrases {
     public static func oneThingAtATime(_ language: SpeechLanguage) -> String {
         language == .french ? "Je fais une chose à la fois\(nb): redis-moi la suite."
             : "I do one thing at a time: tell me the rest again."
+    }
+
+    // MARK: - Several actions in one request
+
+    /// Said once, at the end of a request that asked for more actions than the app carries out at once (`count`), the
+    /// first ones carried out: « Je fais trois choses à la fois au plus : redis-moi la suite. »; `oneThingAtATime` for 1.
+    public static func atMost(_ count: Int, _ language: SpeechLanguage) -> String {
+        guard count > 1 else { return oneThingAtATime(language) }
+        return language == .french
+            ? "Je fais \(Self.count(count, feminine: true)) choses à la fois au plus\(nb): redis-moi la suite."
+            : "I do \(Self.count(count, english: true)) things at a time at most: tell me the rest again."
+    }
+
+    /// The one question for the sensitive calls of one request, which wait together for the user's "oui": a single one's
+    /// own sentence (`ToolProvider.summary`), or each one's without its question, then one « on y va ? » (« Je lance le
+    /// raccourci « Salon » et je confie « relire le README » à Claude Code : on y va ? »).
+    public static func pendingQuestion(_ summaries: [String], _ language: SpeechLanguage) -> String {
+        guard summaries.count > 1 else { return summaries.first ?? "" }
+        let parts = summaries.enumerated().map { index, summary in
+            let part = withoutQuestion(summary)
+            return index == 0 ? capitalized(part) : continuing(part)
+        }
+        return language == .french ? list(parts, language) + "\(nb): on y va\(nb)?"
+            : list(parts, language) + ": shall I go ahead?"
+    }
+
+    /// A sentence that asks for the user's "oui", without its question: « Je lance le raccourci « Salon ». On y va ? »
+    /// → « Je lance le raccourci « Salon » ».
+    static func withoutQuestion(_ summary: String) -> String {
+        var text = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasSuffix("?") {
+            text.removeLast()
+            text = text.trimmingCharacters(in: .whitespaces)
+            for ending in ["on y va", "shall i go ahead"] where text.lowercased().hasSuffix(ending) {
+                text.removeLast(ending.count)
+                text = text.trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
+        while let last = text.last, ".,;:!?".contains(last) {
+            text.removeLast()
+            text = text.trimmingCharacters(in: .whitespaces)
+        }
+        return text
+    }
+
+    /// A part after the first in one sentence: « Je confie… » → « je confie… » (a name stays as it is).
+    private static func continuing(_ part: String) -> String {
+        part.hasPrefix("Je ") || part.hasPrefix("J’") || part.hasPrefix("J'") ? lowercasedFirst(part) : part
+    }
+
+    /// « annule » after a request that did several things: what was taken back, in a few words each, in the order they
+    /// were done (`ToolProvider.undoneName`): « C’est annulé : le minuteur et le rappel. », « … : les deux minuteurs. »
+    public static func undone(_ names: [String], _ language: SpeechLanguage) -> String {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for name in names {
+            if counts[name] == nil { order.append(name) }
+            counts[name, default: 0] += 1
+        }
+        let parts = order.map { name in counts[name]! > 1 ? plural(name, counts[name]!, language) : name }
+        return language == .french ? "C’est annulé\(nb): \(list(parts, language))."
+            : "Cancelled: I took back \(list(parts, language))."
+    }
+
+    /// What an action of the calendar or a timer was, for `undone`.
+    public static func undoneName(_ kind: UndoneKind, _ language: SpeechLanguage) -> String {
+        switch (kind, language) {
+        case (.event, .french): "l’événement"
+        case (.reminder, .french): "le rappel"
+        case (.change, .french): "la modification"
+        case (.deletion, .french): "la suppression"
+        case (.timer, .french): "le minuteur"
+        case (.event, .english): "the event"
+        case (.reminder, .english): "the reminder"
+        case (.change, .english): "the change"
+        case (.deletion, .english): "the deletion"
+        case (.timer, .english): "the timer"
+        }
+    }
+
+    /// « le minuteur » said twice → « les deux minuteurs »; « the timer » → « the two timers ».
+    private static func plural(_ name: String, _ n: Int, _ language: SpeechLanguage) -> String {
+        func pluralized(_ word: Substring) -> String {
+            word.hasSuffix("s") || word.hasSuffix("x") || word.hasSuffix("z") ? String(word) : word + "s"
+        }
+        switch language {
+        case .french:
+            var rest = Substring(name)
+            for article in ["le ", "la ", "l’", "l'"] where rest.hasPrefix(article) {
+                rest = rest.dropFirst(article.count)
+                break
+            }
+            var words = rest.split(separator: " ", omittingEmptySubsequences: false)
+            guard let first = words.first else { return name }
+            words[0] = Substring(pluralized(first))
+            return "les \(count(n)) " + words.joined(separator: " ")
+        case .english:
+            guard name.hasPrefix("the ") else { return name }
+            var words = name.dropFirst(4).split(separator: " ")
+            guard let last = words.last else { return name }
+            words[words.count - 1] = Substring(pluralized(last))
+            return "the \(count(n, english: true)) " + words.joined(separator: " ")
+        }
     }
 
     public static func badTime(_ language: SpeechLanguage) -> String {

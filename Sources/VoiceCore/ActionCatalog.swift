@@ -61,6 +61,18 @@ public enum ActionCatalog {
     /// or done earlier, it tells the examples as if they had happened; no instruction tried stopped that.
     public static func showsExamples(on tier: HardwareTier) -> Bool { tier == .minimum }
 
+    /// The most actions carried out in one request on this tier (the user asked for several at once), in the order the
+    /// model wrote their calls: 3 where the model writes them right (`voice-cli actions-bench` on
+    /// Tests/Fixtures/actions-multi-fr.json: every action right in at least 90 % of the requests with several, no worse
+    /// on the requests with one, at most one action too many on the ten that sound like two), 1 elsewhere, and on the
+    /// tiers that could not be measured.
+    public static func actionsPerRequest(on tier: HardwareTier) -> Int {
+        switch tier {
+        case .comfort: 3
+        default: 1
+        }
+    }
+
     /// Four exchanges for the start of a conversation, as if they had happened: a timer, a reminder without a date,
     /// then an event asked for in a calendar the user names, at a moment the app cannot place (`vagueMoment`), and the
     /// user's answer. Each request gets its call at once, with the user's words, then its result and what was said:

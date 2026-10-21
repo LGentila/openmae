@@ -57,6 +57,8 @@ private actor CacheCheck {
     let model: MLXChatModel
     let base: Conversation
     let dateLine: String
+    /// The calls the app carries out in one request (`PipelineConfig.actionsPerRequest`).
+    let maxCalls: Int
     var conversation: Conversation
     var steps: [Step] = []
     /// Time of each `catchUp` that computed something.
@@ -65,10 +67,11 @@ private actor CacheCheck {
     var outOfStep = 0
     let clock = ContinuousClock()
 
-    init(model: MLXChatModel, base: Conversation, dateLine: String) {
+    init(model: MLXChatModel, base: Conversation, dateLine: String, maxCalls: Int) {
         self.model = model
         self.base = base
         self.dateLine = dateLine
+        self.maxCalls = maxCalls
         conversation = base
     }
 
@@ -97,7 +100,7 @@ private actor CacheCheck {
     /// Sends a request; `stopAfter`: stop reading (cancel) after this many pieces of output. `wentBackBefore`: the
     /// model's counts, read before something else started on the model (read here, they would wait for it, and so would
     /// the request).
-    /// `moreCalls`: the model wrote more than one call, or went on to another (`ModelOutput.moreToolCalls`).
+    /// `moreCalls`: the model went on to another call than those it may write (`ModelOutput.moreToolCalls`).
     private func request(_ label: String, _ messages: [ChatMessage], stopAfter: Int? = nil,
                          wentBackBefore: WentBack? = nil) async throws -> (text: String, calls: [ToolCall], moreCalls: Bool)
     {
@@ -135,7 +138,7 @@ private actor CacheCheck {
         print(String(format: "  %-46@ %5d tokens: reused %5d, computed %5d in %6.0f ms · GPU memory %.2f GB (peak %.2f)"
                      + "%@%@%@", label as NSString, step.promptTokens, step.reused, step.computed, step.prefillMs,
                      MLXChatModel.activeMemoryGB, step.peakGB, waited, note, await outOfStepNote()))
-        return (text, calls, moreCalls || calls.count > 1)
+        return (text, calls, moreCalls)
     }
 
     /// A request the user cancels while the model reads its prompt (they spoke over the waiting phrase while it read a
@@ -180,14 +183,15 @@ private actor CacheCheck {
         return "  ← out of step: the model counts \(counts.counted) tokens, its cache holds \(counts.held)"
     }
 
-    /// One turn as the pipeline runs it: the answer goes into the history the way the pipeline records it (pieces cut
-    /// and cleaned for the voice, `SpeakableText.record`); a call succeeds, after one refusal and a second try with
-    /// `refuse`, and the app then says "C'est noté."; with `summarize`, the call gets that result and the model sums it
-    /// up (as after a web search or an agent's report). Either way, when the model asked for more than one call in the
-    /// turn, the app then says that it does one thing at a time. `record: false`: the turn is dropped (the user spoke
-    /// again before any voice); `interrupted`: the answer is recorded as cut off. `cancelSumming`: the summing up is
-    /// cancelled while the model reads the result (`cancelledRequest`). `wentBackBefore`: see `request`.
-    /// `catchingUp: false`: recorded without catching up.
+    /// One turn as the pipeline runs it (`VoicePipeline.answerWithTools`): the answer goes into the history the way the
+    /// pipeline records it (pieces cut and cleaned for the voice, `SpeakableText.record`). The calls the model writes, at
+    /// most `maxCalls`, succeed, and the app says "C'est noté." for each; with `refuse`, the first one is refused and the
+    /// model gets a second try (its calls then succeed); with `summarize`, the first one gets that result and the model
+    /// sums it up (as after a web search or an agent's report). Each pass's calls go into the history as the model wrote
+    /// them, in one assistant message, then their results. When the model asked for more calls than `maxCalls`, the app
+    /// then says how many it does at a time. `record: false`: the turn is dropped (the user spoke again before any voice);
+    /// `interrupted`: the answer is recorded as cut off. `cancelSumming`: the summing up is cancelled while the model reads
+    /// the result (`cancelledRequest`). `wentBackBefore`: see `request`. `catchingUp: false`: recorded without catching up.
     func turn(_ label: String, _ text: String, refuse: Bool = false, summarize: JSONValue? = nil, record: Bool = true,
               stopAfter: Int? = nil, interrupted: Bool = false, cancelSumming: Bool = false,
               wentBackBefore: WentBack? = nil, catchingUp: Bool = true) async throws
@@ -214,34 +218,38 @@ private actor CacheCheck {
                                                 wentBackBefore: pass.isEmpty ? wentBackBefore : nil)
             chunker.pieces(adding: filter.push(output.text)).forEach(send)
             chunker.pieces(adding: filter.flush()).forEach(send)
-            if !summing, output.moreCalls { askedForMore = true }
-            guard !summing, let call = output.calls.first else {  // a call written while summing up: ignored
-                if summing, askedForMore {
-                    chunker.remainingPieces().forEach(send)
-                    SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer)
-                }
-                break
-            }
             chunker.remainingPieces().forEach(send)
+            // Calls written while summing up are ignored (the pipeline then sums up once more only after calls alone).
+            guard !summing, !output.calls.isEmpty else { break }
+            if output.moreCalls || output.calls.count > maxCalls { askedForMore = true }
+            let calls = Array(output.calls.prefix(maxCalls))
+            var results: [JSONValue] = []
+            for (index, _) in calls.enumerated() {
+                if index == 0, refuse, !secondTry {
+                    results.append(["erreur": .string(
+                        "Cette date est déjà passée. Demande à l'utilisateur de préciser, ou propose une date à venir.")])
+                } else if index == 0, let summarize, !secondTry {
+                    results.append(summarize)
+                } else {
+                    results.append(["ok": .bool(true), "id": .string("r\(self.steps.count)-\(index + 1)")])
+                    SpeakableText.record("C'est noté.", in: &answer)
+                }
+            }
+            steps += [.calls(calls)] + zip(calls, results).map { .result(of: $0, $1) }
             if refuse, !secondTry {
-                steps += [.call(call), .result(of: call, ["erreur": .string(
-                    "Cette date est déjà passée. Demande à l'utilisateur de préciser, ou propose une date à venir.")])]
                 secondTry = true
                 request = conversation.messages(adding: user) + steps
                 continue
             }
-            if let summarize {
-                steps += [.call(call), .result(of: call, summarize)]
+            if summarize != nil, !secondTry {
                 summing = true
                 request = conversation.messages(adding: user) + steps
                 continue
             }
-            steps += [.call(call), .result(of: call, ["ok": .bool(true), "id": .string("r\(self.steps.count)")])]
-            SpeakableText.record("C'est noté.", in: &answer)
-            if askedForMore { SpeakableText.record(ActionPhrases.oneThingAtATime(.french), in: &answer) }
             break
         }
         chunker.remainingPieces().forEach(send)
+        if askedForMore { SpeakableText.record(ActionPhrases.atMost(maxCalls, .french), in: &answer) }
         if record {
             conversation.record(user: user, steps: steps, assistant: answer, interrupted: interrupted)
             if catchingUp { await catchUp(userSpeaks: interrupted) }
@@ -422,6 +430,9 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
     await model.useTools(tools)
+    let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
+    await model.limitToolCalls(maxCalls)
+    print("calls carried out in one request: \(maxCalls) at most")
     var base = Conversation()
     base.cutOffPlacement = placement
     base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
@@ -436,7 +447,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
                  + "memory %.2f GB\n", tools.count, promptTokens, computeMs, await model.lastBeginning?.peakGB ?? 0,
                  MLXChatModel.activeMemoryGB))
 
-    let check = CacheCheck(model: model, base: base, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone))
+    let check = CacheCheck(model: model, base: base, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone),
+                           maxCalls: maxCalls)
     let scenarios: [(String, () async throws -> Void)] = [
         ("plain", {
             try await check.newConversation()
@@ -486,7 +498,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("plain answer", "Tu as une idée de dîner rapide pour ce soir ?")
         }),
         ("two-actions", {
-            // Two actions in one request: the app carries out the first one and says it does one thing at a time.
+            // Several actions in one request: the app carries out as many as it does at once (the tier's, or --max-calls),
+            // the history keeps them as the model wrote them.
             try await check.newConversation()
             try await check.turn("plain answer", "Bonjour, tu vas bien aujourd'hui ?")
             try await check.turn("two actions in one request", "Mets un minuteur de deux minutes et un autre de cinq minutes.")
@@ -496,6 +509,18 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
             try await check.turn("two actions after the two actions",
                                  "Rappelle-moi d'acheter du pain demain matin et d'appeler ma mère ce soir.")
             try await check.turn("plain answer after the two actions", "Merci beaucoup.")
+            try await check.turn("three actions in one request",
+                                 "Mets un minuteur de vingt minutes, rappelle-moi de sortir les poubelles ce soir à 21 h "
+                                     + "et ajoute un dîner chez Léa samedi à 20 h.")
+            try await check.turn("plain answer after the three actions", "Super. Qu'est-ce que je pourrais apporter chez Léa ?")
+            try await check.turn("two actions, the first refused",
+                                 "Ajoute un rendez-vous chez le kiné hier à 17 h et mets un minuteur de dix minutes.",
+                                 refuse: true)
+            try await check.turn("plain answer after the refused one", "D'accord, merci.")
+            try await check.turn("four actions in one request",
+                                 "Mets un minuteur de cinq minutes, un de dix minutes, un de quinze minutes et un de vingt "
+                                     + "minutes.")
+            try await check.turn("plain answer after the four actions", "Merci, c'est tout pour l'instant.")
         }),
         ("summary", {
             try await check.newConversation()

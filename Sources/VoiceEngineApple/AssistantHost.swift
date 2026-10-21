@@ -237,6 +237,7 @@ public actor AssistantHost: AssistantConnection {
             config.listening = settings.listening
             config.actionExamples = ActionCatalog.showsExamples(on: tier)
             config.cutOffPlacement = Conversation.cutOffPlacement(on: tier)
+            config.actionsPerRequest = ActionCatalog.actionsPerRequest(on: tier)
             let router = AudioRouter(audio)
             self.router = router
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
