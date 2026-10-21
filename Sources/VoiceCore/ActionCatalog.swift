@@ -61,11 +61,26 @@ public enum ActionCatalog {
     /// or done earlier, it tells the examples as if they had happened; no instruction tried stopped that.
     public static func showsExamples(on tier: HardwareTier) -> Bool { tier == .minimum }
 
-    /// Three exchanges for the start of a conversation, as if they had happened: a timer, a reminder without a date
-    /// and an event, each a call made at once with the user's words, its result and what the app then said. As the
-    /// benchmark measured them: no date line in their messages. The event is on the Tuesday the app would choose at
-    /// `now`, and the ids ("t0", "r0", "e0") are ones the app never gives: a call that refers to one of these items
-    /// is refused, never taken for something of the user's.
+    /// Four exchanges for the start of a conversation, as if they had happened: a timer, a reminder without a date,
+    /// then an event asked for in a calendar the user names, at a moment the app cannot place (`vagueMoment`), and the
+    /// user's answer. Each request gets its call at once, with the user's words, then its result and what was said:
+    /// the app's sentence, or, after the event refused, the question of a second try about the day and the hour alone.
+    /// At the answer, the event's call again, with the request's title and calendar. As the benchmark measured them: no
+    /// date line in their messages. The event is on the Tuesday the app would choose at `now`, and the ids ("t0", "r0",
+    /// "e0") are ones the app never gives: a call that refers to one of these items is refused, never taken for
+    /// something of the user's.
+    ///
+    /// The event used to be asked for with its moment (« Ajoute un rendez-vous chez le kiné mardi à 18 h 15 »). Asked
+    /// for an event at a moment the app cannot place (« Ajoute un rendez-vous chez le coiffeur après le travail. »),
+    /// Gemma 4 E2B then wrote no call in 10 runs of 10 of voice-cli dialogue-bench: it asked about something the request
+    /// already said (« Quel est le nom du coiffeur ? », « Quel est le nom de ton calendrier ? »), and again at the
+    /// user's answer (« Demain à 18 h. »), so the appointment was saved in 0 to 2 runs of 10. With the event refused
+    /// first, then created at the answer: 9 or 10 runs of 10 (the beginning grows from 1,847 to 2,070 tokens). Without a
+    /// calendar named in that request, E2B also left out a calendar the user named after a reminder (« … dans mon
+    /// calendrier Travail. »: 9 runs of 10). With every example of that kind tried, E2B leaves out the list of « Ajoute
+    /// du pain à ma liste de courses. » (10 runs of 10, as E4B does in 4 to 6; it used to name it in 10): the reminder
+    /// goes to the default list. With the reminder example last, it named it, then named it again after « Mets-le dans
+    /// tes rappels alors. » (7 runs of 10).
     public static func examples(now: Date, timeZone: TimeZone = .current) -> [ChatMessage] {
         let context = ToolContext(now: now, timeZone: timeZone, language: .french)
         var messages: [ChatMessage] = []
@@ -80,16 +95,29 @@ public enum ActionCatalog {
             ActionPhrases.reminderCreated(title: "acheter du lait", due: nil, hasTime: false, listName: nil, context))
         let title = "Rendez-vous chez le kiné"
         let when = "mardi à 18 h 15"
+        let calendarName = "Famille"
         if let start = try? FrenchDates.moment(when, now: now, calendar: context.calendar).start {
+            let refused = ToolCall(name: createEvent.name, arguments: [
+                "titre": .string(title), "quand": .string(vagueMoment), "calendrier": .string(calendarName),
+            ])
+            add("Ajoute un rendez-vous chez le kiné \(vagueMoment) dans mon calendrier \(calendarName)", refused,
+                refusal(.notUnderstood, key: "quand", raw: vagueMoment, context: context).result(for: refused),
+                "Quel jour et à quelle heure, pour ce rendez-vous\(ActionPhrases.nb)?")
             let end = start.addingTimeInterval(3600)
-            let event = ToolCall(name: createEvent.name, arguments: ["titre": .string(title), "quand": .string(when)])
-            add("Ajoute un rendez-vous chez le kiné \(when)", event,
+            let event = ToolCall(name: createEvent.name, arguments: [
+                "titre": .string(title), "quand": .string(when), "calendrier": .string(calendarName),
+            ])
+            add(when.prefix(1).uppercased() + when.dropFirst() + ".", event,
                 ["id": "e0", "titre": .string(title), "debut": .string(LocalDateTime.format(start, in: timeZone)),
-                 "fin": .string(LocalDateTime.format(end, in: timeZone)), "calendrier": "Maison"],
-                ActionPhrases.eventCreated(title: title, start: start, end: end, allDay: false, calendarName: nil, context))
+                 "fin": .string(LocalDateTime.format(end, in: timeZone)), "calendrier": .string(calendarName)],
+                ActionPhrases.eventCreated(title: title, start: start, end: end, allDay: false,
+                                           calendarName: calendarName, context))
         }
         return messages
     }
+
+    /// The moment of the examples' event request, which the app cannot place in time (`FrenchDates`).
+    static let vagueMoment = "après la piscine"
 
     /// What the model is told of `dateLine`: part of the actions' prompt, and on its own when only the web search is on.
     public static let dateLineRule = "Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre "
