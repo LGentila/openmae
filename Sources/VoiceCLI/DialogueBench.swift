@@ -45,15 +45,21 @@ private struct DialogueCorpus: Decodable {
         /// An item the dialogue creates on the way, which the user never asks to change: its title contains `keep`
         /// (whatever the accents and case). The report counts the runs that changed or deleted it.
         var keep: String?
+        /// The calendars and the reminder lists the app finds in this dialogue, the default one first (by default, one
+        /// of each: « Maison » and « Rappels »).
+        var calendars: [String]?
+        var lists: [String]?
     }
 
     /// The item the user wants saved: by this tool, its title containing `title` (whatever the accents and case), at
-    /// `when` ("2026-10-16T16:00", or the day alone). With `modifier_element`, an item created earlier in the dialogue
-    /// that the user wants changed: the app changed it (it did not create it), its title and date as wanted.
+    /// `when` ("2026-10-16T16:00", or the day alone), in the calendar or the list `calendar` (whatever the accents and
+    /// case). With `modifier_element`, an item created earlier in the dialogue that the user wants changed: the app
+    /// changed it (it did not create it), its title and date as wanted.
     struct Goal: Decodable {
         var tool: String
         var title: String?
         var when: String?
+        var calendar: String?
     }
 }
 
@@ -145,6 +151,7 @@ func runDialogueBench(_ o: Options) async throws {
             }
             at = date
         }
+        await calendar.use(calendars: dialogue.calendars, lists: dialogue.lists)
         for run in 1...repeats {
             print("■ \(dialogue.name) — run \(run)/\(repeats)" + (at == now ? "" : " · at \(LocalDateTime.format(at, in: timeZone))"))
             var talk = Talk(model: model, runner: runner, calendar: calendar, conversation: base, now: at,
@@ -355,8 +362,9 @@ private struct DryWebSearch: ToolProvider {
 }
 
 /// Whether a pass saved the goal's item: an item of the goal's tool's kind (an event for creer_evenement, a reminder for
-/// creer_rappel) that the app created, its title and date as wanted. Whatever call the model wrote: a change of the item
-/// whose creation was just refused creates it. For modifier_element: an item that the app changed, not created.
+/// creer_rappel) that the app created, its title, date and calendar or list as wanted. Whatever call the model wrote: a
+/// change of the item whose creation was just refused creates it. For modifier_element: an item that the app changed,
+/// not created.
 private func reaches(_ pass: Pass, _ goal: DialogueCorpus.Goal) -> Bool {
     let change = goal.tool == ActionCatalog.changeItem.name
     let saved = change ? pass.call?.name == ActionCatalog.changeItem.name && pass.touched != nil && pass.created != true
@@ -371,6 +379,11 @@ private func reaches(_ pass: Pass, _ goal: DialogueCorpus.Goal) -> Bool {
         guard let saved = (fields["debut"] ?? fields["echeance"])?.text else { return false }
         // To the minute, or the day alone.
         guard when.contains("T") ? saved == when : saved.hasPrefix(when) else { return false }
+    }
+    if let calendar = goal.calendar {
+        guard let saved = (fields["calendrier"] ?? fields["liste"])?.text, folded(saved) == folded(calendar) else {
+            return false
+        }
     }
     return true
 }

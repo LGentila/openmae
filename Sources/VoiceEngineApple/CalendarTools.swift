@@ -56,13 +56,24 @@ public actor CalendarTools: ToolProvider {
 
     public func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
 
+    /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
+    /// (`withCollectionSaid`): the answer then creates it there.
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
             try ActionCatalog.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(call, refusal)
+            refusedCreation.refused(withCollectionSaid(call, context), refusal)
             throw refusal
+        }
+    }
+
+    /// A creation whose call names no calendar (an event) or no list (a reminder), with the one the user's words name
+    /// among the writable ones, or the one of the same creation refused just before (`ActionCatalog.withCollectionSaid`):
+    /// the model left it out. Found then as one the model names.
+    private func withCollectionSaid(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
+        ActionCatalog.withCollectionSaid(call, context: context, again: refusedCreation.collection(before: call)) {
+            writable($0 ? .event : .reminder)
         }
     }
 
@@ -129,13 +140,14 @@ public actor CalendarTools: ToolProvider {
                                   spoken: ActionPhrases.notUnderstood(context.language))
             }
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(call, refusal)
+            refusedCreation.refused(withCollectionSaid(call, context), refusal)
             throw refusal
         }
     }
 
     private func createEvent(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.event, context: context)
+        let call = withCollectionSaid(call, context)
         let title = try ActionCatalog.title(call, context: context)
         let times = try ActionCatalog.eventTimes(call, context: context)
         let named = call.text("calendrier")
@@ -168,6 +180,7 @@ public actor CalendarTools: ToolProvider {
 
     private func createReminder(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.reminder, context: context)
+        let call = withCollectionSaid(call, context)
         let title = try ActionCatalog.title(call, context: context)
         let due = try ActionCatalog.reminderDue(call, context: context)
         let named = call.text("liste")

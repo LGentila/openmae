@@ -1,6 +1,6 @@
 // The app's reminders and calendar for voice-cli dialogue-bench: the same checks, results and sentences as
 // `CalendarTools` (VoiceEngineApple), on items kept in memory instead of EventKit. One calendar, « Maison », and one
-// reminder list, « Rappels », both empty when a dialogue starts.
+// reminder list, « Rappels », both empty when a dialogue starts; a dialogue may have others (`use`).
 
 import Foundation
 import VoiceCore
@@ -19,7 +19,13 @@ actor MemoryCalendar: ToolProvider {
         /// An event at a time (not for the whole day), a reminder due at a time.
         var hasTime: Bool
         var place: String?
+        /// Its calendar (an event's) or its list (a reminder's).
+        var collection: String
     }
+
+    /// The calendars and the reminder lists there are, the default one first.
+    private var calendars = [calendarName]
+    private var lists = [listName]
 
     /// Items created in this conversation, by the reference given to the model ("e1", "r2").
     private var items: [String: Item] = [:]
@@ -42,13 +48,27 @@ actor MemoryCalendar: ToolProvider {
 
     func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
 
+    /// The calendars and the lists of the next conversations, the default one first (none: « Maison », « Rappels »).
+    func use(calendars: [String]?, lists: [String]?) {
+        self.calendars = calendars.flatMap { $0.isEmpty ? nil : $0 } ?? [Self.calendarName]
+        self.lists = lists.flatMap { $0.isEmpty ? nil : $0 } ?? [Self.listName]
+    }
+
     func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
             try ActionCatalog.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(call, refusal)
+            refusedCreation.refused(withCollectionSaid(call, context), refusal)
             throw refusal
+        }
+    }
+
+    /// As in the app: a creation whose call names no calendar or no list, with the one the user's words name, or the one
+    /// of the same creation refused just before (`ActionCatalog.withCollectionSaid`).
+    private func withCollectionSaid(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
+        ActionCatalog.withCollectionSaid(call, context: context, again: refusedCreation.collection(before: call)) {
+            $0 ? calendars : lists
         }
     }
 
@@ -66,7 +86,7 @@ actor MemoryCalendar: ToolProvider {
         do {
             return try await carryOut(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(call, refusal)
+            refusedCreation.refused(withCollectionSaid(call, context), refusal)
             throw refusal
         }
     }
@@ -74,31 +94,31 @@ actor MemoryCalendar: ToolProvider {
     private func carryOut(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
         switch call.name {
         case ActionCatalog.createEvent.name:
+            let call = withCollectionSaid(call, context)
             let title = try ActionCatalog.title(call, context: context)
             let times = try ActionCatalog.eventTimes(call, context: context)
             let named = call.text("calendrier")
-            try collection(named, Self.calendarName, kind: "Aucun calendrier modifiable ne s'appelle", others: "Calendriers",
-                           spoken: ActionPhrases.unknownCalendar, context)
+            let calendar = try collection(named, event: true, context)
             eventCount += 1
             let reference = "e\(eventCount)"
             let item = Item(isEvent: true, title: title, date: times.start, end: times.end, hasTime: !times.allDay,
-                            place: call.text("lieu"))
+                            place: call.text("lieu"), collection: calendar)
             let sayCalendar = named != nil || !calendarNamed
             calendarNamed = true
             return created(item, reference, spoken: ActionPhrases.eventCreated(
                 title: title, start: times.start, end: times.end, allDay: times.allDay,
-                calendarName: sayCalendar ? Self.calendarName : nil, context), context)
+                calendarName: sayCalendar ? calendar : nil, context), context)
         case ActionCatalog.createReminder.name:
+            let call = withCollectionSaid(call, context)
             let title = try ActionCatalog.title(call, context: context)
             let due = try ActionCatalog.reminderDue(call, context: context)
             let named = call.text("liste")
-            try collection(named, Self.listName, kind: "Aucune liste de rappels ne s'appelle", others: "Listes",
-                           spoken: ActionPhrases.unknownList, context)
+            let list = try collection(named, event: false, context)
             reminderCount += 1
             let reference = "r\(reminderCount)"
-            let item = Item(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false)
+            let item = Item(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false, collection: list)
             return created(item, reference, spoken: ActionPhrases.reminderCreated(
-                title: title, due: due?.date, hasTime: due?.hasTime ?? false, listName: named != nil ? Self.listName : nil,
+                title: title, due: due?.date, hasTime: due?.hasTime ?? false, listName: named != nil ? list : nil,
                 context), context)
         case ActionCatalog.readAgenda.name:
             guard let (start, end) = try ActionCatalog.period(call, context: context, required: true) else {
@@ -196,22 +216,24 @@ actor MemoryCalendar: ToolProvider {
                            undo: addUndo(reference, before: nil))
     }
 
-    /// The calendar or list a call names, which must be `only` (whatever the case and accents); none named: `only`.
-    private func collection(_ named: String?, _ only: String, kind: String, others: String,
-                            spoken: (String, SpeechLanguage) -> String, _ context: ToolContext) throws
-    {
-        guard let named else { return }
-        func folded(_ text: String) -> String {
-            text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let (key, name) = (folded(named), folded(only))
-        guard key == name || key.contains(name) || name.contains(key) else {
-            var refusal = ToolRefusal(forModel: "\(kind) « \(named) ». \(others) : \(only).",
-                                      spoken: spoken(named, context.language))
+    /// The calendar (`event`) or the list a call names, among this conversation's, found as `CalendarTools` finds it
+    /// (whatever the case and accents, else one whose name contains it or is contained in it); none named: the default
+    /// one. Refused as in the app when none has that name.
+    private func collection(_ named: String?, event: Bool, _ context: ToolContext) throws -> String {
+        let names = event ? calendars : lists
+        guard let named else { return names[0] }
+        guard let index = ActionCatalog.collectionMatch(named, among: names) else {
+            var refusal = event
+                ? ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(named) ». Calendriers : "
+                                  + names.joined(separator: ", ") + ".",
+                              spoken: ActionPhrases.unknownCalendar(named, context.language))
+                : ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(named) ». Listes : "
+                                  + names.joined(separator: ", ") + ".",
+                              spoken: ActionPhrases.unknownList(named, context.language))
             refusal.detailGivenAgain = true
             throw refusal
         }
+        return names[index]
     }
 
     /// The item a call refers to: "dernier", or a reference given earlier ("e1").
@@ -243,10 +265,10 @@ actor MemoryCalendar: ToolProvider {
             if let end = item.end { fields["fin"] = .string(LocalDateTime.format(end, in: timeZone, withTime: item.hasTime)) }
             if !item.hasTime { fields["journee_entiere"] = true }
             if let place = item.place, !place.isEmpty { fields["lieu"] = .string(place) }
-            if reference != nil { fields["calendrier"] = .string(Self.calendarName) }
+            if reference != nil { fields["calendrier"] = .string(item.collection) }
         } else {
             if let due = item.date { fields["echeance"] = .string(LocalDateTime.format(due, in: timeZone, withTime: item.hasTime)) }
-            fields["liste"] = .string(Self.listName)
+            fields["liste"] = .string(item.collection)
         }
         return .object(fields)
     }

@@ -1,5 +1,5 @@
 {
- "_comment": "French dialogues for voice-cli dialogue-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue's turns are sent in order, as long as its goal is not reached: the item the user wants saved: one of goal.tool's kind (an event for creer_evenement, a reminder for creer_rappel) that the app created, whatever call the model wrote, its title containing goal.title (whatever the accents and case), at goal.when (to the minute, or the day alone). A dialogue may have its own reference time (now), which its goal follows. In the first four, the first request asks for a moment already gone, which the app refuses: the model must write the call anyway (the app checks the date, not the model) and keep the item when the user gives another moment. In the others, the app refuses the first request's call for something the model may correct, which gives it a second try: a weekday that does not match the date (the 22nd is a Thursday), nothing created yet to move, no title, a list or a calendar that does not exist, words that cannot be placed in time. A second try that says nothing leaves the app's question; the user then answers it. The last four first create a reminder without a date, then go on as « a Work calendar that does not exist » and « hairdresser after work » do: in the first two, that reminder (keep) must stay as it was, the report counts the runs that changed or deleted it; in the last two, the user asks to move it instead, and their goal is that reminder changed (modifier_element), not created.",
+ "_comment": "French dialogues for voice-cli dialogue-bench. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue's turns are sent in order, as long as its goal is not reached: the item the user wants saved: one of goal.tool's kind (an event for creer_evenement, a reminder for creer_rappel) that the app created, whatever call the model wrote, its title containing goal.title (whatever the accents and case), at goal.when (to the minute, or the day alone). A dialogue may have its own reference time (now), which its goal follows. In the first four, the first request asks for a moment already gone, which the app refuses: the model must write the call anyway (the app checks the date, not the model) and keep the item when the user gives another moment. In the others, the app refuses the first request's call for something the model may correct, which gives it a second try: a weekday that does not match the date (the 22nd is a Thursday), nothing created yet to move, no title, a list or a calendar that does not exist, words that cannot be placed in time. A second try that says nothing leaves the app's question; the user then answers it. The four after them first create a reminder without a date, then go on as « a Work calendar that does not exist » and « hairdresser after work » do: in the first two, that reminder (keep) must stay as it was, the report counts the runs that changed or deleted it; in the last two, the user asks to move it instead, and their goal is that reminder changed (modifier_element), not created. A dialogue may also have its own calendars and reminder lists (calendars, lists: the default one first; by default one of each, « Maison » and « Rappels »), and a goal its calendar or list (goal.calendar, whatever the accents and case). In the last four, the calendar or the list the user names exists besides the default one, and the item must be saved in it, whether the model's call names it or the app finds it in the user's words: a shopping list, a Work calendar, the same after a reminder, and a hairdresser after work in a Perso calendar, then the moment the user gives.",
  "now": "2026-10-15T18:42",
  "dialogues": [
   {
@@ -179,6 +179,72 @@
     "tool": "modifier_element",
     "title": "pain",
     "when": "2026-10-16T11:00"
+   }
+  },
+  {
+   "name": "a shopping list that exists",
+   "lists": [
+    "Rappels",
+    "Courses"
+   ],
+   "turns": [
+    "Ajoute du pain à ma liste de courses."
+   ],
+   "goal": {
+    "tool": "creer_rappel",
+    "title": "pain",
+    "calendar": "Courses"
+   }
+  },
+  {
+   "name": "a Work calendar that exists",
+   "calendars": [
+    "Maison",
+    "Travail"
+   ],
+   "turns": [
+    "Ajoute une réunion demain à 10 h dans mon calendrier Travail."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "reunion",
+    "when": "2026-10-16T10:00",
+    "calendar": "Travail"
+   }
+  },
+  {
+   "name": "bread reminder, then a Work calendar that exists",
+   "calendars": [
+    "Maison",
+    "Travail"
+   ],
+   "turns": [
+    "Rappelle-moi d'acheter du pain.",
+    "Ajoute une réunion demain à 10 h dans mon calendrier Travail."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "reunion",
+    "when": "2026-10-16T10:00",
+    "calendar": "Travail"
+   },
+   "keep": "pain"
+  },
+  {
+   "name": "hairdresser after work in the Perso calendar",
+   "calendars": [
+    "Maison",
+    "Perso"
+   ],
+   "turns": [
+    "Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso.",
+    "Demain à 18 h."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "coiffeur",
+    "when": "2026-10-16T18:00",
+    "calendar": "Perso"
    }
   }
  ]

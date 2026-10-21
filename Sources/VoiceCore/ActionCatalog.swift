@@ -78,9 +78,9 @@ public enum ActionCatalog {
     /// first, then created at the answer: 9 or 10 runs of 10 (the beginning grows from 1,847 to 2,070 tokens). Without a
     /// calendar named in that request, E2B also left out a calendar the user named after a reminder (« … dans mon
     /// calendrier Travail. »: 9 runs of 10). With every example of that kind tried, E2B leaves out the list of « Ajoute
-    /// du pain à ma liste de courses. » (10 runs of 10, as E4B does in 4 to 6; it used to name it in 10): the reminder
-    /// goes to the default list. With the reminder example last, it named it, then named it again after « Mets-le dans
-    /// tes rappels alors. » (7 runs of 10).
+    /// du pain à ma liste de courses. » (10 runs of 10, as E4B does in 4 to 6; it used to name it in 10): the app then
+    /// finds the list in the user's words, when there is one of that name (`withCollectionSaid`). With the reminder
+    /// example last, it named it, then named it again after « Mets-le dans tes rappels alors. » (7 runs of 10).
     public static func examples(now: Date, timeZone: TimeZone = .current) -> [ChatMessage] {
         let context = ToolContext(now: now, timeZone: timeZone, language: .french)
         var messages: [ChatMessage] = []

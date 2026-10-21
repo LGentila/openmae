@@ -129,16 +129,31 @@ public enum DateCheck {
 /// Not after a refusal whose answer only completes the refused words (« de l'après-midi » for an hour that may be the
 /// morning, « le 25 » for a weekday that does not match the date): read alone, such words would lose the rest of the
 /// moment, which the model writes again in a creation of its own.
+///
+/// When the model writes the creation again instead, without its calendar or its list, the refused one's
+/// (`collection(before:)`).
 public struct RefusedCreation: Sendable {
     private var refused: ToolCall?
+    /// The creation refused just before the call being checked and carried out, when that call is the same tool's.
+    private var before: ToolCall?
     private static let creations = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name]
 
     public init() {}
 
     /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change
-    /// (`creation(insteadOf:exists:)`).
+    /// (`creation(insteadOf:exists:)`), or the same creation written again (`collection(before:)`).
     public mutating func checking(_ call: ToolCall) {
+        before = refused?.name == call.name ? refused : nil
         if call.name != ActionCatalog.changeItem.name { refused = nil }
+    }
+
+    /// The calendar (an event's) or the list (a reminder's) of the same creation refused just before `call`, the call
+    /// being checked and carried out, written again (« Demain à 18 h. » after words about time the app could not
+    /// place): the user named it in the request (the app kept it so: `ActionCatalog.withCollectionSaid`), or the model
+    /// did, and left it out when it wrote the call again. nil when `call` is another one.
+    public func collection(before call: ToolCall) -> String? {
+        guard let before, before.name == call.name else { return nil }
+        return before.text(before.name == ActionCatalog.createEvent.name ? "calendrier" : "liste")
     }
 
     /// A call was refused, by the provider's check or when carried out: a creation is kept when the user gives the
@@ -175,5 +190,8 @@ public struct RefusedCreation: Sendable {
         return creation
     }
 
-    public mutating func forget() { refused = nil }
+    public mutating func forget() {
+        refused = nil
+        before = nil
+    }
 }

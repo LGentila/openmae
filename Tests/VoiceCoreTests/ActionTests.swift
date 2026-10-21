@@ -603,14 +603,16 @@ actor RecordingTools: ToolProvider {
     }
 }
 
-/// The calendar's tools with the app's checks (`ActionCatalog.check`), and one calendar, « Maison »: an item "saved"
-/// only gets an id ("r1", "e1"), and an event in another calendar is refused when the call is carried out, as
-/// `CalendarTools` refuses a calendar it does not find. A change of an item saved (the last one, or one named by its
+/// The calendar's tools with the app's checks (`ActionCatalog.check`), and two calendars, « Maison » and « Perso »: an
+/// item "saved" only gets an id ("r1", "e1"), and an event in another calendar is refused when the call is carried out,
+/// as `CalendarTools` refuses a calendar it does not find. A change of an item saved (the last one, or one named by its
 /// id) gives it the change's arguments. Right after a creation refused for a detail the user gives again, a change of
 /// the last item, or of one never created, is that creation (`RefusedCreation`, around the check and the carrying out
-/// of each call, as in the app's providers).
+/// of each call, as in the app's providers). A creation whose call names no calendar gets the one the user's words
+/// name, or the one of the same creation refused just before (`ActionCatalog.withCollectionSaid`), as in the app.
 actor CheckedCalendar: ToolProvider {
     nonisolated let identifier = "calendar"
+    static let calendars = ["Maison", "Perso"]
     private(set) var created: [ToolCall] = []
     /// The items saved, by id: their creations, with the arguments of their changes.
     private(set) var items: [String: ToolCall] = [:]
@@ -624,12 +626,19 @@ actor CheckedCalendar: ToolProvider {
         do {
             try ActionCatalog.check(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(call, refusal)
+            refusedCreation.refused(withCollectionSaid(call, context), refusal)
             throw refusal
         }
     }
 
+    private func withCollectionSaid(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
+        ActionCatalog.withCollectionSaid(call, context: context, again: refusedCreation.collection(before: call)) {
+            $0 ? Self.calendars : ["Rappels"]
+        }
+    }
+
     func perform(_ call: ToolCall, context: ToolContext) throws -> ToolOutcome {
+        let call = withCollectionSaid(call, context)
         do {
             if call.name == ActionCatalog.changeItem.name {
                 if let creation = refusedCreation.creation(insteadOf: call, exists: { items[$0] != nil }) {
@@ -646,9 +655,9 @@ actor CheckedCalendar: ToolProvider {
                 return ToolOutcome(spoken: "C’est modifié\(nb): \(item.text("titre") ?? "").", forModel: ["id": .string(id)])
             }
             try ActionCatalog.check(call, context: context)
-            if let name = call.text("calendrier"), name != "Maison" {
+            if let name = call.text("calendrier"), !Self.calendars.contains(name) {
                 var refusal = ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(name) ». "
-                                              + "Calendriers : Maison.",
+                                              + "Calendriers : Maison, Perso.",
                                           spoken: ActionPhrases.unknownCalendar(name, context.language))
                 refusal.detailGivenAgain = true
                 throw refusal
@@ -917,6 +926,146 @@ struct ToolNameTests {
             #expect(refusal.retryable)
             #expect(refusal.forModel == "Outil inconnu : lire_rappels. Les outils existants sont : creer_rappel, "
                     + "lister_rappels, creer_evenement, lire_agenda, modifier_element, supprimer_element, minuteur.")
+        }
+    }
+}
+
+/// The calendar or the list the user's words name, for a creation whose call names none (`ActionCatalog.withCollectionSaid`).
+@Suite("Calendar or list in the user's words")
+struct CollectionSaidTests {
+    func said(_ sentence: String, event: Bool = false, among names: [String]) -> String? {
+        ActionCatalog.collectionSaid(in: sentence, event: event, among: names).map { names[$0] }
+    }
+
+    @Test func findsTheListTheUserNames() {
+        let lists = ["Rappels", "Courses", "Maison", "Idées cadeaux", "À faire"]
+        for sentence in ["Ajoute du pain à ma liste de courses.", "Ajoute du pain à la liste des courses.",
+                         "Mets du lait sur ma liste Courses, merci.", "Dans la liste de mes courses, ajoute du pain.",
+                         "Ajoute du pain à ma liste de course pour samedi."] {  // as a name in a call: « course »
+            #expect(said(sentence, among: lists) == "Courses", "\(sentence)")
+        }
+        #expect(said("Note un livre dans ma liste idées cadeaux.", among: lists) == "Idées cadeaux")
+        #expect(said("Ajoute appeler le plombier à ma liste à faire.", among: lists) == "À faire")
+        #expect(said("Ajoute du pain sur la liste appelée Maison.", among: lists) == "Maison")
+        // A name that begins with the word itself; the longest name that is all there; one that goes on.
+        #expect(said("Ajoute du pain à ma liste de courses.", among: ["Rappels", "Liste de courses"]) == "Liste de courses")
+        #expect(said("Ajoute du pain à ma liste de courses.", among: ["Courses", "Liste de courses"]) == "Liste de courses")
+        #expect(said("Ajoute du pain à ma liste de courses.", among: ["Rappels", "Courses du week-end"])
+                == "Courses du week-end")
+        #expect(said("Ajoute du pain à ma liste de courses.", among: ["Rappels", "🛒 Courses"]) == "🛒 Courses")
+        // In English.
+        #expect(said("Add milk to my shopping list.", among: ["Reminders", "Shopping"]) == "Shopping")
+        #expect(said("Add milk to the Groceries list", among: ["Reminders", "Groceries"]) == "Groceries")
+        #expect(said("Add milk to my shopping list.", among: ["Reminders", "Shopping list"]) == "Shopping list")
+        #expect(said("Put it on the list Groceries.", among: ["Reminders", "Groceries"]) == "Groceries")
+    }
+
+    /// No list of that name, none named, or a list named only as something to do.
+    @Test func findsNoListTheUserDoesNotName() {
+        let lists = ["Rappels", "Invités", "Courses", "Maison"]
+        for sentence in ["Rappelle-moi de faire la liste des invités.", "Rappelle-moi de vider ma liste de courses.",
+                         "Ajoute du pain à ma liste.", "Ajoute du pain à ma liste pour demain.", "Ajoute à ma liste, du pain.",
+                         "Rappelle-moi d'acheter du pain.", "Rappelle-moi de ranger la maison.",
+                         "Ajoute du pain dans mon calendrier Maison."] {
+            #expect(said(sentence, among: lists) == nil, "\(sentence)")
+        }
+        #expect(said("Ajoute du pain à ma liste de courses.", among: ["Rappels"]) == nil)
+        #expect(said("Ajoute une réunion demain à 10 h dans mon calendrier Travail.", among: ["Rappels"]) == nil)
+    }
+
+    @Test func findsTheCalendarTheUserNames() {
+        let calendars = ["Maison", "Travail", "Famille Dupont", "Professionnel"]
+        func calendar(_ sentence: String) -> String? { said(sentence, event: true, among: calendars) }
+        #expect(calendar("Ajoute une réunion demain à 10 h dans mon calendrier Travail.") == "Travail")
+        #expect(calendar("Ajoute une réunion dans le calendrier du travail demain à 10 h.") == "Travail")
+        #expect(calendar("Mets le match au calendrier famille Dupont samedi.") == "Famille Dupont")
+        #expect(calendar("Note-le dans l'agenda pro.") == "Professionnel")
+        #expect(said("Add the meeting to my work calendar.", event: true, among: ["Home", "Work"]) == "Work")
+        for sentence in ["Ajoute une réunion demain à 10 h dans mon calendrier.",
+                         "Ajoute une réunion dans mon calendrier demain à 10 h.",
+                         "Ajoute à mon calendrier le match de foot dimanche à 15 h au stade",
+                         "Rappelle-moi de regarder le calendrier Travail.", "Ajoute une réunion à ma liste Travail.",
+                         "J'ai une réunion avec l'équipe lundi à 9 h 30, note-la dans mon calendrier"] {
+            #expect(calendar(sentence) == nil, "\(sentence)")
+        }
+    }
+
+    /// Only a creation that names none, from this turn's sentence, else from the same creation refused just before; a
+    /// name among the ones there are.
+    @Test func putsItInACreationThatNamesNone() {
+        let names: (Bool) -> [String] = { $0 ? ["Maison", "Travail", "Perso"] : ["Rappels", "Courses"] }
+        func amended(_ call: ToolCall, said: [String], again: String? = nil) -> ToolCall {
+            ActionCatalog.withCollectionSaid(call, context: ToolContext(now: now, timeZone: paris, language: .french,
+                                                                         userSaid: said),
+                                             again: again, names: names)
+        }
+        let bread = ToolCall(name: "creer_rappel", arguments: ["titre": "pain"])
+        let shopping = "Ajoute du pain à ma liste de courses."
+        #expect(amended(bread, said: [shopping]) == ToolCall(name: "creer_rappel",
+                                                             arguments: ["titre": "pain", "liste": "Courses"]))
+        let named = ToolCall(name: "creer_rappel", arguments: ["titre": "pain", "liste": "Rappels"])
+        #expect(amended(named, said: [shopping]) == named)  // the model's own
+        #expect(amended(bread, said: ["Rappelle-moi d'appeler Paul.", shopping]) == bread)  // another request's
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(amended(meeting, said: ["Ajoute une réunion demain à 10 h dans mon calendrier Travail."])
+                == ToolCall(name: "creer_evenement",
+                            arguments: ["titre": "Réunion", "quand": "demain à 10 h", "calendrier": "Travail"]))
+        #expect(amended(meeting, said: [shopping]) == meeting)  // a list, not a calendar
+        for other in [ToolCall(name: "minuteur", arguments: ["duree": "5 minutes"]),
+                      ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "quand": "à 11 h"])] {
+            #expect(amended(other, said: ["Ajoute-le à mon calendrier Travail."], again: "Travail") == other)
+        }
+        // The refused creation's, when the call is written again without it: only one there is.
+        let hairdresser = ToolCall(name: "creer_evenement", arguments: ["titre": "Coiffeur", "quand": "demain à 18 h"])
+        var perso = hairdresser
+        perso.arguments["calendrier"] = "Perso"
+        #expect(amended(hairdresser, said: ["Demain à 18 h."], again: "perso") == perso)
+        #expect(amended(hairdresser, said: ["Demain à 18 h."], again: "Bureau") == hairdresser)
+        #expect(amended(hairdresser, said: ["Demain à 18 h dans mon calendrier Travail."], again: "Perso").text("calendrier")
+                == "Travail")  // what the user says now first
+    }
+
+    /// The same creation written again right after it was refused gets the refused one's calendar or list; another call
+    /// does not.
+    @Test func aCreationWrittenAgainKeepsTheRefusedOnesCollection() throws {
+        let refusedCall = ToolCall(name: "creer_evenement",
+                                   arguments: ["titre": "Coiffeur", "quand": "après le travail", "calendrier": "Perso"])
+        let refusal = try #require(checkRefusal(refusedCall))
+        let again = ToolCall(name: "creer_evenement", arguments: ["titre": "Coiffeur", "quand": "demain à 18 h"])
+        var refused = RefusedCreation()
+        refused.checking(refusedCall)
+        refused.refused(refusedCall, refusal)
+        refused.checking(again)
+        #expect(refused.collection(before: again) == "Perso")
+        #expect(refused.collection(before: ToolCall(name: "creer_rappel", arguments: ["titre": "Pain"])) == nil)
+        refused.checking(ToolCall(name: "minuteur", arguments: ["duree": "5 minutes"]))
+        #expect(refused.collection(before: again) == nil)  // only right after it
+        refused.refused(refusedCall, refusal)
+        refused.checking(ToolCall(name: "creer_rappel", arguments: ["titre": "Pain"]))
+        refused.checking(again)
+        #expect(refused.collection(before: again) == nil)
+    }
+
+    /// « Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso. », its call without the
+    /// calendar, refused for its moment, then « Demain à 18 h. »: a change of the last item, or the creation written
+    /// again without the calendar, creates it in « Perso ».
+    @Test func theAnswerCreatesTheRefusedItemInTheCalendarTheUserNamed() async {
+        let request = "Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso."
+        let first = ToolContext(now: now, timeZone: paris, language: .french, userSaid: [request])
+        let answer = ToolContext(now: now, timeZone: paris, language: .french, userSaid: ["Demain à 18 h.", request])
+        let call = ToolCall(name: "creer_evenement", arguments: ["titre": "Coiffeur", "quand": "après le travail"])
+        let inPerso = ToolCall(name: "creer_evenement",
+                               arguments: ["titre": "Coiffeur", "quand": "demain à 18 h", "calendrier": "Perso"])
+        for next in [ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "quand": "demain à 18 h"]),
+                     ToolCall(name: "creer_evenement", arguments: ["titre": "Coiffeur", "quand": "demain à 18 h"])] {
+            let calendar = CheckedCalendar()
+            let runner = ToolRunner(providers: [calendar])
+            _ = await runner.tools()
+            let refused = await runner.handle(call, context: first)
+            #expect(refused.retryable)
+            let made = await runner.handle(next, context: answer)
+            #expect(made.forModel == ["id": "e1"], "\(next.name)")
+            #expect(await calendar.created == [inPerso], "\(next.name)")
         }
     }
 }
