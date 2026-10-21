@@ -404,7 +404,8 @@ public actor VoicePipeline {
         var typedText: String?
         /// Wake-word mode: the request, already read by the check of the whole sentence: no transcription.
         var request: String?
-        /// Wake-word mode: the turn says nothing (the phrase alone, or "stop"): no "thinking" on screen.
+        /// Wake-word mode: the turn says nothing (the phrase alone, or "stop"): no "thinking" on screen. Known from its
+        /// start when the check of the sentence read it (`promoteCandidate`), otherwise once it is transcribed.
         var isSilent = false
         /// Wake-word mode: what Maé made of the sentence, for the log once the turn is the user's for sure.
         var wakeDecision: WakeDecision?
@@ -1140,9 +1141,15 @@ public actor VoicePipeline {
         guard turn == nil, !talkKeyPressed, utteranceOpen else { return }
         if turnDetector.isInUtterance {
             setState(.userSpeaking)
-            // The answer is prepared during the pause, from the request the check read (not transcribed again).
-            let known = request.flatMap { $0.isEmpty || StopRequest.matches($0) ? nil : $0 }
-            if inPause, config.speculativeStart { startTurn(committed: false, request: known) }
+            guard inPause, config.speculativeStart else { return }
+            if request?.isEmpty == true || onlyStops {
+                // The phrase alone, or « stop »: the turn knows from the check that it asks for no answer, so the end
+                // of the sentence shows no "thinking", however late its task runs.
+                startTurn(committed: false, request: request, silent: true)
+            } else {
+                // The answer is prepared during the pause, from the request the check read (not transcribed again).
+                startTurn(committed: false, request: request.flatMap { StopRequest.matches($0) ? nil : $0 })
+            }
         } else if request?.isEmpty == true || onlyStops {
             endWithoutTurn(wakes: !onlyStops)
         } else {
@@ -1274,7 +1281,8 @@ public actor VoicePipeline {
 
     // MARK: - Turns
 
-    private func startTurn(committed: Bool, request: String? = nil) {
+    /// `silent`: wake-word mode, `request` is the phrase alone or « stop », as the check read it: no answer to prepare.
+    private func startTurn(committed: Bool, request: String? = nil, silent: Bool = false) {
         guard utteranceOpen, !utterance.isEmpty else { return }
         // The turn's transcription would wait for it: it stops at its next step, and what it found is not needed.
         stopPartialPass()
@@ -1283,6 +1291,7 @@ public actor VoicePipeline {
         turn.speechEnd = lastSpeechEnd
         turn.whileAwake = utteranceWhileAwake
         turn.request = request
+        turn.isSilent = silent
         self.turn = turn
         let audio = utterance
         if committed { commit(turn) }
@@ -1322,6 +1331,12 @@ public actor VoicePipeline {
         var metrics = TurnMetrics()
         metrics.speculative = !turn.committed
         do {
+            // Wake-word mode: the phrase alone or « stop », read by the check: nothing to transcribe or answer.
+            if turn.isSilent, let request = turn.request {
+                try await waitForCommit(turn)
+                endSilently(turn, wakes: request.isEmpty)
+                return
+            }
             // 1. Speech → text.
             let t0 = clock.now
             let heard = if let typed = turn.typedText ?? turn.request { typed } else { try await transcriber.transcribe(audio) }

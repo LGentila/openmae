@@ -57,6 +57,7 @@ struct OutOfReachTests {
         await waitFor { await recorded(model) == [Self.answer] }
         #expect(await recorded(model) == [Self.answer])
         #expect(await speaker.played == 2500)  // the second and third sentences, again
+        await waitFor { await log.finished.count >= 2 }  // the recorder reads the events on its own task
         #expect(await log.pieces == Self.sentences + Self.sentences.suffix(2))
         #expect(await log.finished.map(\.interrupted) == [true, false])
         #expect(await model.requests.count == 1)
@@ -163,6 +164,7 @@ struct OutOfReachTests {
         #expect(await speaker.played == 0)
         await pipeline.setOutputReachable(true)
         await waitFor { await speaker.played == 500 }
+        await waitFor { await !log.pieces.isEmpty }  // the recorder reads the events on its own task
         #expect(await log.pieces == [OutOfReachPhrases.sentenceCut(.french)])
         #expect(await model.requests.isEmpty)
         await waitFor { await log.states.last == .listening }

@@ -78,6 +78,7 @@ struct UnheardAnnouncementTests {
         await pipeline.setOutputReachable(true)
         await waitFor { await recorded(model) == [Self.sentence] }
         #expect(await speaker.played == 2 * Self.samples)
+        await waitFor { await log.finished.count >= 2 }  // the recorder reads the events on its own task
         #expect(await log.pieces == [Self.sentence, Self.sentence])
         #expect(await recorded(model) == [Self.sentence])
         #expect(await log.finished.map(\.interrupted) == [true, false])
@@ -96,6 +97,7 @@ struct UnheardAnnouncementTests {
         await waitFor { await recorded(model) == [Self.sentence] }
         #expect(await speaker.played == 2 * Self.samples)  // the chime and the same words, twice
         #expect(voice.started == 1)
+        await waitFor { await log.pieces.count >= 2 }  // the recorder reads the events on its own task
         #expect(await log.pieces == [Self.sentence, Self.sentence])
     }
 
@@ -257,8 +259,8 @@ struct UnheardAnnouncementTests {
         await waitFor { await recorded(model) == [Self.sentence, "Celui de 10 minutes."] }
         let request = try #require(await model.requests.last)
         #expect(request.dropFirst().map(\.content) == [Self.note, Self.sentence, "Lequel ?" + Self.cutOff])
+        await waitFor { await log.finished.count == 2 }  // the recorder reads the events on its own task
         #expect(await log.pieces == [Self.sentence, "Celui de 10 minutes."])
-        await waitFor { await log.finished.count == 2 }
         #expect(await log.finished.map(\.interrupted) == [true, false])
     }
 

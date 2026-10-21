@@ -105,6 +105,9 @@ struct PartialTranscriptTests {
         #expect(await log.states.last == .userSpeaking)
         await push(pipeline, silence, 20)
         await waitFor { await model.requests.count == 1 }
+        // The recorder reads the events on its own task.
+        await waitFor { await !log.finals.isEmpty }
+        await waitFor { await log.states.contains(.thinking) }
         let final = try #require(await log.finals.first)
         #expect(await log.finals.count == 1)
         #expect(try #require(samples(final)) > read.last ?? 0)
@@ -136,6 +139,7 @@ struct PartialTranscriptTests {
         #expect(await log.finals.isEmpty)
         await pipeline.setTalkKey(pressed: false)
         await waitFor { await model.requests.count == 1 }
+        await waitFor { await !log.finals.isEmpty }  // the recorder reads the events on its own task
         #expect(await log.finals == ["phrase de \((2 * second + 8) * 512) échantillons"])
         #expect(await stt.calls.last == (2 * second + 8) * 512)
         #expect(await model.requests.last?.last?.content == "phrase de \((2 * second + 8) * 512) échantillons")
@@ -290,6 +294,7 @@ struct PartialTranscriptTests {
             await push(pipeline, speech, 3 * second)
             await push(pipeline, silence, 20)
             await waitFor { await model.requests.count == 1 }
+            await waitFor { await !log.finals.isEmpty }  // the recorder reads the events on its own task
             #expect(await log.partials.isEmpty == !partials)
             results.append((await log.finals, try #require(await model.requests.last)))
             await pipeline.stop()

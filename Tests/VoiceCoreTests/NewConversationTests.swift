@@ -139,9 +139,11 @@ struct NewConversationTests {
         await pipeline.announce(Self.sentence, note: Self.note, language: .french)
         try await Task.sleep(for: .milliseconds(50))  // the voice gets ready: nothing played yet
         let played = await speaker.played
+        await waitFor { await log.states.last == .thinking }  // the recorder reads the events on its own task
         #expect(await log.states.last == .thinking)
         try await pipeline.resetConversation()
         await waitFor { await model.catchUps.count == 2 }
+        await waitFor { await log.pieces.count >= 2 }
         #expect(await log.pieces == ["Bonjour !", Self.sentence])
         #expect(await speaker.played == played + Self.announcementSamples)  // its chime, then its sentence, once
         let history = try #require(await model.catchUps.last)

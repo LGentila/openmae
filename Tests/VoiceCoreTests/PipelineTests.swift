@@ -401,6 +401,7 @@ struct PipelineTests {
         #expect(await log.pieces.isEmpty)  // the interface must not show an answer that may be dropped
         await push(pipeline, String(repeating: "0", count: 12))  // the turn is really over
         await waitFor { await speaker.played >= 1000 }
+        await waitFor { await log.pieces.count >= 2 }  // the recorder reads the events on its own task
         #expect(await log.pieces.count == 2)
         #expect(await log.order.first == "user")  // the user's words come before the answer
     }
@@ -573,9 +574,13 @@ actor LevelTranscriber: Transcriber {
         9: "Quelle heure est-il ?",
     ]
     private(set) var calls = 0
+    /// How long each transcription after the first takes: a speech recognition that lags behind the microphone.
+    private let laterCallsTake: Duration
+    init(laterCallsTake: Duration = .zero) { self.laterCallsTake = laterCallsTake }
 
     func transcribe(_ samples: [Float]) async throws -> String {
         calls += 1
+        if calls > 1, laterCallsTake > .zero { try await Task.sleep(for: laterCallsTake) }
         var levels: [Int] = []
         for sample in samples where abs(sample) > 0.05 {
             let level = Int((abs(sample) * 10).rounded())
@@ -609,12 +614,13 @@ struct WakeWordPipelineTests {
     }
 
     func make(_ model: ScriptedModel, _ speaker: FakeSpeaker, followUp: Double = 8,
-              wakeWord: any WakeWordDetector = OKMaeWakeWord()) -> (VoicePipeline, EventRecorder)
+              wakeWord: any WakeWordDetector = OKMaeWakeWord(),
+              transcriber: LevelTranscriber = LevelTranscriber()) -> (VoicePipeline, EventRecorder)
     {
         var config = PipelineConfig()
         config.listening = .wakeWord
         config.wakeFollowUpSeconds = followUp
-        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: LevelTranscriber(), model: model,
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: transcriber, model: model,
                                      synthesizer: FakeSynthesizer(), output: speaker, wakeWord: wakeWord, config: config)
         let log = EventRecorder()
         Task { for await event in pipeline.events { await log.record(event) } }
@@ -645,9 +651,10 @@ struct WakeWordPipelineTests {
         for _ in 0..<16 { await pipeline.push(silence) }
         await waitFor { await speaker.played >= 1000 }
         #expect(await model.requests.last?.last?.content == "Quelle heure est-il ?")
-        #expect(await log.states.starts(with: [.listening, .userSpeaking, .thinking]))
         await waitFor { await log.awake == [true] }  // after the answer: a few seconds of attention
         #expect(await log.awake == [true])
+        // The recorder reads the events on its own task, in order: the states of the answer are in by now.
+        #expect(await log.states.starts(with: [.listening, .userSpeaking, .thinking]))
         #expect(await log.wakeDecisions.map(\.accepted) == [true])
     }
 
@@ -658,7 +665,11 @@ struct WakeWordPipelineTests {
         await say(pipeline, 4)  // "Ok Mae."
         await waitFor { await log.awake == [true] }
         #expect(await log.awake == [true])
-        #expect(await speaker.played == Chime.samples(sampleRate: 1000).count)
+        // The chime plays from a task of its own, and the state at rest comes after the awake event.
+        let chime = Chime.samples(sampleRate: 1000).count
+        await waitFor { await speaker.played == chime }
+        #expect(await speaker.played == chime)
+        await waitFor { await log.states.last == .listening }
         #expect(await model.requests.isEmpty)
         let states = await log.states
         #expect(states.last == .listening && !states.contains(.thinking))
@@ -667,16 +678,37 @@ struct WakeWordPipelineTests {
         #expect(await model.requests.last?.last?.content == "Et demain ?")
     }
 
+    /// The check reads the phrase alone (or « OK Maé, stop ») at the pause, and the sentence ends before the speech
+    /// recognition would have read it again: Maé knows from the check that it asks for no answer, and the end of the
+    /// sentence shows no "thinking".
+    @Test(arguments: [4, 6]) func aSentenceThatAsksForNoAnswerShowsNoThinking(level: Int) async throws {
+        let (model, speaker) = (ScriptedModel(), FakeSpeaker())
+        let (pipeline, log) = make(model, speaker, transcriber: LevelTranscriber(laterCallsTake: .milliseconds(300)))
+        try await pipeline.start()
+        await say(pipeline, level, silenceAfter: 8)  // a pause: the sentence is checked
+        await waitFor { await log.states.last == .userSpeaking }
+        for _ in 0..<16 { await pipeline.push(silence) }  // the end of the sentence, at once
+        await waitFor { await log.states.last == .listening }
+        let states = await log.states
+        #expect(states == [.listening, .userSpeaking, .listening])
+        #expect(await log.awake == (level == 4 ? [true] : []))  // the phrase alone wakes her, « stop » does not
+        #expect(await model.requests.isEmpty)
+    }
+
     @Test func noPhraseIsNeededForAFewSecondsAfterAnAnswer() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
-        let (pipeline, log) = make(model, speaker)
+        let (pipeline, log) = make(model, speaker, followUp: 30)  // the few seconds do not run out on a busy Mac
         try await pipeline.start()
         await say(pipeline, 3)
         await waitFor { await log.awake == [true] }
         await say(pipeline, 5)  // "Et demain ?", without the phrase
         await waitFor { await model.requests.count == 2 }
         #expect(await model.requests.last?.last?.content == "Et demain ?")
-        let decision = try #require(await log.wakeDecisions.last)
+        // The decision reaches the recorder through the events, on its own task.
+        await waitFor { await log.wakeDecisions.count >= 2 }
+        let decisions = await log.wakeDecisions
+        #expect(decisions.count == 2)
+        let decision = try #require(decisions.last)
         #expect(decision.moment == .awake && decision.accepted && decision.heard == "Et demain ?")
     }
 
