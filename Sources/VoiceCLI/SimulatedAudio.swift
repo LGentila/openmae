@@ -11,11 +11,6 @@ actor SimulatedSpeaker: AudioOutput {
     private(set) var recorded: [Float] = []
     private(set) var sampleRate = 24_000.0
     private(set) var lastStop: ContinuousClock.Instant?
-    /// Between the first sound of an answer (or of an announcement's chime) and its end: running out of sound then is a
-    /// gap, as the app's speakers log it (`audio: gap of … in the voice`).
-    private var playing = false
-    /// The gaps since the last `takeGaps()`, in seconds, in order.
-    private var gaps: [Double] = []
     /// Whether it keeps what it plays, and when (`takePlays()`).
     private let logsPlays: Bool
     private var plays: [Played] = []
@@ -32,8 +27,6 @@ actor SimulatedSpeaker: AudioOutput {
         self.sampleRate = sampleRate
         recorded += samples
         let now = clock.now
-        if playing, let end = playhead, end < now { gaps.append((now - end).seconds) }
-        playing = true
         let start = max(now, playhead ?? now)
         playhead = start + .seconds(Double(samples.count) / sampleRate)
         if logsPlays { plays.append(Played(samples: samples, start: start)) }
@@ -44,13 +37,11 @@ actor SimulatedSpeaker: AudioOutput {
         while let end = playhead, end > clock.now {
             try? await clock.sleep(until: min(end, clock.now + .milliseconds(20)))
         }
-        playing = false
         return .confirmed
     }
 
     func stopImmediately() {
         playhead = nil
-        playing = false
         lastStop = clock.now
     }
 
@@ -59,11 +50,6 @@ actor SimulatedSpeaker: AudioOutput {
     func takeRecording() -> [Float] {
         defer { recorded = [] }
         return recorded
-    }
-
-    func takeGaps() -> [Double] {
-        defer { gaps = [] }
-        return gaps
     }
 
     /// What it played since the last call, in order (with `logsPlays`).

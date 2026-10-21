@@ -5,10 +5,11 @@
 //                                                       talks over the assistant; time to silence it
 //   voice-cli endurance --minutes N [--new-conversation-every N] [options] <phrase.wav>...
 //                                                       loops a conversation; memory after every turn
-//   voice-cli announce-drop [--repeats 5] [--mute-first | --mute-station] [options]
+//   voice-cli announce-drop [--repeats 5] [--on-mac] [--mute-first | --mute-station] [--chime-wait 0.3] [options]
 //                                                       an announcement cut by a home station's drop, said again
-//                                                       on the Mac; the pace of each utterance of the voice, and
-//                                                       the gaps after the chime (see AnnounceDrop.swift)
+//                                                       on the Mac (--on-mac: said on the Mac from the start); the
+//                                                       pace of each utterance of the voice, when the chime rings
+//                                                       and the gaps after it (see AnnounceDrop.swift)
 //   voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1] [--with-llm]
 //                                                       silence the voice produces before speaking
 //   voice-cli voice-gaps [--repeats 1] [options]        long answers to typed questions: the silence heard between
@@ -61,6 +62,8 @@
 //                            ahead of the speakers (seconds; default 0.5)
 //   --no-wait-openings       after an answer's first sound, the model no longer waits while the voice opens a sentence
 //                            with near-silence (only for the lead)
+//   --chime-wait <s>         seconds an announcement's chime waits at most for the voice's first sound (default 0.3;
+//                            0: at once)
 //   --slower-voice <f>       voice-gaps: as if the voice (and the model) were this fraction slower than speech (0.1:
 //                            10 %): the simulated speaker plays the voice that much faster than real time
 //   --wake-word              only sentences that start with « OK Maé » are answered, as in the app's wake-word mode
@@ -119,6 +122,10 @@ struct Options {
     var muteFirst = false
     /// announce-drop: the same for the station's first utterance of it, which then starts again after the drop.
     var muteStation = false
+    /// announce-drop: no home station: the announcement is said on the Mac from the start.
+    var onMac = false
+    /// Seconds an announcement's chime waits at most for the voice's first sound (`chimeWaitsForVoiceSeconds`).
+    var chimeWait: Double?
     /// Voices racing for each answer's first sound (`PipelineConfig.racingVoices`).
     var racingVoices: Int?
     /// The voice is never started again after a long near-silent opening (`PipelineConfig.voiceRestartAfterSeconds`).
@@ -212,6 +219,8 @@ struct Options {
             case "--early-session": o.earlySession = true
             case "--mute-first": o.muteFirst = true
             case "--mute-station": o.muteStation = true
+            case "--on-mac": o.onMac = true
+            case "--chime-wait": o.chimeWait = Double(it.next() ?? "")
             case "--racing-voices": o.racingVoices = Int(it.next() ?? "")
             case "--no-voice-restart": o.noVoiceRestart = true
             case "--voice-restart-after": o.voiceRestartAfter = Double(it.next() ?? "")
@@ -324,7 +333,7 @@ struct Engine {
 }
 
 /// `voice`: what the pipeline gets of the voice (announce-drop and voice-gaps measure it); `logPlays`: the speaker keeps
-/// what it plays, and when (voice-gaps).
+/// what it plays, and when (voice-gaps, announce-drop).
 func buildEngine(_ o: Options, logPlays: Bool = false,
                  voice: (PocketSpeechSynthesizer) -> any SpeechSynthesizer = { $0 }) async throws -> Engine
 {
@@ -373,6 +382,7 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
         config.voiceLeadSeconds = nil
         config.modelWaitsDuringOpenings = false
     }
+    if let seconds = o.chimeWait { config.chimeWaitsForVoiceSeconds = seconds }
     if o.wakeWord { config.listening = .wakeWord }
     if let followUp = o.followUp { config.wakeFollowUpSeconds = followUp }
     if o.noPartials { config.partialTranscriptSeconds = nil }
@@ -720,7 +730,7 @@ if let options = Options.parse(CommandLine.arguments), options.command == "voice
 if let options = Options.parse(CommandLine.arguments), options.command == "announce-drop" {
     do {
         var measuring: MeasuringSynthesizer?
-        let engine = try await buildEngine(options) { voice in
+        let engine = try await buildEngine(options, logPlays: true) { voice in
             let wrapped = MeasuringSynthesizer(voice)
             measuring = wrapped
             return wrapped
@@ -741,8 +751,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]
-               voice-cli announce-drop [--tier tier] [--repeats 5] [--mute-first | --mute-station]
-                                       [--voice-restart-after s]
+               voice-cli announce-drop [--tier tier] [--repeats 5] [--on-mac] [--mute-first | --mute-station]
+                                       [--voice-restart-after s] [--chime-wait s]
                voice-cli voice-gaps [--tier tier] [--repeats 1] [--questions n] [--no-sentence-restart]
                                     [--sentence-restart-after s] [--no-voice-lead] [--voice-lead s]
                                     [--no-wait-openings] [--slower-voice f] [--out folder]

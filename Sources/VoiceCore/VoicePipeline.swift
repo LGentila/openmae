@@ -69,6 +69,16 @@ public struct PipelineConfig: Sendable {
     /// Pauses of the voice longer than this (between sentences, each one starting with near-silence)
     /// are shortened to it. nil = keep them.
     public var maxVoicePauseMs: Double? = 300
+    /// An announcement's chime (0.75 s) waits this long at most (seconds) for the voice's first sound, then plays; the
+    /// words follow it. The voice opens with near-silence of random length, which the chime covers: played at once, the
+    /// chime left the voice 0.75 s, and an opening of 1.2 s of audio or more (7 first sentences in 50, `voice-cli
+    /// voice-onset`) has the voice start again (`voiceRestartAfterSeconds`) once the chime is over. Waiting gives it
+    /// 1.05 s. Measured with `voice-cli announce-drop --on-mac` on the reference Mac (Gemma 4 26B, 12 tries each,
+    /// against 0): the chime rang 0.32 s after the announcement instead of 0.01 s (median), the words right after it
+    /// (before, 2 silences of 0.10 and 0.16 s); with the voice always started again (`--mute-first`), the words came
+    /// 0.26 s after the chime instead of 0.82 s (median), but over 0.5 s after it in 5 tries instead of 10, when the
+    /// voice started again opened with near-silence of its own. 0 = at once.
+    public var chimeWaitsForVoiceSeconds: Double = 0.3
     /// What it takes for a voice heard while Maé talks to interrupt her rather than be taken for her echo, on the device
     /// that has the conversation (`BargeInProfile`): the Mac's at first; `VoicePipeline.setBargeIn` changes it while
     /// another device has the conversation (an iPhone).
@@ -417,6 +427,11 @@ public actor VoicePipeline {
         var isAnnouncement: Bool { announcement != nil }
         /// An announcement's chime: when it is over. The output plays the words after it.
         var chimeEnd: ContinuousClock.Instant?
+        /// An announcement's chime and its voice wait for each other: the chime for the voice's first sound, opened by
+        /// the player once it has it (`chimeWaitsForVoiceSeconds` at most); the voice for the chime, opened once the
+        /// chime went to the output (or will not). nil without a chime.
+        var firstSound: Gate?
+        var chimeSent: Gate?
         /// When the turn's voice (not a chime) first went to the output.
         var voiceStart: ContinuousClock.Instant?
         /// The voice's output went out of reach while the announcement was said (`setOutputReachable`): stopped, it is
@@ -1648,6 +1663,7 @@ public actor VoicePipeline {
                         }
                         voiceHeard = true
                         self.voiceIsAudible()
+                        await turn.firstSound?.open()  // an announcement's chime waits for it
                     }
                     // Each sentence starts again with near-silence: cap the pauses between sentences.
                     quietSamples = quiet ? quietSamples + samples.count : 0
@@ -1659,6 +1675,7 @@ public actor VoicePipeline {
                         continue
                     }
                     await turn.gate.wait()  // a speculative answer waits for the end of the turn
+                    if !playing { await turn.chimeSent?.wait() }  // an announcement's words come after its chime
                     if Task.isCancelled { break }
                     if !playing {
                         playing = true
@@ -1993,14 +2010,13 @@ public actor VoicePipeline {
             }
             if turn.elsewhere { DebugLog.log("announcement: on the home station") }
             if announcement.chime {
-                let sampleRate = synthesizer.outputSampleRate
-                let chime = Chime.samples(sampleRate: sampleRate)
-                audioStarted(turn, at: clock.now, chime: .seconds(Double(chime.count) / sampleRate))
-                await turn.output.play(chime, sampleRate: sampleRate)
+                turn.firstSound = Gate()
+                turn.chimeSent = Gate()
             }
             startPlayer(turn, stream)
             say(announcement.text, to: turn)
             stream.finish()
+            if announcement.chime { await playChime(turn) }
             await turn.player?.value
             try Task.checkCancellation()
             let end = await turn.output.waitUntilDone()
@@ -2024,6 +2040,26 @@ public actor VoicePipeline {
             emit.yield(.failure("\(error)"))
             if self.turn === turn { finish(turn, metrics: nil) }
         }
+    }
+
+    /// An announcement's chime, once the player has the voice's first sound, or after `chimeWaitsForVoiceSeconds` if
+    /// that comes first (the voice opens with near-silence of random length, which the chime covers); the voice's words
+    /// follow it.
+    private func playChime(_ turn: Turn) async {
+        let patience = config.chimeWaitsForVoiceSeconds
+        if patience > 0, let firstSound = turn.firstSound {
+            let start = clock.now
+            let heard = await firstSound.wait(atMost: .seconds(patience))
+            DebugLog.log("announcement: the voice is \(heard ? "" : "not ")audible after"
+                         + " \(Int(ms(clock.now - start))) ms: the chime")
+        }
+        if !Task.isCancelled {  // stopped meanwhile (the user spoke): whoever stopped it decides what becomes of it
+            let sampleRate = synthesizer.outputSampleRate
+            let chime = Chime.samples(sampleRate: sampleRate)
+            audioStarted(turn, at: clock.now, chime: .seconds(Double(chime.count) / sampleRate))
+            await turn.output.play(chime, sampleRate: sampleRate)
+        }
+        await turn.chimeSent?.open()
     }
 
     private func voiceIsAudible() {
@@ -2170,6 +2206,7 @@ public actor VoicePipeline {
         // Marked, it says, records and reports nothing more; the exchange is recorded once, below.
         turn.interrupted = true
         turn.player?.cancel()
+        await turn.chimeSent?.open()  // a player waiting for the chime to go to the output lets go
         await turn.output.stopImmediately()  // silence at once…
         await turn.player?.value  // …and once the player is over, again: a frame may have been on its way
         await turn.output.stopImmediately()
@@ -2211,6 +2248,7 @@ public actor VoicePipeline {
         turn.task?.cancel()
         turn.player?.cancel()
         await turn.gate.open()  // release a player waiting for the end of the turn
+        await turn.chimeSent?.open()  // or for an announcement's chime
         await turn.stream?.cancel()
         DebugLog.log("turn \(turn.id): cancelled")
         if stopAudio, turn.audioStarted {
@@ -2324,19 +2362,36 @@ public actor VoicePipeline {
 }
 
 /// A one-way door: tasks `wait()` until someone calls `open()`. Used to hold a speculative answer's
-/// audio until the user's turn is really over.
+/// audio until the user's turn is really over, and an announcement's chime and voice (`Turn.firstSound`).
 actor Gate {
     private var isOpen = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var lastWaiter = 0
 
     func open() {
         isOpen = true
-        waiters.forEach { $0.resume() }
+        waiters.values.forEach { $0.resume() }
         waiters.removeAll()
     }
 
     func wait() async {
         if isOpen { return }
-        await withCheckedContinuation { waiters.append($0) }
+        lastWaiter += 1
+        let waiter = lastWaiter
+        await withCheckedContinuation { waiters[waiter] = $0 }
+    }
+
+    /// Waits until it opens, `timeout` at most: true when it opened.
+    func wait(atMost timeout: Duration) async -> Bool {
+        if isOpen { return true }
+        lastWaiter += 1
+        let waiter = lastWaiter
+        // On this actor: it takes the continuation back once it is in.
+        Task {
+            try? await Task.sleep(for: timeout)
+            self.waiters.removeValue(forKey: waiter)?.resume()
+        }
+        await withCheckedContinuation { waiters[waiter] = $0 }
+        return isOpen
     }
 }

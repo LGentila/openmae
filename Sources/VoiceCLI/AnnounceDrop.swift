@@ -1,17 +1,23 @@
 // voice-cli announce-drop — an announcement that a home station was saying when it dropped (the iPad unplugged 0.6 s
-// into its chime), said again at once on the Mac, as the app does; then the pace of every utterance of the voice, and
-// the gaps in the Mac's sound after its chime.
+// into its chime), said again at once on the Mac, as the app does; then the pace of every utterance of the voice, when
+// the Mac's chime rang, and the gaps in the Mac's sound after it.
 //
-//   voice-cli announce-drop [--repeats 5] [--mute-first | --mute-station] [options]
+//   voice-cli announce-drop [--repeats 5] [--on-mac] [--mute-first | --mute-station] [--chime-wait 0.3] [options]
 //
+// --on-mac: no home station: the announcement is said on the Mac from the start, by the voice (said again after the
+// drop, it comes from its recording, without the voice).
 // --mute-first: the Mac's first utterance of the announcement is taken for near-silence (its audio is replaced with
 // silence on its way to the pipeline), so that the voice starts it again after 1.2 s of its audio (`VoiceRestart`),
 // as it did in the app when the gap was seen. The voice computes exactly what it would otherwise.
 // --mute-station: the same for the station's first utterance of it, which then starts again just after the drop.
+// --chime-wait: how long the chime waits at most for the voice's first sound (seconds, 0: at once;
+// `PipelineConfig.chimeWaitsForVoiceSeconds`).
 //
 // Each utterance is reported with its frames: how long its first frame took after its first text, then the time per
 // frame (all the frames after the first, and the near-silent ones before its first audible frame), and the other
-// utterances that ran at the same time.
+// utterances that ran at the same time. Then the Mac's sound: when its chime started after the announcement went to the
+// Mac (`announce` with --on-mac, the drop otherwise), and the silences in it after the chime, the first one between the
+// chime and the words.
 
 import Foundation
 import VoiceCore
@@ -206,6 +212,7 @@ struct MeasuredStream: SynthesisStream {
 }
 
 func runAnnounceDrop(_ o: Options, _ e: Engine, voice: MeasuringSynthesizer) async throws {
+    if o.onMac, o.muteStation { throw CLIError("--mute-station needs the home station: not with --on-mac") }
     let mic = SimulatedMicrophone(pipeline: e.pipeline)
     let station = DroppingStation()
     let text = ActionPhrases.timerFinished(seconds: 15, label: nil, .french)
@@ -213,42 +220,54 @@ func runAnnounceDrop(_ o: Options, _ e: Engine, voice: MeasuringSynthesizer) asy
     var fresh: [Double] = []
     var restarted: [Double] = []
     var restartedOpenings: [Double] = []
+    var chimes: [Double] = []
+    var voiceHeard: [Double] = []
     var afterChime: [Double] = []
     var laterGaps: [Double] = []
     let tries = o.repeats ?? 5
     for attempt in 1...tries {
         print("■ try \(attempt)")
         await mic.silence(3)  // what the model computes once an announcement is recorded is over
-        await station.reset()
         _ = voice.take()
-        _ = await e.speaker.takeGaps()
-        await e.pipeline.announceThrough(station)
+        _ = await e.speaker.takePlays()
         let before = await e.log.completedTurns
-        voice.muteNextTurn(o.muteStation)
-        await e.pipeline.announce(text, note: note, language: .french)
-        await mic.silence(until: { await station.firstSound != nil }, timeout: 10)
-        guard let chime = await station.firstSound else {
-            print("  the station never played the chime")
-            continue
+        /// When the announcement went to the Mac.
+        let sent: ContinuousClock.Instant
+        if o.onMac {
+            voice.muteNextTurn(o.muteFirst)
+            sent = .now
+            await e.pipeline.announce(text, note: note, language: .french)
+        } else {
+            await station.reset()
+            await e.pipeline.announceThrough(station)
+            voice.muteNextTurn(o.muteStation)
+            await e.pipeline.announce(text, note: note, language: .french)
+            await mic.silence(until: { await station.firstSound != nil }, timeout: 10)
+            guard let chime = await station.firstSound else {
+                print("  the station never played the chime")
+                continue
+            }
+            // 0.6 s into the chime, the iPad is unplugged: `LinkHost` lets its speaker go (`detach`) and announcements
+            // go where the conversation is (`announceThrough(nil)`).
+            await mic.silence(until: { ContinuousClock.now - chime >= .milliseconds(600) }, timeout: 2)
+            if o.muteFirst { voice.muteNextTurn() }
+            await station.drop()
+            sent = .now
+            await e.pipeline.announceThrough(nil)
         }
-        // 0.6 s into the chime, the iPad is unplugged: `LinkHost` lets its speaker go (`detach`) and announcements go
-        // where the conversation is (`announceThrough(nil)`).
-        await mic.silence(until: { ContinuousClock.now - chime >= .milliseconds(600) }, timeout: 2)
-        if o.muteFirst { voice.muteNextTurn() }
-        await station.drop()
-        await e.pipeline.announceThrough(nil)
         await waitForAnswer(e, mic: mic, after: before, timeout: 30)
         await mic.silence(0.3)
 
         let utterances = voice.take()
-        let gaps = await e.speaker.takeGaps()
+        let plays = await e.speaker.takePlays()
         var turn = 0
         var restarts = 0
         for (index, u) in utterances.enumerated() {
             if index > 0 {
                 if u.restart { restarts += 1 } else { (turn, restarts) = (turn + 1, 0) }
             }
-            let role = (turn == 0 ? "station" : "Mac") + (restarts > 0 ? ", started again (\(restarts))" : "")
+            let device = turn == 0 && !o.onMac ? "station" : "Mac"
+            let role = device + (restarts > 0 ? ", started again (\(restarts))" : "")
             let others = utterances.filter { $0.overlaps(u) }.count
             let firstFrame = u.firstText.flatMap { text in u.frames.first.map { ($0.at - text).seconds * 1000 } }
             let audibleAt = u.frames.firstIndex(where: \.audible).map { "audible at frame \($0 + 1)" }
@@ -265,11 +284,28 @@ func runAnnounceDrop(_ o: Options, _ e: Engine, voice: MeasuringSynthesizer) asy
                 fresh.append(pace)
             }
         }
-        if turn == 0 { print("  Mac: no voice computed (said again from the station's recording)") }
-        if let first = gaps.first { afterChime.append(first * 1000) } else { afterChime.append(0) }
-        laterGaps += gaps.dropFirst().map { $0 * 1000 }
-        print("  Mac's sound: gap after the chime \(fmt(gaps.first.map { $0 * 1000 } ?? 0))"
-              + (gaps.count > 1 ? ", then \(gaps.dropFirst().map { fmt($0 * 1000) }.joined(separator: ", "))" : ""))
+        if turn == 0, !o.onMac { print("  Mac: no voice computed (said again from the station's recording)") }
+        guard let chime = plays.first, plays.count > 1 else {
+            print("  Mac's sound: \(plays.isEmpty ? "none" : "the chime alone")")
+            continue
+        }
+        // The chime, then the voice: the silences between what the Mac played, the first one after the chime.
+        let rate = await e.speaker.sampleRate
+        func end(_ play: SimulatedSpeaker.Played) -> ContinuousClock.Instant {
+            play.start + .seconds(Double(play.samples.count) / rate)
+        }
+        let gaps = plays.indices.dropFirst().map { max(0, (plays[$0].start - end(plays[$0 - 1])).seconds * 1000) }
+        let later = gaps.dropFirst().filter { $0 > 0 }
+        chimes.append((chime.start - sent).seconds * 1000)
+        afterChime.append(gaps[0])
+        laterGaps += later
+        // With --on-mac, when the voice's first audible frame came (a muted utterance gave the pipeline none).
+        let audible = utterances.filter { !$0.muted }.compactMap { $0.frames.first(where: \.audible)?.at }
+        let heard = o.onMac ? audible.min().map { ($0 - sent).seconds * 1000 } : nil
+        if let heard { voiceHeard.append(heard) }
+        print("  Mac's sound: chime \(fmt(chimes.last)) after the announcement"
+              + (heard.map { ", voice audible after \(fmt($0))" } ?? "") + "; gap after the chime \(fmt(gaps[0]))"
+              + (later.isEmpty ? "" : ", then \(later.map { fmt($0) }.joined(separator: ", "))"))
     }
     print("\n=== Summary: \(tries) tries ===")
     print("frames of fresh utterances: median \(fmt(median(fresh))) per frame (\(fresh.count) utterances)")
@@ -278,6 +314,10 @@ func runAnnounceDrop(_ o: Options, _ e: Engine, voice: MeasuringSynthesizer) asy
     if let r = median(restarted), let f = median(fresh) {
         print(String(format: "started again / fresh: %.2f", r / f))
     }
-    print("gap after the chime: median \(fmt(median(afterChime))), max \(fmt(afterChime.max()))"
+    print("chime after the announcement went to the Mac: median \(fmt(median(chimes))), max \(fmt(chimes.max()))"
+          + (voiceHeard.isEmpty ? "" : "; the voice audible after it: median \(fmt(median(voiceHeard))),"
+             + " max \(fmt(voiceHeard.max()))"))
+    print("gap after the chime: median \(fmt(median(afterChime))), max \(fmt(afterChime.max())),"
+          + " over 500 ms in \(afterChime.filter { $0 > 500 }.count) of \(afterChime.count)"
           + "; later gaps: \(laterGaps.count), max \(fmt(laterGaps.max()))")
 }

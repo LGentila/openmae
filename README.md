@@ -320,13 +320,16 @@ utterance, how fast all its frames came, its slowest frame, and how many other u
 time.
 
 An announcement cut by a home station's drop (the iPad unplugged 0.6 s into the chime), said again at once on the
-Mac, as the app does; each try reports the pace of every utterance of the voice, and the gaps in the Mac's sound after
-its chime. `--mute-first` takes the Mac's first utterance of it for near-silence, so that the voice would start it
-again after 1.2 s of its audio (an announcement said again from its recording no longer uses the voice);
-`--mute-station` does the same on the station, whose voice then starts again just after the drop:
+Mac, as the app does; each try reports the pace of every utterance of the voice, when the Mac's chime rang, and the
+gaps in the Mac's sound after it. `--mute-first` takes the Mac's first utterance of it for near-silence, so that the
+voice would start it again after 1.2 s of its audio (an announcement said again from its recording no longer uses the
+voice); `--mute-station` does the same on the station, whose voice then starts again just after the drop. `--on-mac`
+has the announcement said on the Mac from the start, by the voice (a timer that rings with no home station);
+`--chime-wait` sets how long the chime waits at most for the voice's first sound (0.3 s in the app; 0: at once):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli announce-drop --repeats 6 --mute-station
+.build/xcode/Build/Products/Release/voice-cli announce-drop --repeats 10 --on-mac --mute-first
 ```
 
 Check that the language model picks the right action, with the right date. Text only, nothing is created: the
