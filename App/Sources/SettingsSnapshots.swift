@@ -88,6 +88,8 @@ extension Snapshots {
                             caller: "192.168.1.20", detail: InboundRefusal.noText.explanation),
             InboundLogEntry(date: ago(minutes: 75), path: .homeRelay, form: .json, result: .expired,
                             caller: "192.168.1.20", text: "Quelqu’un a sonné à la porte d’entrée."),
+            InboundLogEntry(date: ago(minutes: 130), path: .homeRelay, form: .json, result: .notifiedAndKept,
+                            caller: "192.168.1.20", text: "Fumée détectée dans la cuisine."),
         ]
         let garageLog = [
             InboundLogEntry(date: ago(minutes: 180), path: .homeRelay, form: .text, result: .notified,

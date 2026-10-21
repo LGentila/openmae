@@ -22,6 +22,9 @@ public struct InboundLogEntry: Codable, Sendable, Equatable, Identifiable {
         /// Kept for later, in the news: by its source's mode, the quiet hours, the announcements switched off, Maé not
         /// ready, or an announcement stopped before its end.
         case kept
+        /// Urgent, and Maé could not say it (the announcements switched off, or Maé not ready): shown in a
+        /// notification, and kept for later in the news as well.
+        case notifiedAndKept
         case duplicate
         /// Refused: the source is paused (answered 404).
         case paused
@@ -323,11 +326,7 @@ public actor InboundHost {
         updateInternetPath()
         offerNews()
         publish()
-        if mode == .notifyOnly {
-            // Only these sources end in notifications: what is not said is kept for later, in the news.
-            let announcer = announcer
-            Task { await announcer?.requestNotificationPermission() }
-        }
+        if Self.mayNotify(source) { requestNotificationPermission() }
         return source.id
     }
 
@@ -337,13 +336,21 @@ public actor InboundHost {
         let previous = state.sources[index]
         state.sources[index] = source
         if source.origin != previous.origin { setSecret(InboundSecret.generate(), for: source.id) }
-        if source.mode == .notifyOnly, previous.mode != .notifyOnly {
-            let announcer = announcer
-            Task { await announcer?.requestNotificationPermission() }
-        }
+        if Self.mayNotify(source), !Self.mayNotify(previous) { requestNotificationPermission() }
         save()
         updateInternetPath()
         publish()
+    }
+
+    /// Only these sources' deliveries may end in a notification: "Notification only", and the urgent ones of a source
+    /// that may ask for them, while Maé cannot say them. What else is not said is kept for later, in the news.
+    private static func mayNotify(_ source: InboundSource) -> Bool {
+        source.mode == .notifyOnly || source.mayBeUrgent
+    }
+
+    private func requestNotificationPermission() {
+        let announcer = announcer
+        Task { await announcer?.requestNotificationPermission() }
     }
 
     public func removeSource(_ id: UUID) {
@@ -511,6 +518,7 @@ public actor InboundHost {
         case .queued: .queued
         case .kept: .kept
         case .notified: .notified
+        case .notifiedAndKept: .notifiedAndKept
         case .duplicate: .duplicate
         }
         let entry = log(InboundLogEntry(date: now(), path: path, form: message.form, result: result, caller: caller,
@@ -526,6 +534,11 @@ public actor InboundHost {
             await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
                                     language: message.language))
             return HTTPResponse.json(202, ["status": "kept"])
+        case .notifiedAndKept:
+            notify(message, from: source)
+            await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
+                                    language: message.language))
+            return HTTPResponse.json(202, ["status": "notified"])
         case .queued:
             // In the news from now on, as being announced: should it not be said to its end, it stays there.
             let item = await news.add(NewsItem(source: source.name, received: now(), text: message.spoken,
@@ -539,7 +552,8 @@ public actor InboundHost {
     /// Has Maé say it, after the chime, as soon as nobody speaks; with "news": true (the welcome home), the news after it
     /// (`NewsPhrases.whileAway`). Said to its end, its item in the news is marked said, and the news it read are taken
     /// out. Not said in time (it is never said late), stopped before its end (the user spoke over it, the stop button…),
-    /// or Maé not ready: it stays in the news, unread, and so do the news it was to read.
+    /// or Maé not ready: it stays in the news, unread, and so do the news it was to read. An urgent one Maé is no longer
+    /// ready to say is shown in a notification as well, as `InboundRules` has it when she is not ready on its arrival.
     private func say(_ message: InboundMessage, from source: InboundSource, entry: UUID, item: UUID, urgent: Bool,
                      expiresAfter: Int) async
     {
@@ -558,15 +572,19 @@ public actor InboundHost {
             await news.release(held, said: said)
             update(entry, of: source.id, to: result)
         }
+        func notReady() async {
+            if urgent { notify(message, from: source) }
+            await ended(said: false, urgent ? .notifiedAndKept : .kept)
+        }
         guard let announcer, await announcer.canAnnounce() else {
-            await ended(said: false, .kept)
+            await notReady()
             return
         }
         let id = UUID()
         let note = InboundPhrases.note(source: source.name, receivedAt: now())
         guard await announcer.announce(text, note: note, language: message.language, chime: true, urgent: urgent, id: id)
         else {
-            await ended(said: false, .kept)
+            await notReady()
             return
         }
         let wait = expiryUnit * expiresAfter

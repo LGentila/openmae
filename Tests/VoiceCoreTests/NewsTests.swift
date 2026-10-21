@@ -74,17 +74,29 @@ struct NewsTests {
         let off = InboundPreferences(announcements: false)
         var home = InboundSource(name: "Maison")
         #expect(decide(message, from: home, preferences: off).outcome == .kept)
+        // Urgent from a source that may not ask for it: like the others.
+        #expect(decide(urgent, from: home, preferences: off).outcome == .kept)
+        // Everything goes to the news; an urgent one from a source that may ask for it shows a notification as well.
         home.mayBeUrgent = true
-        #expect(decide(urgent, from: home, preferences: off).outcome == .kept)  // everything goes to the news
+        #expect(decide(message, from: home, preferences: off).outcome == .kept)
+        #expect(decide(urgent, from: home, preferences: off) == InboundDecision(outcome: .notifiedAndKept, urgent: true))
+        // Whatever the mode, as when it is said.
+        let later = InboundSource(name: "Cave", mode: .keepForLater, mayBeUrgent: true)
+        #expect(decide(urgent, from: later, preferences: off).outcome == .notifiedAndKept)
         let notifying = InboundSource(name: "Garage", mode: .notifyOnly)
         #expect(decide(message, from: notifying, preferences: off).outcome == .notified)
     }
 
     @Test func notReadyGoesToTheNews() {
         var home = InboundSource(name: "Maison")
+        #expect(decide(urgent, from: home, ready: false).outcome == .kept)
         home.mayBeUrgent = true
         #expect(decide(message, from: home, ready: false).outcome == .kept)
-        #expect(decide(urgent, from: home, ready: false).outcome == .kept)
+        // An urgent one from a source that may ask for it shows a notification as well, during the quiet hours too.
+        #expect(decide(urgent, from: home, ready: false) == InboundDecision(outcome: .notifiedAndKept, urgent: true))
+        let quiet = InboundPreferences(quietHours: QuietHours(enabled: true))  // 22:00 to 08:00
+        #expect(decide(urgent, from: home, ready: false, preferences: quiet, now: at(23)).outcome == .notifiedAndKept)
+        #expect(decide(message, from: home, ready: false, preferences: quiet, now: at(23)).outcome == .kept)
         let notifying = InboundSource(name: "Garage", mode: .notifyOnly)
         #expect(decide(message, from: notifying, ready: false).outcome == .notified)
     }

@@ -52,6 +52,8 @@ private actor FakeAnnouncer: Announcing {
     }
 
     var ready = true
+    /// The engine stops between the check and the announcement (a change of tier): `announce` refuses.
+    var refusing = false
     /// Someone speaks: announcements wait.
     var holding = false
     /// The user stops what is said before its end (speaks over it, Escape…).
@@ -59,19 +61,21 @@ private actor FakeAnnouncer: Announcing {
     /// What the engine was asked to say (whether it was said to its end or not).
     private(set) var said: [Said] = []
     private(set) var notifications: [(title: String, body: String)] = []
+    private(set) var permissionRequests = 0
     private var states: [UUID: AnnouncementState] = [:]
     /// The news, while the engine offers lire_nouvelles; and each time it was given or taken away.
     private(set) var news: NewsStore?
     private(set) var newsOffers: [Bool] = []
 
     func set(ready: Bool) { self.ready = ready }
+    func set(refusing: Bool) { self.refusing = refusing }
     func set(holding: Bool) { self.holding = holding }
     func set(stopping: Bool) { self.stopping = stopping }
 
     func canAnnounce() -> Bool { ready }
 
     func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID) -> Bool {
-        guard ready else { return false }
+        guard ready, !refusing else { return false }
         said.append(Said(text: text, note: note, urgent: urgent, language: language))
         states[id] = holding ? .waiting : stopping ? .stopped : .said
         return true
@@ -91,7 +95,7 @@ private actor FakeAnnouncer: Announcing {
     }
 
     func notify(title: String, body: String) { notifications.append((title, body)) }
-    func requestNotificationPermission() {}
+    func requestNotificationPermission() { permissionRequests += 1 }
 }
 
 @Suite("Received information on the Mac")
@@ -449,6 +453,71 @@ struct InboundTests {
         _ = await rig.post(#"{"text": "Fumée détectée dans la cuisine", "priority": "urgent"}"#)
         #expect(await eventually { await rig.announcer.said.count == 1 })
         #expect(await rig.announcer.said.first?.urgent == false)
+    }
+
+    /// An urgent delivery Maé cannot say, the announcements switched off: a notification, and the news as well.
+    @Test func urgentWithTheAnnouncementsOffIsNotifiedAndKept() async {
+        let rig = await makeRig { $0.mayBeUrgent = true }
+        await rig.host.setPreferences(InboundPreferences(announcements: false))
+        let tube = await rig.post(#"{"title": "Cuisine", "text": "Fumée détectée", "priority": "urgent"}"#)
+        #expect(tube.status == 202 && tube.json == ["status": "notified"])
+        #expect(await rig.log().first?.result == .notifiedAndKept)
+        #expect(await rig.host.news.unread.map(\.text) == ["Cuisine\u{00A0}: Fumée détectée"])
+        #expect(await eventually { await rig.announcer.notifications.count == 1 })
+        let notification = await rig.announcer.notifications.first
+        #expect(notification?.title == "Cuisine" && notification?.body == "Fumée détectée")
+        // Not urgent: the news only.
+        let calm = await rig.post(#"{"text": "Le courrier est arrivé"}"#)
+        #expect(calm.json == ["status": "kept"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await rig.announcer.notifications.count == 1)
+        #expect(await rig.announcer.said.isEmpty)
+    }
+
+    /// An urgent delivery while Maé is not ready (models loading), or no longer ready when it was to be said: a
+    /// notification, and the news as well.
+    @Test func urgentWhileNotReadyIsNotifiedAndKept() async {
+        let rig = await makeRig { $0.mayBeUrgent = true }
+        await rig.announcer.set(ready: false)
+        let tube = await rig.post(#"{"text": "Fumée détectée", "priority": "urgent"}"#)
+        #expect(tube.json == ["status": "notified"])
+        #expect(await rig.log().first?.result == .notifiedAndKept)
+        #expect(await rig.host.news.unread.map(\.text) == ["Fumée détectée"])
+        #expect(await eventually { await rig.announcer.notifications.first?.title == "Home Assistant" })
+        // Ready when it arrives, but the engine stops before it is said.
+        await rig.announcer.set(ready: true)
+        await rig.announcer.set(refusing: true)
+        let late = await rig.post(#"{"text": "Le détecteur de fumée sonne encore", "priority": "urgent"}"#)
+        #expect(late.json == ["status": "queued"])
+        #expect(await eventually { await rig.log().first?.result == .notifiedAndKept })
+        #expect(await eventually { await rig.announcer.notifications.count == 2 })
+        #expect(await rig.announcer.notifications.last?.body == "Le détecteur de fumée sonne encore")
+        #expect(await rig.host.news.unread.map(\.text) == ["Fumée détectée", "Le détecteur de fumée sonne encore"])
+        // Not urgent: kept, never notified.
+        let calm = await rig.post(#"{"text": "Le courrier est arrivé"}"#)
+        #expect(calm.json == ["status": "queued"])
+        #expect(await eventually { await rig.log().first?.result == .kept })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await rig.announcer.notifications.count == 2)
+        #expect(await rig.announcer.said.isEmpty)
+    }
+
+    /// The notification permission is asked when a source may end in a notification: "Notification only", or allowed
+    /// urgent deliveries.
+    @Test func notificationPermissionForTheSourcesThatMayNotify() async throws {
+        let rig = await makeRig()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await rig.announcer.permissionRequests == 0)  // said right away: never a notification
+        var source = try #require(await rig.host.current.sources.first)
+        source.mayBeUrgent = true
+        await rig.host.updateSource(source)
+        #expect(await eventually { await rig.announcer.permissionRequests == 1 })
+        source.mode = .notifyOnly  // asked already
+        await rig.host.updateSource(source)
+        _ = await rig.host.addSource(name: "Gladys", mode: .notifyOnly)
+        #expect(await eventually { await rig.announcer.permissionRequests == 2 })
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await rig.announcer.permissionRequests == 2)
     }
 
     @Test func sendTest() async {

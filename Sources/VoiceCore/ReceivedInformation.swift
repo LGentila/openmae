@@ -34,7 +34,8 @@ public struct InboundSource: Codable, Sendable, Equatable, Identifiable {
     public var name: String
     public var origin: Origin
     public var mode: Mode
-    /// "May ask for an urgent announcement": an urgent delivery is then said at once, whatever the mode.
+    /// "May ask for an urgent announcement": an urgent delivery is then said at once, whatever the mode; shown in a
+    /// notification, and kept for later, when Maé cannot say it (the announcements switched off, or Maé not ready).
     public var mayBeUrgent: Bool
     /// Paused: its address answers like an unknown one.
     public var paused: Bool
@@ -298,13 +299,16 @@ public enum InboundOutcome: String, Codable, Sendable {
     case kept
     /// A notification on the Mac: `202 {"status":"notified"}`.
     case notified
+    /// An urgent delivery Maé cannot say (the announcements switched off, or Maé not ready): a notification on the Mac,
+    /// and kept for later in the news as well. `202 {"status":"notified"}`.
+    case notifiedAndKept
     /// The same text from the same source a moment ago: ignored, `200 {"status":"duplicate"}`.
     case duplicate
 }
 
 public struct InboundDecision: Sendable, Equatable {
     public var outcome: InboundOutcome
-    /// Said at once: it may cut Maé's sentence, never the user's.
+    /// Urgent, from a source that may ask for it. Said at once: it may cut Maé's sentence, never the user's.
     public var urgent: Bool
     /// Not said after this many seconds: it then goes to the news, never said late.
     public var expiresAfter: Int
@@ -358,6 +362,8 @@ public struct QuietHours: Codable, Sendable, Equatable {
 /// - Urgent: said at once whatever the mode, if the source may ask for it; otherwise like the others.
 /// - The announcements switched off, or the quiet hours (except for the urgent ones above): to the news instead.
 /// - Maé not ready (models loading, setup to finish): to the news instead.
+/// - The urgent ones above, with the announcements switched off or Maé not ready: to the news, and in a notification
+///   as well.
 /// - Not said within 60 s (or its `expires`): never said late, the news instead (`InboundHost`).
 /// - The same text from the same source within 2 minutes: ignored.
 public struct InboundRules: Sendable {
@@ -387,10 +393,11 @@ public struct InboundRules: Sendable {
             case .notifyOnly: return InboundDecision(outcome: .notified)
             }
         }
-        // Maé would say it now.
-        guard preferences.announcements else { return InboundDecision(outcome: .kept) }
+        // Maé would say it now. What she cannot say is kept for later; an urgent one is shown in a notification as well.
+        let cannotSay = InboundDecision(outcome: urgent ? .notifiedAndKept : .kept, urgent: urgent)
+        guard preferences.announcements else { return cannotSay }
         if !urgent, preferences.quietHours.contains(now, calendar: calendar) { return InboundDecision(outcome: .kept) }
-        guard ready else { return InboundDecision(outcome: .kept) }
+        guard ready else { return cannotSay }
         return InboundDecision(outcome: .queued, urgent: urgent, expiresAfter: message.expires ?? Self.defaultExpiry)
     }
 

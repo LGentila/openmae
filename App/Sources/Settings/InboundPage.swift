@@ -207,7 +207,7 @@ private struct AnnouncementRows: View {
             }
             Caption("Meanwhile, what should be said right away is kept for later. Urgent announcements are still said.")
         } else {
-            Caption("Maé says nothing on her own: everything is kept for later. Ask her “What’s new?” to hear it.")
+            Caption("Maé says nothing on her own: everything is kept for later, and urgent announcements also show a notification. Ask her “What’s new?” to hear it.")
         }
     }
 
@@ -393,7 +393,7 @@ struct InboundSourcePage: View {
         }
         Hairline()
         SwitchRow("May ask for an urgent announcement", isOn: binding(\.mayBeUrgent))
-        Caption("When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours.")
+        Caption("When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours. If she cannot speak (announcements off, not ready yet), it shows in a notification and is kept for later.")
         Hairline()
         SwitchRow("Pause this source", isOn: binding(\.paused))
         Caption("While it is paused, its address answers as if it did not exist.")
@@ -912,7 +912,7 @@ enum InboundWords {
     static func isRefusal(_ result: InboundLogEntry.Result) -> Bool {
         switch result {
         case .paused, .wrongPath, .unreadable, .noText, .tooLarge, .rateLimited, .methodRefused, .timedOut: true
-        case .queued, .said, .expired, .notified, .kept, .duplicate: false
+        case .queued, .said, .expired, .notified, .kept, .notifiedAndKept, .duplicate: false
         }
     }
 
@@ -923,6 +923,7 @@ enum InboundWords {
         case .expired: Text("Too late: kept for later")
         case .notified: Text("Notified")
         case .kept: Text("Kept for later")
+        case .notifiedAndKept: Text("Notified and kept for later")
         case .duplicate: Text("Duplicate: ignored")
         case .paused, .wrongPath, .unreadable, .noText, .tooLarge, .rateLimited, .methodRefused, .timedOut:
             Text("Refused")
@@ -949,7 +950,7 @@ enum InboundWords {
         case .rateLimited: "Too many deliveries: at most 6 a minute and 60 an hour."
         case .methodRefused: "Wrong method: send with POST, or GET with ?text=."
         case .timedOut: "It took over 10 seconds to arrive."
-        case .queued, .said, .expired, .notified, .kept, .duplicate: nil
+        case .queued, .said, .expired, .notified, .kept, .notifiedAndKept, .duplicate: nil
         }
     }
 }

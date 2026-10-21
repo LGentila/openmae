@@ -2411,12 +2411,12 @@
         }
       }
     },
-    "Maé says nothing on her own: everything is kept for later. Ask her “What’s new?” to hear it.": {
+    "Maé says nothing on her own: everything is kept for later, and urgent announcements also show a notification. Ask her “What’s new?” to hear it.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé ne dit plus rien d’elle-même : tout est gardé pour plus tard. Demande-lui « Quoi de neuf ? » pour l’entendre."
+            "value": "Maé ne dit plus rien d’elle-même : tout est gardé pour plus tard, et les annonces urgentes s’affichent aussi en notification. Demande-lui « Quoi de neuf ? » pour l’entendre."
           }
         }
       }
@@ -2967,6 +2967,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Notifiée"
+          }
+        }
+      }
+    },
+    "Notified and kept for later": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifiée et gardée pour plus tard"
           }
         }
       }
@@ -5091,12 +5101,12 @@
         }
       }
     },
-    "When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours.": {
+    "When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours. If she cannot speak (announcements off, not ready yet), it shows in a notification and is kept for later.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quand elle marque une information comme urgente, Maé la dit tout de suite, quel que soit le mode : elle peut couper sa propre phrase, jamais la tienne."
+            "value": "Quand elle marque une information comme urgente, Maé la dit tout de suite, quel que soit le mode : elle peut couper sa propre phrase, jamais la tienne. Si elle ne peut pas parler (annonces coupées, pas encore prête), l’information s’affiche en notification et est gardée pour plus tard."
           }
         }
       }
