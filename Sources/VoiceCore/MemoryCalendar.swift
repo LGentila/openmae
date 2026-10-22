@@ -54,17 +54,19 @@ public actor MemoryCalendar: ToolProvider {
         do {
             try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(completed(call, context), refusal)
+            refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
         }
     }
 
     /// As in the app: a creation whose call names no calendar or no list, with the one the user's words name, or the one
-    /// of the same creation refused just before (`ActionCatalog.withCollectionSaid`); with an hour alone, that refused
-    /// creation's day when its words left the hour open (`RefusedCreation.withRefusedDay`).
+    /// of the same creation refused just before, or, when that one does not exist, the one the user's answer names
+    /// (`ActionCatalog.withCollectionSaid`); with an hour alone, that refused creation's day when its words left the
+    /// hour open (`RefusedCreation.withRefusedDay`).
     private func completed(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
         ActionCatalog.withCollectionSaid(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context,
-                                         again: refusedCreation.collection(before: call)) {
+                                         again: refusedCreation.collection(before: call),
+                                         answer: refusedCreation.answer(before: call, said: context.userSaid)) {
             $0 ? calendars : lists
         }
     }
@@ -83,7 +85,7 @@ public actor MemoryCalendar: ToolProvider {
         do {
             return try await carryOut(call, context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(completed(call, context), refusal)
+            refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
         }
     }
@@ -152,8 +154,12 @@ public actor MemoryCalendar: ToolProvider {
                            })])
         case ActionCatalog.changeItem.name:
             // As in the app: the item whose creation was just refused, named as the last item or by an id that names
-            // none, is created with what the change gives.
-            if let creation = refusedCreation.creation(insteadOf: call, said: context.userSaid, exists: { items[$0] != nil }) {
+            // none, is created with what the change gives (no calendar or list, after one that does not exist: the one
+            // the user's answer names).
+            if let creation = refusedCreation.creation(insteadOf: call, said: context.userSaid,
+                                                       names: { $0 ? calendars : lists },
+                                                       exists: { items[$0] != nil })
+            {
                 return try await perform(creation, context: context)
             }
             let (reference, item) = try referenced(call, context)

@@ -1,6 +1,7 @@
 import Foundation
 
-// The calendar or the reminder list the user's own words name, for a creation whose call names none.
+// The calendar or the reminder list the user's own words name, for a creation whose call names none, or for a creation
+// refused for one that does not exist, whose answer names another.
 
 extension ActionCatalog {
     /// A creation (`creer_evenement`, `creer_rappel`) whose call names no calendar or no list, with the one the user's
@@ -17,8 +18,13 @@ extension ActionCatalog {
     /// Paul. »). The refused creation's own covers a request in two turns: « Ajoute un rendez-vous chez le coiffeur
     /// après le travail dans mon calendrier Perso. », refused for its moment, then « Demain à 18 h. » and the call again
     /// without the calendar. A calendar or a list that does not exist is never put in: the app could only refuse it.
+    ///
+    /// When the refused creation's own does not exist (« Travail », refused for it), the one the user's answer to the
+    /// app's question names (`answer`, from `RefusedCreation.answer(before:said:)`), as `collectionAnswered` finds it:
+    /// « Mets-la dans Maison alors. » names « Maison » without « calendrier » before it, and the creation written again
+    /// without its calendar went to the default one, whichever the answer named.
     public static func withCollectionSaid(_ call: ToolCall, context: ToolContext, again: String? = nil,
-                                          names: (_ event: Bool) -> [String]) -> ToolCall
+                                          answer: String? = nil, names: (_ event: Bool) -> [String]) -> ToolCall
     {
         let event = call.name == createEvent.name
         guard event || call.name == createReminder.name else { return call }
@@ -26,7 +32,10 @@ extension ActionCatalog {
         guard call.text(key) == nil else { return call }
         let all = names(event)
         let index = context.userSaid.first.flatMap { collectionSaid(in: $0, event: event, among: all) }
-            ?? again.flatMap { collectionIndex(named: $0, among: all) }
+            ?? again.flatMap { refused in
+                collectionIndex(named: refused, among: all)
+                    ?? answer.flatMap { collectionAnswered(in: $0, event: event, among: all) }
+            }
         guard let index else { return call }
         var said = call
         said.arguments[key] = .string(all[index])
@@ -93,6 +102,50 @@ extension ActionCatalog {
         }
         return best?.index ?? loose
     }
+
+    /// Where among `names` the calendar (`event`) or the list is that `sentence` names when it answers the app's
+    /// question about one (« Je ne trouve pas le calendrier « Travail ». Tu peux me redire son nom ? »): as
+    /// `collectionSaid` finds it, else a name whose words are all there, even without « calendrier » or « liste »
+    /// before them (« Mets-la dans Maison alors. », « Maison. », « C'est le calendrier perso. »), the longest at its
+    /// place (« Famille Dupont » before « Famille »). When the sentence has several, the only one behind « à »,
+    /// « dans », « sur »… (« Dans Maison, pas Perso. »). nil when it names none, or several that nothing tells apart
+    /// (« Maison ou Perso ? »). A name made only of such a word (a calendar called « Calendrier ») is not found so:
+    /// « dans le calendrier par défaut » does not name it.
+    ///
+    /// Only for an answer: in a request, a name alone is often something else (« le ménage de la maison »).
+    public static func collectionAnswered(in sentence: String, event: Bool, among names: [String]) -> Int? {
+        if let said = collectionSaid(in: sentence, event: event, among: names) { return said }
+        let words = placeWords(sentence)
+        let nameWords = names.map { placeWords($0).filter { $0 != "|" } }
+        var found: [(index: Int, placed: Bool)] = []
+        var start = 0
+        while start < words.count {
+            // The longest name there, the first of that length (two calendars of the same name in two accounts).
+            var longest: Int?
+            for (index, name) in nameWords.enumerated()
+                where !name.isEmpty && !name.allSatisfy(collectionWords.contains)
+                    && name.count > (longest.map { nameWords[$0].count } ?? 0)
+            {
+                let stop = start + name.count
+                if stop <= words.count, words[start..<stop].elementsEqual(name) { longest = index }
+            }
+            guard let longest else {
+                start += 1
+                continue
+            }
+            found.append((longest, placed(before: start, words)))
+            start += nameWords[longest].count
+        }
+        let named = Set(found.map { $0.index })
+        if named.count == 1 { return named.first }
+        let placedNames = Set(found.filter { $0.placed }.map { $0.index })
+        return placedNames.count == 1 ? placedNames.first : nil
+    }
+
+    /// The words for a calendar or a list, in both languages: what `collectionSaid` looks for a name after (or before).
+    private static let collectionWords: Set<String> = [
+        "calendrier", "calendriers", "agenda", "agendas", "calendar", "calendars", "liste", "listes", "list", "lists",
+    ]
 
     /// The words of a text, without case or accents, and "|" where a comma, a full stop… cuts the sentence: a name never
     /// runs over it.

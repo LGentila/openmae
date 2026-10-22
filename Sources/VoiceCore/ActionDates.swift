@@ -133,9 +133,18 @@ public enum DateCheck {
 /// When the model writes the creation again instead, without its calendar or its list, the refused one's
 /// (`collection(before:)`).
 ///
+/// Refused for a calendar or a list that does not exist, the creation goes instead in the one the user's answer names
+/// among the writable ones (« Mets-la dans Maison alors. »: `ActionCatalog.collectionAnswered`), when the change that
+/// stands for it gives none (`creation(insteadOf:said:names:exists:)`), or when the creation written again leaves it
+/// out (`answer(before:said:)`): the refused one could only be refused again, and the default one is not the one
+/// named. Gemma 4 E4B answered so with `modifier_element {reference: dernier, titre: réunion}`, without the calendar,
+/// in 2 runs of 10 of voice-cli dialogue-bench: the meeting was refused again for « Travail », and the model said it
+/// was in « Maison ». Only the user's answer, said after the refusal: the request itself, which a second try of the
+/// model reads again, names the refused one.
+///
 /// Refused for words that gave the day but left the hour open (« jeudi après le travail »:
 /// `FrenchDates.leavesTheHourOpen`), the creation keeps that day when the answer gives an hour alone (« À 18 h. »:
-/// `FrenchDates.saysOnlyTheHour`), in a change (`creation(insteadOf:said:exists:)`) or in the creation written
+/// `FrenchDates.saysOnlyTheHour`), in a change (`creation(insteadOf:said:names:exists:)`) or in the creation written
 /// again (`withRefusedDay`): « à 18 h » alone is the next 18:00, the next day at the bench's 18:42, not the Thursday
 /// the user said. To that answer, the models wrote « jeudi à 18 h » in 59 of 60 calls of voice-cli dialogue-bench,
 /// and Gemma 4 E4B once a change of the last item with « à 18 h ».
@@ -143,6 +152,9 @@ public struct RefusedCreation: Sendable {
     private var refused: ToolCall?
     /// The creation refused just before the call being checked and carried out, when that call is the same tool's.
     private var before: ToolCall?
+    /// What the user had said when the creation kept (`refused`, then `before`) was refused (`ToolContext.userSaid`):
+    /// a call with the same words comes from the same turn, a second try of the model, not from the user's answer.
+    private var refusedSaid: [String] = []
     private static let creations = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name]
     /// The words a call may give its moment under, the first one given counting.
     private static let starts = ["quand", "debut", "echeance"]
@@ -150,8 +162,8 @@ public struct RefusedCreation: Sendable {
     public init() {}
 
     /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change
-    /// (`creation(insteadOf:said:exists:)`), or the same creation written again (`collection(before:)`,
-    /// `withRefusedDay`).
+    /// (`creation(insteadOf:said:names:exists:)`), or the same creation written again (`collection(before:)`,
+    /// `answer(before:said:)`, `withRefusedDay`).
     public mutating func checking(_ call: ToolCall) {
         before = refused?.name == call.name ? refused : nil
         if call.name != ActionCatalog.changeItem.name { refused = nil }
@@ -164,6 +176,16 @@ public struct RefusedCreation: Sendable {
     public func collection(before call: ToolCall) -> String? {
         guard let before, before.name == call.name else { return nil }
         return before.text(before.name == ActionCatalog.createEvent.name ? "calendrier" : "liste")
+    }
+
+    /// The user's answer to the refusal of the same creation refused just before `call`, the call being checked and
+    /// carried out: `said`'s first (`ToolContext.userSaid`, the latest first), when the user said it after that
+    /// refusal. nil when `call` is another one, or comes from the same turn (the model's second try, with the request
+    /// as the user's words). For the calendar or the list that answer names, when the refused one does not exist
+    /// (`ActionCatalog.withCollectionSaid`).
+    public func answer(before call: ToolCall, said: [String]) -> String? {
+        guard let before, before.name == call.name, said != refusedSaid else { return nil }
+        return said.first
     }
 
     /// `call`, the call being checked and carried out, when it is the same creation refused just before written again
@@ -203,19 +225,26 @@ public struct RefusedCreation: Sendable {
     /// A call was refused, by the provider's check or when carried out: a creation is kept when the user gives the
     /// refused detail again (`ToolRefusal.detailGivenAgain`), forgotten otherwise. A change refused leaves what is
     /// kept: its second try may still make it, and the creation it was made into, refused in turn, is already kept.
-    public mutating func refused(_ call: ToolCall, _ refusal: ToolRefusal) {
+    /// `said`: what the user had said (`ToolContext.userSaid`), which tells their answer from a second try of the
+    /// model in the same turn.
+    public mutating func refused(_ call: ToolCall, _ refusal: ToolRefusal, said: [String] = []) {
         guard Self.creations.contains(call.name) else { return }
         refused = refusal.detailGivenAgain ? call : nil
+        refusedSaid = said
     }
 
     /// The creation to carry out instead of `change`, a change of the last item or of one that does not exist: the
     /// refused call, with what the change gives: a new moment instead of the old one (as `quand`, whichever word the
     /// change uses; an hour alone after words that gave the day and left the hour open, both: « jeudi après le
     /// travail à 18 h »), a calendar or a list (an event's calendar, a reminder's list, whichever of the two words the
-    /// change uses), a title, a length, a place. nil when no creation was refused just before, or when the change names
-    /// by its id an item created in this conversation (`exists`: whether a reference names one), which it changes.
-    /// `said`: the user's messages, the latest first, as for `withRefusedDay`. Forgets the refused creation.
+    /// change uses; none, when the refused one does not exist among `names(event)`, the calendars of an event or the
+    /// lists of a reminder: the one the user's answer names, `ActionCatalog.collectionAnswered`), a title, a length, a
+    /// place. nil when no creation was refused just before, or when the change names by its id an item created in this
+    /// conversation (`exists`: whether a reference names one), which it changes. `said`: the user's messages, the
+    /// latest first, as for `withRefusedDay`; the first is their answer when they said it after the refusal
+    /// (`refused(_:_:said:)`). Forgets the refused creation.
     public mutating func creation(insteadOf change: ToolCall, said: [String] = [],
+                                  names: (_ event: Bool) -> [String] = { _ in [] },
                                   exists: (String) -> Bool) -> ToolCall? {
         guard var creation = refused, change.name == ActionCatalog.changeItem.name else { return nil }
         refused = nil
@@ -233,6 +262,16 @@ public struct RefusedCreation: Sendable {
         let event = creation.name == ActionCatalog.createEvent.name
         let (own, other) = event ? ("calendrier", "liste") : ("liste", "calendrier")
         if let named = given.removeValue(forKey: other), given[own] == nil { given[own] = named }
+        // None given, and the refused one does not exist: the one the user's answer names.
+        if given[own] == nil, let refusedName = creation.text(own), said != refusedSaid, let answer = said.first {
+            let all = names(event)
+            if ActionCatalog.collectionIndex(named: refusedName, among: all) == nil,
+               let index = ActionCatalog.collectionAnswered(in: answer, event: event, among: all)
+            {
+                given[own] = .string(all[index])
+                DebugLog.log("calendar: \(event ? "calendar" : "list") “\(all[index])” taken from the user's answer")
+            }
+        }
         creation.arguments.merge(given) { _, changed in changed }
         return creation
     }
@@ -240,5 +279,6 @@ public struct RefusedCreation: Sendable {
     public mutating func forget() {
         refused = nil
         before = nil
+        refusedSaid = []
     }
 }
