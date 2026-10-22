@@ -269,6 +269,22 @@ struct FrenchDatesTests {
                 && !FrenchDates.saysTheHour("2026-10-22") && !FrenchDates.saysTheHour("après le travail"))
     }
 
+    /// The answer to « À quelle heure ? »: an hour or a part of the day, without a day, a date or a period, and not
+    /// counted from now or from the item. Said after « jeudi après le travail », it keeps that Thursday.
+    @Test func anHourAloneLeavesTheDayOut() throws {
+        let alone = ["À 18 h.", "à 18 h", "18 h 30", "vers 18 h", "18:00", "de 18 h à 19 h", "à six heures du soir",
+                     "le soir", "en fin d'après-midi", "à midi", "après le travail, à 18 h"]
+        for text in alone { #expect(FrenchDates.saysOnlyTheHour(text), "\(text)") }
+        let notAlone = ["Demain à 18 h.", "jeudi à 18 h", "jeudi soir", "ce soir", "ce midi", "aujourd'hui à 18 h",
+                        "le 22 à 18 h", "2026-10-22T18:00", "jeudi", "après le travail", "dans 20 minutes",
+                        "une heure plus tard", "à la même heure", "maintenant", "cette semaine à 18 h",
+                        "pendant une heure", ""]
+        for text in notAlone { #expect(!FrenchDates.saysOnlyTheHour(text), "\(text)") }
+        #expect(try moment("jeudi après le travail à 18 h") == "2026-10-22T18:00")
+        #expect(try moment("jeudi après le travail le soir") == "2026-10-22T19:00")
+        #expect(try moment("à 18 h") == "2026-10-16T18:00")  // alone: the next 18:00
+    }
+
     @Test func lengths() {
         let cases: [(String, Int?)] = [
             ("une heure et quart", 4500), ("une heure et demie", 5400), ("1 h 30", 5400), ("1h30", 5400),

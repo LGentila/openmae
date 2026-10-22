@@ -120,6 +120,16 @@ public enum FrenchDates {
         Parser(tokens(text)).parse().saysTheHour
     }
 
+    /// Whether words give the hour of a day they leave out: an hour (« à 18 h », « de 18 h à 19 h »), a part of the
+    /// day (« le soir ») — the answer to « À quelle heure ? ». Not with a day of their own (« demain à 18 h », « jeudi
+    /// soir », « ce soir »), a date or a period, nor an hour counted from now or from the item (« dans 20 minutes »,
+    /// « une heure plus tard », « à la même heure »).
+    public static func saysOnlyTheHour(_ text: String) -> Bool {
+        let p = Parser(tokens(text)).parse()
+        return (!p.clocks.isEmpty || !p.parts.isEmpty) && p.days.isEmpty && p.endDay == nil && p.period == nil
+            && p.offset == nil && p.shift == nil && !p.sameTime
+    }
+
     /// The length a sentence says ("mets un minuteur d'une heure et quart" → 4500 s), not counting times of day.
     public static func lengthSaid(_ text: String) -> Int? {
         let p = Parser(tokens(text)).parse()

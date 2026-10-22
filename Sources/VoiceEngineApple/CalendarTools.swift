@@ -57,22 +57,26 @@ public actor CalendarTools: ToolProvider {
     public func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
 
     /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
-    /// (`withCollectionSaid`): the answer then creates it there.
+    /// (`completed`): the answer then creates it there. Its moment is checked as it is carried out: on the day of the
+    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`).
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(call, context: context)
+            try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(withCollectionSaid(call, context), refusal)
+            refusedCreation.refused(completed(call, context), refusal)
             throw refusal
         }
     }
 
-    /// A creation whose call names no calendar (an event) or no list (a reminder), with the one the user's words name
-    /// among the writable ones, or the one of the same creation refused just before (`ActionCatalog.withCollectionSaid`):
-    /// the model left it out. Found then as one the model names.
-    private func withCollectionSaid(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
-        ActionCatalog.withCollectionSaid(call, context: context, again: refusedCreation.collection(before: call)) {
+    /// A creation with what the model left out of its call. No calendar (an event) or no list (a reminder): the one the
+    /// user's words name among the writable ones, or the one of the same creation refused just before
+    /// (`ActionCatalog.withCollectionSaid`), found then as one the model names. An hour alone (« à 18 h ») after that
+    /// refused creation's words gave the day and left the hour open (« jeudi après le travail »): that day
+    /// (`RefusedCreation.withRefusedDay`).
+    private func completed(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
+        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context,
+                                         again: refusedCreation.collection(before: call)) {
             writable($0 ? .event : .reminder)
         }
     }
@@ -140,14 +144,14 @@ public actor CalendarTools: ToolProvider {
                                   spoken: ActionPhrases.notUnderstood(context.language))
             }
         } catch let refusal as ToolRefusal {
-            refusedCreation.refused(withCollectionSaid(call, context), refusal)
+            refusedCreation.refused(completed(call, context), refusal)
             throw refusal
         }
     }
 
     private func createEvent(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.event, context: context)
-        let call = withCollectionSaid(call, context)
+        let call = completed(call, context)
         let title = try ActionCatalog.title(call, context: context)
         let times = try ActionCatalog.eventTimes(call, context: context)
         let named = call.text("calendrier")
@@ -180,7 +184,7 @@ public actor CalendarTools: ToolProvider {
 
     private func createReminder(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         try await ensureAccess(.reminder, context: context)
-        let call = withCollectionSaid(call, context)
+        let call = completed(call, context)
         let title = try ActionCatalog.title(call, context: context)
         let due = try ActionCatalog.reminderDue(call, context: context)
         let named = call.text("liste")
@@ -315,7 +319,7 @@ public actor CalendarTools: ToolProvider {
         // The item whose creation was just refused for a detail the user gave again, named as the last item (not one
         // created before it) or by an id that names none: created with what the change gives (another moment,
         // calendar or list).
-        if let creation = refusedCreation.creation(insteadOf: call, exists: { created[$0] != nil }) {
+        if let creation = refusedCreation.creation(insteadOf: call, said: context.userSaid, exists: { created[$0] != nil }) {
             DebugLog.log("calendar: a change of an item never created, made as its creation")
             return try await perform(creation, context: context)
         }
