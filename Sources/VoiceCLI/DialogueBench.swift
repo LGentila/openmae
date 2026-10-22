@@ -54,7 +54,7 @@ private struct DialogueCorpus: Decodable {
     /// The item the user wants saved: by this tool, its title containing `title` (whatever the accents and case), at
     /// `when` ("2026-10-16T16:00", or the day alone), in the calendar or the list `calendar` (whatever the accents and
     /// case). With `modifier_element`, an item created earlier in the dialogue that the user wants changed: the app
-    /// changed it (it did not create it), its title and date as wanted.
+    /// changed it (it did not create it), its title, date and calendar as wanted.
     struct Goal: Decodable {
         var tool: String
         var title: String?
@@ -123,7 +123,7 @@ func runDialogueBench(_ o: Options) async throws {
     // in memory, and Claude Code or the web search as the model sees them (nothing handed over or searched).
     let agents = corpus.agents == true || o.agents
     let web = corpus.web == true || o.web
-    let calendar = MemoryCalendar()
+    let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (agents ? [DryAgents()] : [])
         + (web ? [DryWebSearch()] : [])
     let runner = ToolRunner(providers: providers)

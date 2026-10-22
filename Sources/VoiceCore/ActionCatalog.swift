@@ -195,20 +195,59 @@ public enum ActionCatalog {
         ],
         risk: .read)
 
+    /// What a change gives besides the calendar and the list.
+    private static let changeParameters = [
+        ToolParameter("reference", .string, "« dernier » pour le dernier élément créé, ou son identifiant "
+                      + "donné par l'outil (par exemple e1 ou r2).", required: true),
+        ToolParameter("titre", .string, "Nouveau nom."),
+        ToolParameter("quand", .string, "Nouveau moment, avec les mots exacts de l'utilisateur (par exemple "
+                      + "« à 10 h », « lundi à la même heure », « une heure plus tard »)."),
+        ToolParameter("duree", .string, "Nouvelle durée d'un événement, avec les mots exacts de l'utilisateur."),
+        ToolParameter("lieu", .string, "Nouveau lieu d'un événement."),
+    ]
+
+    /// `modifier_element` on the tiers that do not move items (`movesItems(on:)`): a new title, moment, length or place.
     public static let changeItem = ToolSpec(
         name: "modifier_element",
         description: "Modifie un rappel ou un événement créé plus tôt dans cette conversation : le décaler, le "
             + "renommer, changer sa durée ou son lieu.",
-        parameters: [
-            ToolParameter("reference", .string, "« dernier » pour le dernier élément créé, ou son identifiant "
-                          + "donné par l'outil (par exemple e1 ou r2).", required: true),
-            ToolParameter("titre", .string, "Nouveau nom."),
-            ToolParameter("quand", .string, "Nouveau moment, avec les mots exacts de l'utilisateur (par exemple "
-                          + "« à 10 h », « lundi à la même heure », « une heure plus tard »)."),
-            ToolParameter("duree", .string, "Nouvelle durée d'un événement, avec les mots exacts de l'utilisateur."),
-            ToolParameter("lieu", .string, "Nouveau lieu d'un événement."),
+        parameters: changeParameters,
+        risk: .undoable)
+
+    /// `modifier_element` on the tiers that move items to another calendar or list. Its calendar and its list are two
+    /// words, as in the creations (`creer_evenement`'s « calendrier », `creer_rappel`'s « liste »): the model writes the
+    /// word it already writes for the same thing, and Gemma 4 26B wrote « calendrier » for an event's even before the
+    /// change had it. Either word is read for either kind of item (`collectionNamed`), as the model may still write the
+    /// other one.
+    public static let changeItemMoving = ToolSpec(
+        name: changeItem.name,
+        description: "Modifie un rappel ou un événement créé plus tôt dans cette conversation : le décaler, le "
+            + "renommer, changer sa durée, son lieu, son calendrier ou sa liste.",
+        parameters: changeParameters + [
+            ToolParameter("calendrier", .string, "Nouveau calendrier d'un événement, seulement si l'utilisateur en "
+                          + "nomme un."),
+            ToolParameter("liste", .string, "Nouvelle liste d'un rappel, seulement si l'utilisateur en nomme une."),
         ],
         risk: .undoable)
+
+    /// Whether `modifier_element` offers a calendar and a list, to move an item, on this tier: on Gemma 4 26B (comfort,
+    /// max) only. Every wording tried made Gemma 4 E4B (standard) readier to call a tool for a remark, in
+    /// `voice-cli actions-bench --watch-calls` (the chance of a call at the first token, which does not depend on the
+    /// sampling): 3.4 % on average without them, 3.7 to 5.6 % with both or with one word for both, « Demain, je vais au
+    /// marché avec ma sœur » 31 % against 44 to 75 %. On E2B (minimum), the two made it write again a reminder refused
+    /// for its missing list (dialogue-bench's « a shopping list that does not exist »: 13 runs of 20 right, against 19 or
+    /// 20 without them and 18 or 19 with one word). The 26B did as well with them as without.
+    /// A calendar or a list the model writes all the same in a change is applied on every tier (`collectionNamed`), as
+    /// other words it may write are read.
+    public static func movesItems(on tier: HardwareTier) -> Bool { tier == .comfort || tier == .max }
+
+    /// The reminders' and calendar's tools for this tier's model.
+    public static func calendarTools(on tier: HardwareTier) -> [ToolSpec] { calendarTools(movingItems: movesItems(on: tier)) }
+
+    /// The reminders' and calendar's tools, `modifier_element` with a calendar and a list or without (`movesItems(on:)`).
+    public static func calendarTools(movingItems: Bool) -> [ToolSpec] {
+        [createReminder, listReminders, createEvent, readAgenda, movingItems ? changeItemMoving : changeItem, deleteItem]
+    }
 
     public static let deleteItem = ToolSpec(
         name: "supprimer_element",
@@ -219,12 +258,133 @@ public enum ActionCatalog {
         ],
         risk: .undoable)
 
-    public static let calendarTools = [createReminder, listReminders, createEvent, readAgenda, changeItem, deleteItem]
-
     /// Whether the `reference` of a change or a deletion is the last item created: « dernier », as the tools'
     /// descriptions say, or as the model may also write it.
     public static func meansLastItem(_ reference: String) -> Bool {
         ["dernier", "last", "derniere", "dernière"].contains(reference.lowercased())
+    }
+
+    // MARK: - Changes, shared by the providers (`CalendarTools`, and voice-cli's calendar in memory)
+
+    /// What a `modifier_element` call can give besides its reference (with the words the model may still write): a
+    /// call that gives none of them changes nothing.
+    static let changeKeys = ["titre", "quand", "debut", "echeance", "fin", "duree", "duree_minutes", "lieu",
+                             "calendrier", "liste"]
+
+    /// An event or a reminder as saved, as a change sees it.
+    public struct SavedItem: Equatable, Sendable {
+        public var isEvent: Bool
+        public var title: String
+        /// An event's start, a reminder's due date (nil: none).
+        public var date: Date?
+        /// An event's end.
+        public var end: Date?
+        /// An event at a time (not for the whole day), a reminder due at a time.
+        public var hasTime: Bool
+        /// An event's place.
+        public var place: String?
+        /// Its calendar (an event's) or its list (a reminder's): what tells them apart for the provider (EventKit's
+        /// identifier; the name for voice-cli's calendar in memory).
+        public var collection: String
+
+        public init(isEvent: Bool, title: String, date: Date?, end: Date? = nil, hasTime: Bool, place: String? = nil,
+                    collection: String)
+        {
+            self.isEvent = isEvent
+            self.title = title
+            self.date = date
+            self.end = end
+            self.hasTime = hasTime
+            self.place = place
+            self.collection = collection
+        }
+
+        /// Whether a change moved it in time (not only its end).
+        public func moved(from before: SavedItem) -> Bool { date != before.date || hasTime != before.hasTime }
+    }
+
+    /// The calendar (`event`) or the list a change names: the word of its kind of item, or the other one, as the model
+    /// may write it ("calendrier" for a reminder's list).
+    public static func collectionNamed(in call: ToolCall, event: Bool) -> String? {
+        event ? call.text("calendrier") ?? call.text("liste") : call.text("liste") ?? call.text("calendrier")
+    }
+
+    /// Where among `names` (the calendars or the lists an item can go in) a name the model gave is, whatever the case and
+    /// accents: the one of that name, else one whose name contains it or is contained in it; at the same rank, the
+    /// item's own (`current`), which a change then leaves where it is. nil when none fits.
+    public static func collectionIndex(named name: String, among names: [String], current: Int? = nil) -> Int? {
+        let key = folded(name)
+        guard !key.isEmpty else { return nil }
+        let keys = names.map(folded)
+        func fitting(_ fits: (String) -> Bool) -> Int? {
+            if let current, keys.indices.contains(current), fits(keys[current]) { return current }
+            return keys.firstIndex(where: fits)
+        }
+        return fitting { $0 == key } ?? fitting { !$0.isEmpty && ($0.contains(key) || key.contains($0)) }
+    }
+
+    static func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A calendar (`event`) or a list that does not exist: the model reads the ones there are (`names`), the user is
+    /// asked. For a creation, the answer gives that name again (`ToolRefusal.detailGivenAgain`).
+    public static func unknownCollection(_ name: String, event: Bool, names: [String], context: ToolContext) -> ToolRefusal {
+        var refusal = event
+            ? ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(name) ». Calendriers : "
+                              + names.joined(separator: ", ") + ".",
+                          spoken: ActionPhrases.unknownCalendar(name, context.language))
+            : ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(name) ». Listes : "
+                              + names.joined(separator: ", ") + ".",
+                          spoken: ActionPhrases.unknownList(name, context.language))
+        refusal.detailGivenAgain = true
+        return refusal
+    }
+
+    /// What a `modifier_element` call makes of `item`: a new title; a new moment, length or place for an event, a new
+    /// due date for a reminder (the dates as `changedEvent` and `changedDue` read them); `collection`, the calendar or
+    /// the list it names (as the provider found it). Refused when that changes nothing: what the call gives is already
+    /// the item's, or does not apply to it (a place for a reminder), so that the app never says « C'est modifié » of an
+    /// item it left as it was. `reference`: the item's, for the model.
+    public static func changed(_ item: SavedItem, by call: ToolCall, collection: String?, reference: String,
+                               context: ToolContext) throws -> SavedItem
+    {
+        var changed = item
+        if let title = call.text("titre") { changed.title = title }
+        if let collection { changed.collection = collection }
+        if item.isEvent {
+            if let place = call.text("lieu") { changed.place = place }
+            let start = item.date ?? context.now
+            if let times = try changedEvent(call, start: start, end: item.end ?? start.addingTimeInterval(3600),
+                                            allDay: !item.hasTime, context: context)
+            {
+                (changed.date, changed.end, changed.hasTime) = (times.start, times.end, !times.allDay)
+            }
+        } else if let due = try changedDue(call, due: item.date.map { ($0, item.hasTime) }, context: context) {
+            (changed.date, changed.hasTime) = (due.date, due.hasTime)
+        }
+        guard changed != item else { throw unchanged(event: item.isEvent, reference: reference, context: context) }
+        return changed
+    }
+
+    /// A change that changes nothing, given nothing (`event` nil: the kind of the item is not known yet) or only what the
+    /// item already is. The model reads what a change can give it, then gets its second try; if that try says nothing,
+    /// the user is asked what to change.
+    static func unchanged(event: Bool?, reference: String?, context: ToolContext) -> ToolRefusal {
+        let item = reference.map { " : « \($0) » est déjà comme il le demande" } ?? ""
+        let what: String
+        switch event {
+        case true?:
+            what = "son titre (titre), son moment (quand), sa durée (duree), son lieu (lieu) ou son calendrier (calendrier)"
+        case false?:
+            what = "son titre (titre), son moment (quand) ou sa liste (liste)"
+        case nil:
+            what = "son titre (titre), son moment (quand), sa durée (duree), son lieu (lieu), son calendrier (calendrier) "
+                + "ou la liste d'un rappel (liste)"
+        }
+        return ToolRefusal(forModel: "Cet appel ne change rien\(item). On peut changer \(what).",
+                           spoken: ActionPhrases.nothingChanged(event: event, context.language))
     }
 
     // MARK: - Timers and shortcuts
@@ -542,7 +702,7 @@ public enum ActionCatalog {
 
     /// The built-in tools' names, in the app's order (the shortcuts' tool only when there are shortcuts).
     static func names(shortcuts: [String] = []) -> [String] {
-        (calendarTools + [timer] + [runShortcut(names: shortcuts)].compactMap { $0 }).map(\.name)
+        (calendarTools(movingItems: true) + [timer] + [runShortcut(names: shortcuts)].compactMap { $0 }).map(\.name)
     }
 
     /// Checks a call against the static rules (the benchmark's "would the app accept it"). The dates of a change
@@ -563,6 +723,10 @@ public enum ActionCatalog {
         case changeItem.name, deleteItem.name:
             guard call.text("reference") != nil else {
                 throw ToolRefusal(forModel: "Il manque « reference ».", spoken: ActionPhrases.nothingToChange(context.language))
+            }
+            // What it gives is compared with the item when the call is carried out (`changed`).
+            if call.name == changeItem.name, !changeKeys.contains(where: { call.text($0) != nil }) {
+                throw unchanged(event: nil, reference: nil, context: context)
             }
         case timer.name:
             _ = try timerSeconds(call, context: context)

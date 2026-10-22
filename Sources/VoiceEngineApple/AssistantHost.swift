@@ -560,6 +560,7 @@ public actor AssistantHost: AssistantConnection {
             let on = agents + search + (sourcesOn ? sources : []) + (await newsTools.isOn ? [newsTools] : [])
             return on.isEmpty ? nil : ToolRunner(providers: on, actions: false)
         }
+        await calendarTools.offerMoves(ActionCatalog.movesItems(on: tier))
         await shortcutTools.refresh()
         await shortcutTools.setNeedingConfirmation(Set(settings.shortcutsToConfirm))
         return ToolRunner(providers: [calendarTools, timerTools, shortcutTools, agentTools, webSearchTools] + sources

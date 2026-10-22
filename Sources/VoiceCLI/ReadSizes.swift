@@ -37,7 +37,7 @@ func runReadSizes(_ o: Options, arguments: [String]) async throws {
 
     let timeZone = TimeZone.current
     let now = LocalDateTime.parse(o.now ?? "2026-10-15T18:42", in: timeZone)?.date ?? Date()
-    await model.useTools(ActionCatalog.calendarTools + [ActionCatalog.timer])
+    await model.useTools(ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer])
     var conversation = Conversation()
     conversation.systemAddenda = [
         ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)),

@@ -434,7 +434,7 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         print("experts' rows never padded (--unpadded-experts)")
     }
 
-    let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
+    let tools = ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
     await model.useTools(tools)

@@ -407,7 +407,10 @@ func buildEngine(_ o: Options, logPlays: Bool = false,
     let speaker = SimulatedSpeaker(logsPlays: logPlays)
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
-                                 tools: o.actions ? ToolRunner(providers: [MemoryCalendar(), TimerTools()]) : nil,
+                                 tools: o.actions
+                                     ? ToolRunner(providers: [MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier)),
+                                                              TimerTools()])
+                                     : nil,
                                  config: config)
     let log = EventLog()
     await log.attach(model)

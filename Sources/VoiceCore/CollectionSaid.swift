@@ -26,7 +26,7 @@ extension ActionCatalog {
         guard call.text(key) == nil else { return call }
         let all = names(event)
         let index = context.userSaid.first.flatMap { collectionSaid(in: $0, event: event, among: all) }
-            ?? again.flatMap { collectionMatch($0, among: all) }
+            ?? again.flatMap { collectionIndex(named: $0, among: all) }
         guard let index else { return call }
         var said = call
         said.arguments[key] = .string(all[index])
@@ -61,10 +61,10 @@ extension ActionCatalog {
                 best = (index, name.count)
             }
         }
-        /// As a name in a call is found (`collectionMatch`): a word that may begin a name.
+        /// As a name in a call is found (`collectionIndex`): a word that may begin a name.
         func looseFit(_ word: String) {
             guard loose == nil, word.count >= 2, !notNames.contains(word) else { return }
-            loose = collectionMatch(word, among: names)
+            loose = collectionIndex(named: word, among: names)
         }
         for (i, word) in words.enumerated() where keywords.contains(word) {
             // After it: « à ma liste de courses », « dans mon calendrier Travail », « to the list Groceries ».
@@ -92,19 +92,6 @@ extension ActionCatalog {
             looseFit(words[i - 1])
         }
         return best?.index ?? loose
-    }
-
-    /// Where among `names` the one is that `name` stands for, as the providers find a calendar or a list a call names:
-    /// the same whatever the case and accents, else the first one that contains it or that it contains.
-    public static func collectionMatch(_ name: String, among names: [String]) -> Int? {
-        func folded(_ text: String) -> String {
-            text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let key = folded(name)
-        guard !key.isEmpty else { return nil }
-        let all = names.map(folded)
-        return all.firstIndex(of: key) ?? all.firstIndex { !$0.isEmpty && ($0.contains(key) || key.contains($0)) }
     }
 
     /// The words of a text, without case or accents, and "|" where a comma, a full stop… cuts the sentence: a name never

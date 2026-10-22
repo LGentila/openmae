@@ -217,7 +217,7 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
     base.cutOffPlacement = style.placement ?? Conversation.cutOffPlacement(on: tier)  // a drop's note goes there too
     var dateLine: String?
     if o.actions {
-        await model.useTools(ActionCatalog.calendarTools + [ActionCatalog.timer])
+        await model.useTools(ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer])
         base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         if ActionCatalog.showsExamples(on: tier) { base.examples = ActionCatalog.examples(now: now, timeZone: timeZone) }
         dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)

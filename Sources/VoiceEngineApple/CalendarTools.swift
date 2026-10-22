@@ -15,7 +15,7 @@ public actor CalendarTools: ToolProvider {
     /// use: lets the feature be tried without changing the user's own calendars. Readings still cover them all.
     private let testCollection: String?
 
-    private enum Item: Sendable {
+    private enum Item: Sendable, Equatable {
         case event(String)  // EventKit identifiers
         case reminder(String)
     }
@@ -54,7 +54,13 @@ public actor CalendarTools: ToolProvider {
         self.testCollection = testCollection
     }
 
-    public func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
+    /// Whether `modifier_element` offers a calendar and a list (`ActionCatalog.movesItems(on:)`): set for the tier's
+    /// model before the tools are read.
+    private var movesItems = false
+
+    public func offerMoves(_ on: Bool) { movesItems = on }
+
+    public func tools() -> [ToolSpec] { ActionCatalog.calendarTools(movingItems: movesItems) }
 
     /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
     /// (`completed`): the answer then creates it there. Its moment is checked as it is carried out: on the day of the
@@ -331,48 +337,128 @@ public actor CalendarTools: ToolProvider {
                 throw ToolRefusal(forModel: "L'événement \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
-            // Worked out before anything changes: a refused call leaves the event as it was.
-            let times = try ActionCatalog.changedEvent(call, start: event.startDate, end: event.endDate,
-                                                      allDay: event.isAllDay, context: context)
-            let before = snapshot(event)
-            let moved = times.map { $0.start != event.startDate || $0.allDay != event.isAllDay } ?? false
-            if let title = call.text("titre") { event.title = title }
-            if let place = call.text("lieu") { event.location = place }
-            if let times {
-                event.isAllDay = times.allDay
-                event.startDate = times.start
-                event.endDate = times.end
+            // Worked out before anything changes: a refused call (a calendar that does not exist, a change that changes
+            // nothing) leaves the event as it was.
+            let calendar = try ActionCatalog.collectionNamed(in: call, event: true).map {
+                try eventCalendar(named: $0, current: event.calendar, context: context)
             }
-            try store.save(event, span: .thisEvent, commit: true)
-            let saved = store.event(withIdentifier: id) ?? event
+            let current = state(of: event)
+            let changed = try ActionCatalog.changed(current, by: call, collection: calendar?.calendarIdentifier,
+                                                    reference: key, context: context)
+            let before = snapshot(event)
+            if changed.title != current.title { event.title = changed.title }
+            if changed.place != current.place { event.location = changed.place }
+            if let start = changed.date, let end = changed.end,
+               start != current.date || end != current.end || changed.hasTime != current.hasTime
+            {
+                event.isAllDay = !changed.hasTime
+                event.startDate = start
+                event.endDate = end
+            }
+            let newCalendar = changed.collection != current.collection ? calendar : nil
+            if let newCalendar { event.calendar = newCalendar }
+            try save(event)
+            let saved = reread(event, id: id)
+            if newCalendar != nil { logMove(of: saved) }
             return ToolOutcome(
                 spoken: ActionPhrases.eventChanged(title: saved.title ?? "", start: saved.startDate, end: saved.endDate,
-                                                   allDay: saved.isAllDay, moved: moved, context),
+                                                   allDay: saved.isAllDay, moved: changed.moved(from: current),
+                                                   calendarName: newCalendar.map { saved.calendar?.title ?? $0.title },
+                                                   context),
                 forModel: describe(saved, reference: key, context),
-                undo: addUndo(.restore(item, before)))
+                undo: addUndo(.restore(.event(saved.eventIdentifier ?? id), before)))
         case .reminder(let id):
             try await ensureAccess(.reminder, context: context)
             guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
                 throw ToolRefusal(forModel: "Le rappel \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
-            let due = try ActionCatalog.changedDue(call, due: dueDate(of: reminder, context), context: context)
-            let before = snapshot(reminder)
-            if let title = call.text("titre") { reminder.title = title }
-            if let due {
-                reminder.dueDateComponents = components(due.date, hasTime: due.hasTime, context)
-                reminder.alarms?.forEach { reminder.removeAlarm($0) }
-                if due.hasTime { reminder.addAlarm(EKAlarm(absoluteDate: due.date)) }
+            let list = try ActionCatalog.collectionNamed(in: call, event: false).map {
+                try reminderList(named: $0, current: reminder.calendar, context: context)
             }
-            let moved = due != nil
-            try store.save(reminder, commit: true)
-            let when = dueDate(of: reminder, context)
+            let current = state(of: reminder, context)
+            let changed = try ActionCatalog.changed(current, by: call, collection: list?.calendarIdentifier,
+                                                    reference: key, context: context)
+            let before = snapshot(reminder)
+            if changed.title != current.title { reminder.title = changed.title }
+            if changed.moved(from: current), let due = changed.date {
+                reminder.dueDateComponents = components(due, hasTime: changed.hasTime, context)
+                reminder.alarms?.forEach { reminder.removeAlarm($0) }
+                if changed.hasTime { reminder.addAlarm(EKAlarm(absoluteDate: due)) }
+            }
+            let newList = changed.collection != current.collection ? list : nil
+            if let newList { reminder.calendar = newList }
+            try save(reminder)
+            let saved = reread(reminder, id: id)
+            if newList != nil { logMove(of: saved) }
+            let when = dueDate(of: saved, context)
             return ToolOutcome(
-                spoken: ActionPhrases.reminderChanged(title: reminder.title ?? "", due: when?.date,
-                                                      hasTime: when?.hasTime ?? false, moved: moved, context),
-                forModel: describe(reminder, reference: key, context),
-                undo: addUndo(.restore(item, before)))
+                spoken: ActionPhrases.reminderChanged(title: saved.title ?? "", due: when?.date,
+                                                      hasTime: when?.hasTime ?? false,
+                                                      moved: changed.moved(from: current),
+                                                      listName: newList.map { saved.calendar?.title ?? $0.title }, context),
+                forModel: describe(saved, reference: key, context),
+                undo: addUndo(.restore(.reminder(saved.calendarItemIdentifier), before)))
         }
+    }
+
+    /// An event just saved, read again from EventKit. In another calendar, EventKit may store it anew (in another
+    /// account, it is a new event there): its identifier then changes ("if you change the calendar of an event, this ID
+    /// will likely change", says EKEvent.h), and the reference given to the model follows it.
+    private func reread(_ event: EKEvent, id: String) -> EKEvent {
+        guard let now = event.eventIdentifier else { return event }
+        if now != id { follow(.event(id), to: .event(now)) }
+        return store.event(withIdentifier: now) ?? event
+    }
+
+    private func reread(_ reminder: EKReminder, id: String) -> EKReminder {
+        let now = reminder.calendarItemIdentifier
+        if now != id { follow(.reminder(id), to: .reminder(now)) }
+        return store.calendarItem(withIdentifier: now) as? EKReminder ?? reminder
+    }
+
+    /// Where a change moved an item: the calendar or the list, and its account.
+    private func logMove(of item: EKCalendarItem) {
+        DebugLog.log("calendar: \(item is EKReminder ? "reminder" : "event") moved to “\(item.calendar?.title ?? "?")” "
+                     + "(\(item.calendar?.source?.title ?? "?"))")
+    }
+
+    private func follow(_ old: Item, to new: Item) {
+        for (reference, item) in created where item == old { created[reference] = new }
+        DebugLog.log("calendar: saved under another identifier")
+    }
+
+    /// Saves a change; when EventKit refuses it (another account that does not take the item, say), the item keeps
+    /// what was saved before, not the values set for the change.
+    private func save(_ event: EKEvent) throws {
+        do {
+            try store.save(event, span: .thisEvent, commit: true)
+        } catch {
+            event.rollback()
+            throw error
+        }
+    }
+
+    private func save(_ reminder: EKReminder) throws {
+        do {
+            try store.save(reminder, commit: true)
+        } catch {
+            reminder.rollback()
+            throw error
+        }
+    }
+
+    private func state(of event: EKEvent) -> ActionCatalog.SavedItem {
+        ActionCatalog.SavedItem(isEvent: true, title: event.title ?? "", date: event.startDate, end: event.endDate,
+                                hasTime: !event.isAllDay, place: event.location,
+                                collection: event.calendar?.calendarIdentifier ?? "")
+    }
+
+    private func state(of reminder: EKReminder, _ context: ToolContext) -> ActionCatalog.SavedItem {
+        let due = dueDate(of: reminder, context)
+        return ActionCatalog.SavedItem(isEvent: false, title: reminder.title ?? "", date: due?.date,
+                                       hasTime: due?.hasTime ?? false,
+                                       collection: reminder.calendar?.calendarIdentifier ?? "")
     }
 
     // MARK: - Undo
@@ -414,7 +500,14 @@ public actor CalendarTools: ToolProvider {
                     event.startDate = start
                     event.endDate = end
                 }
-                try store.save(event, span: .thisEvent, commit: true)
+                // Moved to another calendar by the change: back to its own (and maybe to another identifier again).
+                if let calendar = before.calendar.flatMap({ store.calendar(withIdentifier: $0) }),
+                   calendar.calendarIdentifier != event.calendar?.calendarIdentifier
+                {
+                    event.calendar = calendar
+                }
+                try save(event)
+                _ = reread(event, id: id)
             }
             return ActionPhrases.undone(.change, context.language)
         case .recreate(let reference, .event, let before):
@@ -448,7 +541,13 @@ public actor CalendarTools: ToolProvider {
                 reminder.dueDateComponents = before.due
                 reminder.alarms?.forEach { reminder.removeAlarm($0) }
                 before.alarmDates.forEach { reminder.addAlarm(EKAlarm(absoluteDate: $0)) }
-                try store.save(reminder, commit: true)
+                if let list = before.calendar.flatMap({ store.calendar(withIdentifier: $0) }),
+                   list.calendarIdentifier != reminder.calendar?.calendarIdentifier
+                {
+                    reminder.calendar = list
+                }
+                try save(reminder)
+                _ = reread(reminder, id: id)
             }
             return ActionPhrases.undone(.change, context.language)
         }
@@ -466,18 +565,12 @@ public actor CalendarTools: ToolProvider {
 
     // MARK: - Calendars and lists
 
-    private func eventCalendar(named name: String?, context: ToolContext) throws -> EKCalendar {
+    /// The calendar for an event: the one named (a creation's, or the one a change moves it to), else the default one.
+    /// With the test calendar, always that one: a change then leaves the event in it. `current`: the event's own, which a
+    /// change names to leave it there.
+    private func eventCalendar(named name: String?, current: EKCalendar? = nil, context: ToolContext) throws -> EKCalendar {
         if let testCollection { return try collection(.event, named: testCollection) }
-        if let name {
-            guard let calendar = find(name, in: store.calendars(for: .event)) else {
-                var refusal = ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(name) ». "
-                                              + "Calendriers : " + writable(.event).joined(separator: ", ") + ".",
-                                          spoken: ActionPhrases.unknownCalendar(name, context.language))
-                refusal.detailGivenAgain = true
-                throw refusal
-            }
-            return calendar
-        }
+        if let name { return try find(name, .event, current: current, context: context) }
         guard let calendar = store.defaultCalendarForNewEvents else {
             throw ToolRefusal(forModel: "Aucun calendrier par défaut.", spoken: ActionPhrases.saveFailed(context.language),
                               retryable: false)
@@ -485,18 +578,10 @@ public actor CalendarTools: ToolProvider {
         return calendar
     }
 
-    private func reminderList(named name: String?, context: ToolContext) throws -> EKCalendar {
+    /// The list for a reminder, as `eventCalendar` finds an event's calendar.
+    private func reminderList(named name: String?, current: EKCalendar? = nil, context: ToolContext) throws -> EKCalendar {
         if let testCollection { return try collection(.reminder, named: testCollection) }
-        if let name {
-            guard let list = find(name, in: store.calendars(for: .reminder)) else {
-                var refusal = ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(name) ». Listes : "
-                                              + writable(.reminder).joined(separator: ", ") + ".",
-                                          spoken: ActionPhrases.unknownList(name, context.language))
-                refusal.detailGivenAgain = true
-                throw refusal
-            }
-            return list
-        }
+        if let name { return try find(name, .reminder, current: current, context: context) }
         guard let list = store.defaultCalendarForNewReminders() else {
             throw ToolRefusal(forModel: "Aucune liste de rappels par défaut.",
                               spoken: ActionPhrases.saveFailed(context.language), retryable: false)
@@ -504,21 +589,21 @@ public actor CalendarTools: ToolProvider {
         return list
     }
 
-    /// Compared without case or accents ("Maison" = "maison").
-    private func find(_ name: String, in calendars: [EKCalendar]) -> EKCalendar? {
-        let key = Self.folded(name)
-        let writable = calendars.filter(\.allowsContentModifications)
-        return writable.first { Self.folded($0.title) == key }
-            ?? writable.first { Self.folded($0.title).contains(key) || key.contains(Self.folded($0.title)) }
+    /// A calendar or a list the item can be saved in (of its kind, not read-only), by its name compared without case or
+    /// accents ("Maison" = "maison"), in every account; refused when there is none.
+    private func find(_ name: String, _ type: EKEntityType, current: EKCalendar?, context: ToolContext) throws -> EKCalendar {
+        let writable = store.calendars(for: type).filter(\.allowsContentModifications)
+        let names = writable.map(\.title)
+        let own = current.flatMap { current in writable.firstIndex { $0.calendarIdentifier == current.calendarIdentifier } }
+        guard let index = ActionCatalog.collectionIndex(named: name, among: names, current: own) else {
+            throw ActionCatalog.unknownCollection(name, event: type == .event, names: names, context: context)
+        }
+        return writable[index]
     }
 
+    /// The names of the calendars (`.event`) or the lists an item of that kind can be saved in.
     private func writable(_ type: EKEntityType) -> [String] {
         store.calendars(for: type).filter(\.allowsContentModifications).map(\.title)
-    }
-
-    private static func folded(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The test calendar or list, created next to the default one (iCloud, usually) the first time.

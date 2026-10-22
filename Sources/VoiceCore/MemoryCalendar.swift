@@ -1,32 +1,20 @@
-// The app's reminders and calendar for voice-cli dialogue-bench: the same checks, results and sentences as
-// `CalendarTools` (VoiceEngineApple), on items kept in memory instead of EventKit. One calendar, « Maison », and one
-// reminder list, « Rappels », both empty when a dialogue starts; a dialogue may have others (`use`).
-
 import Foundation
-import VoiceCore
 
-actor MemoryCalendar: ToolProvider {
-    nonisolated let identifier = "calendar"
+/// The app's reminders and calendar for voice-cli dialogue-bench: the same checks, results and sentences as
+/// `CalendarTools` (VoiceEngineApple), on items kept in memory instead of EventKit. One calendar, « Maison », and one
+/// reminder list, « Rappels », both empty when a dialogue starts; a dialogue may have others (`use`). Here rather than in
+/// voice-cli so that the tests reach it; the app never uses it.
+public actor MemoryCalendar: ToolProvider {
+    public nonisolated let identifier = "calendar"
     static let calendarName = "Maison"
     static let listName = "Rappels"
 
-    private struct Item: Sendable {
-        var isEvent: Bool
-        var title: String
-        /// An event's start, a reminder's due date (nil: none).
-        var date: Date?
-        var end: Date?
-        /// An event at a time (not for the whole day), a reminder due at a time.
-        var hasTime: Bool
-        var place: String?
-        /// Its calendar (an event's) or its list (a reminder's).
-        var collection: String
-    }
+    /// An item: its calendar or its list (`collection`) by its name.
+    private typealias Item = ActionCatalog.SavedItem
 
     /// The calendars and the reminder lists there are, the default one first.
     private var calendars = [calendarName]
     private var lists = [listName]
-
     /// Items created in this conversation, by the reference given to the model ("e1", "r2").
     private var items: [String: Item] = [:]
     private var lastCreated: String?
@@ -41,20 +29,27 @@ actor MemoryCalendar: ToolProvider {
     /// list), which a change of the last item, or of an item never created, makes instead.
     private var refusedCreation = RefusedCreation()
     /// Every item created, by reference, in order: what the bench checks a dialogue's goal against.
-    private(set) var creations: [String] = []
+    public private(set) var creations: [String] = []
     /// Every item changed or deleted, by its title as it was, in order: what the bench checks an item that a dialogue
     /// must leave as it was against.
-    private(set) var touched: [String] = []
+    public private(set) var touched: [String] = []
 
-    func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
+    /// Whether `modifier_element` offers a calendar and a list, as in the app on this tier (`ActionCatalog.movesItems(on:)`).
+    private let movesItems: Bool
+
+    public init(movingItems: Bool = true) {
+        movesItems = movingItems
+    }
+
+    public func tools() -> [ToolSpec] { ActionCatalog.calendarTools(movingItems: movesItems) }
 
     /// The calendars and the lists of the next conversations, the default one first (none: « Maison », « Rappels »).
-    func use(calendars: [String]?, lists: [String]?) {
+    public func use(calendars: [String]?, lists: [String]?) {
         self.calendars = calendars.flatMap { $0.isEmpty ? nil : $0 } ?? [Self.calendarName]
         self.lists = lists.flatMap { $0.isEmpty ? nil : $0 } ?? [Self.listName]
     }
 
-    func check(_ call: ToolCall, context: ToolContext) throws {
+    public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
             try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
@@ -74,7 +69,7 @@ actor MemoryCalendar: ToolProvider {
         }
     }
 
-    func resetConversation() {
+    public func resetConversation() {
         items = [:]
         lastCreated = nil
         undos = [:]
@@ -84,7 +79,7 @@ actor MemoryCalendar: ToolProvider {
 
     /// As in the app: a creation refused here (a calendar or a list that does not exist) is kept as one refused by
     /// `check` is.
-    func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
+    public func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
         do {
             return try await carryOut(call, context: context)
         } catch let refusal as ToolRefusal {
@@ -162,30 +157,23 @@ actor MemoryCalendar: ToolProvider {
                 return try await perform(creation, context: context)
             }
             let (reference, item) = try referenced(call, context)
-            var changed = item
-            if let title = call.text("titre") { changed.title = title }
-            if item.isEvent {
-                if let place = call.text("lieu") { changed.place = place }
-                let start = item.date ?? context.now
-                if let times = try ActionCatalog.changedEvent(call, start: start, end: item.end ?? start.addingTimeInterval(3600),
-                                                             allDay: !item.hasTime, context: context)
-                {
-                    (changed.date, changed.end, changed.hasTime) = (times.start, times.end, !times.allDay)
-                }
-            } else {
-                let due = item.date.map { (date: $0, hasTime: item.hasTime) }
-                if let moved = try ActionCatalog.changedDue(call, due: due, context: context) {
-                    (changed.date, changed.hasTime) = (moved.date, moved.hasTime)
-                }
+            // As in the app: another calendar or list among this conversation's, refused when it does not exist; a change
+            // that changes nothing is refused.
+            let moveTo = try ActionCatalog.collectionNamed(in: call, event: item.isEvent).map {
+                try collection($0, event: item.isEvent, current: item.collection, context)
             }
+            let changed = try ActionCatalog.changed(item, by: call, collection: moveTo, reference: reference,
+                                                    context: context)
             items[reference] = changed
             touched.append(item.title)
-            let moved = changed.date != item.date || changed.hasTime != item.hasTime
+            let moved = changed.moved(from: item)
+            let newCollection = changed.collection != item.collection ? changed.collection : nil
             let spoken = item.isEvent
                 ? ActionPhrases.eventChanged(title: changed.title, start: changed.date ?? context.now,
-                                             end: changed.end ?? context.now, allDay: !changed.hasTime, moved: moved, context)
+                                             end: changed.end ?? context.now, allDay: !changed.hasTime, moved: moved,
+                                             calendarName: newCollection, context)
                 : ActionPhrases.reminderChanged(title: changed.title, due: changed.date, hasTime: changed.hasTime,
-                                                moved: moved, context)
+                                                moved: moved, listName: newCollection, context)
             return ToolOutcome(spoken: spoken, forModel: describe(changed, reference: reference, context),
                                undo: addUndo(reference, before: item))
         case ActionCatalog.deleteItem.name:
@@ -201,14 +189,15 @@ actor MemoryCalendar: ToolProvider {
         }
     }
 
-    func undoneName(_ token: UndoToken, language: SpeechLanguage) -> String? {
+    public func undoneName(_ token: UndoToken, language: SpeechLanguage) -> String? {
         guard let undo = undos[token.id] else { return nil }
         // A change or a deletion: the item as it was comes back.
         if undo.before != nil { return ActionPhrases.undoneName(items[undo.reference] == nil ? .deletion : .change, language) }
         return items[undo.reference].map { ActionPhrases.undoneName($0.isEvent ? .event : .reminder, language) }
     }
 
-    func undo(_ token: UndoToken, context: ToolContext) throws -> String {
+    /// As in the app: the item as it was before, in its own calendar or list again after a move.
+    public func undo(_ token: UndoToken, context: ToolContext) throws -> String {
         guard let undo = undos.removeValue(forKey: token.id) else { return ActionPhrases.cannotUndo(context.language) }
         let current = items[undo.reference]
         items[undo.reference] = undo.before
@@ -225,22 +214,17 @@ actor MemoryCalendar: ToolProvider {
                            undo: addUndo(reference, before: nil))
     }
 
-    /// The calendar (`event`) or the list a call names, among this conversation's, found as `CalendarTools` finds it
-    /// (whatever the case and accents, else one whose name contains it or is contained in it); none named: the default
-    /// one. Refused as in the app when none has that name.
-    private func collection(_ named: String?, event: Bool, _ context: ToolContext) throws -> String {
+    /// The calendar (`event`) or the list a call names, among this conversation's (as `CalendarTools` finds them:
+    /// `ActionCatalog.collectionIndex`), the item's own (`current`) first; none named: the default one. Refused as in
+    /// the app when none has that name.
+    private func collection(_ named: String?, event: Bool, current: String? = nil, _ context: ToolContext) throws
+        -> String
+    {
         let names = event ? calendars : lists
         guard let named else { return names[0] }
-        guard let index = ActionCatalog.collectionMatch(named, among: names) else {
-            var refusal = event
-                ? ToolRefusal(forModel: "Aucun calendrier modifiable ne s'appelle « \(named) ». Calendriers : "
-                                  + names.joined(separator: ", ") + ".",
-                              spoken: ActionPhrases.unknownCalendar(named, context.language))
-                : ToolRefusal(forModel: "Aucune liste de rappels ne s'appelle « \(named) ». Listes : "
-                                  + names.joined(separator: ", ") + ".",
-                              spoken: ActionPhrases.unknownList(named, context.language))
-            refusal.detailGivenAgain = true
-            throw refusal
+        let own = current.flatMap { names.firstIndex(of: $0) }
+        guard let index = ActionCatalog.collectionIndex(named: named, among: names, current: own) else {
+            throw ActionCatalog.unknownCollection(named, event: event, names: names, context: context)
         }
         return names[index]
     }

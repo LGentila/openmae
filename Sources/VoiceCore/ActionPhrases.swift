@@ -165,23 +165,46 @@ public enum ActionPhrases {
         }
     }
 
+    /// `calendarName`: the calendar the event was moved to (nil: it stayed in its own), which makes it a move.
     public static func eventChanged(title: String, start: Date, end: Date, allDay: Bool, moved: Bool,
-                                    _ context: ToolContext) -> String
+                                    calendarName: String? = nil, _ context: ToolContext) -> String
     {
         let when = span(start, end, allDay: allDay, context)
         switch context.language {
-        case .french: return "C’est \(moved ? "déplacé" : "modifié")\(nb): \(title), \(when)."
-        case .english: return "\(moved ? "Moved" : "Changed"): \(title), \(when)."
+        case .french:
+            if let calendarName { return "C’est déplacé dans ton calendrier «\(nb)\(calendarName)\(nb)»\(nb): \(title), \(when)." }
+            return "C’est \(moved ? "déplacé" : "modifié")\(nb): \(title), \(when)."
+        case .english:
+            if let calendarName { return "Moved to your “\(calendarName)” calendar: \(title), \(when)." }
+            return "\(moved ? "Moved" : "Changed"): \(title), \(when)."
         }
     }
 
-    public static func reminderChanged(title: String, due: Date?, hasTime: Bool, moved: Bool,
+    /// `listName`: the list the reminder was moved to (nil: it stayed in its own), which makes it a move.
+    public static func reminderChanged(title: String, due: Date?, hasTime: Bool, moved: Bool, listName: String? = nil,
                                        _ context: ToolContext) -> String
     {
         let when = due.map { ", " + moment($0, hasTime: hasTime, context) } ?? ""
         switch context.language {
-        case .french: return "C’est \(moved ? "déplacé" : "modifié")\(nb): \(title)\(when)."
-        case .english: return "\(moved ? "Moved" : "Changed"): \(title)\(when)."
+        case .french:
+            if let listName { return "C’est déplacé dans ta liste «\(nb)\(listName)\(nb)»\(nb): \(title)\(when)." }
+            return "C’est \(moved ? "déplacé" : "modifié")\(nb): \(title)\(when)."
+        case .english:
+            if let listName { return "Moved to your “\(listName)” list: \(title)\(when)." }
+            return "\(moved ? "Moved" : "Changed"): \(title)\(when)."
+        }
+    }
+
+    /// A change that changed nothing (`ActionCatalog.changed`): what can be changed, for an event (`event`), a reminder,
+    /// or an item not known yet (nil).
+    public static func nothingChanged(event: Bool?, _ language: SpeechLanguage) -> String {
+        switch (event, language) {
+        case (true?, .french): "Je n’ai rien changé. Tu veux changer le nom, le moment, le lieu ou le calendrier\(nb)?"
+        case (false?, .french): "Je n’ai rien changé. Tu veux changer le nom, le moment ou la liste\(nb)?"
+        case (nil, .french): "Je n’ai rien changé. Qu’est-ce que tu veux changer\(nb)?"
+        case (true?, .english): "I didn’t change anything. Do you want to change the name, the time, the place or the calendar?"
+        case (false?, .english): "I didn’t change anything. Do you want to change the name, the time or the list?"
+        case (nil, .english): "I didn’t change anything. What do you want to change?"
         }
     }
 

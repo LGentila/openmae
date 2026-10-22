@@ -259,7 +259,7 @@ func runActionsBench(_ o: Options) async throws {
     }
     let news = corpus.news == true || o.news
     // In the app's order: the actions, the agents, the web search, the built-in sources, the news.
-    let tools = (actions ? ActionCatalog.calendarTools + [ActionCatalog.timer]
+    let tools = (actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
         + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : [])
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])

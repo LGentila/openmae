@@ -691,7 +691,7 @@ actor CheckedCalendar: ToolProvider {
     private var lastCreated: String?
     private var refusedCreation = RefusedCreation()
 
-    func tools() -> [ToolSpec] { ActionCatalog.calendarTools }
+    func tools() -> [ToolSpec] { ActionCatalog.calendarTools(movingItems: true) }
 
     func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
@@ -1690,5 +1690,199 @@ struct PipelineActionTests {
         await waitFor { await log.pieces.contains("Ton minuteur de 10 minutes est terminé.") }
         await waitFor { await speaker.played >= Chime.samples(sampleRate: 1000).count + 500 }
         #expect(await speaker.played == Chime.samples(sampleRate: 1000).count + 500)
+    }
+}
+
+// MARK: - Changes: another calendar or list, and changes that change nothing
+
+@Suite("Changes")
+struct ChangeTests {
+    /// A meeting in « Travail », tomorrow from 10 h to 11 h.
+    let meeting = ActionCatalog.SavedItem(isEvent: true, title: "Réunion", date: date("2026-10-16T10:00"),
+                                          end: date("2026-10-16T11:00"), hasTime: true, collection: "Travail")
+    let bread = ActionCatalog.SavedItem(isEvent: false, title: "Acheter du pain", date: date("2026-10-16T10:00"),
+                                        hasTime: true, collection: "Rappels")
+
+    func change(_ arguments: [String: JSONValue]) -> ToolCall {
+        var all: [String: JSONValue] = ["reference": "e1"]
+        all.merge(arguments) { $1 }
+        return ToolCall(name: "modifier_element", arguments: all)
+    }
+
+    /// What `ActionCatalog.changed` refuses of a change; nil when it changes something.
+    func refusal(_ item: ActionCatalog.SavedItem, _ arguments: [String: JSONValue], collection: String? = nil)
+        -> ToolRefusal?
+    {
+        do {
+            _ = try ActionCatalog.changed(item, by: change(arguments), collection: collection, reference: "e1",
+                                          context: context())
+            return nil
+        } catch {
+            return error as? ToolRefusal
+        }
+    }
+
+    /// As for a creation: by its name, whatever the case and accents, else a name that contains it or that it contains;
+    /// the item's own first, when it fits as well. Either word, for either kind of item.
+    @Test func calendarsAndListsAreFoundByName() {
+        let names = ["Travail", "Maison", "Maison de campagne"]
+        #expect(ActionCatalog.collectionIndex(named: "maison", among: names) == 1)
+        #expect(ActionCatalog.collectionIndex(named: "Ma maison", among: ["Travail", "Maison"]) == 1)
+        #expect(ActionCatalog.collectionIndex(named: "campagne", among: names) == 2)
+        #expect(ActionCatalog.collectionIndex(named: "Famille", among: names) == nil)
+        #expect(ActionCatalog.collectionIndex(named: " ", among: names) == nil)
+        // Two of the same name (in two accounts): the item's own, which it then stays in.
+        #expect(ActionCatalog.collectionIndex(named: "Maison", among: ["Maison", "Travail", "Maison"], current: 2) == 2)
+        #expect(ActionCatalog.collectionIndex(named: "Maison", among: ["Maison", "Travail", "Maison"]) == 0)
+        // Its own fitting less well does not win.
+        #expect(ActionCatalog.collectionIndex(named: "Maison", among: names, current: 2) == 1)
+        let calendar = ActionCatalog.unknownCollection("Famille", event: true, names: ["Travail", "Maison"],
+                                                       context: context())
+        #expect(calendar.forModel == "Aucun calendrier modifiable ne s'appelle « Famille ». Calendriers : Travail, Maison.")
+        #expect(calendar.retryable && calendar.spoken == ActionPhrases.unknownCalendar("Famille", .french))
+        let list = ActionCatalog.unknownCollection("Courses", event: false, names: ["Rappels"], context: context())
+        #expect(list.forModel == "Aucune liste de rappels ne s'appelle « Courses ». Listes : Rappels.")
+        #expect(list.spoken == ActionPhrases.unknownList("Courses", .french))
+        #expect(ActionCatalog.collectionNamed(in: change(["calendrier": "Maison"]), event: true) == "Maison")
+        #expect(ActionCatalog.collectionNamed(in: change(["liste": "Maison"]), event: true) == "Maison")
+        #expect(ActionCatalog.collectionNamed(in: change(["calendrier": "Courses"]), event: false) == "Courses")
+        #expect(ActionCatalog.collectionNamed(in: change(["quand": "à 11 h"]), event: false) == nil)
+    }
+
+    /// The calendar and the list are offered on Gemma 4 26B's tiers only; the smaller ones keep the tool without them.
+    @Test func onlyTheLargerModelsAreOfferedTheMove() {
+        func change(on tier: HardwareTier) -> ToolSpec? {
+            ActionCatalog.calendarTools(on: tier).first { $0.name == ActionCatalog.changeItem.name }
+        }
+        for tier in [HardwareTier.comfort, .max] {
+            let parameters = change(on: tier)?.parameters.map(\.name) ?? []
+            #expect(ActionCatalog.movesItems(on: tier) && parameters.contains("calendrier") && parameters.contains("liste"))
+            #expect(change(on: tier) == ActionCatalog.changeItemMoving)
+        }
+        for tier in [HardwareTier.minimum, .standard] {
+            let parameters = change(on: tier)?.parameters.map(\.name) ?? []
+            #expect(!ActionCatalog.movesItems(on: tier) && !parameters.contains("calendrier") && !parameters.contains("liste"))
+            #expect(change(on: tier) == ActionCatalog.changeItem)
+        }
+        // The same tools otherwise, in the same order.
+        #expect(ActionCatalog.calendarTools(on: .minimum).map(\.name) == ActionCatalog.calendarTools(on: .comfort).map(\.name))
+    }
+
+    /// Alone or with the rest, and said as a move to that calendar or list.
+    @Test func changeMovesToAnotherCalendarOrList() throws {
+        let moved = try ActionCatalog.changed(meeting, by: change(["calendrier": "Maison"]), collection: "Maison",
+                                              reference: "e1", context: context())
+        var inHome = meeting
+        inHome.collection = "Maison"
+        #expect(moved == inHome && !moved.moved(from: meeting))
+        let later = try ActionCatalog.changed(meeting, by: change(["calendrier": "Maison", "quand": "à 11 h"]),
+                                              collection: "Maison", reference: "e1", context: context())
+        #expect(later.collection == "Maison" && later.date == date("2026-10-16T11:00")
+                && later.end == date("2026-10-16T12:00") && later.moved(from: meeting))
+        let groceries = try ActionCatalog.changed(bread, by: change(["liste": "Courses"]), collection: "Courses",
+                                                  reference: "r1", context: context())
+        var inGroceries = bread
+        inGroceries.collection = "Courses"
+        #expect(groceries == inGroceries)
+        #expect(ActionPhrases.eventChanged(title: "Réunion", start: date("2026-10-16T10:00"), end: date("2026-10-16T11:00"),
+                                           allDay: false, moved: false, calendarName: "Maison", context())
+                == "C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(ActionPhrases.reminderChanged(title: "Acheter du pain", due: nil, hasTime: false, moved: false,
+                                              listName: "Courses", context())
+                == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): Acheter du pain.")
+        #expect(ActionPhrases.eventChanged(title: "Meeting", start: date("2026-10-16T10:00"), end: date("2026-10-16T11:00"),
+                                           allDay: false, moved: false, calendarName: "Home", context(.english))
+                .hasPrefix("Moved to your “Home” calendar: Meeting, "))
+        // Without a calendar, as before.
+        #expect(ActionPhrases.eventChanged(title: "Réunion", start: date("2026-10-16T10:00"), end: date("2026-10-16T11:00"),
+                                           allDay: false, moved: false, context()).hasPrefix("C’est modifié\(nb): Réunion"))
+    }
+
+    /// What it gives is already the item's, or does not apply to it: refused, with what can be changed and a second try,
+    /// never « C'est modifié ». Given nothing to change, it is refused by the check.
+    @Test func changeThatChangesNothingIsRefused() throws {
+        let inWork = try #require(refusal(meeting, ["calendrier": "Travail"], collection: "Travail"))
+        #expect(inWork.retryable)
+        #expect(inWork.forModel == "Cet appel ne change rien : « e1 » est déjà comme il le demande. On peut changer son "
+                + "titre (titre), son moment (quand), sa durée (duree), son lieu (lieu) ou son calendrier (calendrier).")
+        #expect(inWork.spoken == ActionPhrases.nothingChanged(event: true, .french) && !inWork.spoken.contains("modifié"))
+        #expect(refusal(meeting, ["titre": "Réunion"]) != nil)
+        #expect(refusal(meeting, ["quand": "à 10 h"]) != nil)  // where it already is
+        #expect(refusal(meeting, ["quand": "demain à 10 h", "duree": "une heure"]) != nil)
+        #expect(refusal(meeting, ["titre": "Réunion d'équipe"]) == nil)
+        #expect(refusal(meeting, ["lieu": "Salle 3"]) == nil)
+        // A reminder has no place nor length; already due then.
+        let place = try #require(refusal(bread, ["lieu": "Boulangerie"]))
+        #expect(place.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        #expect(place.forModel.hasSuffix("On peut changer son titre (titre), son moment (quand) ou sa liste (liste)."))
+        #expect(refusal(bread, ["duree": "une heure"]) != nil)
+        #expect(refusal(bread, ["quand": "demain à 10 h"]) != nil)
+        #expect(refusal(bread, ["quand": "demain à 11 h"]) == nil)
+        for arguments: [String: JSONValue] in [["reference": "e1"], ["reference": "dernier", "titre": " "],
+                                               ["reference": "e1", "journee_entiere": true]] {
+            let empty = try #require(checkRefusal(ToolCall(name: "modifier_element", arguments: arguments)), "\(arguments)")
+            #expect(empty.retryable && empty.spoken == ActionPhrases.nothingChanged(event: nil, .french), "\(arguments)")
+            #expect(empty.forModel.hasPrefix("Cet appel ne change rien. On peut changer"), "\(arguments)")
+        }
+        #expect(checkRefusal(ToolCall(name: "modifier_element", arguments: ["reference": "e1", "duree_minutes": 90])) == nil)
+        #expect(checkRefusal(ToolCall(name: "modifier_element", arguments: ["reference": "e1", "liste": "Courses"])) == nil)
+        for language in SpeechLanguage.allCases {
+            for event: Bool? in [true, false, nil] {
+                let sentence = ActionPhrases.nothingChanged(event: event, language)
+                #expect(ActionPhrases.wordCount(SpeakableText.forVoice(sentence, language: language)) >= 5, "\(sentence)")
+            }
+        }
+    }
+
+    /// voice-cli's calendar in memory, as the app's (through the runner, as dialogue-bench uses it): a meeting created in
+    /// the default calendar, then moved to another by name, then « annule »: back where it was. A calendar that does not
+    /// exist and a change that changes nothing are refused, with a second try, and leave it as it was. The same for a
+    /// reminder and its list.
+    @Test func memoryCalendarMovesAndUndoesTheMove() async throws {
+        let calendar = MemoryCalendar()
+        await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        let created = await runner.handle(meeting, context: context())
+        #expect(created.forModel["calendrier"] == "Travail")
+        #expect(created.spoken
+                == "C’est dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        let unknown = await runner.handle(change(["reference": "dernier", "calendrier": "Famille"]), context: context())
+        #expect(unknown.retryable && unknown.spoken == ActionPhrases.unknownCalendar("Famille", .french))
+        let same = await runner.handle(change(["calendrier": "travail"]), context: context())
+        #expect(same.retryable && same.spoken == ActionPhrases.nothingChanged(event: true, .french))
+        #expect(same.forModel["erreur"]?.text?.hasPrefix("Cet appel ne change rien : « e1 » est déjà") == true)
+        #expect(same.forModel["erreur"]?.text?.hasSuffix(ToolRefusal.secondTry("modifier_element")) == true)
+        let nothing = await runner.handle(change([:]), context: context())
+        #expect(nothing.retryable && nothing.spoken == ActionPhrases.nothingChanged(event: nil, .french))
+        #expect(await calendar.touched.isEmpty)  // none of them changed it
+
+        let moved = await runner.handle(change(["calendrier": "maison"]), context: context())
+        #expect(!moved.retryable)
+        #expect(moved.spoken
+                == "C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(moved.forModel["calendrier"] == "Maison" && moved.forModel["debut"] == "2026-10-16T10:00")
+        let at = now.addingTimeInterval(30)
+        #expect(await runner.interception(for: "Annule", now: at) == .undo)
+        #expect(await runner.resolve(.undo, context: context(at: at))?.spoken == ActionPhrases.undone(.change, .french))
+        let renamed = await runner.handle(change(["titre": "Réunion d'équipe"]), context: context())
+        #expect(renamed.forModel["calendrier"] == "Travail" && renamed.forModel["titre"] == "Réunion d'équipe")
+        #expect(renamed.spoken.hasPrefix("C’est modifié\(nb): Réunion d'équipe"))
+
+        let reminder = ToolCall(name: "creer_rappel", arguments: ["titre": "Acheter du pain"])
+        #expect(await runner.handle(reminder, context: context()).forModel["liste"] == "Rappels")
+        let noList = await runner.handle(change(["reference": "r1", "liste": "Bricolage"]), context: context())
+        #expect(noList.retryable && noList.spoken == ActionPhrases.unknownList("Bricolage", .french))
+        let toGroceries = await runner.handle(change(["reference": "dernier", "calendrier": "Courses"]), context: context())
+        #expect(toGroceries.spoken == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): Acheter du pain.")
+        #expect(toGroceries.forModel["liste"] == "Courses")
+        #expect(await runner.interception(for: "annule", now: at) == .undo)
+        _ = await runner.resolve(.undo, context: context(at: at))
+        let place = await runner.handle(change(["reference": "r1", "lieu": "Boulangerie"]), context: context())
+        #expect(place.retryable && place.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        let back = await runner.handle(change(["reference": "r1", "quand": "demain à 9 h"]), context: context())
+        #expect(back.forModel["liste"] == "Rappels")
+        #expect(await calendar.touched == ["Réunion", "Réunion", "Acheter du pain", "Acheter du pain"])
     }
 }
