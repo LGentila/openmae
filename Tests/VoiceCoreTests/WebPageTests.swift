@@ -6,8 +6,11 @@ import Testing
 private let paris = TimeZone(identifier: "Europe/Paris")!
 private let now = LocalDateTime.parse("2026-10-16T18:30", in: paris)!.date
 
-private func context(_ said: String = "Quel est le prix de l'action Apple actuellement ?") -> ToolContext {
-    ToolContext(now: now, timeZone: paris, language: .french, userSaid: [said])
+/// A turn's context: its moment (a later turn, `after` seconds later), and what the user said.
+private func context(_ said: String = "Quel est le prix de l'action Apple actuellement ?", after seconds: TimeInterval = 0)
+    -> ToolContext
+{
+    ToolContext(now: now.addingTimeInterval(seconds), timeZone: paris, language: .french, userSaid: [said])
 }
 
 private func waitFor(_ condition: () async -> Bool) async {
@@ -282,9 +285,16 @@ struct OpenPageToolTests {
         #expect(second.allowedWhileSumming.isEmpty)
         #expect(second.forModel["note"]?.text?.hasSuffix("C'est la dernière page que tu peux ouvrir : réponds avec ce que "
                                                            + "tu sais, ou dis que tu n'as pas trouvé.") == true)
-        // A turn of its own (other words of the user): two pages again.
-        let next = await runner.handle(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]), context: context("Et hier ?"))
+        // A turn of its own: two pages again.
+        let next = await runner.handle(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]),
+                                       context: context("Et hier ?", after: 30))
         #expect(next.allowedWhileSumming == [WebSearchCatalog.openPageName])
+        // The turn is its moment: a call that is one of several the user asked for at once has none of their words,
+        // and still counts for the turn.
+        var oneOfSeveral = context("Et hier ?", after: 30)
+        oneOfSeveral.userSaid = []
+        let several = await runner.handle(ToolCall(name: "ouvrir_page", arguments: ["resultat": 2]), context: oneOfSeveral)
+        #expect(several.allowedWhileSumming.isEmpty)
         #expect(page.forModel["site"] == "boursorama.com")
         #expect(page.forModel["titre"] == "APPLE Cours Action AAPL - Boursorama")
         #expect(page.forModel["texte"]?.text?.contains("342,94 USD") == true)
@@ -308,7 +318,7 @@ struct OpenPageToolTests {
         #expect(none.allowedWhileSumming.isEmpty)
         // Or the site's name, in another turn.
         _ = await runner.handle(ToolCall(name: "ouvrir_page", arguments: ["site": "Boursorama"]),
-                                context: context("Et sur Boursorama ?"))
+                                context: context("Et sur Boursorama ?", after: 30))
         #expect(await reader.read == [zonebourse, boursorama])
     }
 
@@ -555,5 +565,48 @@ struct PipelineOpenPageTests {
         #expect(await model.requests.count == 3)
         // The search's waiting phrase, none for the page, then the app's sentence.
         #expect(await log.pieces == [WebSearchPhrases.searching(.french), WebSearchPhrases.couldNotSumUp(.french)])
+    }
+
+    /// The search is one of several actions asked at once, one of which waits for the user's "oui": summing its results
+    /// up, the model opens a page, carried out as one more call of the request, so what waits for the "oui" stays; the
+    /// page's answer is said, then the question, and "oui" sends it.
+    @Test func aPageAmongSeveralActionsKeepsWhatWaitsForYes() async throws {
+        let nb = "\u{00A0}"
+        let reader = FakePageReader([boursorama: .success(quotePage)])
+        let sending = SendingTools()
+        let first: [ModelOutput] = [
+            .toolCall(ToolCall(name: "envoyer", arguments: ["quoi": "le rapport"])),
+            .toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "cours Apple"])),
+        ]
+        let open: [ModelOutput] = [.toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]))]
+        let answer: [ModelOutput] = [.text("D'après Boursorama, l'action Apple valait 342,94 dollars à 18 h 14.")]
+        let model = ScriptedModel(scripts: [first, open, answer])
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        config.actionsPerRequest = 3
+        let pipeline = VoicePipeline(
+            detector: LoudnessDetector(),
+            transcriber: ScriptedTranscriber(["Envoie le rapport et cherche le cours d'Apple", "Oui"]),
+            model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+            tools: ToolRunner(providers: [sending, WebSearchTools(provider: FakeSearch(quotes), pageReader: reader)]),
+            config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("On y va") }
+        #expect(await reader.read == [boursorama])
+        #expect(await sending.dropped.isEmpty)
+        #expect(await log.pieces.joined(separator: " ") == "D'après Boursorama, l'action Apple valait 342,94 dollars à "
+                + "18 h 14. J’envoie «\(nb)le rapport\(nb)». On y va\(nb)?")
+        #expect(await model.requests.count == 3)
+        let request = try #require(await model.requests.last)
+        #expect(request.suffix(5).map(\.role) == [.assistant, .tool, .tool, .assistant, .tool])
+        #expect(request.last?.toolResult?["texte"]?.text?.contains("342,94 USD") == true)
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await sending.sent == ["le rapport"] }
+        #expect(await sending.sent == ["le rapport"])
+        #expect(await model.requests.count == 3)  // the "oui" never reached the model
     }
 }

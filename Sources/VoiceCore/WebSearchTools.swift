@@ -291,8 +291,10 @@ public actor WebSearchTools: ToolProvider {
     private var pageReader: (any WebPageReader)?
     /// The conversation's last search, for the page tool: its keywords and what it found.
     private var lastSearch: (query: String, found: WebSearchResults)?
-    /// The pages opened in the turn (its user's words): two at most (`ToolOutcome.callsWhileSumming`).
-    private var opened: (turn: String, count: Int) = ("", 0)
+    /// The pages opened in the turn: two at most (`ToolOutcome.callsWhileSumming`). The turn is told by its moment
+    /// (`ToolContext.now`, the same for all its calls), not by the user's words: a call that is one of several the user
+    /// asked for at once gets none (`ToolContext.userSaid`), and the summing up of its results gets them.
+    private var opened: (turn: Date?, count: Int) = (nil, 0)
 
     public init(provider: (any WebSearchProvider)? = nil, pageReader: (any WebPageReader)? = nil) {
         self.provider = provider
@@ -384,8 +386,7 @@ public actor WebSearchTools: ToolProvider {
             throw ToolRefusal(forModel: "Aucune recherche dont ouvrir un résultat : cherche d'abord avec chercher_web.",
                               spoken: ActionPhrases.notUnderstood(language))
         }
-        let turn = context.userSaid.first ?? ""
-        if opened.turn != turn { opened = (turn, 0) }
+        if opened.turn != context.now { opened = (context.now, 0) }
         opened.count += 1
         let last = opened.count >= ToolOutcome.callsWhileSumming
         let another: Set<String> = last ? [] : [WebSearchCatalog.openPageName]
@@ -416,6 +417,6 @@ public actor WebSearchTools: ToolProvider {
     /// A new conversation: its searches are gone.
     public func resetConversation() async {
         lastSearch = nil
-        opened = ("", 0)
+        opened = (nil, 0)
     }
 }
