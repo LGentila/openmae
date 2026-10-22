@@ -299,7 +299,7 @@ extension MLXChatModel {
                                   firstTokens: firstTokens)
     }
 
-    /// Whether the model has experts that compute in bfloat16 as the rest is computed in float32 (`HalfPrecisionExperts`).
+    /// Whether the model has experts that compute in bfloat16 as the rest is computed in float32 (`ReadingExperts`).
     private var hasExperts: Bool {
         context.model.leafModules().flattened().contains { $0.1 is QuantizedSwitchLinear }
     }

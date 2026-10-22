@@ -417,6 +417,17 @@ shortened, a new conversation. Text only, nothing is created; run it again after
 .build/xcode/Build/Products/Release/voice-cli cache-check
 ```
 
+How long the language model takes to read a request's new tokens, by their number: after a conversation of about 1,500
+tokens, the first N tokens of the next request are read as a request reads them (in float32, up to the answer's first
+token), for N from `--from` to `--to`, `--runs` times each. Gemma 4 26B's experts pad their rows to the count from which
+MLX computes them in blocks (`ReadingExperts` in `MLXChatModel.swift`); `--compare-padding` reads each N never padded,
+padded whenever their rows are sorted and as in the app, one right after the other, and `--unpadded-experts` (also for
+`cache-check`) never pads them, as before:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli read-sizes --from 32 --to 96 --runs 5 --compare-padding
+```
+
 Answers cut off one after the other, as when the user speaks over Maé: the dialogues of `Tests/Fixtures/cut-offs-fr.json`
 (twelve answers cut off in a row; answers cut early, then what a user who did not hear their end would ask), text only.
 Each answer cut off goes into the history as the app records it on the tier: what the voice had been given, then a note

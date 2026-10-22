@@ -14,6 +14,7 @@
 //
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
 //                         [--cut-off ahead|after-user-words] [--bfloat16-prompts] [--bfloat16-experts]
+//                         [--unpadded-experts]
 //
 // --cut-off says where the history tells the model that an answer was cut off; by default as the app does on the tier
 // (`Conversation.cutOffPlacement(on:)`): "ahead", a note of its own right after the answer, or "after-user-words", the
@@ -29,7 +30,9 @@
 // M tokens of the history ahead").
 // --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the app did before (comparisons in
 // one build). --bfloat16-experts computes a mixture-of-experts model's experts' products (Gemma 4 26B's) in bfloat16 as
-// the requests and the history are computed in float32 (the app computes them in float32 too).
+// the requests and the history are computed in float32 (the app computes them in float32 too). --unpadded-experts never
+// pads the rows of a mixture-of-experts model's experts (Gemma 4 26B's) to the count MLX's batched kernel takes, as before
+// (`MLXChatModel.padExpertRows`; the app pads them).
 
 import Foundation
 import Synchronization
@@ -410,6 +413,10 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
     await model.computeExpertsInHalfPrecision(o.bfloat16Experts)
     if o.bfloat16Experts { print("experts' products in bfloat16 in the requests and the history (--bfloat16-experts)") }
+    if o.unpaddedExperts {
+        await model.padExpertRows(from: nil)
+        print("experts' rows never padded (--unpadded-experts)")
+    }
 
     let tools = ActionCatalog.calendarTools + [ActionCatalog.timer]
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])

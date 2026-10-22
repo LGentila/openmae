@@ -22,6 +22,9 @@
 //   voice-cli cache-check [--scenario name] [--agents]  how much of each request the model finds in its memory,
 //                                                       in the app's sequences of requests (text only; see
 //                                                       CacheCheck.swift)
+//   voice-cli read-sizes [--from 32] [--to 96] [--runs 5] [--compare-padding]
+//                                                       how long the model takes to read a request's new tokens, by
+//                                                       their number (text only; see ReadSizes.swift)
 //   voice-cli cut-off-bench [--repeats 10] [--cut-off ahead|after-user-words|marker|none]
 //                           [--drop written|heard|cut-off|none|whole]
 //                                                       answers cut off one after the other: does the model write
@@ -150,6 +153,9 @@ struct Options {
     /// actions-bench, cache-check: a mixture-of-experts model's experts' products computed in bfloat16 as the requests and
     /// the history are computed in float32 (`MLXChatModel.computeExpertsInHalfPrecision`), for comparisons in one build.
     var bfloat16Experts = false
+    /// cache-check, read-sizes: a mixture-of-experts model's experts never pad their rows, as before
+    /// (`MLXChatModel.padExpertRows`), for comparisons in one build.
+    var unpaddedExperts = false
     var addendum: String?
     /// actions-bench: the web search's part of the system prompt, read from this file.
     var webAddendum: String?
@@ -224,6 +230,7 @@ struct Options {
             case "--compare-requests": o.compareRequests = true
             case "--bfloat16-prompts": o.bfloat16Prompts = true
             case "--bfloat16-experts": o.bfloat16Experts = true
+            case "--unpadded-experts": o.unpaddedExperts = true
             case "--addendum": o.addendum = it.next()
             case "--web-addendum": o.webAddendum = it.next()
             case "--examples": o.examples = it.next()
@@ -671,7 +678,7 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "cut-off-bench",
-    "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+    "read-sizes", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -682,6 +689,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "dialogue-bench": try await runDialogueBench(options)
         case "cache-check": try await runCacheCheck(options, arguments: CommandLine.arguments)
         case "cut-off-bench": try await runCutOffBench(options, arguments: CommandLine.arguments)
+        case "read-sizes": try await runReadSizes(options, arguments: CommandLine.arguments)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)
@@ -744,6 +752,9 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                         [--watch-calls]
                voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
                                      [--cut-off ahead|after-user-words] [--bfloat16-prompts] [--bfloat16-experts]
+                                     [--unpadded-experts]
+               voice-cli read-sizes [--tier tier] [--llm folder] [--from 32] [--to 96] [--runs 5] [--compare-padding]
+                                    [--unpadded-experts]
                voice-cli cut-off-bench [--tier tier] [--llm folder] [--corpus file.json] [--repeats 10] [--actions]
                                        [--cut-off ahead|after-user-words|marker|none] [--note "(…)"]
                                        [--note-role system|user] [--drop written|heard|cut-off|none|whole]

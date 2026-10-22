@@ -82,8 +82,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// float32 like the beginning (`readingPrompt`); off only for comparisons (`computePromptsInFloat32`).
     private(set) var promptsInFloat32 = true
     /// Whether, as they are computed in float32, the experts of a mixture-of-experts model (Gemma 4 26B) compute their
-    /// products in bfloat16 (`HalfPrecisionExperts`); on only for comparisons (`computeExpertsInHalfPrecision`).
+    /// products in bfloat16 (`ReadingExperts.halfPrecision`); on only for comparisons (`computeExpertsInHalfPrecision`).
     private(set) var expertsInHalfPrecision = false
+    /// From how many rows (tokens × experts per token) the experts of a mixture-of-experts model pad their rows to the
+    /// count MLX's batched kernel takes, as they are computed in float32 (`ReadingExperts`); nil: never, as before (only
+    /// for comparisons, `padExpertRows`).
+    private(set) var expertRowsPaddedFrom: Int? = ReadingExperts.paddedFrom
     /// What the model swaps in to compute in float32, and back out (`withFloat32Activations`): prepared at its first such
     /// computation and kept; nil until then, and again once the weights have changed type (`leaveFloat32`).
     var float32Swap: Float32Swap?
@@ -329,10 +333,68 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     /// Benchmark diagnostics (`voice-cli … --bfloat16-experts`): `true` computes the products of a mixture-of-experts
-    /// model's experts in bfloat16 as the requests and the history are computed in float32 (`HalfPrecisionExperts`), for
+    /// model's experts in bfloat16 as the requests and the history are computed in float32 (`ReadingExperts`), for
     /// comparisons in one build.
     public func computeExpertsInHalfPrecision(_ on: Bool) {
         expertsInHalfPrecision = on
+    }
+
+    /// Benchmark diagnostics (`voice-cli … --unpadded-experts`, `voice-cli read-sizes`): from how many rows (tokens ×
+    /// experts per token) a mixture-of-experts model's experts pad their rows as they are computed in float32
+    /// (`ReadingExperts`); nil: never, as before; `ReadingExperts.paddedFrom` in the app. For comparisons in one build.
+    public func padExpertRows(from rows: Int?) {
+        expertRowsPaddedFrom = rows
+    }
+
+    /// Diagnostics: the app's value of `padExpertRows(from:)`.
+    public static let expertRowsPaddedFrom = ReadingExperts.paddedFrom
+
+    /// Diagnostics (`voice-cli read-sizes`): how long the model takes to read `count` new tokens after `history`, as a
+    /// request reads them (`generate`: in float32, into a cache whose memory a snapshot shares, up to the answer's first
+    /// token drawn, everything waited for), for each count, each way of padding the experts' rows in `paddings` (see
+    /// `padExpertRows`), `runs` times, after a first pass that is not kept. The new tokens are the first ones of the request
+    /// `history` + `next`. Milliseconds, by way then count. The cache is left holding `history`.
+    public func readTimes(after history: [ChatMessage], next: ChatMessage, counts: [Int], paddings: [Int?], runs: Int)
+        throws -> [[Int: [Double]]]
+    {
+        cacheUses += 1
+        try prefill(tokens: try render(history, generationPrompt: false))
+        let prompt = try render(history + [next], generationPrompt: true)
+        let start = commonPrefix(cachedTokens, prompt)
+        guard start == cachedTokens.count, let most = counts.max(), start + most <= prompt.count else {
+            throw ReadTimesError(message: "the request has \(prompt.count - start) new tokens, \(counts.max() ?? 0) asked")
+        }
+        let kept = (cache: cache, tokens: cachedTokens, padding: expertRowsPaddedFrom)
+        defer { (cache, cachedTokens, expertRowsPaddedFrom) = kept }
+        let clock = ContinuousClock()
+        var times = paddings.map { _ in [Int: [Double]]() }
+        for run in 0...runs {
+            for count in counts {
+                for (way, padding) in paddings.enumerated() {
+                    expertRowsPaddedFrom = padding
+                    cache = kept.cache.map { $0.copy() }  // shares its memory, as the cache a request's snapshot copied
+                    cachedTokens = kept.tokens
+                    let upcoming = UpcomingToken.Box()
+                    let components = GenerationComponents().appendingLogitProcessor { UpcomingToken(box: upcoming) }
+                    let t0 = clock.now
+                    _ = try readingPrompt {
+                        try readPrompt(Array(prompt[..<(start + count)]), from: start, components: components)
+                    }
+                    eval(cache.flatMap(\.state) + (upcoming.sampled.map { [$0] } ?? []))
+                    let d = clock.now - t0
+                    if run > 0 {
+                        times[way][count, default: []].append(
+                            Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+                    }
+                }
+            }
+        }
+        return times
+    }
+
+    public struct ReadTimesError: Error, CustomStringConvertible {
+        public let message: String
+        public var description: String { message }
     }
 
     /// Diagnostics (`voice-cli cache-check`): `observer` is called on the request's own task each time the model has read
@@ -482,8 +544,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// are in float32. Its other weights stay as they are: a quantized layer computes in the type of what it is given,
     /// converting its scales on the fly, so every activation and the cache are float32 from the embeddings on, as when
     /// every weight is in float32 (2.7 GB more with Gemma 4 26B). Back as they were afterwards (a float32 made from a
-    /// half-precision value goes back to it exactly). `halfPrecisionExperts`: the experts of a mixture-of-experts model
-    /// compute their products in bfloat16 meanwhile (`HalfPrecisionExperts`).
+    /// half-precision value goes back to it exactly). The experts of a mixture-of-experts model are swapped for
+    /// `ReadingExperts` meanwhile, which pad their rows (`expertRowsPaddedFrom`) and, with `halfPrecisionExperts`, compute
+    /// their products in bfloat16.
     ///
     /// What it swaps in and out is prepared once and kept (`float32Swap`), the float32 copies of the small weights
     /// included: rebuilt and converted at every request, then converted back and waited for, they took a few milliseconds
@@ -492,10 +555,14 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let swap = float32Swap ?? prepareFloat32Swap()
         float32Swap = swap
         let model = context.model
-        let experts = halfPrecisionExperts ? swap.experts : nil
+        let experts = halfPrecisionExperts || expertRowsPaddedFrom != nil ? swap.experts : nil
+        for layer in experts?.layers ?? [] {
+            layer.halfPrecision = halfPrecisionExperts
+            layer.paddedFrom = expertRowsPaddedFrom
+        }
         model.update(parameters: swap.float32Weights)
         model.update(modules: swap.float32Tables)
-        if let experts { model.update(modules: experts.half) }
+        if let experts { model.update(modules: experts.reading) }
         defer {
             model.update(parameters: swap.weights)
             model.update(modules: swap.tables)
@@ -506,7 +573,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// Prepares what `withFloat32Activations` swaps in and out (`float32Swap`): the small half-precision weights and their
     /// float32 copies (computed here, once), the quantized embedding tables as `Float32Rows`, and the experts of a
-    /// mixture-of-experts model as `HalfPrecisionExperts` (which share their weights).
+    /// mixture-of-experts model as `ReadingExperts` (which share their weights).
     private func prepareFloat32Swap() -> Float32Swap {
         let model = context.model
         let leaves = model.leafModules().flattened()
@@ -514,9 +581,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             guard let table = module as? QuantizedEmbedding, table.mode == .affine else { return nil }
             return (key, table)
         }
-        let experts = leaves.compactMap { key, module -> (String, QuantizedSwitchLinear, HalfPrecisionExperts)? in
-            guard let experts = module as? QuantizedSwitchLinear, let half = HalfPrecisionExperts(experts) else { return nil }
-            return (key, experts, half)
+        let experts = leaves.compactMap { key, module -> (String, QuantizedSwitchLinear, ReadingExperts)? in
+            guard let experts = module as? QuantizedSwitchLinear, let reading = ReadingExperts(experts) else { return nil }
+            return (key, experts, reading)
         }
         let small = model.parameters().flattened().filter { _, array in
             array.ndim <= 1 && (array.dtype == .bfloat16 || array.dtype == .float16)
@@ -535,7 +602,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             float32Tables: ModuleChildren.unflattened(tables.map { ($0.0, Float32Rows($0.1) as Module) }),
             experts: experts.isEmpty ? nil
                 : (own: ModuleChildren.unflattened(experts.map { ($0.0, $0.1 as Module) }),
-                   half: ModuleChildren.unflattened(experts.map { ($0.0, $0.2 as Module) })))
+                   reading: ModuleChildren.unflattened(experts.map { ($0.0, $0.2 as Module) }),
+                   layers: experts.map(\.2)))
     }
 
     /// Once the history no longer matches the cache (an answer cut off, kept as far as the voice had it while the model
@@ -1185,24 +1253,44 @@ struct Float32Swap {
     /// The quantized embedding tables, and the same as `Float32Rows`.
     let tables: ModuleChildren
     let float32Tables: ModuleChildren
-    /// The experts of a mixture-of-experts model, and the same as `HalfPrecisionExperts`; nil without any.
-    let experts: (own: ModuleChildren, half: ModuleChildren)?
+    /// The experts of a mixture-of-experts model, the same as `ReadingExperts`, and those one by one; nil without any.
+    let experts: (own: ModuleChildren, reading: ModuleChildren, layers: [ReadingExperts])?
 }
 
-/// The experts of a mixture-of-experts layer (`QuantizedSwitchLinear`), computing their products in the type of their
-/// scales (bfloat16) whatever they are given, and giving them back in the type they were given; the same weights.
+/// The experts of a mixture-of-experts layer (`QuantizedSwitchLinear`), the same weights, swapped in while the model reads
+/// tokens in float32 (`MLXChatModel.withFloat32Activations`): the requests' new tokens, the history computed ahead or
+/// again, the beginning. Computed as the original's, but for two things.
 ///
-/// Given float32, a quantized layer computes in float32 and converts its scales and biases to float32 first, all of them,
-/// at every pass: in Gemma 4 26B's mixture-of-experts layers, those of their 128 experts (1.4 GB in bfloat16 in all).
-/// Swapped in while the requests and the history are computed in float32 (`MLXChatModel.computeInFloat32`), it rounds
-/// the experts' inputs and products to bfloat16 instead: the rest of the computation (attention, the dense layers, the
-/// norms, the router, the sum of the experts' products) stays in float32.
+/// Their rows are padded. The experts compute one row per token and expert it is routed to (8 per token with Gemma 4
+/// 26B), sorted by expert from 8 tokens on (`SwitchGLU`). MLX computes sorted rows with its batched kernel, which reads an
+/// expert's weights once for a block of 16 rows, only from 4 rows per expert on average (512 with Gemma 4 26B's 128
+/// experts: 64 tokens); below, it computes them one by one, reading their expert's weights again for each row. So from
+/// `paddedFrom` rows on (nil: never), fewer rows than the batched kernel's count are padded to it, with rows of zeros
+/// routed to the last expert (the rows stay sorted), and the padding's products dropped: the batched kernel computes them
+/// all, as in a block of 64 tokens or more, and nothing else changes (the cache, the history, the answer's tokens).
 ///
-/// Only for comparisons (`computeExpertsInHalfPrecision`, `voice-cli … --bfloat16-experts`): on the reference Mac (M1
-/// Pro, whose GPU computes bfloat16 without hardware support), the experts' products took longer in bfloat16 than the
-/// conversions saved, and the memory peak hardly moved (`voice-cli cache-check`, Gemma 4 26B, medians: first output
-/// 607 ms instead of 561, GPU memory peak during a request 15.76 GB instead of 15.90).
-private final class HalfPrecisionExperts: SwitchLinear {
+/// With Gemma 4 26B on the reference Mac (M1 Pro; `voice-cli read-sizes`: N new tokens read after 1,503, up to the
+/// answer's first token, medians of 5 runs), the rows computed one by one cost about 7 ms more per token, until the
+/// batched kernel took over: 63 tokens in 648 ms, 64 in 490. Padded, 40 to 63 tokens took 461 to 544 ms instead of 477 to
+/// 661 (46: 468 instead of 525; 56: 514 instead of 610; 62: 495 instead of 661). Below about 38 tokens the padding cost
+/// more than it saved (32 tokens: 391 ms instead of 376; 8: 326 instead of 224), hence `paddedFrom`: 320 rows, 40 tokens.
+///
+/// `halfPrecision`: they compute their products in the type of their scales (bfloat16) whatever they are given, and give
+/// them back in the type they were given. Given float32, a quantized layer computes in float32 and converts its scales and
+/// biases to float32 first, all of them, at every pass: in Gemma 4 26B's mixture-of-experts layers, those of their 128
+/// experts (1.4 GB in bfloat16 in all). In bfloat16, the experts' inputs and products are rounded to bfloat16 instead: the
+/// rest of the computation (attention, the dense layers, the norms, the router, the sum of the experts' products) stays in
+/// float32. Only for comparisons (`computeExpertsInHalfPrecision`, `voice-cli … --bfloat16-experts`): on the reference Mac
+/// (M1 Pro, whose GPU computes bfloat16 without hardware support), the experts' products took longer in bfloat16 than the
+/// conversions saved, and the memory peak hardly moved (`voice-cli cache-check`, Gemma 4 26B, medians: first output 607 ms
+/// instead of 561, GPU memory peak during a request 15.76 GB instead of 15.90).
+final class ReadingExperts: SwitchLinear {
+    /// The app's `paddedFrom`: 40 tokens of Gemma 4 26B (8 experts each), 2.5 rows per expert on average.
+    static let paddedFrom: Int? = 320
+
+    /// Set by the model before it swaps them in (`MLXChatModel.withFloat32Activations`).
+    var halfPrecision = false
+    var paddedFrom = ReadingExperts.paddedFrom
     /// Named as the original's, the same arrays: the model's parameters are the same while it is swapped in.
     let scales: MLXArray
     let biases: MLXArray
@@ -1211,6 +1299,8 @@ private final class HalfPrecisionExperts: SwitchLinear {
     private let groupSize: Int
     private let bits: Int
     private let mode: QuantizationMode
+    /// The rows from which MLX computes sorted rows with its batched kernel: 4 per expert.
+    private let batchedRows: Int
 
     /// Nil for experts this does not handle (other than affine quantization, or with a bias of their own).
     init?(_ experts: QuantizedSwitchLinear) {
@@ -1224,15 +1314,30 @@ private final class HalfPrecisionExperts: SwitchLinear {
         groupSize = experts.groupSize
         bits = experts.bits
         mode = experts.mode
+        batchedRows = 4 * weight.dim(0)
         super.init(inputDims: weight.dim(2) * 32 / experts.bits, outputDims: weight.dim(1), numExperts: weight.dim(0),
                    weight: weight)
         freeze()
     }
 
     override func callAsFunction(_ x: MLXArray, _ indices: MLXArray, sortedIndices: Bool = false) -> MLXArray {
-        gatherQuantizedMM(x.asType(scales.dtype), _packed, scales: scales, biases: biases, rhsIndices: indices,
-                          transpose: true, groupSize: groupSize, bits: bits, mode: mode, sortedIndices: sortedIndices)
-            .asType(x.dtype)
+        let input = halfPrecision ? x.asType(scales.dtype) : x
+        let rows = indices.size
+        func products(_ input: MLXArray, _ indices: MLXArray) -> MLXArray {
+            gatherQuantizedMM(input, _packed, scales: scales, biases: biases, rhsIndices: indices, transpose: true,
+                              groupSize: groupSize, bits: bits, mode: mode, sortedIndices: sortedIndices)
+        }
+        let output: MLXArray
+        if sortedIndices, let paddedFrom, rows >= paddedFrom, rows < batchedRows, indices.ndim == 1, input.ndim == 3,
+           input.dim(0) == rows, input.dim(1) == 1
+        {
+            let extra = batchedRows - rows
+            output = products(padded(input, widths: [[0, extra], 0, 0]),
+                              concatenated([indices, broadcast(indices[(rows - 1)...], to: [extra])]))[..<rows]
+        } else {
+            output = products(input, indices)
+        }
+        return halfPrecision ? output.asType(x.dtype) : output
     }
 }
 
