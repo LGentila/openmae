@@ -94,6 +94,8 @@ public actor AssistantHost: AssistantConnection {
     private let newsTools = NewsTools()
     /// The news came or went while the models loaded: the tools are set again once they are loaded.
     private var newsChangedWhileLoading = false
+    /// Opens a search result's page, on the tiers whose model can use it (`WebSearchCatalog.opensPages(on:)`).
+    private let pageReader = HTTPPageReader()
     private var actionsStatus: ActionsStatus?
     /// Counts the checks of Claude Code (`reportClaudeCode`): only the last one's answer goes to the app.
     private var claudeCodeChecks = 0
@@ -937,10 +939,11 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// Hands the source of the settings to the web search tool while the search is switched on, with the keychain's key
-    /// or password. Returns true when what the model sees changed.
+    /// or password, and the page reader on the tiers that open pages. Returns true when what the model sees changed.
     @discardableResult
     private func configureWebSearch() async -> Bool {
-        await webSearchTools.configure(settings.webSearch.isReady ? webSearchProvider() : nil)
+        await webSearchTools.configure(settings.webSearch.isReady ? webSearchProvider() : nil,
+                                       pageReader: WebSearchCatalog.opensPages(on: tier) ? pageReader : nil)
     }
 
     /// The source of the settings, as they and the keychain describe it, switched on or not; nil when it is not set up

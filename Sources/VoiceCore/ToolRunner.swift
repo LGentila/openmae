@@ -17,6 +17,8 @@ public actor ToolRunner {
         public var retryable: Bool
         /// The model says the answer itself, from `forModel` (see `ToolOutcome.modelSpeaks`); `spoken` if it gives nothing.
         public var modelSpeaks = false
+        /// While it does, the only tools whose calls are still carried out (see `ToolOutcome.allowedWhileSumming`).
+        public var allowedWhileSumming: Set<String> = []
         /// The call was refused (`spoken` is then the app's question about it), whether the model may correct it or not.
         public var refusal: ToolRefusal?
         /// A sensitive call, which waits for the user's "oui": `spoken` is its question (`ToolProvider.summary`). With
@@ -317,7 +319,7 @@ public actor ToolRunner {
                 lastAt = context.now
             }
             return Reply(spoken: outcome.spoken, forModel: outcome.forModel, retryable: false,
-                         modelSpeaks: outcome.modelSpeaks)
+                         modelSpeaks: outcome.modelSpeaks, allowedWhileSumming: outcome.allowedWhileSumming)
         } catch let refusal as ToolRefusal {
             return Reply(refusal, of: call)
         } catch {

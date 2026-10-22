@@ -194,6 +194,9 @@ public struct ToolOutcome: Sendable {
     /// Nothing was done, as what the call asks for already is (an item created again in its own calendar:
     /// `ActionCatalog.alreadyThere`): « annule » still takes back what the request before did, as after a refused call.
     public var nothingDone: Bool
+    /// While the model sums it up, the only tools whose calls are still carried out (a search's results: opening the
+    /// page of one of them); none by default. See `VoicePipeline`.
+    public var allowedWhileSumming: Set<String>
 
     /// Told the model when, summing up such a text, it writes a call and nothing else (no call is carried out then):
     /// it gets one more pass to answer with what it has.
@@ -209,7 +212,7 @@ public struct ToolOutcome: Sendable {
     public static let onlyRefusedCalls = "Appel non fait : seuls les appels refusés plus haut peuvent être corrigés."
 
     public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil,
-                modelSpeaks: Bool = false, nothingDone: Bool = false)
+                modelSpeaks: Bool = false, nothingDone: Bool = false, allowedWhileSumming: Set<String> = [])
     {
         self.spoken = spoken
         self.forModel = forModel
@@ -217,7 +220,12 @@ public struct ToolOutcome: Sendable {
         self.cannotUndo = cannotUndo
         self.modelSpeaks = modelSpeaks
         self.nothingDone = nothingDone
+        self.allowedWhileSumming = allowedWhileSumming
     }
+
+    /// Calls carried out while the model sums up, in a turn, at most: a page, and another one when the first could not
+    /// be read.
+    public static let callsWhileSumming = 2
 }
 
 /// A call the app refuses, and why. It is never carried out.
