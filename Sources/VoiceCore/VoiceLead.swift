@@ -7,7 +7,7 @@ import Foundation
 /// sentences), what the speakers still had to play when the voice was done with a sentence was 0.10 s in the median at
 /// the first boundary between two sentences, 0.41 s at the second, 0.65 s later. Each sentence then opens with a
 /// near-silent breath of random length, which the voice takes time to produce while the speakers have nothing to play
-/// beyond 0.3 s of it (`PipelineConfig.maxVoicePauseMs`): that is the silence heard between two sentences, 1 s or more
+/// beyond 0.3 s of it (then `PipelineConfig.maxVoicePauseMs`): that is the silence heard between two sentences, 1 s or more
 /// before 1 to 2.5 % of them. The model is 4 to 5 times faster than speech: it can wait a little. So it waits:
 /// - while the voice opens a sentence with near-silence (`duringOpenings`): the voice has that sentence to say anyway;
 /// - while the speakers have less than `minimum` left to play (the voice's lead), as long as the voice has another text

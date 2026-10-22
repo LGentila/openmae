@@ -248,7 +248,7 @@ struct VoiceLeadPipelineTests {
         #expect(await speaker.played >= 1000)  // both sentences
         let held = model.held.map(\.held)
         #expect(runs(held) == [true, false, true, false])  // first piece, first sound; the opening, then heard
-        // The opening's 30 chunks of 100 ms (the first three played, the others left out): the pause said at each one.
+        // The opening's 30 chunks of 100 ms (the first five played, the others left out): the pause said at each one.
         #expect(held.dropFirst(2).prefix { $0 }.count == 30)
     }
 
@@ -266,8 +266,10 @@ struct VoiceLeadPipelineTests {
                                   (.milliseconds(5), "Comment vas-tu ce matin, mon ami ? ")]
                                      + words.map { (.milliseconds(60), $0) }, pause: pause)
         let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 2400 : 0, false) }], pace: .milliseconds(50))
-        let speaker = try await run(model, synthesizer, config: config, until: 1800)
-        #expect(await speaker.played == 1800)  // three sentences of 500, and 300 of the opening's near-silence
+        // Three sentences of 500, and as much of the opening's near-silence as a pause may last.
+        let played = 1500 + Int(try #require(config.maxVoicePauseMs))
+        let speaker = try await run(model, synthesizer, config: config, until: played)
+        #expect(await speaker.played == played)
         let held = model.held
         #expect(runs(held.map(\.held)) == [true, false, true, false])  // first piece, first sound; the opening
         let opening = Array(held.dropFirst(2).prefix { $0.held })

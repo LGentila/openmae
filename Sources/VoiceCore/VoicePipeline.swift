@@ -67,8 +67,10 @@ public struct PipelineConfig: Sendable {
     /// `leadingSilenceThresholdDB`.
     public var racingVoices = 1
     /// Pauses of the voice longer than this (between sentences, each one starting with near-silence)
-    /// are shortened to it. nil = keep them.
-    public var maxVoicePauseMs: Double? = 300
+    /// are shortened to it. nil = keep them. 500 ms since 2026-10-22: with the voice no longer late (FluidAudio's
+    /// caches kept between frames), 300 ms left too little room between two sentences for the user's ear; at an
+    /// answer's or an announcement's start it is also the longest silence before the first words.
+    public var maxVoicePauseMs: Double? = 500
     /// An announcement's chime (0.75 s) waits this long at most (seconds) for the voice's first sound, then plays; the
     /// words follow it. The voice opens with near-silence of random length, which the chime covers: played at once, the
     /// chime left the voice 0.75 s, and an opening of 1.2 s of audio or more (7 first sentences in 50, `voice-cli
