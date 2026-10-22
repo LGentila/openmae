@@ -429,6 +429,73 @@ struct ActionCallTests {
         #expect(reading.0 == date("2026-10-16") && reading.1 == date("2026-10-17"))
     }
 
+    /// Words about when that leave the hour open (« après le travail »), with a day or without: refused as words the
+    /// app cannot place, so the model asks the user and the creation is kept for the answer; never saved for the whole
+    /// day, whether the day is one the model took from the date line (today is Thursday) or the user's own.
+    @Test func anHourLeftOpenIsAsked() throws {
+        func said(_ sentences: [String]) -> ToolContext {
+            ToolContext(now: now, timeZone: paris, language: .french, userSaid: sentences)
+        }
+        func refusal(_ quand: String?, said sentences: [String], tool: String = "creer_evenement") -> ToolRefusal? {
+            var arguments: [String: JSONValue] = ["titre": "Rendez-vous chez le coiffeur"]
+            if let quand { arguments["quand"] = .string(quand) }
+            do {
+                try ActionCatalog.check(ToolCall(name: tool, arguments: arguments), context: said(sentences))
+                return nil
+            } catch {
+                return error as? ToolRefusal
+            }
+        }
+        let request = "Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso."
+        // A day from the date line, with the user's words or without, a date or an hour the model chose.
+        for quand in ["jeudi après le travail", "jeudi", "2026-10-22", "2026-10-16T18:00", "demain à 18 h",
+                      "après le travail"] {
+            let refused = try #require(refusal(quand, said: [request]), "\(quand)")
+            #expect(refused.retryable && refused.detailGivenAgain && refused.spoken == ActionPhrases.badTime(.french)
+                    && refused.forModel.hasPrefix("Je ne comprends pas « quand »"), "\(quand)")
+        }
+        // The weekday the user said, with the rest or without, an hour the model added, or no moment in the call.
+        let own = "Ajoute un rendez-vous chez le coiffeur jeudi après le travail."
+        for quand in ["jeudi après le travail", "jeudi", "jeudi à 18 h", nil] {
+            #expect(refusal(quand, said: [own])?.detailGivenAgain == true, "\(quand ?? "none")")
+        }
+        let paul = "Rappelle-moi d'appeler Paul jeudi après le travail"
+        #expect(refusal("jeudi après le travail", said: [paul], tool: "creer_rappel") != nil)
+        #expect(refusal(nil, said: [paul], tool: "creer_rappel") != nil)
+        #expect(refusal("jeudi après le travail", said: []) != nil)  // the words alone
+        // A change: the item's time is not the hour the user left open either.
+        func change(_ quand: String, said sentence: String) throws -> (start: Date, end: Date, allDay: Bool)? {
+            try ActionCatalog.changedEvent(
+                ToolCall(name: "modifier_element", arguments: ["reference": "e1", "quand": .string(quand)]),
+                start: date("2026-10-16T15:00"), end: date("2026-10-16T16:00"), allDay: false,
+                context: said([sentence]))
+        }
+        let move = "Décale-le à jeudi après le travail"
+        #expect(throws: ToolRefusal.self) { try change("jeudi après le travail", said: move) }
+        #expect(throws: ToolRefusal.self) { try change("jeudi", said: move) }
+        #expect(try change("jeudi", said: "Décale-le à jeudi")?.start == date("2026-10-22T15:00"))
+
+        // The hour in the user's words: saved. The answer to the question, an hour said with the rest (which
+        // completes the model's words), a part of the day, an hour said in an earlier turn.
+        func start(_ quand: String, said sentences: [String]) throws -> Date {
+            let call = ToolCall(name: "creer_evenement", arguments: ["titre": "Coiffeur", "quand": .string(quand)])
+            return try ActionCatalog.eventTimes(call, context: said(sentences)).start
+        }
+        #expect(try start("demain à 18 h", said: ["Demain à 18 h.", request]) == date("2026-10-16T18:00"))
+        let withHour = "Ajoute un rendez-vous chez le coiffeur jeudi à 18 h après le travail."
+        #expect(try start("jeudi à 18 h", said: [withHour]) == date("2026-10-22T18:00"))
+        #expect(try start("jeudi après le travail", said: [withHour]) == date("2026-10-22T18:00"))
+        #expect(try start("jeudi soir", said: ["Ajoute un rendez-vous chez le coiffeur jeudi soir après le travail."])
+                == date("2026-10-22T19:00"))
+        let atSix = "Ajoute un rendez-vous chez le coiffeur à 18 h."
+        #expect(try start("jeudi à 18 h", said: ["Jeudi après le travail.", atSix]) == date("2026-10-22T18:00"))
+        // Other words about when, as before.
+        let bill = ToolCall(name: "creer_evenement", arguments: ["titre": "Facture", "quand": "vendredi"])
+        let deadline = "Ajoute le paiement de la facture avant vendredi"
+        let friday = try ActionCatalog.eventTimes(bill, context: said([deadline]))
+        #expect(friday.allDay && friday.start == date("2026-10-16"))
+    }
+
     /// "Décale-le à 16 h" keeps the day of the item, "samedi à la même heure" its time, its length goes along.
     @Test func changesStartFromTheItem() throws {
         func change(_ arguments: [String: JSONValue]) throws -> (start: Date, end: Date, allDay: Bool)? {

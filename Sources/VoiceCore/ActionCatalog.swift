@@ -253,24 +253,47 @@ public enum ActionCatalog {
     /// The moment a call gives in the first of `keys` it has (the user's words, or a date the model wrote): not
     /// past, less than a year ahead. nil when absent and not required. `base`: the item a change starts from.
     /// `orSaid`: when the call gives none, the moment the user's sentence says, if any (the model left it out).
+    ///
+    /// Words that say when relative to something the app cannot place and give no hour (« jeudi après le travail »:
+    /// `FrenchDates.leavesTheHourOpen`) are refused as words it cannot place (`Problem.notUnderstood`), like « après
+    /// le travail » alone: the model gets its second try and asks the user, and the refused creation is kept for the
+    /// answer (`RefusedCreation`). Read without that part, they saved the event for the whole day. When the user's own
+    /// sentence of this turn leaves the hour open, a moment is refused too unless the model's words give the hour, in
+    /// the user's words: not a day taken from the date line, an hour the model chose, or the user's day alone. Asked
+    /// « Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso. » on a Thursday, Gemma 4
+    /// E4B wrote « jeudi après le travail » in 9 runs of 10 of voice-cli dialogue-bench: saved on the next Thursday,
+    /// all day, and the appointment the user then gave (« Demain à 18 h. ») in 1 run of 10. Refused, the moment is
+    /// asked (by the model's second try, or by the app when it says nothing) and the answer saves the appointment in 9
+    /// runs of 10. With « jeudi » in the user's words, the three models saved the whole day in 10 runs of 10; refused,
+    /// the user's answer (« À 18 h. ») saved Thursday at 18:00 in 59 runs of 60.
     static func moment(_ call: ToolCall, _ keys: [String], context: ToolContext, base: FrenchDates.Base? = nil,
                        required: Bool, orSaid: Bool = false) throws -> FrenchDates.Moment?
     {
         guard let key = keys.first(where: { call.text($0) != nil }), let raw = call.text(key) else {
-            if orSaid, let said = context.userSaid.first, FrenchDates.saysWhen(said),
-               let moment = try? FrenchDates.moment(said, now: context.now, calendar: context.calendar)
-            {
-                try DateCheck.upcoming(moment, key: keys[0], raw: said, context: context, tool: call.name)
-                return moment
+            if orSaid, let said = context.userSaid.first, FrenchDates.saysWhen(said) {
+                // The user's day, but not its hour: asked, as when the model gives these words.
+                if FrenchDates.leavesTheHourOpen(said) {
+                    throw DateCheck.refusal(.missing, key: keys[0], raw: "", context: context)
+                }
+                if let moment = try? FrenchDates.moment(said, now: context.now, calendar: context.calendar) {
+                    try DateCheck.upcoming(moment, key: keys[0], raw: said, context: context, tool: call.name)
+                    return moment
+                }
             }
             if required { throw DateCheck.refusal(.missing, key: keys[0], raw: "", context: context) }
             return nil
         }
         func read(_ text: String) throws -> FrenchDates.Moment {
-            try FrenchDates.moment(text, now: context.now, calendar: context.calendar, base: base)
+            if FrenchDates.leavesTheHourOpen(text) { throw FrenchDates.Problem.notUnderstood }
+            return try FrenchDates.moment(text, now: context.now, calendar: context.calendar, base: base)
         }
         do {
             let moment = try readingTheUser(raw, context: context, read: read)
+            if let said = context.userSaid.first, FrenchDates.leavesTheHourOpen(said),
+               !(FrenchDates.saysTheHour(raw) && FrenchDates.wordsAreTheUser(raw, said: context.userSaid))
+            {
+                throw FrenchDates.Problem.notUnderstood
+            }
             try DateCheck.upcoming(moment, key: key, raw: raw, context: context, tool: call.name)
             return moment
         } catch let problem as FrenchDates.Problem {

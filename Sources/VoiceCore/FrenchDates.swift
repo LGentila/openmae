@@ -104,6 +104,22 @@ public enum FrenchDates {
             || p.endDay != nil
     }
 
+    /// Whether words say when relative to something the app cannot place in time — « après le travail », « avant
+    /// de partir », « en sortant du bureau », « dès que je rentre » — and give no hour of their own (`saysTheHour`):
+    /// « jeudi après le travail » gives the day, never the hour. `moment` reads such words without that part
+    /// (« jeudi », the whole day; « après le travail » alone is `Problem.notUnderstood`): right for a forecast's day,
+    /// not for an event.
+    public static func leavesTheHourOpen(_ text: String) -> Bool {
+        let p = Parser(tokens(text)).parse()
+        return p.unplaced && !p.saysTheHour
+    }
+
+    /// Whether words say the hour: an hour (« à 18 h »), a part of the day (« jeudi soir »), « dans 20 minutes »,
+    /// « une heure plus tard », « à la même heure ».
+    public static func saysTheHour(_ text: String) -> Bool {
+        Parser(tokens(text)).parse().saysTheHour
+    }
+
     /// The length a sentence says ("mets un minuteur d'une heure et quart" → 4500 s), not counting times of day.
     public static func lengthSaid(_ text: String) -> Int? {
         let p = Parser(tokens(text)).parse()
@@ -395,6 +411,14 @@ public enum FrenchDates {
         var sameTime = false
         var period: Period?
         var allDay = false
+        /// Words that say when relative to something the app cannot place: « après le travail » (`Parser.unplaced`).
+        var unplaced = false
+
+        /// An hour, a part of the day, a time from now or from the item ("dans 20 minutes", "une heure plus tard"),
+        /// "à la même heure"; not a day alone, nor "dans deux jours".
+        var saysTheHour: Bool {
+            !clocks.isEmpty || !parts.isEmpty || sameTime || shift != nil || (offset?.underADay ?? false)
+        }
     }
 
     fileprivate struct Parser {
@@ -850,7 +874,9 @@ public enum FrenchDates {
                         i = next + 2
                         continue
                     }
-                    if isWord(next, ["apres", "avant"]) {
+                    // Not « à 18 h après le travail »: an hour, then words relative to something (18 hours later, it
+                    // lost the day and the hour).
+                    if isWord(next, ["apres", "avant"]), !unplaced(at: next) {
                         p.shift = (span, word(next) == "apres")
                         i = next + 1
                         continue
@@ -939,9 +965,51 @@ public enum FrenchDates {
                     i = next
                     continue
                 }
+                if unplaced(at: i) { p.unplaced = true }
                 i += 1
             }
             return p
+        }
+
+        // MARK: Words it cannot place
+
+        static let articles: Set<String> = ["le", "la", "l'", "les", "ce", "cet", "cette"]
+        static let subjects: Set<String> = ["je", "j'", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "c'"]
+        /// After « après », « avant »…: not something the moment is relative to.
+        static let unrelated = subjects.union([",", "-", "tout", "quoi"])
+        static let possessives: Set<String> = ["mon", "ton", "son", "notre", "votre", "leur"]
+        static let leaving: Set<String> = ["sortant", "rentrant", "partant", "arrivant", "revenant", "quittant",
+                                           "finissant", "terminant"]
+
+        /// Whether the words from `i` say when relative to something the app cannot place in time: « après le
+        /// travail », « avant de partir », « pendant la pause », « en sortant du bureau », « à la sortie de
+        /// l'école », « à l'heure du déjeuner », « au retour », « à mon retour », « au réveil », « dès que je
+        /// rentre », « quand tu rentres », « lors du déjeuner ». Not when a moment follows (« après 18 h », « avant
+        /// vendredi », « avant le 15 », « pendant le week-end »), nor « d'après », « en avant », « après tout »,
+        /// « après, on verra », « après je verrai »; « deux jours après » and « pendant une heure » never get here
+        /// (a shift, a length).
+        func unplaced(at i: Int) -> Bool {
+            let of: Set<String> = ["de", "du", "des", "d'"]
+            switch word(i) {
+            case "apres", "avant", "pendant", "durant":
+                guard !isWord(i - 1, ["d'", "de", "en", "l'", "ci"]), !isWord(i + 1, Self.unrelated) else {
+                    return false
+                }
+                let k = isWord(i + 1, Self.articles) ? i + 2 : i + 1
+                guard tokens.indices.contains(k) else { return false }
+                return FrenchDates.meaning(tokens[k]) == nil  // not a word that says when: « avant le 15 », « midi »
+            case "en": return isWord(i + 1, Self.leaving)
+            case "a":  // « à », its accent gone
+                if word(i + 1) == "la", word(i + 2) == "sortie", isWord(i + 3, of) { return true }
+                if word(i + 1) == "l'", isWord(i + 2, ["heure", "heures"]), isWord(i + 3, of) { return true }
+                return isWord(i + 1, Self.possessives) && word(i + 2) == "retour"
+            case "au": return isWord(i + 1, ["retour", "reveil", "lever", "coucher"])
+            case "des":  // « dès »
+                return isWord(i + 1, ["que", "qu'"]) || isWord(i + 1, Self.possessives) && word(i + 2) == "retour"
+            case "quand": return isWord(i + 1, Self.subjects)
+            case "lors": return isWord(i + 1, of)
+            default: return false
+            }
         }
     }
 

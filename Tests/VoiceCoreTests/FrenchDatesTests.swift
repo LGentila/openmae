@@ -233,6 +233,42 @@ struct FrenchDatesTests {
         #expect(FrenchDates.lengthSaid("Rendez-vous vendredi à 18 h") == nil)
     }
 
+    /// Words that say when relative to something the app cannot place leave the hour open, unless they give one; the
+    /// moment is read without them (a forecast's day), and the app refuses it for an event or a reminder.
+    @Test func wordsItCannotPlaceLeaveTheHourOpen() throws {
+        let open = [
+            "jeudi après le travail", "après le travail", "demain après le boulot", "samedi après la piscine",
+            "mardi après manger", "lundi après mon rendez-vous", "vendredi avant de partir", "demain avant le dîner",
+            "jeudi pendant la pause", "lundi lors du déjeuner", "demain en sortant du bureau", "jeudi en rentrant",
+            "lundi à la sortie de l'école", "demain à l'heure du déjeuner", "jeudi au retour", "vendredi à mon retour",
+            "demain au réveil", "demain dès que je rentre", "demain quand je rentre",
+            "Ajoute un rendez-vous chez le coiffeur après le travail dans mon calendrier Perso.",
+        ]
+        for text in open { #expect(FrenchDates.leavesTheHourOpen(text), "\(text)") }
+        // With an hour of their own, or a part of the day.
+        let placed = ["jeudi après le travail à 18 h", "après le travail vers 18 h 30", "jeudi 18 h, après le travail",
+                      "demain soir après le travail", "après le travail ce soir", "dans 20 minutes, en sortant"]
+        for text in placed { #expect(!FrenchDates.leavesTheHourOpen(text), "\(text)") }
+        // A moment follows, or nothing the moment is relative to; the phrases read today.
+        let plain = ["après 18 h", "avant vendredi", "avant le 15", "après le 3 novembre", "avant midi", "après minuit",
+                     "avant la semaine prochaine", "pendant le week-end", "pendant une heure", "deux jours après",
+                     "après-demain", "après demain matin", "d'après la météo", "la semaine d'après", "en avant",
+                     "après tout", "jeudi, après on verra", "demain matin", "samedi soir", "lundi prochain à 9 h",
+                     "vendredi", "dans deux jours"]
+        for text in plain { #expect(!FrenchDates.leavesTheHourOpen(text), "\(text)") }
+        #expect(try moment("jeudi après le travail") == "2026-10-22")
+        #expect(problem("après le travail") == .notUnderstood)
+        // An hour before them is an hour, not a shift (« 18 h après » used to be 18 hours from now).
+        #expect(try moment("jeudi à 18 h après le travail") == "2026-10-22T18:00")
+        #expect(try moment("demain 18 h après le boulot") == "2026-10-16T18:00")
+        #expect(try moment("une heure après", base: "2026-10-16T15:00") == "2026-10-16T16:00")
+        #expect(try moment("deux jours avant", base: "2026-10-16T15:00") == "2026-10-14T15:00")
+        #expect(FrenchDates.saysTheHour("jeudi soir") && FrenchDates.saysTheHour("dans 20 minutes")
+                && FrenchDates.saysTheHour("à la même heure") && FrenchDates.saysTheHour("2026-10-16T18:00"))
+        #expect(!FrenchDates.saysTheHour("jeudi") && !FrenchDates.saysTheHour("dans deux jours")
+                && !FrenchDates.saysTheHour("2026-10-22") && !FrenchDates.saysTheHour("après le travail"))
+    }
+
     @Test func lengths() {
         let cases: [(String, Int?)] = [
             ("une heure et quart", 4500), ("une heure et demie", 5400), ("1 h 30", 5400), ("1h30", 5400),
