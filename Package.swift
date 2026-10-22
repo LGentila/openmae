@@ -35,7 +35,9 @@ let package = Package(
     dependencies: [
         // Versions are pinned exactly: these are the measured ones, and an engine update must be a
         // deliberate, re-measured change.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7"),  // Apache-2.0
+        // OpenMaé's fork: FluidAudio 0.17.7 and one fix, the FlowLM step's caches written into arrays the session keeps
+        // (with Gemma 4 26B loaded, allocating them anew at every frame slowed the voice from 45 to 57 ms per 80 ms).
+        .package(url: "https://github.com/LGentila/FluidAudio.git", exact: "0.17.7-openmae.1"),  // Apache-2.0
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", exact: "3.32.3"),  // MIT
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.5"),  // Apache-2.0
     ],

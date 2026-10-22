@@ -13,10 +13,10 @@
     {
       "identity" : "fluidaudio",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidInference/FluidAudio.git",
+      "location" : "https://github.com/LGentila/FluidAudio.git",
       "state" : {
-        "revision" : "503b4bd1bbf7220882de39fe8ae6716aae4132da",
-        "version" : "0.17.7"
+        "revision" : "3bcb0e1fae15bc044066117b588682a784d408af",
+        "version" : "0.17.7-openmae.1"
       }
     },
     {
