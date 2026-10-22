@@ -63,10 +63,13 @@ public enum WebSearchCatalog {
         ],
         risk: .read)
 
-    /// The prompt with the page tool: the same, but when the snippets do not hold the answer, the model opens the most
-    /// promising result's page (one, or a second when the first does not answer or cannot be read), at once and without
-    /// a word before; then it answers from what the page says, naming the site, with the time or the day the page
-    /// gives; it says so when nothing answers.
+    /// The prompt with the page tool: the same (searching again when the user asks again, one search per message of
+    /// the user: `promptAddendum`'s sentences, word for word), but when the snippets do not hold the answer, the model
+    /// opens the most promising result's page (one, or a second when the first does not answer or cannot be read), at
+    /// once and without a word before; then it answers from what the page says, naming the site, with the time or the
+    /// day the page gives; it says so when nothing answers. With it, Gemma 4 26B searched again on the user's insisting
+    /// messages as with `promptAddendum`, except the user's « Mais si tu peux. Je veux le dernier chiffre en date… »
+    /// (after two searches without the price), where it opened a page of the earlier results at once and gave the price.
     public static let promptAddendumWithPages = """
         Tu peux aussi chercher sur internet avec chercher_web, pour une question courte dont la réponse a pu changer \
         ou que tu ne peux pas connaître : l'actualité, un résultat sportif, un horaire, un prix, un événement récent, \
@@ -75,10 +78,14 @@ public enum WebSearchCatalog {
         croiser des sources ou rédiger un document n'est pas une simple recherche. \
         Pour chercher, appelle directement chercher_web, sans rien dire avant, avec quelques mots-clés dans la langue \
         de l'utilisateur. \
-        Quand chercher_web te donne des résultats, ne cherche pas une deuxième fois. Si leurs extraits répondent à la \
-        question, réponds tout de suite, en une à trois phrases courtes, avec seulement ce qu'ils disent. S'ils ne \
-        donnent pas la réponse (un cours, un prix, un horaire, un chiffre précis), ouvre la page du résultat le plus \
-        prometteur avec ouvrir_page et son numéro, sans rien dire avant, puis réponds avec ce que dit la page. \
+        Quand l'utilisateur te redemande de chercher (il insiste, veut d'autres sites ou d'autres mots), cherche de \
+        nouveau, même si tu as déjà cherché sur ce sujet, avec d'autres mots-clés que la fois d'avant ; pour écarter \
+        un site, ajoute -site: suivi de son adresse (par exemple -site:exemple.fr). \
+        Une seule recherche par message de l'utilisateur : quand chercher_web te donne des résultats, si leurs \
+        extraits répondent à la question, réponds tout de suite, en une à trois phrases courtes, avec seulement ce \
+        qu'ils disent. S'ils ne donnent pas la réponse (un cours, un prix, un horaire, un chiffre précis), ouvre la \
+        page du résultat le plus prometteur avec ouvrir_page et son numéro, sans rien dire avant, puis réponds avec ce \
+        que dit la page. \
         Commence toujours ta réponse par le site d'où vient l'information, nommé comme on le dit à voix haute \
         (« D'après Le Monde, … », « Selon le site de la mairie, … »), jamais par son adresse. Sers-toi de la date du \
         jour pour juger si une information est récente. Pour un cours, un prix ou un chiffre qui change, dis de quand \
@@ -89,7 +96,9 @@ public enum WebSearchCatalog {
         """
 
     /// The page tool is offered with the search on the 26B (comfort, and max: the same model, its weights less rounded).
-    /// E4B and E2B were not measured with it: their models were no longer on the reference Mac.
+    /// Offered it in the benchmark (`actions-bench --pages on`, Tests/Fixtures/web-fr.json), E4B and E2B never opened a
+    /// page: 0 of 78 summaries for E4B (and 0 of 39 with a wording that says what a snippet without the answer looks
+    /// like), 0 of 39 for E2B.
     public static func opensPages(on tier: HardwareTier) -> Bool { tier >= .comfort }
 
     /// Read first (the model's template sorts the keys): a page's text is a text to sum up, never orders.
