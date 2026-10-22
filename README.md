@@ -1,95 +1,35 @@
-# OpenMaé
+<p align="center">
+  <img src=".github/readme/banner.svg" alt="OpenMaé — The voice assistant that lives on your Mac." width="960">
+</p>
 
-A voice assistant for Apple silicon Macs that runs **entirely on your Mac**. You talk, it answers out loud, in
-French or English, in real time — like the voice mode of the big chat apps, but local: speech recognition,
-the language model and the voice all run on the Mac, and nothing you say ever leaves your own devices.
+**OpenMaé** is a voice assistant for Apple silicon Macs. You talk, Maé answers out loud, in French or English, in real
+time — like the voice mode of the big chat apps, except that everything runs on your Mac: nothing you say leaves your
+own devices.
 
-The only network access is the one-time download of the models, at first launch, and — only if you turn them
-on — the link with your iPhone and the web search. After that, OpenMaé works in airplane mode.
+<p align="center">
+  <img src=".github/readme/mac.png" alt="OpenMaé on the Mac, while Maé answers" height="460">
+  &nbsp;&nbsp;
+  <img src=".github/readme/iphone-listening.png" alt="The iPhone app, while you speak" height="460">
+</p>
 
-> **Status:** proof of concept, under active development. Distribution as a signed, notarized disk image is
-> not ready yet: for now the app is built from source (see below).
+> **Status:** proof of concept, under active development. There is no signed download yet: for now the app is built
+> from source (see below).
 
 ## Features
 
-- **Spoken conversation.** The assistant starts talking while the language model is still writing: the
-  answer goes to the voice sentence by sentence.
-- **Interrupt at any time.** Speak over the assistant and it stops within about a quarter of a second. The
-  Interrupt button, a click on the orb or the Escape key work too.
-- **From any app.** Press ⌥ Space to talk, and again to finish: a small capsule at the bottom of the screen
-  shows that Maé listens, thinks or answers, without bringing the window forward (Escape cancels or
-  interrupts). Closing the window leaves OpenMaé in the menu bar, where its icon shows when Maé is active and
-  has Quit; with the window closed, Maé only listens after ⌥ Space (unless she waits for « OK Maé », below).
-  While OpenMaé runs, ⌥ Space no longer types a non-breaking space in other apps.
-- **« OK Maé » (optional).** In Settings › Voice and sound, choose to talk after « OK Maé »: Maé then only answers the
-  sentences that start with it, so the TV and the conversations around no longer start her, and listens to any
-  voice for a few seconds after each answer. While she speaks, only « OK Maé, stop », ⌥ Space, a click on the orb or
-  Escape interrupt her. With the window closed she still waits for the phrase, and the capsule shows when she wakes;
-  plugged in, the Mac does not go to sleep. The phrase is read in what speech recognition writes: say it in one
-  breath with the request (« OK Maé, quelle heure est-il ? »); said alone it is often misheard (when it is heard, a
-  chime, then she listens), and it often misses you while the TV talks.
-- **Echo cancellation.** On the Mac's speakers, the assistant does not hear itself. A headphones mode skips
-  the echo processing, and push-to-talk (hold the space bar) helps in noisy places.
-- **French first, English too.** It answers in the language you speak, and switches by itself.
-- **Actions (optional).** Turn on Settings › Actions, and Maé adds events and reminders to your
-  calendars (every account macOS knows: iCloud, Google, Exchange…), reads you what is planned, sets timers and
-  runs the shortcuts you put in an “OpenMaé” folder of the Shortcuts app. The app, not the model, carries them
-  out and says what was really saved; say “annule” (or “cancel”) within two minutes to take it back, and a shortcut can be
-  set to ask first. OpenMaé itself still never goes online: macOS syncs the calendars. While a timer runs, the Mac
-  does not go to sleep on its own, on battery too (the display still goes off), so that it rings on time.
-- **Long tasks handed to Claude Code (optional).** Switch on Claude Code in Settings › Agents (the actions may
-  stay off), then ask for something long: “lance le développement d’un site pour la boulangerie de ma sœur”.
-  Maé reads the task back, waits for your “oui”, and hands it to the Claude Code installed and signed in on
-  your Mac, which works on its own in a new folder of `~/OpenMae` (or in a folder you allowed). Ask “où en est
-  le site ?” whenever you like; a notification tells you when it is done, and the result is in the history.
-  While Claude Code works, the Mac does not go to sleep on its own, on battery too (the task would pause).
-  By default Claude Code may only change the files of its folder: anything else is refused, and Maé tells you.
-  What you hand to Claude Code leaves your Mac — that is the point of handing it over.
-- **Searching the internet (optional).** Switch on Settings › Search the internet and choose where
-  the searches go: **Brave Search**, with your own API key (create one on [Brave's site](https://brave.com/search/api/)
-  and paste it), or **your own [SearXNG](https://docs.searxng.org/)**, with its JSON format on (and the password of
-  a protection in front of it, if any). Keys and passwords go in the keychain; "Test" checks it all. Ask something
-  Maé cannot know — “qui a gagné le match du PSG hier soir ?”, “à quelle heure ferme la piscine le dimanche ?” —
-  and she searches, reads the first results and answers in a sentence or two, naming the site; whatever the pages
-  say, nothing is carried out while she sums them up. When they do not hold the answer, ask again — “cherche
-  encore”, “regarde sur d’autres sites” — and she searches again, with other words. Only the few keywords she
-  searches for leave the Mac: to Brave Search, or to your SearXNG and from there to the search engines. The results
-  are never stored (no cache): they only live in the conversation. Public SearXNG instances are not used: they turn
-  programs away, and OpenMaé never passes for a browser.
-- **Weather, rates and travel times (optional).** One switch on the same page. Maé answers these from dedicated
-  services rather than from a search, whose snippets rarely hold a forecast, a price or a travel time: the weather
-  now and up to seven days ahead from [Open-Meteo](https://open-meteo.com) (“il va pleuvoir demain à Lyon ?”), a
-  currency's rate from the European Central Bank's reference rates (through [Frankfurter](https://frankfurter.dev))
-  or a crypto's price from [CoinGecko](https://www.coingecko.com) (“combien vaut le bitcoin ?”), always with its time
-  or day, and a travel time by car with the traffic or by public transport, with when to leave, from Apple Maps
-  (“combien de temps pour aller à la gare de Cergy ?”). No key is needed. “Here” is the Mac's location (macOS asks
-  once); a place you name wins. Only the place, or the currency or the crypto, leaves the Mac. Shares and indices
-  have no source of this kind yet: they stay with the web search. Offered on the tiers whose model passed their
-  benchmark (Gemma 4 E4B and 26B).
-- **Memory (optional).** Switch on Settings › Memory and say “retiens que je suis allergique aux noix” or
-  “souviens-toi que ma fille s'appelle Inès”: Maé keeps it on a short sheet (1,200 characters, one entry per line)
-  and uses it when it helps, from the next conversation on, without reciting it. She only remembers what you ask her
-  to, with your own words — never something said in passing, nor what a web page or an agent says. “Annule” takes back
-  what she just remembered; “oublie que…” forgets an entry once you say “oui”. The sheet is a Markdown file you can
-  read and edit (`memory.md`). With its own switch, off by default, the **history** keeps each exchange (your words
-  and her answer) for 30 days, a year or without limit, so that you can ask “qu'est-ce que je t'avais dit sur le
-  garagiste ?” or “efface ce qu'on s'est dit hier”; it is searched on the Mac by full-text search (SQLite).
-  Everything stays in `~/Library/Application Support/OpenMaé/Memory`, never online and never in iCloud; Settings ›
-  Memory lists what she remembers and erases the history or everything.
-- **From your iPhone (optional).** The iPhone app is the Mac's microphone, speaker and screen: pair it once
-  with a QR code (Settings › iPhone and iPad), then talk to Maé from the iPhone — directly on the home Wi-Fi, through an
-  encrypted relay elsewhere (see [iPhone app](#iphone-app)). The work stays on the Mac.
-- **Private by design.** No account, no telemetry, no cloud. The models are downloaded once, then the app
-  never goes online again — unless you pair an iPhone: the Mac then stays reachable by it, everything between
-  the two being end-to-end encrypted. (Claude Code, when you hand it a task, goes online on its own, with your
-  account; the web search, when you turn it on, sends its keywords to Brave Search or to your SearXNG; the weather,
-  rates and travel times send the place, the currency or the crypto to their services.) The memory and its history
-  never leave the Mac: no network, no iCloud.
-- **Adapted to your Mac.** The language model is chosen from the Mac's memory (see below); another tier can
-  be forced in Settings › Advanced.
-- **Measurements built in.** A side panel (View › Show Measurements, ⌥⌘M) shows the latency of each stage,
-  interruption times, memory and audio devices.
-- Interface in French and English.
+- **Real-time conversation.** Maé starts talking before her answer is fully written.
+- **Interrupt her any time.** Just speak over her.
+- **From any app.** Press ⌥ Space and talk; a small capsule shows that she is listening.
+- **« OK Maé ».** Hands-free: say her name, then what you want.
+- **French first, English too.** She answers in the language you speak.
+- **Actions.** Calendar events, reminders, timers and your own Shortcuts.
+- **Searching the internet.** The news, opening hours, the weather, a travel time…
+- **Memory.** She remembers what you ask her to.
+- **From your iPhone.** Talk to Maé from anywhere; the work stays on the Mac.
+- **Private by design.** Speech recognition, the language model and the voice all run on your Mac. No account, no
+  telemetry: once the models are downloaded, only what you turn on goes online.
+
+« OK Maé », the actions, the web search, the memory and the iPhone are off until you turn them on in Settings.
 
 ## Requirements
 
@@ -255,272 +195,8 @@ The link's end-to-end tests (pairing, sessions, sound, on this Mac) use the netw
 
 ## Command-line tool
 
-`voice-cli` uses the same engine and the same models as the app, without any interface.
-
-Download the models of this Mac's tier (or of `--tier minimum|standard|comfort|max`):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli download
-```
-
-Check every downloaded file against its SHA-256 (about one second per GB):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli verify
-```
-
-Measure the engine with recorded speech, played in real time as a microphone would. First generate the test
-phrases with macOS's built-in voices:
-
-```bash
-zsh scripts/make-test-audio.sh
-```
-
-A conversation, with the latency of each stage:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli conversation measurements/audio/0*.wav
-```
-
-Interruptions (speaking over the assistant):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli interruption measurements/audio/10-histoire.wav measurements/audio/11-stop.wav
-```
-
-What it takes to interrupt Maé depends on the device that has the conversation, since her echo is not as loud on each
-one (`BargeInProfile`): on the Mac, a voice over hers must reach -38 dB for 224 ms; on an iPhone, -30 dB for 288 ms (an
-iPad keeps the Mac's values for now). `--barge-in iphone` measures the interruptions with the iPhone's. With
-`VOICE_DEBUG=1`, the app's log says how each voice heard over hers was judged ("speech started (level … dB, over the
-assistant…)" or "ignored while the assistant talks…") and, after each answer, what was heard over her voice: how many
-bursts, the longest, the loudest. To try other values on an iPhone without building the app again, launch it with
-`VOICE_BARGE_IN_IPHONE_DB` (the level) and `VOICE_BARGE_IN_IPHONE_MS` (the duration):
-
-```bash
-open --env VOICE_DEBUG=1 --env VOICE_BARGE_IN_IPHONE_DB=-28 --env VOICE_BARGE_IN_IPHONE_MS=320 --stderr /tmp/openmae.log .build/app/Build/Products/Release/OpenMae.app
-```
-
-Memory over time (here 10 minutes):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli endurance --minutes 10 measurements/audio/0*.wav
-```
-
-`--actions` puts the actions in the model's instructions, as in the app when they are on (none is carried out, a call
-is declined); with `--new-conversation-every 4`, a new conversation starts every four turns, as with "New
-conversation" in the app, and the time it takes is shown. `--wake-word` only answers the recordings that start with
-« OK Maé », as the app's wake-word mode; add `--follow-up 0` so that every recording needs the phrase (no seconds of
-attention after an answer). `--no-voice-restart` keeps the voice going when its opening stays near-silent (the app
-starts it again after 1.2 s of near-silence), and `--racing-voices 2` starts each answer with two voices at once, the
-first one audible saying it (off in the app: 1.2 GB more memory). The words the user says so far are printed while
-each recording plays, as the app shows them; `--no-partials` turns that off, for comparison. `--talk-key` holds the
-talk key while each recording plays and releases it `--release-after` seconds later (0.25 by default), as ⌥ Space.
-
-The voice alone: how long it takes to make its first audible sound on typical first sentences, and the near-silence it
-produces before (Pocket TTS opens each sentence with a breath of random length). `--parallel 2` has two voices speak
-each sentence at once, the first audible one counting (as `--racing-voices 2` in a conversation); `--with-llm` has the
-language model write an answer meanwhile, paused once its first sentence is written, as in a turn:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli voice-onset --repeats 5 --parallel 2
-```
-
-The voice's pace through long answers, without the pipeline: five sentences said in one utterance, answer after
-answer, and the time per 80 ms frame by second since each answer's first frame. `--with-llm` loads the language model
-too (its memory is taken as in the app), and `--model-writes 120` has it write that many pieces at the start of each
-answer; `--fingerprint` prints a fingerprint of two sentences said with a fixed seed, the same in two builds that make
-the same sound:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli voice-pace --with-llm --repeats 5
-```
-
-With `VOICE_DEBUG=1`, every engine command also logs, for each sentence the voice says, how long its first frame took,
-how many near-silent frames came before the first audible one and how fast the frames came; and at the end of each
-utterance, how fast all its frames came, its slowest frame, and how many other utterances of the voice ran at the same
-time.
-
-An announcement cut by a home station's drop (the iPad unplugged 0.6 s into the chime), said again at once on the
-Mac, as the app does; each try reports the pace of every utterance of the voice, when the Mac's chime rang, and the
-gaps in the Mac's sound after it. `--mute-first` takes the Mac's first utterance of it for near-silence, so that the
-voice would start it again after 1.2 s of its audio (an announcement said again from its recording no longer uses the
-voice); `--mute-station` does the same on the station, whose voice then starts again just after the drop. `--on-mac`
-has the announcement said on the Mac from the start, by the voice (a timer that rings with no home station);
-`--chime-wait` sets how long the chime waits at most for the voice's first sound (0.3 s in the app; 0: at once):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli announce-drop --repeats 6 --mute-station
-.build/xcode/Build/Products/Release/voice-cli announce-drop --repeats 10 --on-mac --mute-first
-```
-
-Check that the language model picks the right action, with the right date. Text only, nothing is created: the
-French requests of `Tests/Fixtures/actions-fr.json` (actions, and traps that only look like one) are sent at a
-fixed reference time, and the report gives the right-tool rate, the dates, false triggers and the time to a
-complete call:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench
-```
-
-The same with the tools that hand tasks to Claude Code (requests to hand over, questions about programming
-that must not be, and questions about a task already handed over):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
-```
-
-With `--no-actions`, the actions are left out (their tools, their part of the prompt, their example exchanges), as the
-app has Claude Code, the web search or the built-in sources when the actions are off: the delegation's part of the
-prompt is then the one that says on its own how to call its tool, with an example call. A request for an action then
-expects no call. `--agents-addendum <file>` replaces the delegation's part, to try another wording without rebuilding:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions
-```
-
-Searching the internet: requests that need a search, requests that do not (traps included), research for an agent,
-and requests that follow a search whose results did not answer (the user insists or asks for other sites: a new
-search is expected, with keywords of its own; or asks for nothing new). The model sums up the results recorded for
-each request in the corpus, as the app would have it do, and the report gives the right decisions, the searches made
-by mistake, the keywords and what the summaries said:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/web-fr.json
-```
-
-With `--searxng <address>`, the searches are made for real on that SearXNG, with the model's own keywords; `--web`
-offers the search tool with the other corpora too, to check that it does not change their results;
-`--web-addendum <file>` replaces the search's part of the system prompt, to try another wording without rebuilding.
-`--compare-beginnings` generates nothing: it computes the beginning of the conversations (the system prompt with its
-tools) as the app does (in float32, then rounded: the same state at load and after a tools change), then in bfloat16 as
-it was computed before and with every weight in float32 as a reference, compares the model's memory after each, and
-gives every request's chance of a call at its first token from each, read as the app reads it (from the state at load,
-the same as `--watch-calls`; a request whose decision moves with mere rounding is one the model hesitates on).
-`--compare-requests` generates nothing either: from the beginning the app keeps, it reads each request's first token
-computed as the app computes it (its new tokens in float32, the same as `--watch-calls`), as it was computed before (in
-bfloat16), with Gemma 4 26B also with its experts' products in bfloat16 rather than float32, and for a request with
-earlier exchanges with those computed first on their own (as the history computed ahead, or in one pass), against the
-same float32 reference. `--bfloat16-prompts` (also for `cache-check`) computes the requests' new tokens and the history
-in bfloat16, as the app did before, and `--bfloat16-experts` computes Gemma 4 26B's experts' products in bfloat16 while
-the rest of them is computed in float32, to compare in one build. One
-search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise
-```
-
-The weather, rates and travel times: requests for each, requests that must not use them (general knowledge, small
-talk, questions for the web search, actions), with the services' answers recorded so that it runs offline;
-`--live-sources` asks the real services instead (timed; “here” is the corpus's place) and `--record-sources file.json`
-writes what they answered; `--sources` offers these tools with the other corpora too:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/sources-fr.json
-```
-
-The news of received information (« Quoi de neuf ? », the tool `lire_nouvelles`, offered while a source exists):
-requests for the user's news, requests that must not use it (small talk, the news of the world, which is the web
-search's, actions with close words); `--news` offers it with the other corpora too, to check that it does not change
-their results:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/news-fr.json
-```
-
-Short conversations, as the app has them: the dialogues of `Tests/Fixtures/dialogues-fr.json` (here, a request for a
-moment already gone, then the user's new moment; or a request whose call the app refuses for the model's second try,
-then the user's answer to the app's question) are sent turn after turn, text only and with nothing created: each call
-goes through the app's checks and second try, and is carried out on a calendar kept in memory that answers as the app
-would. The model samples its answers, so each dialogue runs several times, and the report says what the model did at
-each turn, how many answers said nothing to the user and how often the item the user wanted was saved:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10
-```
-
-The memory's tool (`memoire`: remember, search the history, forget): requests to remember, search and forget, and above
-all traps — small talk, general knowledge, a real web search, an action, and facts said without asking Maé to remember
-them, which must not be remembered; `--memory` offers the tool with the other corpora too (with an empty sheet):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/memory-actions-fr.json
-```
-
-The memory's history search, without a model: recall@4 and MRR by kind of query (the exchange's own words, paraphrases,
-a period, speech-to-text mistakes, traps) on a synthetic corpus, the same with the French sentence embedding macOS
-already has (to decide on searching by meaning), then the search's speed and the database's size at 20,000 exchanges:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli memory-bench
-```
-
-How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
-sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the
-model computes in the background once said, and a request sent meanwhile), a refused call and its second try, a long
-result summed up (as after a web search), a turn dropped after a second try, a speculative or interrupted answer, an
-answer in paragraphs, a speculative answer abandoned after an answer cut off, the tools changing, the history
-shortened, a new conversation (with `--memory`: the memory's sheet unchanged, then changed). Text only, nothing is
-created; run it again after any change to `MLXChatModel`. With `VOICE_DEBUG=1`, it also shows where each request stops
-matching that memory, and what differs. `--cut-off ahead` or `--cut-off after-user-words` puts the note of an answer cut
-off where another tier does (see below):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli cache-check
-```
-
-How long the language model takes to read a request's new tokens, by their number: after a conversation of about 1,500
-tokens, the first N tokens of the next request are read as a request reads them (in float32, up to the answer's first
-token), for N from `--from` to `--to`, `--runs` times each. Gemma 4 26B's experts pad their rows to the count from which
-MLX computes them in blocks (`ReadingExperts` in `MLXChatModel.swift`); `--compare-padding` reads each N never padded,
-padded whenever their rows are sorted and as in the app, one right after the other, and `--unpadded-experts` (also for
-`cache-check`) never pads them, as before:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli read-sizes --from 32 --to 96 --runs 5 --compare-padding
-```
-
-Answers cut off one after the other, as when the user speaks over Maé: the dialogues of `Tests/Fixtures/cut-offs-fr.json`
-(twelve answers cut off in a row; answers cut early, then what a user who did not hear their end would ask), text only.
-Each answer cut off goes into the history as the app records it on the tier: what the voice had been given, then a note
-saying that the user cut Maé off, which Gemma 4 26B reads ahead (a message of its own right after the answer, computed
-while the user still speaks) and E4B and E2B after the user's words, in their next message. The report prints every
-answer, and counts those in which the model wrote the mark of a cut itself (« […] », which the history once ended such
-answers with: the model copied it, dozens in a row, and the voice read them), copied the note, or went round in circles
-and was stopped. `--cut-off ahead` or `--cut-off after-user-words` puts the note where another tier does; for
-comparison, `--cut-off marker` records the answers cut off as the app did before (« […] » at their end),
-`--cut-off none` without saying anything:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli cut-off-bench --repeats 10
-```
-
-Answers cut by a drop (the iPhone that has the conversation went out of reach in the middle of an answer and was not
-back in time to hear the rest): the dialogues of `Tests/Fixtures/drops-fr.json`, three « Raconte-moi … » answers cut
-after their first piece, with or without a question between them, then a fourth heard to its end. Each answer cut by
-the drop goes into the history as the app records it: as the model wrote it, then a note saying that the link dropped
-and the user heard only its beginning, where the tier puts the note of an answer cut off. The report counts, per turn,
-the answers heard to their end that hold a single whole sentence. For comparison, `--drop heard` keeps only what the
-device heard, then the note, `--drop cut-off` what it heard as an answer the user cut off (as the app did before),
-`--drop none` what it heard without a note, `--drop whole` as if there had been no drop:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli cut-off-bench --corpus Tests/Fixtures/drops-fr.json --actions
-```
-
-Hand a task to Claude Code the way the app does, without the app or a language model (it uses the Claude Code
-signed in on this Mac; `--check` only says whether it is installed and signed in):
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli delegate --instruction "Crée un fichier bonjour.txt qui dit bonjour."
-```
-
-To move a model to another version (a deliberate change, to be measured again): edit its `revision` in
-`Sources/VoiceCore/ModelCatalog.swift`, then regenerate the list of its files, sizes and SHA-256 from Hugging
-Face:
-
-```bash
-.build/xcode/Build/Products/Release/voice-cli catalog
-```
+`voice-cli` uses the same engine and the same models as the app, without any interface: it downloads the models,
+measures the engine and runs the benchmarks. Its commands are in [Sources/VoiceCLI/README.md](Sources/VoiceCLI/README.md).
 
 ## Project layout
 
@@ -536,7 +212,7 @@ Sources/VoiceEngineApple/      the Apple implementations: Silero, Parakeet and P
                                Gemma 4 (MLX), microphone and speakers (AVAudioEngine)
 Sources/OpenMaeLink/           the link with the iPhone: keys, pairing, Noise, direct and relayed connections,
                                the voice's codec and jitter buffer (both apps use it)
-Sources/VoiceCLI/              voice-cli
+Sources/VoiceCLI/              voice-cli (its README lists the commands)
 Tests/VoiceCoreTests/          unit tests of the core
 Tests/OpenMaeLinkTests/        tests of the link (Noise test vectors, frames, jitter buffer, end to end)
 Tests/Fixtures/                requests for the actions benchmark, Noise test vectors, recorded Claude Code
