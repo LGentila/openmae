@@ -1272,8 +1272,9 @@ struct Float32Swap {
 /// With Gemma 4 26B on the reference Mac (M1 Pro; `voice-cli read-sizes`: N new tokens read after 1,503, up to the
 /// answer's first token, medians of 5 runs), the rows computed one by one cost about 7 ms more per token, until the
 /// batched kernel took over: 63 tokens in 648 ms, 64 in 490. Padded, 40 to 63 tokens took 461 to 544 ms instead of 477 to
-/// 661 (46: 468 instead of 525; 56: 514 instead of 610; 62: 495 instead of 661). Below about 38 tokens the padding cost
-/// more than it saved (32 tokens: 391 ms instead of 376; 8: 326 instead of 224), hence `paddedFrom`: 320 rows, 40 tokens.
+/// 661 (46: 468 instead of 525; 56: 514 instead of 610; 62: 495 instead of 661; each read right after the unpadded one,
+/// which gained it about 10 ms, as the same code from 64 tokens on showed). Below about 40 tokens the padding saved
+/// nothing or cost more (32 tokens: 391 ms instead of 376; 8: 326 instead of 224), hence `paddedFrom`: 320 rows, 40 tokens.
 ///
 /// `halfPrecision`: they compute their products in the type of their scales (bfloat16) whatever they are given, and give
 /// them back in the type they were given. Given float32, a quantized layer computes in float32 and converts its scales and
