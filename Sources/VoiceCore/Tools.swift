@@ -298,6 +298,14 @@ public protocol ToolProvider: Sendable {
     func tools() async -> [ToolSpec]
     /// A few sentences for the system prompt about when to use these tools; constant during a session too.
     func promptAddendum() async -> String?
+    /// The same for a runner with the built-in actions or without them (`ToolRunner.offersActions`), whose part of the
+    /// prompt says how to call a tool; `writeCall` writes a call the way the model writes it, for an example
+    /// (`LanguageModel.toolCallText`). By default `promptAddendum()`, with or without the actions.
+    func promptAddendum(actions: Bool, writeCall: @Sendable (ToolCall) async -> String?) async -> String?
+    /// Exchanges a conversation starts with, as if they had happened, for a runner without the built-in actions, on a
+    /// tier whose model needs them (`PipelineConfig.actionExamples`; with the actions, theirs: `ActionCatalog.examples`).
+    /// `now`: the time of their date lines. None by default.
+    func exampleExchanges(now: Date) async -> [ChatMessage]
     /// The risk of this call; by default the tool's.
     func risk(of call: ToolCall) async -> ToolRisk
     /// Checks a call without carrying it out (dates, names). Throws a `ToolRefusal`.
@@ -326,6 +334,10 @@ public protocol ToolProvider: Sendable {
 
 extension ToolProvider {
     public func promptAddendum() async -> String? { nil }
+    public func promptAddendum(actions: Bool, writeCall: @Sendable (ToolCall) async -> String?) async -> String? {
+        await promptAddendum()
+    }
+    public func exampleExchanges(now: Date) async -> [ChatMessage] { [] }
     public func risk(of call: ToolCall) async -> ToolRisk {
         await tools().first { $0.name == call.name }?.risk ?? .sensitive
     }

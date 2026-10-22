@@ -112,13 +112,24 @@ public actor ToolRunner {
         return named
     }
 
-    /// What the providers add to the system prompt, in their order.
-    public func promptAddenda() async -> [String] {
+    /// What the providers add to the system prompt, in their order, with the actions or without them (`offersActions`).
+    /// `writeCall`: a call written the way the model writes it, for the examples they show (none by default).
+    public func promptAddenda(writeCall: @Sendable (ToolCall) async -> String? = { _ in nil }) async -> [String] {
         var addenda: [String] = []
         for provider in providers {
-            if let addendum = await provider.promptAddendum() { addenda.append(addendum) }
+            if let addendum = await provider.promptAddendum(actions: offersActions, writeCall: writeCall) {
+                addenda.append(addendum)
+            }
         }
         return addenda
+    }
+
+    /// The providers' example exchanges, in their order, for a runner without the actions (see
+    /// `ToolProvider.exampleExchanges`).
+    public func exampleExchanges(now: Date) async -> [ChatMessage] {
+        var messages: [ChatMessage] = []
+        for provider in providers { messages += await provider.exampleExchanges(now: now) }
+        return messages
     }
 
     /// Whether the user's sentence is an answer the app handles itself. Changes nothing (the turn may still

@@ -114,7 +114,21 @@ public actor AgentTools: ToolProvider {
 
     public func promptAddendum() async -> String? { currentAddendum }
 
+    /// Without the actions, the delegation's part says how to call its tool, with an example call
+    /// (`AgentCatalog.promptAddendumWithoutActions`); with them, it is `promptAddendum()`.
+    public func promptAddendum(actions: Bool, writeCall: @Sendable (ToolCall) async -> String?) async -> String? {
+        guard !actions, currentAddendum != nil else { return currentAddendum }
+        return AgentCatalog.promptAddendumWithoutActions(exampleCall: await writeCall(AgentCatalog.example.call))
+    }
+
     private var currentAddendum: String? { agents.isEmpty ? nil : AgentCatalog.promptAddendum }
+
+    /// `AgentCatalog.examples`, with the agent's name and its read-back setting; none for several agents (their calls
+    /// would need the agent's name, which the examples do not show).
+    public func exampleExchanges(now: Date) async -> [ChatMessage] {
+        guard let agent = agents.first, agents.count == 1 else { return [] }
+        return AgentCatalog.examples(now: now, agent: agent.connector.displayName, review: agent.review)
+    }
 
     public func risk(of call: ToolCall) async -> ToolRisk {
         switch call.name {

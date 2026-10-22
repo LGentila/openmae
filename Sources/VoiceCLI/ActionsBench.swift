@@ -10,8 +10,9 @@
 //
 //   voice-cli actions-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/actions-fr.json] [--out measurements] [--show-prompt]
-//                           [--watch-calls] [--examples app|none|file] [--web] [--addendum file]
-//                           [--web-addendum file] [--searxng http://127.0.0.1:8888 [--searxng-user name]]
+//                           [--watch-calls] [--examples app|none|file] [--web] [--no-actions] [--addendum file]
+//                           [--web-addendum file] [--agents-addendum file]
+//                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
 //                           [--record file.json] [--sources] [--news] [--compare-beginnings] [--compare-requests]
 //                           [--bfloat16-prompts] [--bfloat16-experts]
 //
@@ -33,14 +34,16 @@
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
 // included. It slows generation a little: timings of such a run are not comparable.
-// Conversations start with the example exchanges the app gives this tier's model (ActionCatalog.examples), or
-// with those --examples says: "app" (the app's, on any tier), "none", or a file of exchanges (the shape of a
-// case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between them).
-// --addendum <file> replaces the actions part of the system prompt, --web-addendum <file> the web search's
-// (experiments without rebuilding).
+// Conversations start with the example exchanges the app gives this tier's model (ActionCatalog.examples; without the
+// actions, AgentCatalog.examples), or with those --examples says: "app" (the app's, on any tier), "none", or a file of
+// exchanges (the shape of a case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between
+// them).
+// --addendum <file> replaces the actions part of the system prompt, --web-addendum <file> the web search's,
+// --agents-addendum <file> the delegation's (experiments without rebuilding).
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
-// has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then only
-// says what the date line is, and a request whose tool is not offered expects no call.
+// has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
+// what the date line is, the delegation's part is the one for the tools on their own (with its own example call, and
+// on the smallest tier its example exchanges), and a request whose tool is not offered expects no call.
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -317,7 +320,12 @@ func runActionsBench(_ o: Options) async throws {
     } else {
         actionsPart = ActionCatalog.promptAddendum(exampleCall: exampleCall)
     }
-    conversation.systemAddenda = [actionsPart] + (agents ? [AgentCatalog.promptAddendum] : [])
+    // The delegation's part as `AgentTools` gives it: without the actions, with an example call of its own.
+    let delegationCall = await model.toolCallText(AgentCatalog.example.call)
+    let agentsPart = try o.agentsAddendum.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    } ?? (actions ? AgentCatalog.promptAddendum : AgentCatalog.promptAddendumWithoutActions(exampleCall: delegationCall))
+    conversation.systemAddenda = [actionsPart] + (agents ? [agentsPart] : [])
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
@@ -325,8 +333,11 @@ func runActionsBench(_ o: Options) async throws {
             : [])
         + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: true)] : [])
     if memory { print("memory: on, with the journal, \(sheet.count) entries in the sheet") }
-    let examples = o.examples ?? (actions && ActionCatalog.showsExamples(on: tier) ? "app" : "none")
-    conversation.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
+    let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents) ? "app" : "none")
+    // Without the actions, the app's are the delegation's (`AgentTools.exampleExchanges`, Claude Code reading back).
+    conversation.examples = try !actions && examples == "app"
+        ? (agents ? AgentCatalog.examples(now: now, timeZone: timeZone, agent: ClaudeCode.displayName, review: true) : [])
+        : exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
     let reference = ToolContext(now: now, timeZone: timeZone, language: .french)

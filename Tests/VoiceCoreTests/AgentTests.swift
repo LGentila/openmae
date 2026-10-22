@@ -493,7 +493,8 @@ struct PipelineAgentTests {
         #expect(await tools.visibleTasks.count == 1)
     }
 
-    /// The delegation instructions go into the system prompt only when an agent is set up.
+    /// The delegation instructions go into the system prompt only when an agent is set up; with the actions, the ones
+    /// they always were.
     @Test func promptMentionsAgentsOnlyWhenOneIsSetUp() async throws {
         let folder = scratchFolder()
         let tools = AgentTools(store: TaskStore(folder: folder), workspace: folder)
@@ -510,11 +511,59 @@ struct PipelineAgentTests {
         await pipeline.submit(text: "Encore")
         await waitFor { await model.requests.count == 2 }
         #expect(await model.requests.last?.first?.content.contains("deleguer_tache") == true)
+        #expect(await model.requests.last?.first?.content.hasSuffix(
+            ActionCatalog.promptAddendum(exampleCall: "[minuteur]") + " " + AgentCatalog.promptAddendum) == true)
     }
 
-    /// With the actions off, Claude Code on its own, as the app offers it then: its tools only, the date line and its part
-    /// of the prompt but nothing of the actions, not even their example exchanges. A task asked for is read back, and the
-    /// user's "oui" hands it over, without the model.
+    /// The delegation's part of the prompt: with the actions, the one it always was (theirs says how to call a tool);
+    /// without them, one that says it too, with an example call written the model's way; none without an agent.
+    @Test func withoutTheActionsItsPartSaysHowToCall() async throws {
+        let folder = scratchFolder()
+        let tools = AgentTools(store: TaskStore(folder: folder), workspace: folder)
+        let write: @Sendable (ToolCall) async -> String? = { "[\($0.name)]" }
+        #expect(await tools.promptAddendum(actions: false, writeCall: write) == nil)
+        await tools.configure(agents: [AgentTools.Agent(connector: FakeAgent())], folders: [])
+        #expect(await tools.promptAddendum(actions: true, writeCall: write) == AgentCatalog.promptAddendum)
+        let alone = try #require(await tools.promptAddendum(actions: false, writeCall: write))
+        #expect(alone == AgentCatalog.promptAddendumWithoutActions(exampleCall: "[deleguer_tache]"))
+        #expect(alone.contains("pas même la première phrase courte"))
+        #expect(alone.contains(" Exemple : à « \(AgentCatalog.example.request) », ta réponse entière est [deleguer_tache] "))
+        #expect(!AgentCatalog.promptAddendumWithoutActions(exampleCall: nil).contains("Exemple"))
+        // The example is a call the app accepts.
+        try AgentCatalog.check(AgentCatalog.example.call, context: context(), agents: ["Claude Code"], folders: [])
+    }
+
+    /// The exchanges the smallest tier's conversations start with without the actions: three tasks handed over at once,
+    /// each user message ending with the date line; read back and confirmed, or started at once without the read-back.
+    @Test func examplesHandThreeTasksOverAtOnce() throws {
+        let paris = try #require(TimeZone(identifier: "Europe/Paris"))
+        let now = try #require(LocalDateTime.parse("2026-10-15T18:42", in: paris)?.date)
+        let line = ActionCatalog.dateLine(now, timeZone: paris)
+        let examples = AgentCatalog.examples(now: now, timeZone: paris, agent: "Claude Code", review: true)
+        let readBack: [ChatMessage.Role] = [.user, .assistant, .tool, .assistant, .user, .assistant]
+        #expect(examples.map(\.role) == readBack + readBack + readBack)
+        #expect(examples.filter { $0.role == .user }.allSatisfy { $0.content.hasSuffix("\n" + line) })
+        #expect(examples.first?.content == AgentCatalog.example.request + "\n" + line)
+        let calls = examples.flatMap(\.toolCalls)
+        #expect(calls.count == 3)
+        #expect(calls.first == AgentCatalog.example.call)
+        for call in calls {
+            try AgentCatalog.check(call, context: context(), agents: ["Claude Code"], folders: [])
+        }
+        #expect(examples[3].content == AgentPhrases.review(agent: "Claude Code", title: "application des scores de cartes",
+                                                           folder: nil, .french))
+        #expect(examples[5].content == AgentPhrases.started(.french))
+
+        let atOnce = AgentCatalog.examples(now: now, timeZone: paris, agent: "Claude Code", review: false)
+        let started: [ChatMessage.Role] = [.user, .assistant, .tool, .assistant]
+        #expect(atOnce.map(\.role) == started + started + started)
+        #expect(atOnce[2].toolResult?["statut"] == "en cours")
+        #expect(atOnce[3].content == AgentPhrases.started(.french))
+    }
+
+    /// With the actions off, Claude Code on its own, as the app offers it then: its tools only, the date line and its own
+    /// part of the prompt (with its example call), and on the smallest tier its own example exchanges, but nothing of
+    /// the actions. A task asked for is read back, and the user's "oui" hands it over, without the model.
     @Test func withoutTheActionsATaskIsReadBackThenHandedOver() async throws {
         let folder = scratchFolder()
         let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
@@ -528,7 +577,7 @@ struct PipelineAgentTests {
         let model = ScriptedModel(scripts: [[.toolCallStarted, .toolCall(delegation)]])
         var config = PipelineConfig()
         config.toolCallFiller = false
-        config.actionExamples = true  // as on the smallest tier: still none without the actions
+        config.actionExamples = true  // as on the smallest tier: the delegation's examples, not the actions'
         let transcriber = ScriptedTranscriber(["Lance le développement d’un site pour la boulangerie de ma sœur",
                                                "Oui, vas-y"])
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: transcriber, model: model,
@@ -546,11 +595,15 @@ struct PipelineAgentTests {
         #expect(await log.pieces.joined(separator: " ") == review)
         #expect(await agent.started.isEmpty)  // nothing is sent before the "oui"
         let request = try #require(await model.requests.first)
-        #expect(request.count == 2)  // the system prompt and the request: no example exchanges
+        // The system prompt, the delegation's three example tasks (six messages each), and the request.
+        #expect(request.count == 1 + 18 + 1)
+        #expect(request[1].content.hasPrefix(AgentCatalog.example.request + "\n(Nous sommes le "))
+        #expect(request.flatMap(\.toolCalls).map(\.name) == Array(repeating: AgentCatalog.delegateName, count: 3))
         let system = request[0].content
-        #expect(system.hasSuffix(ActionCatalog.dateLineRule + " " + AgentCatalog.promptAddendum))
+        #expect(system.hasSuffix(ActionCatalog.dateLineRule + " "
+                                 + AgentCatalog.promptAddendumWithoutActions(exampleCall: "[deleguer_tache]")))
         #expect(!system.contains("rappels, calendrier, minuteurs"))
-        #expect(request[1].content.contains("\n(Nous sommes le "))
+        #expect(request[19].content.contains("\n(Nous sommes le "))
 
         await waitFor { await log.states.last == .listening }
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))

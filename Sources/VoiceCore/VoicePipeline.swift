@@ -90,7 +90,8 @@ public struct PipelineConfig: Sendable {
     /// reference Mac), say "Un instant, je m'en occupe tout de suite." so the user is not left in silence; or the
     /// tool's own phrase ("Je regarde ça sur internet, un instant."), once its name is read.
     public var toolCallFiller = true
-    /// With actions on, every conversation starts with `ActionCatalog.examples` (see `ActionCatalog.showsExamples`).
+    /// Every conversation starts with example exchanges (see `ActionCatalog.showsExamples`): with actions on,
+    /// `ActionCatalog.examples`; without them, the tools' own (`ToolRunner.exampleExchanges`).
     public var actionExamples = false
     /// Where the history tells the model that an answer was cut off: a setting of the tier
     /// (`Conversation.cutOffPlacement(on:)`).
@@ -541,13 +542,19 @@ public actor VoicePipeline {
     }
 
     /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
-    /// model itself, hence `async`) or, for the web search on its own, what it says of the date line; then what the
-    /// tools' providers add (handing tasks to an agent, searching the web); and the actions' example exchanges when the
-    /// config asks for them. Set with the tools, and kept for the conversations that follow, so the model's memory of
+    /// model itself, hence `async`) or, for the tools offered on their own, what it says of the date line; then what the
+    /// tools' providers add (handing tasks to an agent, with an example call of its own without the actions; searching the
+    /// web); and, when the config asks for them, the actions' example exchanges, or without the actions the tools' own
+    /// (handing tasks over). Set with the tools, and kept for the conversations that follow, so the model's memory of
     /// them stays valid.
     private func updatePrompt() async {
         conversation.systemAddenda = await promptAddenda()
-        conversation.examples = tools?.offersActions == true && config.actionExamples ? ActionCatalog.examples(now: Date()) : []
+        if let tools, config.actionExamples {
+            conversation.examples = tools.offersActions ? ActionCatalog.examples(now: Date())
+                : await tools.exampleExchanges(now: Date())
+        } else {
+            conversation.examples = []
+        }
     }
 
     /// What follows the system prompt: the extensions' sentences, the actions' part (or the date line's rule), then what
@@ -560,7 +567,7 @@ public actor VoicePipeline {
             } else {
                 addenda.append(ActionCatalog.dateLineRule)
             }
-            addenda += await tools.promptAddenda()
+            addenda += await tools.promptAddenda(writeCall: { [model] in await model.toolCallText($0) })
         }
         return addenda
     }

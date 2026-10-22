@@ -360,8 +360,9 @@ that must not be, and questions about a task already handed over):
 ```
 
 With `--no-actions`, the actions are left out (their tools, their part of the prompt, their example exchanges), as the
-app has Claude Code, the web search or the built-in sources when the actions are off; a request for an action then
-expects no call:
+app has Claude Code, the web search or the built-in sources when the actions are off: the delegation's part of the
+prompt is then the one that says on its own how to call its tool, with an example call. A request for an action then
+expects no call. `--agents-addendum <file>` replaces the delegation's part, to try another wording without rebuilding:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions
