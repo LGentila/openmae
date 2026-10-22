@@ -223,9 +223,7 @@ func runActionsBench(_ o: Options) async throws {
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · reference time \(LocalDateTime.format(now, in: timeZone))")
     let clock = ContinuousClock()
     let loadStart = clock.now
-    // As the app prepares it (the warm-up, then the float32 pass), so that the beginning is computed after the same passes.
-    let model = try await MLXChatModel.load(directory: folder, warmUp: false)
-    try await model.prepareKernels()
+    let model = try await MLXChatModel.load(directory: folder)
     print("loaded in \(clock.now - loadStart)")
 
     let actions = !o.noActions

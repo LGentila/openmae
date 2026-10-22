@@ -217,6 +217,7 @@ public actor AssistantHost: AssistantConnection {
 
         let model: MLXChatModel
         let pipeline: VoicePipeline
+        var started: VoicePipeline?  // stopped if the voice then fails to load: its keep-warm loop would hold the models
         do {
             emit.yield(.loading(.speechRecognition))
             let detector = try SileroSpeechDetector(modelURL: vadURL)
@@ -224,18 +225,14 @@ public actor AssistantHost: AssistantConnection {
                 directory: store.folder(ModelCatalog.speechRecognition))
             emit.yield(.loading(.languageModel))
             MLXChatModel.releaseCachedMemory()  // what a previous tier's model may have left
-            model = try await MLXChatModel.load(directory: store.folder(languageModel), warmUp: false)
-            emit.yield(.loading(.voice))
-            // The model's GPU kernels compile meanwhile: after an update, they may not be in macOS's cache yet.
-            async let kernels: Void = model.prepareKernels()
-            let synthesizer = PocketSpeechSynthesizer(store: store)
-            try await synthesizer.preload([.french, .english])
-            try await kernels
-            if synthesizer.outputSampleRate != playbackSampleRate {
-                playbackSampleRate = synthesizer.outputSampleRate
-                route = try await startReliably(audio)
-            }
+            model = try await MLXChatModel.load(directory: store.folder(languageModel))
 
+            // The conversations' beginning (`VoicePipeline.start`) is computed before the voice loads, on weights still
+            // in memory. Loading the voice makes macOS compress most of them (Gemma 4 26B on the reference Mac: the
+            // process's resident memory went from 14.4 to 3.8 GB), and a beginning computed after it waited while 10 to
+            // 15 GB came back. Nothing reaches the pipeline before the voice is loaded: the microphone, the timers, an
+            // iPhone or received information only once loading is over (`self.pipeline` set, `stage == .running`).
+            let synthesizer = PocketSpeechSynthesizer(store: store)  // its voices load below
             var config = PipelineConfig()
             config.listening = settings.listening
             config.actionExamples = ActionCatalog.showsExamples(on: tier)
@@ -245,7 +242,18 @@ public actor AssistantHost: AssistantConnection {
             pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                      synthesizer: synthesizer, output: router, tools: await toolRunner(), config: config)
             try await pipeline.start()
+            started = pipeline
+
+            emit.yield(.loading(.voice))
+            try await synthesizer.preload([.french, .english])
+            if synthesizer.outputSampleRate != playbackSampleRate {
+                playbackSampleRate = synthesizer.outputSampleRate
+                route = try await startReliably(audio)
+            }
+            // What loading the voice pushed out of memory comes back from now on, while Maé already listens.
+            model.wakeUp()
         } catch {
+            await started?.stop()
             audio.stop()
             self.audio = nil
             fail(.engine("\(error)"))
