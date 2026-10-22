@@ -881,26 +881,6 @@
         }
       }
     },
-    "Choose another tier…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choisir un autre palier…"
-          }
-        }
-      }
-    },
-    "Chosen in the settings (Advanced). Recommended tier for this Mac: %@.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choisi dans les réglages (Avancé). Palier recommandé pour ce Mac : %@."
-          }
-        }
-      }
-    },
     "Claude Code could not be started (%@).": {
       "localizations": {
         "fr": {
@@ -3627,6 +3607,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Informations reçues"
+          }
+        }
+      }
+    },
+    "Recommended tier for this Mac: %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Palier recommandé pour ce Mac : %@."
           }
         }
       }

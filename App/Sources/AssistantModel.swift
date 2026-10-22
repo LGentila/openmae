@@ -126,6 +126,12 @@ final class AssistantModel {
         return false
     }
 
+    /// The first-launch screen shows and no download runs (none yet, or paused, or failed).
+    private var isSetupWaiting: Bool {
+        if case .setup = phase { return !isDownloading }
+        return false
+    }
+
     /// The exchange in progress, or the last one: what the user said and Maé's answer so far.
     var currentExchange: (user: TranscriptEntry?, answer: TranscriptEntry?) {
         guard let last = transcript.last else { return (nil, nil) }
@@ -309,6 +315,11 @@ final class AssistantModel {
             downloadFailure = failure
         case .storage(let storage):
             self.storage = storage
+        case .loading(.microphone) where isSetupWaiting:
+            // On the first-launch screen with no download running, the engine only starts again because another
+            // tier was chosen: it checks the microphone (already allowed) before it says what that tier needs. The
+            // screen stays meanwhile, rather than flash the loading screen.
+            break
         case .loading(let step):
             phase = .loading(step)
             download = nil
@@ -447,7 +458,7 @@ final class AssistantModel {
 
     // MARK: - Saved settings
 
-    private static let settingsKey = "settings"
+    static let settingsKey = "settings"
 
     private static func loadSettings() -> AssistantSettings {
         guard let data = UserDefaults.standard.data(forKey: settingsKey),

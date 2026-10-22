@@ -24,8 +24,6 @@ final class WindowState {
 struct ContentView: View {
     @Bindable var model: AssistantModel
     @Bindable var window: WindowState
-    @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,11 +67,7 @@ struct ContentView: View {
         case .loading(let step):
             ConversationView(model: model, isLoading: true, loadingStep: step)
         case .setup(let setup):
-            SetupView(model: model, setup: setup) {
-                // "Choose another tier…": the settings window, on Advanced, its tier row outlined.
-                navigation?.pointAtTier()
-                openWindow(id: SettingsNavigation.windowID)
-            }
+            SetupView(model: model, setup: setup)
         case .problem(let problem):
             ProblemView(problem: problem, retry: model.start, deleteModels: model.deleteModels)
         case .ready:

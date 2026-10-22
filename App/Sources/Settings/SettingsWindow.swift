@@ -32,8 +32,6 @@ final class SettingsNavigation {
     /// Connected tools › a tool.
     var tool: ConnectedTool.ID?
     var sheet: Sheet?
-    /// Changed by "Choose another tier…": the Advanced page outlines its tier row for a moment.
-    private(set) var tierPointer = 0
 
     static let windowID = "settings"
 
@@ -43,12 +41,6 @@ final class SettingsNavigation {
         showsAgent = false
         tool = nil
         sheet = nil
-    }
-
-    /// The Advanced page, its tier row outlined.
-    func pointAtTier() {
-        show(.advanced)
-        tierPointer += 1
     }
 }
 

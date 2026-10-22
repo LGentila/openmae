@@ -1,17 +1,6 @@
 import SwiftUI
 import VoiceCore
 
-/// "Automatic" or a forced tier.
-enum TierChoice: Hashable {
-    case automatic
-    case forced(HardwareTier)
-
-    var tier: HardwareTier? {
-        if case .forced(let tier) = self { return tier }
-        return nil
-    }
-}
-
 /// Settings › Advanced: the tier, the models on this Mac and their deletion, and the log of « OK Maé » in that mode.
 /// The tier is locked, and the deletions disabled, while the models load or download.
 struct AdvancedPage: View {
@@ -46,10 +35,13 @@ struct AdvancedPage: View {
     // MARK: - Models
 
     @ViewBuilder private var models: some View {
-        SettingRow("Tier") { tierMenu }
-            .padding(.horizontal, 8)
-            .modifier(PointedAt(token: navigation.tierPointer))
-            .padding(.horizontal, -8)
+        SettingRow("Tier") {
+            // Locked while models load or download; another tier is confirmed first ("Change tier?").
+            TierMenu(override: model.settings.tierOverride, recommended: model.recommendedTier) {
+                navigation.sheet = .changeTier($0)
+            }
+            .disabled(isBusy)
+        }
         Caption("The tier decides the language model. “Automatic” picks the one that suits this Mac's memory.")
         if let tier = model.tier, !tier.isTested {
             Caption("This tier could not be tested: performance is estimated.")
@@ -78,43 +70,6 @@ struct AdvancedPage: View {
         }
     }
 
-    /// The tier's pop-up menu; locked while models load or download.
-    private var tierMenu: some View {
-        PopUpMenu(title: model.settings.tierOverride.map { Text(StateText.tier($0)) } ?? automaticLabel,
-                  label: Text("Tier"))
-        {
-            Picker(selection: Binding(
-                get: { model.settings.tierOverride.map(TierChoice.forced) ?? .automatic },
-                set: { choice in
-                    if choice.tier != model.settings.tierOverride { navigation.sheet = .changeTier(choice) }
-                }))
-            {
-                automaticLabel.tag(TierChoice.automatic)
-                ForEach(HardwareTier.selectable, id: \.self) { tier in
-                    tierLabel(tier).tag(TierChoice.forced(tier))
-                }
-            } label: {
-                EmptyView()
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        }
-        .disabled(isBusy)
-    }
-
-    private var automaticLabel: Text {
-        if let recommended = model.recommendedTier {
-            return Text("Automatic: \(Text(StateText.tier(recommended)))")
-        }
-        return Text("Automatic")
-    }
-
-    private func tierLabel(_ tier: HardwareTier) -> Text {
-        let name = ModelCatalog.languageModel(for: tier)?.displayName ?? ""
-        return Text(StateText.tier(tier)) + Text(verbatim: " · \(name)")
-            + (tier.isTested ? Text(verbatim: "") : Text(" · untested"))
-    }
-
     // MARK: - The log of « OK Maé »
 
     /// What Maé heard in the wake-word mode, for the user's tests.
@@ -129,35 +84,6 @@ struct AdvancedPage: View {
                 .buttonStyle(WindowButtonStyle())
         }
         .disabled(!wakeLogExists)
-    }
-}
-
-/// A coral outline that fades away in 1.8 s, around the row "Choose another tier…" leads to; again each time `token`
-/// changes.
-private struct PointedAt: ViewModifier {
-    let token: Int
-    @State private var faded = true
-
-    func body(content: Content) -> some View {
-        content
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Palette.coral, lineWidth: 2)
-                    .opacity(faded ? 0 : 1)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Palette.coral.opacity(faded ? 0 : 0.45), lineWidth: faded ? 24 : 0)
-                    }
-                    .allowsHitTesting(false)
-            }
-            .onAppear { point() }
-            .onChange(of: token) { point() }
-    }
-
-    private func point() {
-        guard token > 0 else { return }
-        faded = false
-        withAnimation(.easeOut(duration: 1.8)) { faded = true }
     }
 }
 

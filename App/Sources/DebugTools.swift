@@ -79,7 +79,12 @@ enum Snapshots {
     static func start() {
         guard let folder else { return }
         Task {
+            // Each scene puts back the settings it changed, but a view torn down later (a pop-up menu's picker) can
+            // still write the value it showed: the user's own settings are put back as they were before quitting.
+            let settings = UserDefaults.standard.data(forKey: AssistantModel.settingsKey)
             await render(to: folder)
+            UserDefaults.standard.set(settings, forKey: AssistantModel.settingsKey)
+            UserDefaults.standard.synchronize()  // before exit(0)
             exit(0)
         }
     }
@@ -144,6 +149,11 @@ enum Snapshots {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
             model.settings.listening = scenario.listening  // the scenario's, not the user's own setting
+            // "Automatic", unless the first-launch screen shows another tier than this Mac's own: the user chose it.
+            model.settings.tierOverride = nil
+            for case .setupNeeded(let setup) in scenario.events where setup.tier != setup.recommendedTier {
+                model.settings.tierOverride = setup.tier
+            }
             let window = WindowState()
             let view = ContentView(model: model, window: window)
                 .environment(\.stillFrame, 1.7)
@@ -515,6 +525,21 @@ enum Demo {
         ],
         bytesToDownload: 17_523_100_000, neededBytes: 18_523_100_000, availableBytes: 73_190_000_000,
         folder: NSHomeDirectory() + "/Library/Application Support/OpenMaé/Models")
+
+    /// The first-launch screen of a tier: `setup` with that tier's language model, from the catalog.
+    static func setup(for tier: HardwareTier) -> ModelSetup {
+        guard tier != setup.tier, let pack = ModelCatalog.languageModel(for: tier) else { return setup }
+        var other = setup
+        other.tier = tier
+        other.items = setup.items.map { item in
+            guard item.role == .languageModel else { return item }
+            return ModelSetup.Item(role: .languageModel, displayName: pack.displayName, license: pack.license,
+                                   totalBytes: pack.totalBytes, missingBytes: pack.totalBytes)
+        }
+        other.bytesToDownload = other.items.reduce(0) { $0 + $1.missingBytes }
+        other.neededBytes = other.bytesToDownload + ModelDownloader.safetyMarginBytes
+        return other
+    }
 }
 
 final class DemoConnection: AssistantConnection, @unchecked Sendable {
@@ -522,6 +547,8 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     private let sink: AsyncStream<AssistantEvent>.Continuation
     private let lock = NSLock()
     private var script: Task<Void, Never>?
+    /// The settings' tier, which the first-launch screen shows (-demo-setup).
+    private var tier = Demo.setup.recommendedTier
 
     init() {
         (events, sink) = AsyncStream.makeStream()
@@ -530,8 +557,18 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     func send(_ command: AssistantCommand) {
         DebugLog.log("demo engine: \(command)")
         switch command {
-        case .start:
+        case .start(let settings):
+            _ = setTier(settings.tierOverride)
             play(Demo.startsWithSetup ? setupScript : conversationScript)
+        case .updateSettings(let settings):
+            // As the real engine: another tier starts it again, through the microphone, then that tier's first-launch
+            // screen.
+            guard setTier(settings.tierOverride), Demo.startsWithSetup else { break }
+            play { [setupScript] sink in
+                sink.yield(.loading(.microphone))
+                guard await Self.wait(0.05) else { return }
+                await setupScript(sink)
+            }
         case .downloadModels:
             play(downloadScript)
         case .pauseDownload:
@@ -579,18 +616,29 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
         }
     }
 
+    /// Keeps the settings' tier ("Automatic": this Mac's own); true when it changed.
+    private func setTier(_ override: HardwareTier?) -> Bool {
+        let new = override ?? Demo.setup.recommendedTier
+        return lock.withLock {
+            defer { tier = new }
+            return new != tier
+        }
+    }
+
     private var setupScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
-        { sink in
-            sink.yield(.setupNeeded(Demo.setup))
-            sink.yield(.storage(ModelStorage(usedBytes: 0, unusedBytes: 0, folder: Demo.setup.folder)))
+        let setup = Demo.setup(for: lock.withLock { tier })
+        return { sink in
+            sink.yield(.setupNeeded(setup))
+            sink.yield(.storage(ModelStorage(usedBytes: 0, unusedBytes: 0, folder: setup.folder)))
         }
     }
 
     /// About twenty seconds of download, model after model, then loading.
     private var downloadScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
-        { [conversationScript] sink in
-            let items = Demo.setup.items
-            let total = Demo.setup.bytesToDownload
+        let setup = Demo.setup(for: lock.withLock { tier })
+        return { [conversationScript] sink in
+            let items = setup.items
+            let total = setup.bytesToDownload
             for step in 0...190 {
                 var done = Int64(Double(total) * Double(step) / 190)
                 var progress = DownloadProgress(doneBytes: done, totalBytes: total)

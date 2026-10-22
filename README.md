@@ -52,8 +52,8 @@ Only the comfort tier could be measured so far. The app says so when it runs on 
 ## First launch
 
 1. macOS asks for access to the microphone: click "Allow". Sound never leaves the Mac.
-2. The app shows the Mac, its tier, the models it needs with their size and license, the total to download
-   and the free space, and waits for a click on "Download".
+2. The app shows the Mac, its tier (another one can be picked from its menu), the models it needs with their
+   size and license, the total to download and the free space, and waits for a click on "Download".
 3. The download can be paused, or the app quit: it resumes where it stopped, and after a network cut it
    resumes by itself. Every file is checked against the SHA-256 recorded in the app: the models are pinned to
    the exact versions that were tested.

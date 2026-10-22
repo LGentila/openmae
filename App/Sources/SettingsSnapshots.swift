@@ -373,8 +373,6 @@ extension Snapshots {
                           prepare: { navigation, _, _ in navigation.sheet = .deleteModels }),
             SettingsScene(name: "RgAvance-changer-palier", page: .advanced, events: [bigStorage],
                           prepare: { navigation, _, _ in navigation.sheet = .changeTier(.forced(.standard)) }),
-            SettingsScene(name: "RgAvance-palier-montre", page: .advanced, events: [bigStorage],
-                          prepare: { navigation, _, _ in navigation.pointAtTier() }),
         ]
 
         for scene in scenes {

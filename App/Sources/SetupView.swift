@@ -3,13 +3,11 @@ import SwiftUI
 import VoiceCore
 
 /// First launch (and after another tier was chosen, or the models deleted). On the left, the orb wakes up
-/// while the models download, with what is going on and the button; on the right, the Mac, its tier, and the
-/// three models with their progress.
+/// while the models download, with what is going on and the button; on the right, the Mac, its tier (chosen
+/// here), and the three models with their progress.
 struct SetupView: View {
     let model: AssistantModel
     let setup: ModelSetup
-    /// Opens the settings at the tier.
-    let chooseTier: () -> Void
 
     var body: some View {
         ScrollView {
@@ -17,7 +15,11 @@ struct SetupView: View {
                 welcome
                     .frame(width: 330)
                 VStack(spacing: 14) {
-                    MacCard(setup: setup, isLocked: model.isDownloading, chooseTier: chooseTier)
+                    MacCard(setup: setup, tierOverride: model.settings.tierOverride, isLocked: model.isDownloading) {
+                        // No "Change tier?" here: nothing runs yet. The engine starts again on that tier and says
+                        // what it needs (`setupNeeded`): the models card follows.
+                        model.settings.tierOverride = $0
+                    }
                     ModelsCard(setup: setup, progress: model.download, isDownloading: model.isDownloading)
                 }
                 .frame(maxWidth: .infinity)
@@ -236,29 +238,37 @@ private struct FailureMessage: View {
 
 // MARK: - Cards
 
-/// The Mac and its tier.
+/// The Mac and its tier, with the same menu as in Settings › Advanced.
 private struct MacCard: View {
     let setup: ModelSetup
+    /// The tier the user forced; nil for "Automatic".
+    let tierOverride: HardwareTier?
     /// The tier cannot change during the download.
     let isLocked: Bool
-    let chooseTier: () -> Void
+    /// Another tier was picked (nil: "Automatic").
+    let chooseTier: (HardwareTier?) -> Void
 
     var body: some View {
-        Card {
+        // As much room under the last row as above the first one.
+        Card(padding: EdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)) {
             InfoRow("This Mac") {
                 Text(verbatim: "\(setup.chip) · \(Units.memory(setup.memoryGiB))")
                     .textStyle(.value)
             }
             Hairline()
             InfoRow("Tier") {
-                HStack(spacing: 8) {
-                    Text(StateText.tier(setup.tier))
-                        .textStyle(.value)
-                    TierBadge(isTested: setup.tier.isTested)
+                // Without the badge when the window is too narrow for it: the menu's items still say which tiers are
+                // untested.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        menu
+                        TierBadge(isTested: setup.tier.isTested)
+                    }
+                    menu
                 }
             }
             if setup.tier != setup.recommendedTier {
-                HelpText(Text("Chosen in the settings (Advanced). Recommended tier for this Mac: \(Text(StateText.tier(setup.recommendedTier)))."))
+                HelpText(Text("Recommended tier for this Mac: \(Text(StateText.tier(setup.recommendedTier)))."))
                     .padding(.bottom, 8)
             }
             if setup.tier > setup.recommendedTier {
@@ -266,16 +276,12 @@ private struct MacCard: View {
                          color: Palette.danger)
                     .padding(.bottom, 8)
             }
-            Button(action: chooseTier) {
-                HStack(spacing: 8) {
-                    IconView(icon: .settings, size: 16, strokeWidth: 2)
-                    Text("Choose another tier…")
-                }
-            }
-            .buttonStyle(PillButtonStyle(kind: .link))
-            .disabled(isLocked)
-            .padding(.top, 2)
         }
+    }
+
+    private var menu: some View {
+        TierMenu(override: tierOverride, recommended: setup.recommendedTier) { chooseTier($0.tier) }
+            .disabled(isLocked)
     }
 }
 

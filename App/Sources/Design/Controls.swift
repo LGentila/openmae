@@ -107,7 +107,7 @@ private struct GlassCircle<Label: View>: View {
 /// The 34-point pills of the settings and the first-launch screen.
 struct PillButtonStyle: ButtonStyle {
     enum Kind {
-        /// "Choose another tier…": blue text on a blue tint.
+        /// "Open the folder": blue text on a blue tint.
         case link
         /// "Delete the models…".
         case destructive
