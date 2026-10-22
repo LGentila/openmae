@@ -90,7 +90,7 @@ enum Snapshots {
         let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
         let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0),
                                                .partialTranscript(Demo.questionSoFar)]
-        let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
+        let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, Demo.language), .state(.thinking)]
         let speaking: [AssistantEvent] = thinking
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
         let conversation: [AssistantEvent] = speaking + [.state(.listening), .levels(input: 0, output: 0)]
@@ -205,7 +205,7 @@ enum Snapshots {
         let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
         let heard: [AssistantEvent] = ready + [.state(.userSpeaking), .levels(input: 0.75, output: 0),
                                                .partialTranscript(Demo.questionSoFar)]
-        let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, .french), .state(.thinking)]
+        let thinking: [AssistantEvent] = heard + [.userTranscript(Demo.question, Demo.language), .state(.thinking)]
         let speaking: [AssistantEvent] = thinking
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking), .levels(input: 0, output: 0.8)]
         let scenes: [(name: String, events: [AssistantEvent], state: PipelineState?, listening: ListeningMode)] = [
@@ -469,9 +469,17 @@ enum Demo {
     }
     static var startsWithSetup: Bool { ProcessInfo.processInfo.arguments.contains("-demo-setup") }
 
-    static let question = "Maé, rappelle-moi d’appeler Camille demain matin à dix heures, pour parler du voyage."
+    /// The conversation's language: the interface's (`-AppleLanguages "(en)"` for the English one).
+    static let language: SpeechLanguage = Bundle.main.preferredLocalizations.first == "en" ? .english : .french
+    private static var english: Bool { language == .english }
+
+    static let question = english
+        ? "Maé, remind me to call Camille tomorrow morning at ten, to talk about the trip."
+        : "Maé, rappelle-moi d’appeler Camille demain matin à dix heures, pour parler du voyage."
     /// What speech recognition has heard of it so far, as in the design's listening state.
-    static let questionSoFar = "Maé, rappelle-moi d’appeler Camille demain matin à dix"
+    static let questionSoFar = english
+        ? "Maé, remind me to call Camille tomorrow morning at"
+        : "Maé, rappelle-moi d’appeler Camille demain matin à dix"
 
     /// The user's words so far, `seconds` after they started the question, as speech recognition gives them while they
     /// speak: nothing for the first second, then two more words about every 0.6 s, the first one heard otherwise until
@@ -481,11 +489,14 @@ enum Demo {
         let words = question.split(separator: " ").map(String.init)
         let count = min(words.count, 2 + 2 * Int((seconds - 1) / 0.6))
         var heard = Array(words.prefix(count))
-        if count <= 4 { heard[0] = "Mais," }
+        if count <= 4 { heard[0] = english ? "May," : "Mais," }
         return heard.joined(separator: " ")
     }
-    static let answer = ["C’est noté ! Demain à 10 h, je te rappelle d’appeler Camille.",
-                         "Tu veux que je note aussi les idées du voyage ?"]
+    static let answer = english
+        ? ["Done! Tomorrow at 10 a.m., I’ll remind you to call Camille.",
+           "Do you want me to note your trip ideas too?"]
+        : ["C’est noté ! Demain à 10 h, je te rappelle d’appeler Camille.",
+           "Tu veux que je note aussi les idées du voyage ?"]
 
     static let info = EngineInfo(chip: "Apple M1 Pro", memoryGiB: 32, tier: .comfort, recommendedTier: .comfort,
                                  languageModel: "Gemma 4 26B-A4B", speechRecognition: "Parakeet TDT 0.6B v3",
@@ -550,7 +561,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     private var answerScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
         { [conversationScript] sink in
             sink.yield(.levels(input: 0, output: 0))
-            sink.yield(.userTranscript(Demo.question, .french))
+            sink.yield(.userTranscript(Demo.question, Demo.language))
             sink.yield(.state(.thinking))
             guard await Self.wait(2) else { return }
             Demo.answer.forEach { sink.yield(.assistantPiece($0)) }
@@ -611,7 +622,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
                 guard await Self.wait(2.2) else { return }
                 sink.yield(.state(.userSpeaking))
                 guard await Self.voice(sink, seconds: 5.8, input: true, words: true) else { return }
-                sink.yield(.userTranscript(Demo.question, .french))
+                sink.yield(.userTranscript(Demo.question, Demo.language))
                 sink.yield(.state(.thinking))
                 guard await Self.wait(2) else { return }
                 Demo.answer.forEach { sink.yield(.assistantPiece($0)) }

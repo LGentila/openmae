@@ -10,7 +10,7 @@ extension Snapshots {
     @MainActor
     static func renderPhone(to folder: URL) async {
         let ready: [AssistantEvent] = [.ready(Demo.info), .storage(Demo.storage)]
-        let speaking: [AssistantEvent] = ready + [.state(.userSpeaking), .userTranscript(Demo.question, .french),
+        let speaking: [AssistantEvent] = ready + [.state(.userSpeaking), .userTranscript(Demo.question, Demo.language),
                                                   .state(.thinking)]
             + Demo.answer.map { .assistantPiece($0) } + [.state(.speaking)]
         let added = ISO8601DateFormatter().date(from: "2026-10-15T10:00:00Z") ?? Date()

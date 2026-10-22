@@ -7,9 +7,13 @@ time — like the voice mode of the big chat apps, except that everything runs o
 own devices.
 
 <p align="center">
-  <img src=".github/readme/mac.png" alt="OpenMaé on the Mac, while Maé answers" height="460">
-  &nbsp;&nbsp;
-  <img src=".github/readme/iphone-listening.png" alt="The iPhone app, while you speak" height="460">
+  <img src=".github/readme/conversation.webp" alt="OpenMaé on the Mac: you speak, Maé thinks, then answers out loud" width="420">
+  <br><sub>You speak, Maé thinks, then answers out loud.</sub>
+</p>
+
+<p align="center">
+  <img src=".github/readme/capsule.webp" alt="The capsule that follows the conversation while another app is in front" width="500">
+  <br><sub>From any app: press ⌥ Space, and a small capsule follows the conversation.</sub>
 </p>
 
 > **Status:** proof of concept, under active development. There is no signed download yet: for now the app is built
