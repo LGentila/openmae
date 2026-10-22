@@ -867,6 +867,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             // holds the prompt plus every token returned. Its offset is the ground truth.
             let all = prompt + produced
             cachedTokens = Array(all.prefix(cachedTokenCount(upTo: all.count)))
+            DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
+                                produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
         }
         while let token = iterator.next() {
             produced.append(token)

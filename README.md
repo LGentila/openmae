@@ -325,6 +325,16 @@ language model write an answer meanwhile, paused once its first sentence is writ
 .build/xcode/Build/Products/Release/voice-cli voice-onset --repeats 5 --parallel 2
 ```
 
+The voice's pace through long answers, without the pipeline: five sentences said in one utterance, answer after
+answer, and the time per 80 ms frame by second since each answer's first frame. `--with-llm` loads the language model
+too (its memory is taken as in the app), and `--model-writes 120` has it write that many pieces at the start of each
+answer; `--fingerprint` prints a fingerprint of two sentences said with a fixed seed, the same in two builds that make
+the same sound:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli voice-pace --with-llm --repeats 5
+```
+
 With `VOICE_DEBUG=1`, every engine command also logs, for each sentence the voice says, how long its first frame took,
 how many near-silent frames came before the first audible one and how fast the frames came; and at the end of each
 utterance, how fast all its frames came, its slowest frame, and how many other utterances of the voice ran at the same

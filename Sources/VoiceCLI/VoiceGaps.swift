@@ -15,7 +15,8 @@
 //
 // Also, for each answer: its total time (from the question to the end of its last sound), the time nothing played in it
 // (that total minus the audio played: the wait for the first sound, and the speaker running dry), the speaker running
-// dry in the middle of a sentence, and the language model's pauses for the voice (`VoiceLead`).
+// dry in the middle of a sentence, the language model's pauses for the voice (`VoiceLead`), and the voice's time per
+// 80 ms frame by time since the question (0–2 s, …, 8 s and later).
 //
 // A sentence is a text given to the voice (the first one may stop at a comma: `SentenceChunker`). Audible: an 80 ms
 // frame of the voice at least as loud as the pipeline's threshold (`PipelineConfig.leadingSilenceThresholdDB`).
@@ -163,6 +164,17 @@ struct HeardAnswer: Codable {
     var modelPausedSeconds: Double
     /// The voice's pace: the median time between two frames of the same text (milliseconds; 80 ms of audio a frame).
     var voicePaceMs: Double?
+    /// The times between two frames of the same text (milliseconds), by when the later one came after the question:
+    /// one list per `paceBins` interval.
+    var voicePaces: [[Double]]?
+}
+
+/// The intervals of time since the question the voice's pace is told by (seconds; the last one has no end).
+let paceBins: [Double] = [0, 2, 4, 6, 8]
+
+/// "0–2 s", …, "8+ s".
+func paceBinName(_ i: Int) -> String {
+    "\(Int(paceBins[i]))" + (i + 1 < paceBins.count ? "–\(Int(paceBins[i + 1]))" : "+") + " s"
 }
 
 /// The voice's pace in `frames`: the median time between two frames of the same text in the same utterance (it produces
@@ -177,6 +189,21 @@ func voicePace(_ frames: [GapVoice.Frame]) -> Double? {
         last[frame.utterance] = frame
     }
     return median(intervals)
+}
+
+/// The times between two frames of the same text in the same utterance (milliseconds), by when the later one came after
+/// `asked`, one list per `paceBins` interval.
+func voicePaces(_ frames: [GapVoice.Frame], since asked: ContinuousClock.Instant) -> [[Double]] {
+    var last: [Int: GapVoice.Frame] = [:]
+    var paces = [[Double]](repeating: [], count: paceBins.count)
+    for frame in frames {
+        if let before = last[frame.utterance], before.text == frame.text, !frame.text.isEmpty {
+            let since = (frame.at - asked).seconds
+            paces[paceBins.lastIndex { since >= $0 } ?? 0].append((frame.at - before.at).seconds * 1000)
+        }
+        last[frame.utterance] = frame
+    }
+    return paces
 }
 
 /// What the speaker played of an answer, sentence by sentence (`hear`).
@@ -325,7 +352,8 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
                                      playedSeconds: heard.played, stalls: heard.stalls,
                                      modelPauses: pauses.count - pausesBefore.count,
                                      modelPausedSeconds: pauses.seconds - pausesBefore.seconds,
-                                     voicePaceMs: voicePace(produced.frames))
+                                     voicePaceMs: voicePace(produced.frames),
+                                     voicePaces: voicePaces(produced.frames, since: asked))
             answers.append(answer)
             let gaps = heard.gaps.indices.map { i in
                 String(format: "%.2f [%.2f %.2f %.2f]%@", heard.gaps[i], heard.openings[i], heard.leads[i],
@@ -369,6 +397,10 @@ func runVoiceGaps(_ o: Options, _ e: Engine, voice: GapVoice) async throws {
     let paces = answers.compactMap(\.voicePaceMs)
     print("voice: median \(fmt(median(paces))) per frame (median of the answers; 90th percentile"
           + " \(fmt(percentile(paces, 0.9))))")
+    let byTime = paceBins.indices.map { i in answers.flatMap { $0.voicePaces?[i] ?? [] } }
+    print("voice's time per frame by time since the question: " + paceBins.indices.map { i in
+        "\(paceBinName(i)) \(fmt(median(byTime[i]))) (n=\(byTime[i].count))"
+    }.joined(separator: ", "))
     print("model paused for the voice: \(pauses.reduce(0, +)) time(s), median per answer"
           + " \(median(pauses.map(Double.init)).map { String(format: "%.0f", $0) } ?? "—"),"
           + " \(fmt(answers.map(\.modelPausedSeconds).reduce(0, +) * 1000)) in all")

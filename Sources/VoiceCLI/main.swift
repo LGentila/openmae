@@ -14,6 +14,9 @@
 //                                                       silence the voice produces before speaking
 //   voice-cli voice-gaps [--repeats 1] [options]        long answers to typed questions: the silence heard between
 //                                                       two sentences (see VoiceGaps.swift)
+//   voice-cli voice-pace [--repeats 5] [--with-llm [--model-writes n]] [--fingerprint]
+//                                                       the voice alone, answer after answer: its time per frame by
+//                                                       second (see VoicePace.swift)
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
 //                           [--news]
 //                                                       does the model pick the right action, or search? (text
@@ -124,6 +127,10 @@ struct Options {
     var withLLM = false
     /// voice-onset --with-llm: the voice's session made before the language model writes, as the pipeline does.
     var earlySession = false
+    /// voice-pace --with-llm: the pieces the model writes at the start of each answer (none: it is only loaded).
+    var modelWrites: Int?
+    /// voice-pace: a fingerprint of the voice's samples with a fixed seed, to compare builds.
+    var fingerprint = false
     /// announce-drop: the Mac's first utterance of the announcement taken for near-silence, so that the voice starts
     /// it again.
     var muteFirst = false
@@ -235,6 +242,8 @@ struct Options {
             case "--parallel": o.parallel = max(1, Int(it.next() ?? "") ?? 1)
             case "--with-llm": o.withLLM = true
             case "--early-session": o.earlySession = true
+            case "--model-writes": o.modelWrites = Int(it.next() ?? "")
+            case "--fingerprint": o.fingerprint = true
             case "--mute-first": o.muteFirst = true
             case "--mute-station": o.muteStation = true
             case "--on-mac": o.onMac = true
@@ -715,8 +724,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 // MARK: - Entry point
 
 if let options = Options.parse(CommandLine.arguments),
-   ["voice-onset", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check", "cut-off-bench",
-    "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+   ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
+    "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -733,6 +742,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)
         case "inbound": try await runInbound(CommandLine.arguments)
+        case "voice-pace": try await runVoicePace(options)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -776,6 +786,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]
+               voice-cli voice-pace [--tier tier] [--repeats 5] [--with-llm [--model-writes n]] [--tts gpu|cpu]
+                                    [--fingerprint]
                voice-cli announce-drop [--tier tier] [--repeats 5] [--on-mac] [--mute-first | --mute-station]
                                        [--voice-restart-after s] [--chime-wait s]
                voice-cli voice-gaps [--tier tier] [--repeats 1] [--questions n] [--no-sentence-restart]
