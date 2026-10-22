@@ -26,7 +26,10 @@
 // summing them up (ouvrir_page), as in the app: the page the corpus recorded for that address ("pages": the passages
 // the model read, or why the page could not be read; a page it did not record cannot be read), or, with --live-pages,
 // the page itself on the internet; --record-pages writes the pages read, in the corpus's "pages" shape. Nothing the
-// model writes while it sums up a page is carried out (the calls are counted).
+// model writes while it sums up a page is carried out (the calls are counted). As in the app, a call that is not
+// carried out, written with nothing said, gets one more pass, once (the model is told so; nothing at all is carried
+// out then), and a page asked for at once (the first call) is one of the results of the last search of the case's
+// earlier exchanges, whose results are numbered for the model as the app gives them when it opens pages.
 //
 // The built-in sources (a corpus with "sources": true, or --sources with any corpus) work the same way: the model sums
 // up what the corpus recorded for the request ("recordedSources", as the model reads it), or with --live-sources what
@@ -182,10 +185,13 @@ private struct Corpus: Decodable {
         /// Only for --examples (a case's earlier exchanges get the reference time's line).
         var dateLine: String?
 
-        /// The call and its result, as the history keeps them.
-        func steps(_ context: ToolContext) -> [ChatMessage] {
+        /// The call and its result, as the history keeps them. `numbered`: a search's results numbered, as the app gives
+        /// them when it opens pages.
+        func steps(_ context: ToolContext, numbered: Bool = false) -> [ChatMessage] {
             guard let call else { return [] }
-            let read = found.map { WebSearchCatalog.forModel(query: WebSearchCatalog.query(call) ?? "", $0, context: context) }
+            let read = found.map {
+                WebSearchCatalog.forModel(query: WebSearchCatalog.query(call) ?? "", $0, context: context, numbered: numbered)
+            }
             return [.call(call), .result(of: call, result ?? read ?? .null)]
         }
     }
@@ -237,8 +243,10 @@ private struct CaseResult: Encodable {
     /// A search: what the model said of its results, and the calls it wrote meanwhile (the app carries out none).
     var summary: String?
     var callsWhileSumming: [String]?
-    /// It wrote a call and nothing else, and summed up once more (as the app has it do).
+    /// It wrote a call and nothing else, and summed up once more (as the app has it do); that call came while it read a
+    /// page.
     var summedUpAgain: Bool?
+    var summedUpAgainAfterPage: Bool?
     /// Whether the summary names one of the results' sites.
     var namesASite: Bool?
     /// How many tokens the results take in the model's memory.
@@ -410,7 +418,8 @@ func runActionsBench(_ o: Options) async throws {
         }
         let request = caseRequest(item, in: conversation, corpus: corpus,
                                   dateLine: item.now == nil ? dateLine : ActionCatalog.dateLine(now, timeZone: timeZone),
-                                  context: ToolContext(now: now, timeZone: timeZone, language: .french))
+                                  context: ToolContext(now: now, timeZone: timeZone, language: .french),
+                                  numbered: opensPages)
         var text = ""
         var call: ToolCall?
         var moreCalls = false
@@ -514,6 +523,23 @@ func runActionsBench(_ o: Options) async throws {
                 refusal = refused
                 result.refusal = refused.forModel
                 if result.toolOK, item.expected != nil { result.argumentsOK = false }
+            }
+        } else if let call, call.name == WebSearchCatalog.openPageName {
+            // A result's page asked for at once: as in the app, of one of its last search's results (the last search of
+            // the case's earlier exchanges), then summed up; refused when there is none.
+            do {
+                try WebSearchCatalog.checkPage(call, context: context)
+                let earlier = before.last { $0.call?.name == WebSearchCatalog.searchName }
+                if let search = earlier?.call, let found = earlier?.found {
+                    secondPass = try await sumUp(call, results: found, earlier: search, after: request, context: context,
+                                                 model: model, pages: pageReader, into: &result)
+                } else {
+                    _ = try await WebSearchTools(provider: FixedResults(WebSearchResults(results: [])), pageReader: pageReader)
+                        .perform(call, context: context)
+                }
+            } catch let refused as ToolRefusal {
+                refusal = refused
+                result.refusal = refused.forModel
             }
         } else if let call, call.name == NewsCatalog.readName {
             // The news: no argument, nothing for the app to refuse; the app reads them itself.
@@ -688,13 +714,14 @@ func exampleExchanges(_ examples: String, now: Date, timeZone: TimeZone) throws 
 }
 
 /// A case's request as the app would send it: the conversation, the case's earlier exchanges, then its phrase.
+/// `numbered`: their searches' results numbered, as the app gives them when it opens pages.
 private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String,
-                         context: ToolContext) -> [ChatMessage]
+                         context: ToolContext, numbered: Bool = false) -> [ChatMessage]
 {
     var history = conversation
     for exchange in corpus.exchanges(before: item) {
         history.record(user: Conversation.userMessage(exchange.user, language: .french, dateLine: dateLine),
-                       steps: exchange.steps(context), assistant: exchange.answer, interrupted: false)
+                       steps: exchange.steps(context, numbered: numbered), assistant: exchange.answer, interrupted: false)
     }
     return history.messages(adding: Conversation.userMessage(item.phrase, language: .french, dateLine: dateLine))
 }
@@ -718,7 +745,8 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
     }
     guard let toolsChanged = await model.beginningState(named: "tools changed") else { throw CLIError("no beginning kept") }
     let requests = corpus.cases.map {
-        caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine, context: context)
+        caseRequest($0, in: conversation, corpus: corpus, dateLine: dateLine, context: context,
+                    numbered: tools.contains { $0.name == WebSearchCatalog.openPageName })
     }
     let start = clock.now
     let comparison = try await model.compareBeginnings([atLoad, toolsChanged], requests: requests)
@@ -941,37 +969,84 @@ private func scientific(_ value: Double?) -> String {
 /// The second pass of a search, as in the app: the model reads the results and answers, and nothing it writes then is
 /// carried out (the calls are only counted), but the page of one of the results (`pages`, on the tiers that open
 /// them): that page is read as the corpus recorded it (or on the internet), and the model answers from it, with no call
-/// carried out (another page's only, once, when this one could not be read). Another call and nothing else: as in the
-/// app, the model is told it is not carried out and sums up once more. No results: the app says so itself, without the
-/// model. Returns whether the model was asked.
-private func sumUp(_ call: ToolCall, results: WebSearchResults, after request: [ChatMessage], context: ToolContext,
-                   model: MLXChatModel, pages: BenchPageReader?, into result: inout CaseResult) async throws -> Bool
+/// carried out (another page's only, once, when this one could not be read). Any other call, or a page past those two,
+/// written with nothing said: as in the app, the model is told once that it is not carried out and sums up once more,
+/// and then no call at all is carried out, not even a page's. As in the app, the history keeps each pass's calls as the
+/// model wrote them, then what each one gave (the page's text, or that it was not carried out). `earlier`: the call is
+/// a page asked for at once, of one of the results (`results`) of this search of the case's earlier exchanges (the
+/// app's last search). No results: the app says so itself, without the model. Returns whether the model was asked.
+private func sumUp(_ call: ToolCall, results: WebSearchResults, earlier: ToolCall? = nil, after request: [ChatMessage],
+                   context: ToolContext, model: MLXChatModel, pages: BenchPageReader?, into result: inout CaseResult)
+    async throws -> Bool
 {
     let tools = WebSearchTools(provider: FixedResults(results), pageReader: pages)
-    let outcome = try await tools.perform(call, context: context)
-    guard outcome.modelSpeaks else {
-        result.summary = outcome.spoken
-        return false
-    }
-    var steps: [ChatMessage] = [.call(call), .result(of: call, outcome.forModel)]
-    let called = request + [.call(call)]
-    result.resultTokens = try await model.tokenCount(called + [steps[1]]) - model.tokenCount(called)
-    var allowed = outcome.allowedWhileSumming
+    var steps: [ChatMessage] = []
+    var allowed: Set<String> = []
     /// What the app says if the model says nothing: after a page, the page's.
-    var fallback = outcome.spoken
+    var fallback = ""
+    /// The calls carried out while summing up, as the app counts them (`ToolOutcome.callsWhileSumming`).
     var opened = 0
     var said: [String] = []
     var reading = false
     let clock = ContinuousClock()
-    /// When the results, then the page, were given to the model: the first words are timed from there, over the passes.
+    /// When the results, then a page, were given to the model: its first words are timed from there, over the passes.
     var given = clock.now
+    /// The page to open before the next pass: the calls of the pass that asked for it, as written, and which one it is.
+    var next: (calls: [ToolCall], page: Int)?
+    let notCarriedOut: JSONValue = ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]
+    if let earlier {
+        // The app's last search, whose results the page is one of.
+        _ = try await tools.perform(earlier, context: context)
+        next = ([call], 0)
+    } else {
+        let outcome = try await tools.perform(call, context: context)
+        guard outcome.modelSpeaks else {
+            result.summary = outcome.spoken
+            return false
+        }
+        steps = [.call(call), .result(of: call, outcome.forModel)]
+        let called = request + [.call(call)]
+        result.resultTokens = try await model.tokenCount(called + [steps[1]]) - model.tokenCount(called)
+        allowed = outcome.allowedWhileSumming
+        fallback = outcome.spoken
+        given = clock.now
+    }
     while true {
+        if let asked = next {
+            next = nil
+            let (written, index) = asked
+            let pageCall = written[index]
+            // Opened as the app opens it.
+            let fetchStart = clock.now
+            let page = try await tools.perform(pageCall, context: context)
+            if pages?.live != nil { result.fetchMs = milliseconds(clock.now - fetchStart) }
+            let target = WebSearchCatalog.result(pageCall, in: results)
+            let label = (target.map { "\(pageCall.arguments["resultat"]?.text ?? "?") \($0.site)" }
+                ?? "\(describe(pageCall, written: nil))") + (BenchPages.field(page.forModel, "erreur").map { ": \($0)" } ?? "")
+            result.pagesOpened = (result.pagesOpened ?? []) + [label]
+            if let target, let text = BenchPages.field(page.forModel, "texte") { await pages?.keep(target.url, text: text) }
+            // The pass's calls as written: the page's result, and the others' (not carried out).
+            let passResults = written.indices.map { $0 == index ? page.forModel : notCarriedOut }
+            let before = request + steps + [.calls(written)]
+                + zip(written, passResults).prefix(index).map { .result(of: $0, $1) }
+            steps += [.calls(written)] + zip(written, passResults).map { .result(of: $0, $1) }
+            if BenchPages.field(page.forModel, "texte") != nil {
+                result.pageTokens = try await model.tokenCount(before + [.result(of: pageCall, page.forModel)])
+                    - model.tokenCount(before)
+            }
+            allowed = page.allowedWhileSumming
+            fallback = page.spoken
+            reading = true
+            given = clock.now
+        }
         let start = clock.now
         var text = ""
         var calls: [String] = []
-        var pageCall: ToolCall?
-        /// The first call written that is not carried out.
-        var ignored: ToolCall?
+        /// The pass's calls as the model wrote them, and among them the page carried out (the first one allowed).
+        var written: [ToolCall] = []
+        var page: Int?
+        /// That page call, refused (`refusedAt`): its result is the refusal.
+        var refusedAt: Int?
         var firstWords: Double?
         for try await output in model.reply(to: request + steps) {
             switch output {
@@ -979,21 +1054,37 @@ private func sumUp(_ call: ToolCall, results: WebSearchResults, after request: [
                 if firstWords == nil, piece.contains(where: \.isLetter) { firstWords = milliseconds(clock.now - given) }
                 text += piece
             case .toolCall(let made):
-                // As the app: only the calls the result allows, and two at most in a turn.
-                if pageCall == nil, opened < ToolOutcome.callsWhileSumming,
+                // As the app: only the calls the result allows, the first of a pass, two at most in a turn, and none once
+                // the model was told that nothing more is carried out.
+                if page == nil, result.summedUpAgain != true, opened < ToolOutcome.callsWhileSumming,
                    let name = ToolNames.match(made.name, among: allowed.sorted())
                 {
                     var named = made
                     named.name = name
-                    pageCall = named
+                    page = written.count
+                    written.append(named)
                     if !reading, result.pageCallMs == nil { result.pageCallMs = milliseconds(clock.now - start) }
                 } else {
                     calls.append(describe(made, written: nil))
-                    if ignored == nil { ignored = made }
+                    written.append(made)
                 }
             case .moreToolCalls: calls.append("another call, not written")
             case .unreadableToolCall(let raw): calls.append("unreadable: \(raw)")
             case .toolCallStarted, .toolCallNamed: break
+            }
+        }
+        if let index = page {
+            opened += 1
+            do {
+                // As the app, which checks the call first: without a result's number it is refused, not carried out.
+                try WebSearchCatalog.checkPage(written[index], context: context)
+            } catch let refused as ToolRefusal {
+                calls.append("refused: \(describe(written[index], written: nil))")
+                steps += [.calls(written)] + written.indices.map {
+                    .result(of: written[$0], $0 == index ? refused.result(for: written[$0]) : notCarriedOut)
+                }
+                page = nil
+                refusedAt = index
             }
         }
         var filter = ReasoningFilter()
@@ -1008,34 +1099,17 @@ private func sumUp(_ call: ToolCall, results: WebSearchResults, after request: [
             result.summaryMs = milliseconds(clock.now - given)
             result.callsWhileSumming = (result.callsWhileSumming ?? []) + calls
         }
-        guard let pageCall else {
-            // As the app: a call and nothing else, once in a turn: the model is told it is not carried out and sums up
-            // once more.
-            guard words.isEmpty, let ignored, result.summedUpAgain != true else { break }
-            result.summedUpAgain = true
-            steps += [.call(ignored), .result(of: ignored, ["erreur": .string(ToolOutcome.noCallWhileSummingUp)])]
+        if let page {
+            next = (written, page)
             continue
         }
-        // Opened as the app opens it.
-        opened += 1
-        let fetchStart = clock.now
-        let page = try await tools.perform(pageCall, context: context)
-        if pages?.live != nil { result.fetchMs = milliseconds(clock.now - fetchStart) }
-        let label = (WebSearchCatalog.result(pageCall, in: results).map { "\(pageCall.arguments["resultat"]?.text ?? "?") \($0.site)" }
-            ?? "\(describe(pageCall, written: nil))") + (BenchPages.field(page.forModel, "erreur").map { ": \($0)" } ?? "")
-        result.pagesOpened = (result.pagesOpened ?? []) + [label]
-        if let target = WebSearchCatalog.result(pageCall, in: results), let text = BenchPages.field(page.forModel, "texte") {
-            await pages?.keep(target.url, text: text)
-        }
-        let before = request + steps + [.call(pageCall)]
-        steps += [.call(pageCall), .result(of: pageCall, page.forModel)]
-        if BenchPages.field(page.forModel, "texte") != nil {
-            result.pageTokens = try await model.tokenCount(request + steps) - model.tokenCount(before)
-        }
-        allowed = page.allowedWhileSumming
-        fallback = page.spoken
-        reading = true
-        given = clock.now
+        // As the app: calls not carried out and nothing else, once in a turn: the model is told so and sums up once
+        // more.
+        let ignored = written.indices.filter { $0 != refusedAt }.map { written[$0] }
+        guard words.isEmpty, !ignored.isEmpty, result.summedUpAgain != true else { break }
+        result.summedUpAgain = true
+        if reading { result.summedUpAgainAfterPage = true }
+        if refusedAt == nil { steps += [.calls(ignored)] + ignored.map { .result(of: $0, notCarriedOut) } }
     }
     let summary = said.joined(separator: " ")
     result.summary = summary.isEmpty ? "(nothing: the app says “\(fallback)”)" : summary
@@ -1529,6 +1603,16 @@ private func summarizeSearches(_ results: [CaseResult]) {
               + "\(again.filter { $0.sameKeywordsAsBefore == true }.count)"
               + again.map { "\n    · \($0.phrase) → \(written($0))" }.joined())
     }
+    // A page asked for at once (the first call): of the earlier search's results, or refused without one.
+    let pageAtOnce = results.filter { $0.chosen == WebSearchCatalog.openPageName }
+    if !pageAtOnce.isEmpty {
+        print("  a page asked for at once, of an earlier search's results: \(pageAtOnce.count) (expected: "
+              + "\(pageAtOnce.map(\.expected).joined(separator: ", ")))"
+              + pageAtOnce.map { item in
+                  "\n    · \(item.phrase) → " + (item.refusal.map { "refused: \($0)" }
+                      ?? "\((item.pagesOpened ?? []).joined(separator: ", then ")) → “\(item.summary ?? "")”")
+              }.joined())
+    }
     let leavingOut = results.filter { written($0).lowercased().contains("-site:") }
     print("  keywords leaving a site out (-site:): \(leavingOut.count)"
           + leavingOut.map { "\n    · \($0.phrase) → \(written($0))" }.joined())
@@ -1537,8 +1621,13 @@ private func summarizeSearches(_ results: [CaseResult]) {
     print("  summaries: \(summed.count); with calls written while summing up (the app carries out none): \(calling.count)"
           + calling.map { "\n    · \($0.phrase) → \(($0.callsWhileSumming ?? []).joined(separator: "; "))" }.joined())
     let again = summed.filter { $0.summedUpAgain == true }
-    print("  summed up once more after a call alone: \(again.count), still nothing said: "
-          + "\(again.filter { $0.summary?.hasPrefix("(nothing") == true }.count)")
+    print("  summed up once more after a call alone: \(again.count) (while reading a page: "
+          + "\(again.filter { $0.summedUpAgainAfterPage == true }.count)), still nothing said: "
+          + "\(again.filter { $0.summary?.hasPrefix("(nothing") == true }.count)"
+          + again.map { item in
+              "\n    · \(item.phrase) → "
+                  + ((item.callsWhileSumming ?? []) + (item.callsWhileReading ?? [])).joined(separator: "; ")
+          }.joined())
     let rated = summed.filter { $0.namesASite != nil }
     print("  summaries naming a site of the results: \(rated.filter { $0.namesASite == true }.count) / \(rated.count)")
     let calls = results.filter { $0.chosen == search }.compactMap(\.callMs)

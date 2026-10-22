@@ -1609,7 +1609,9 @@ public actor VoicePipeline {
         /// The calls carried out while summing up, in the turn: a page, and another when the first could not be read
         /// (`ToolOutcome.callsWhileSumming`). Whatever that page says, summing it up carries out nothing more.
         var callsWhileSumming = 0
-        /// The model, summing up, wrote calls and nothing else, and was told to sum up once more.
+        /// The model, summing up, wrote calls that are not carried out (not allowed, or past the limit) and nothing else,
+        /// and was told so and to sum up once more (`ToolOutcome.noCallWhileSummingUp`): once in a turn, and that pass
+        /// carries out no call at all, not even an allowed one.
         var summedUpAgain = false
         /// The user asked for several actions at once (the model's first answer wrote more than one call, or went on to
         /// another): their sentence holds the other actions' moments and lengths too, so the app reads only each call's
@@ -1619,7 +1621,7 @@ public actor VoicePipeline {
         var several = false
         while true {
             /// The tools whose calls this pass may still carry out while it sums up.
-            let allowed = pass == .summing && callsWhileSumming < ToolOutcome.callsWhileSumming
+            let allowed = pass == .summing && !summedUpAgain && callsWhileSumming < ToolOutcome.callsWhileSumming
                 ? Set(toSum.flatMap(\.allows)).sorted() : []
             /// This pass's calls carried out or refused, as named, in order, and what each one gave the model.
             var calls: [ToolCall] = []
@@ -1774,8 +1776,8 @@ public actor VoicePipeline {
                 let ignored = summingCalls.indices.filter { $0 != opening }.map { summingCalls[$0] }
                 if !modelSpoke, !ignored.isEmpty, !summedUpAgain {
                     // Calls instead of a summary (often another search, when the results or the page do not hold the
-                    // answer): rather than the app's sentence, the model is told they are not carried out and sums up
-                    // once more, still without any call carried out.
+                    // answer; or a page past the limit): rather than the app's sentence, the model is told they are not
+                    // carried out and sums up once more, then without any call carried out.
                     DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
                     summedUpAgain = true
                     if opening == nil { turn.steps += [.calls(ignored)] + ignored.map { .result(of: $0, notCarriedOut) } }

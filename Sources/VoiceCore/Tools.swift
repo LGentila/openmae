@@ -189,8 +189,9 @@ public struct ToolOutcome: Sendable {
     /// page of one of them); none by default. See `VoicePipeline`.
     public var allowedWhileSumming: Set<String>
 
-    /// Told the model when, summing up such a text, it writes a call and nothing else (no call is carried out then):
-    /// it gets one more pass to answer with what it has.
+    /// Told the model when, summing up such a text, it writes a call that is not carried out (any call but one that
+    /// `allowedWhileSumming` lets through, within `callsWhileSumming`) and nothing else: it gets one more pass, once in a
+    /// turn, to answer with what it has, and no call at all is carried out in that pass.
     public static let noCallWhileSummingUp = "Appel non fait : plus aucun outil pour ce message. Réponds maintenant à "
         + "l'utilisateur avec ce que tu as, et dis-le simplement si ça ne répond pas à sa question."
 

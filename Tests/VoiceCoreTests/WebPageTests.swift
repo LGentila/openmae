@@ -226,8 +226,21 @@ struct OpenPageToolTests {
         #expect(await web.configure(FakeSearch(quotes), pageReader: FakePageReader([:])) == false)
         #expect(await web.configure(FakeSearch(quotes)))
         #expect(await web.tools() == [WebSearchCatalog.search])
-        // The 26B opens pages; the smaller models were not measured with it.
+        // The 26B opens pages; the smaller models never opened one in the benchmark.
         #expect(HardwareTier.allCases.filter(WebSearchCatalog.opensPages) == [.comfort, .max])
+    }
+
+    /// The prompt with pages asks for a new search when the user asks again in the very words of the search's own
+    /// prompt, measured so (« ne cherche pas une deuxième fois », in any form, made Gemma 4 26B never search again when
+    /// the user insisted).
+    @Test func thePromptWithPagesLetsTheUserAskAgain() throws {
+        let plain = WebSearchCatalog.promptAddendum
+        let start = try #require(plain.range(of: "Quand l'utilisateur te redemande de chercher"))
+        let end = try #require(plain.range(of: "Une seule recherche par message de l'utilisateur : "))
+        let pages = WebSearchCatalog.promptAddendumWithPages
+        #expect(pages.contains(String(plain[start.lowerBound..<end.upperBound])))
+        #expect(!pages.contains("deuxième fois"))
+        #expect(pages.contains("ouvrir_page"))
     }
 
     @Test func theResultsAreNumberedAndAPageMayBeOpenedWhileSummingThemUp() async throws {
@@ -430,6 +443,98 @@ struct PipelineOpenPageTests {
         // The third page call is not carried out: the model is told so and sums up once more (`noCallWhileSummingUp`),
         // then, still nothing said, the app says its sentence.
         #expect(await model.requests.count == 5)
+        #expect(await model.requests.last?.last?.toolResult?["erreur"]?.text == ToolOutcome.noCallWhileSummingUp)
         #expect(await log.pieces.last == WebSearchPhrases.couldNotOpenPage(.french))
+    }
+
+    /// The page read does not hold the answer, and the model writes another search and nothing else: it is not carried
+    /// out; the model is told so and sums up once more (as after results, `ToolOutcome.noCallWhileSummingUp`), and the
+    /// user hears that answer, not the app's sentence.
+    @Test func aSearchAfterAPageGetsOneMorePass() async throws {
+        let reader = FakePageReader([boursorama: .success(quotePage)])
+        let search = FakeSearch(quotes)
+        let ask: [ModelOutput] = [.toolCallStarted, .toolCallNamed("chercher_web"),
+                                  .toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "cours Apple"]))]
+        let open: [ModelOutput] = [.toolCallStarted, .toolCallNamed("ouvrir_page"),
+                                   .toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]))]
+        let again: [ModelOutput] = [.toolCallStarted, .toolCallNamed("chercher_web"),
+                                    .toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "cours Apple hier"]))]
+        let answer: [ModelOutput] = [.text("D'après Boursorama, l'action Apple valait 342,94 dollars à 18 h 14.")]
+        let model = ScriptedModel(scripts: [ask, open, again, answer])
+        let pipeline = VoicePipeline(
+            detector: LoudnessDetector(), transcriber: ScriptedTranscriber(["Le cours d'Apple ?"]),
+            model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+            tools: ToolRunner(providers: [WebSearchTools(provider: search, pageReader: reader)], actions: false))
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("18 h 14") }
+        // No waiting phrase for the search that is not made.
+        #expect(await log.pieces.joined(separator: " ") == WebSearchPhrases.searching(.french) + " "
+                + WebSearchPhrases.openingPage(.french) + " D'après Boursorama, l'action Apple valait 342,94 dollars à 18 h 14.")
+        #expect(await search.queries == ["cours Apple"])
+        #expect(await reader.read == [boursorama])
+        #expect(await model.requests.count == 4)
+        let request = try #require(await model.requests.last)
+        #expect(request.suffix(4).map(\.role) == [.assistant, .tool, .assistant, .tool])
+        #expect(request.suffix(2).first?.toolCalls.first?.name == "chercher_web")
+        #expect(request.last?.toolResult?["erreur"]?.text == ToolOutcome.noCallWhileSummingUp)
+    }
+
+    /// Two pages that cannot be read, then a third page call alone: not carried out (two at most in a turn); the model is
+    /// told so, sums up once more, and what it says then is said.
+    @Test func aThirdPageGetsOneMorePassAndIsNotOpened() async throws {
+        let reader = FakePageReader([zonebourse: .failure(.refused), boursorama: .failure(.consentWall)])
+        let search: [ModelOutput] = [.toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "cours Apple"]))]
+        let first: [ModelOutput] = [.toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 2]))]
+        let second: [ModelOutput] = [.toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]))]
+        let third: [ModelOutput] = [.toolCallStarted, .toolCallNamed("ouvrir_page"),
+                                    .toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 2]))]
+        let answer: [ModelOutput] = [.text("Je n'arrive pas à lire les pages de ces deux sites.")]
+        let model = ScriptedModel(scripts: [search, first, second, third, answer])
+        let pipeline = VoicePipeline(
+            detector: LoudnessDetector(), transcriber: ScriptedTranscriber(["Le cours d'Apple ?"]),
+            model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+            tools: ToolRunner(providers: [WebSearchTools(provider: FakeSearch(quotes), pageReader: reader)], actions: false))
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains("deux sites") }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await reader.read == [zonebourse, boursorama])
+        #expect(await model.requests.count == 5)
+        let request = try #require(await model.requests.last)
+        #expect(request.suffix(2).first?.toolCalls.first?.name == "ouvrir_page")
+        #expect(request.last?.toolResult?["erreur"]?.text == ToolOutcome.noCallWhileSummingUp)
+        // No waiting phrase for the page that is not opened, and not the app's sentence: the answer.
+        #expect(await log.pieces == ["Je n'arrive pas à lire les pages de ces deux sites."])
+    }
+
+    /// Summing up results, the model writes another search alone; told it is not carried out, it writes a page call
+    /// alone: the pass after that note carries out no call at all, not even a page's, and the app says its sentence.
+    @Test func noPageIsOpenedOnceToldThatNothingMoreIsCarriedOut() async throws {
+        let reader = FakePageReader([boursorama: .success(quotePage)])
+        let search: [ModelOutput] = [.toolCallStarted, .toolCallNamed("chercher_web"),
+                                     .toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "cours Apple"]))]
+        let again: [ModelOutput] = [.toolCall(ToolCall(name: "chercher_web", arguments: ["requete": "action Apple"]))]
+        let open: [ModelOutput] = [.toolCallStarted, .toolCallNamed("ouvrir_page"),
+                                   .toolCall(ToolCall(name: "ouvrir_page", arguments: ["resultat": 1]))]
+        let model = ScriptedModel(scripts: [search, again, open])
+        let pipeline = VoicePipeline(
+            detector: LoudnessDetector(), transcriber: ScriptedTranscriber(["Le cours d'Apple ?"]),
+            model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+            tools: ToolRunner(providers: [WebSearchTools(provider: FakeSearch(quotes), pageReader: reader)], actions: false))
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.pieces.joined().contains(WebSearchPhrases.couldNotSumUp(.french)) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await reader.read.isEmpty)
+        #expect(await model.requests.count == 3)
+        // The search's waiting phrase, none for the page, then the app's sentence.
+        #expect(await log.pieces == [WebSearchPhrases.searching(.french), WebSearchPhrases.couldNotSumUp(.french)])
     }
 }
