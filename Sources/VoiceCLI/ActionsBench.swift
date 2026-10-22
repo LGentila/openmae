@@ -266,14 +266,13 @@ func runActionsBench(_ o: Options) async throws {
     let memory = corpus.memory == true || o.memory
     let sheet = corpus.memorySheet ?? []
     // In the app's order: the actions, the agents, the web search, the built-in sources, the news, the memory (last).
-    let tools = (actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
-        + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : [])
-        + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
-            : [])
-        + (web ? [WebSearchCatalog.search] : [])
-        + (sources ? BuiltInSources.tools : [])
-        + (news ? [NewsCatalog.read] : [])
-        + (memory ? [MemoryCatalog.tool(journal: true)] : [])
+    let actionTools: [ToolSpec] = actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
+        + [ActionCatalog.runShortcut(names: corpus.shortcuts)].compactMap { $0 } : []
+    let agentTools: [ToolSpec] = agents
+        ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: []) : []
+    let otherTools: [ToolSpec] = (web ? [WebSearchCatalog.search] : []) + (sources ? BuiltInSources.tools : [])
+        + (news ? [NewsCatalog.read] : []) + (memory ? [MemoryCatalog.tool(journal: true)] : [])
+    let tools = actionTools + agentTools + otherTools
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
         WeatherCatalog.name: WeatherTools(on: true, here: here),
