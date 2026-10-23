@@ -15,7 +15,9 @@ struct SetupView: View {
                 welcome
                     .frame(width: 330)
                 VStack(spacing: 14) {
-                    MacCard(setup: setup, tierOverride: model.settings.tierOverride, isLocked: model.isDownloading) {
+                    MacCard(setup: setup, tierOverride: model.settings.tierOverride, isLocked: model.isDownloading,
+                            onThisMac: model.storage?.tiersOnThisMac ?? [])
+                    {
                         // No "Change tier?" here: nothing runs yet. The engine starts again on that tier and says
                         // what it needs (`setupNeeded`): the models card follows.
                         model.settings.tierOverride = $0
@@ -245,6 +247,8 @@ private struct MacCard: View {
     let tierOverride: HardwareTier?
     /// The tier cannot change during the download.
     let isLocked: Bool
+    /// The tiers whose models are all on this Mac already.
+    let onThisMac: Set<HardwareTier>
     /// Another tier was picked (nil: "Automatic").
     let chooseTier: (HardwareTier?) -> Void
 
@@ -280,7 +284,7 @@ private struct MacCard: View {
     }
 
     private var menu: some View {
-        TierMenu(override: tierOverride, recommended: setup.recommendedTier) { chooseTier($0.tier) }
+        TierMenu(override: tierOverride, recommended: setup.recommendedTier, onThisMac: onThisMac) { chooseTier($0.tier) }
             .disabled(isLocked)
     }
 }

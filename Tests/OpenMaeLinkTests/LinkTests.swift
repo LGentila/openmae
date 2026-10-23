@@ -148,7 +148,7 @@ struct MessageTests {
         #expect(!RemoteCommandPolicy.isAllowed(.start(AssistantSettings())))
         #expect(!RemoteCommandPolicy.isAllowed(.downloadModels))
         #expect(!RemoteCommandPolicy.isAllowed(.deleteModels))
-        #expect(!RemoteCommandPolicy.isAllowed(.deleteUnusedModels))
+        #expect(!RemoteCommandPolicy.isAllowed(.deleteModel("gemma-4-e4b-it-4bit")))
         #expect(!RemoteCommandPolicy.isAllowed(.shutdown))
         #expect(!RemoteCommandPolicy.isAllowed(.typedTurn("hello")))
     }

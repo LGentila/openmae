@@ -23,6 +23,9 @@ public actor AssistantHost: AssistantConnection {
 
     private var settings = AssistantSettings()
     private let store = ModelStore()
+    /// The models the engine loads or has loaded (the tier's when it started), until it stops: never deleted on their
+    /// own, even once another tier is chosen.
+    private var loadedPacks: Set<String> = []
     private var download: Task<Void, Never>?
     private var pipeline: VoicePipeline?
     private var model: MLXChatModel?
@@ -161,8 +164,8 @@ public actor AssistantHost: AssistantConnection {
             download?.cancel()
         case .deleteModels:
             await deleteModels()
-        case .deleteUnusedModels:
-            deleteUnusedModels()
+        case .deleteModel(let id):
+            deleteModel(id)
         case .refreshActions:
             await refreshActions()
         case .stopTask(let id):
@@ -224,6 +227,7 @@ public actor AssistantHost: AssistantConnection {
             fail(.modelMissing("Silero VAD"))
             return
         }
+        loadedPacks = Set(ModelCatalog.packs(for: tier).map(\.id))
 
         // Sound first: a microphone or speaker problem shows up at once, not after a minute of loading.
         let audio = SystemAudio()
@@ -346,6 +350,7 @@ public actor AssistantHost: AssistantConnection {
     private func fail(_ problem: AssistantProblem) {
         stage = .idle
         restartWhenLoaded = false  // the next start reads the settings anyway
+        loadedPacks = []  // nothing stays loaded: start-up stops whatever it had started before it fails
         emit.yield(.problem(problem))
     }
 
@@ -375,6 +380,7 @@ public actor AssistantHost: AssistantConnection {
         for task in running { await task.value }
         pipeline = nil
         model = nil
+        loadedPacks = []
         audio?.stop()
         audio = nil
         route = nil
@@ -482,11 +488,36 @@ public actor AssistantHost: AssistantConnection {
         await start()
     }
 
-    private func deleteUnusedModels() {
-        for pack in store.unusedPacks(keeping: ModelCatalog.packs(for: tier)) {
-            do { try store.delete(pack) } catch { emit.yield(.warning("\(error.localizedDescription)")) }
+    /// The models that cannot be deleted on their own: those the tier needs (in use, or waiting for their download) and
+    /// those the engine has loaded.
+    private var packsInUse: Set<String> {
+        Set(ModelCatalog.packs(for: tier).map(\.id)).union(loadedPacks)
+    }
+
+    /// Settings › Advanced: one model, by the name of its folder. Only a model of the catalog, never one in use, and not
+    /// while models load or download (the interface does not offer it then either).
+    private func deleteModel(_ id: String) {
+        defer { reportStorage() }
+        guard let pack = ModelCatalog.all.first(where: { $0.id == id }) else {
+            DebugLog.log("model not deleted: \(id) is not a model of the catalog")
+            return
         }
-        reportStorage()
+        guard stage != .loading, stage != .downloading, !packsInUse.contains(id) else {
+            DebugLog.log("model not deleted: \(id) is in use")
+            return
+        }
+        do {
+            try store.delete(pack)
+            DebugLog.log("model deleted: \(id)")
+        } catch {
+            emit.yield(.warning("\(error.localizedDescription)"))
+        }
+        // The first-launch screen shows the free space: it grew.
+        if stage == .setup {
+            let hardware = HardwareProfile.current
+            emit.yield(.setupNeeded(setup(tier: tier, recommended: HardwareTier.recommended(for: hardware),
+                                          hardware: hardware)))
+        }
     }
 
     /// CoreML keeps versions of the models compiled for this Mac's Neural Engine in the app's cache folder
@@ -499,10 +530,7 @@ public actor AssistantHost: AssistantConnection {
     }
 
     private func reportStorage() {
-        let unused = store.unusedPacks(keeping: ModelCatalog.packs(for: tier))
-        emit.yield(.storage(ModelStorage(
-            usedBytes: store.usedBytes(), unusedBytes: unused.reduce(0) { $0 + store.usedBytes($1) },
-            folder: store.root.path)))
+        emit.yield(.storage(store.storage(inUse: packsInUse)))
     }
 
     // MARK: - Settings and audio devices

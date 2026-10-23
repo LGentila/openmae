@@ -18,6 +18,8 @@ final class SettingsNavigation {
     enum Sheet: Hashable {
         case changeTier(TierChoice)
         case deleteModels
+        /// One model of Settings › Advanced (`ModelStorage.Model.id`).
+        case deleteModel(String)
         case eraseWakeLog
         case removeBraveKey
         case eraseMemory
@@ -55,11 +57,16 @@ struct SettingsWindowView: View {
     @Environment(InboundAccess.self) private var inbound: InboundAccess?
     @Environment(RelayAccess.self) private var relays: RelayAccess?
 
+    /// The narrowest the window gets: half of a 1512-point screen, with room to spare. Every page fits in it.
+    static let minimumWidth: CGFloat = 720
+
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(model: model, navigation: navigation, tools: tools)
+            // Never wider than what the sidebar leaves: a page too wide for it would push the whole window's content
+            // out on both sides.
             page
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .id(pageIdentity)
         }
         .background(StatePalette(.listening).surface)
@@ -346,6 +353,10 @@ private struct SettingsSheetLayer: View {
                              top: 120)
             case .deleteModels:
                 return Shown(view: AnyView(DeleteModelsSheet(model: model, navigation: navigation)), top: 120)
+            case .deleteModel(let id):
+                guard let entry = model.storage?.models.first(where: { $0.id == id }) else { return nil }
+                return Shown(view: AnyView(DeleteModelSheet(model: model, navigation: navigation, entry: entry)),
+                             top: 120)
             case .eraseWakeLog:
                 return Shown(view: AnyView(EraseWakeLogSheet(navigation: navigation)), top: 120)
             case .removeBraveKey:

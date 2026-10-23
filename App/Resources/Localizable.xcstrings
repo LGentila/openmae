@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    " · on this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · sur ce Mac"
+          }
+        }
+      }
+    },
     " · untested": {
       "localizations": {
         "fr": {
@@ -411,6 +421,16 @@
         }
       }
     },
+    "Add ⌘, ⌥ or ⌃: without them, this key would no longer type in your apps.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajoute ⌘, ⌥ ou ⌃ : sans eux, cette touche ne taperait plus dans tes apps."
+          }
+        }
+      }
+    },
     "Address": {
       "localizations": {
         "fr": {
@@ -537,6 +557,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Annonces"
+          }
+        }
+      }
+    },
+    "Another app already uses this shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une autre app utilise déjà ce raccourci."
+          }
+        }
+      }
+    },
+    "Apps already use ⌘ with this key. Add ⌥ or ⌃.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les apps utilisent déjà ⌘ avec cette touche. Ajoute ⌥ ou ⌃."
           }
         }
       }
@@ -677,6 +717,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Retour"
+          }
+        }
+      }
+    },
+    "Back to %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revenir à %@"
           }
         }
       }
@@ -877,6 +927,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude Code s’est arrêté sans donner de résultat."
+          }
+        }
+      }
+    },
+    "Click, then press the new shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clique, puis appuie sur le nouveau raccourci."
+          }
+        }
+      }
+    },
+    "Comfort": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confort"
           }
         }
       }
@@ -1141,6 +1211,26 @@
         }
       }
     },
+    "Delete %@?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer %@ ?"
+          }
+        }
+      }
+    },
+    "Delete %@…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer %@…"
+          }
+        }
+      }
+    },
     "Delete the models?": {
       "localizations": {
         "fr": {
@@ -1161,12 +1251,12 @@
         }
       }
     },
-    "Delete the other tiers' models (%@)": {
+    "Delete…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Supprimer les modèles des autres paliers (%@)"
+            "value": "Supprimer…"
           }
         }
       }
@@ -1367,6 +1457,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer le journal…"
+          }
+        }
+      }
+    },
+    "Escape cancels.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échap annule."
           }
         }
       }
@@ -1871,6 +1971,16 @@
         }
       }
     },
+    "In use": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisé"
+          }
+        }
+      }
+    },
     "Information from home": {
       "localizations": {
         "fr": {
@@ -2111,6 +2221,16 @@
         }
       }
     },
+    "Language model of the %@ tier": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de langage du palier %@"
+          }
+        }
+      }
+    },
     "Last actions": {
       "localizations": {
         "fr": {
@@ -2237,6 +2357,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mac"
+          }
+        }
+      }
+    },
+    "Maximum": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum"
           }
         }
       }
@@ -2591,6 +2721,16 @@
         }
       }
     },
+    "Minimum": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimum"
+          }
+        }
+      }
+    },
     "Minimum (8 GB)": {
       "localizations": {
         "fr": {
@@ -2717,6 +2857,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "New shortcut": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nouveau raccourci"
           }
         }
       }
@@ -3181,6 +3331,16 @@
         }
       }
     },
+    "OpenMaé already uses this shortcut in its menus.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenMaé utilise déjà ce raccourci dans ses menus."
+          }
+        }
+      }
+    },
     "OpenMaé relay": {
       "localizations": {
         "fr": {
@@ -3357,6 +3517,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé attend toujours « OK Maé »."
+          }
+        }
+      }
+    },
+    "Press the new shortcut: ⌘, ⌥ or ⌃ with a key. Escape cancels.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appuie sur le nouveau raccourci : ⌘, ⌥ ou ⌃ avec une touche. Échap annule."
           }
         }
       }
@@ -3891,6 +4061,16 @@
         }
       }
     },
+    "Shortcut to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raccourci pour parler"
+          }
+        }
+      }
+    },
     "Shortcuts": {
       "localizations": {
         "fr": {
@@ -4067,6 +4247,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Reconnaissance vocale"
+          }
+        }
+      }
+    },
+    "Standard": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
           }
         }
       }
@@ -4321,12 +4511,32 @@
         }
       }
     },
+    "The assistant will restart with %@, already on this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’assistant va redémarrer avec %@, déjà sur ce Mac."
+          }
+        }
+      }
+    },
     "The assistant will restart with %@. If it is not on this Mac yet, it will have to be downloaded (%@).": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "L’assistant va redémarrer avec %@. S’il n’est pas encore sur ce Mac, il faudra le télécharger (%@)."
+          }
+        }
+      }
+    },
+    "The assistant will restart with %@. It has to be downloaded first (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’assistant va redémarrer avec %1$@. Il faut d’abord le télécharger (%2$@)."
           }
         }
       }
@@ -4627,6 +4837,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cette conversation"
+          }
+        }
+      }
+    },
+    "This frees %@ on this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cela libère %@ sur ce Mac."
+          }
+        }
+      }
+    },
+    "This frees %@ on this Mac. If you choose the %@ tier later, it will be downloaded again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cela libère %1$@ sur ce Mac. Si tu choisis plus tard le palier %2$@, il sera téléchargé de nouveau."
           }
         }
       }
@@ -5551,12 +5781,42 @@
         }
       }
     },
+    "incomplete": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "incomplet"
+          }
+        }
+      }
+    },
     "interrupted": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "interrompu"
+          }
+        }
+      }
+    },
+    "macOS already uses this shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS utilise déjà ce raccourci."
+          }
+        }
+      }
+    },
+    "macOS refuses this shortcut. Choose another one.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS refuse ce raccourci. Choisis-en un autre."
           }
         }
       }
@@ -5657,16 +5917,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "« Mots » = tokens, les morceaux de mots du modèle."
-          }
-        }
-      }
-    },
-    "⌥ Space": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⌥ Espace"
           }
         }
       }

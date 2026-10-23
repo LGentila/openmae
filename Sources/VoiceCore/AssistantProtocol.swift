@@ -264,8 +264,9 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     case pauseDownload
     /// Delete every model (Settings › Advanced): the assistant stops and offers to download them again.
     case deleteModels
-    /// Delete the language models of the tiers not in use.
-    case deleteUnusedModels
+    /// Delete one model of Settings › Advanced (`ModelStorage.Model.id`); answered by `.storage`. Never one in use: the
+    /// tier's, or one the engine has loaded.
+    case deleteModel(String)
     /// Look again at what actions can use, and at Claude Code (the app came back to the front: a shortcut may have
     /// been added to the folder, a permission granted in System Settings, Claude Code installed or signed in).
     case refreshActions
@@ -379,17 +380,57 @@ public struct ModelSetup: Sendable, Codable, Equatable {
     public var hasEnoughSpace: Bool { availableBytes.map { $0 >= neededBytes } ?? true }
 }
 
-/// Space taken by the models (Settings › Advanced).
+/// Space taken by the models (Settings › Advanced), in all and model by model.
 public struct ModelStorage: Sendable, Codable, Equatable {
+    /// A model on this Mac, even partly downloaded.
+    public struct Model: Sendable, Codable, Equatable, Identifiable {
+        /// Its pack's id, which is also the name of its folder (`ModelPack.id`).
+        public var id: String
+        public var role: ModelRole
+        public var displayName: String
+        /// Space it takes on disk, its partial downloads included.
+        public var bytes: Int64
+        /// What is left to download before it can be used; 0 when it is complete.
+        public var missingBytes: Int64
+        /// The tier in use needs it, or the engine has it loaded: it cannot be deleted on its own.
+        public var inUse: Bool
+
+        public init(id: String, role: ModelRole, displayName: String, bytes: Int64, missingBytes: Int64, inUse: Bool) {
+            self.id = id
+            self.role = role
+            self.displayName = displayName
+            self.bytes = bytes
+            self.missingBytes = missingBytes
+            self.inUse = inUse
+        }
+    }
+
+    /// Everything in the models folder, partial downloads included.
     public var usedBytes: Int64
-    /// Language models of the tiers not in use, which can be deleted.
-    public var unusedBytes: Int64
+    /// The models on this Mac, in the catalog's order: speech recognition, the voice, then the language models from the
+    /// smallest tier's.
+    public var models: [Model]
     public var folder: String
 
-    public init(usedBytes: Int64, unusedBytes: Int64, folder: String) {
+    public init(usedBytes: Int64, models: [Model] = [], folder: String) {
         self.usedBytes = usedBytes
-        self.unusedBytes = unusedBytes
+        self.models = models
         self.folder = folder
+    }
+
+    private enum CodingKeys: String, CodingKey { case usedBytes, models, folder }
+
+    /// An earlier engine only said the total.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        usedBytes = try c.decode(Int64.self, forKey: .usedBytes)
+        models = try c.decodeIfPresent([Model].self, forKey: .models) ?? []
+        folder = try c.decode(String.self, forKey: .folder)
+    }
+
+    /// Every model `packs` need is complete on this Mac: choosing their tier downloads nothing.
+    public func hasComplete(_ packs: [ModelPack]) -> Bool {
+        !packs.isEmpty && packs.allSatisfy { pack in models.contains { $0.id == pack.id && $0.missingBytes == 0 } }
     }
 }
 
@@ -468,7 +509,7 @@ public enum AssistantEvent: Sendable, Codable {
     case downloadProgress(DownloadProgress)
     /// The download stopped: nil when paused, otherwise why it failed.
     case downloadStopped(DownloadFailure?)
-    /// Space taken by the models, sent when the assistant is ready and after a deletion.
+    /// Space taken by the models, sent when the assistant is ready or waits for a download, and after a deletion.
     case storage(ModelStorage)
     case loading(LoadingStep)
     case ready(EngineInfo)

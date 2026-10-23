@@ -117,7 +117,7 @@ enum Snapshots {
         forced.items[0].missingBytes = 0
         forced.items[1].missingBytes = 0
         forced.bytesToDownload = 5_180_000_000
-        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .storage(ModelStorage(usedBytes: 0, unusedBytes: 0,
+        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .storage(ModelStorage(usedBytes: 0,
                                                                                        folder: Demo.setup.folder))]
 
         let scenarios: [(name: String, events: [AssistantEvent], panel: WindowState.Panel?, listening: ListeningMode)] = [
@@ -164,6 +164,15 @@ enum Snapshots {
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
+        // At rest, with a shortcut the user recorded instead of ⌥ Space.
+        let ownShortcut = await scriptedModel(ready)
+        let savedSettings = ownShortcut.settings
+        ownShortcut.settings.listening = .handsFree
+        ownShortcut.talkShortcut = Demo.recordedShortcut
+        await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
+            .preferredColorScheme(.light), size: CGSize(width: 960, height: 700),
+                   to: folder.appending(path: "main-1-rest-own-shortcut.png"))
+        ownShortcut.settings = savedSettings
         let shortcuts = ["Allumer le salon", "Mode concentration"]
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
@@ -223,11 +232,14 @@ enum Snapshots {
             ("overlay-1-listening", heard, .userSpeaking, .handsFree),
             ("overlay-2-thinking", thinking, .thinking, .handsFree),
             ("overlay-3-speaking", speaking, .speaking, .handsFree),
-            // Woken by « OK Maé », the window closed: no ⌥ Space to press.
+            // Woken by « OK Maé », the window closed: no shortcut to press.
             ("overlay-4-wake-word-awake", ready + [.awake(true)], .userSpeaking, .wakeWord),
+            // The shortcut the user recorded finishes the turn.
+            ("overlay-5-listening-own-shortcut", heard, .userSpeaking, .handsFree),
         ]
         for scene in scenes {
             let model = await scriptedModel(scene.events)
+            if scene.name.hasSuffix("own-shortcut") { model.talkShortcut = Demo.recordedShortcut }
             let saved = model.settings
             model.settings.listening = scene.listening
             let capsule = CapsuleState()
@@ -249,6 +261,7 @@ enum Snapshots {
     @MainActor
     static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
         let model = AssistantModel(connection: ScriptedConnection(events))
+        model.talkShortcut = .standard  // not the one this Mac's user may have recorded
         model.hasTalkShortcut = true  // as on a Mac that accepts ⌥ Space (snapshots register no shortcut)
         try? await Task.sleep(for: .milliseconds(150))  // the model applies the events asynchronously
         return model
@@ -511,8 +524,24 @@ enum Demo {
     static let info = EngineInfo(chip: "Apple M1 Pro", memoryGiB: 32, tier: .comfort, recommendedTier: .comfort,
                                  languageModel: "Gemma 4 26B-A4B", speechRecognition: "Parakeet TDT 0.6B v3",
                                  voice: "Pocket TTS · estelle")
-    static let storage = ModelStorage(usedBytes: 17_520_000_000, unusedBytes: 0,
+    /// The comfort tier's three models, in use.
+    static let storage = ModelStorage(usedBytes: 17_520_000_000, models: tierModels,
                                       folder: NSHomeDirectory() + "/Library/Application Support/OpenMaé/Models")
+    /// The same, with the language models of the minimum and standard tiers kept from earlier tries: 26.29 GB, as on
+    /// the reference Mac.
+    static let storageWithOtherTiers = ModelStorage(
+        usedBytes: 26_290_000_000,
+        models: Array(tierModels.prefix(2))
+            + [HardwareTier.minimum, .standard].compactMap { ModelCatalog.languageModel(for: $0) }
+            .map { model($0, inUse: false) } + tierModels.suffix(1),
+        folder: storage.folder)
+
+    private static let tierModels = ModelCatalog.packs(for: .comfort).map { model($0, inUse: true) }
+
+    private static func model(_ pack: ModelPack, inUse: Bool) -> ModelStorage.Model {
+        ModelStorage.Model(id: pack.id, role: pack.role, displayName: pack.displayName, bytes: pack.totalBytes,
+                           missingBytes: 0, inUse: inUse)
+    }
     static let setup = ModelSetup(
         chip: "Apple M1 Pro", memoryGiB: 32, tier: .comfort, recommendedTier: .comfort,
         items: [
@@ -540,6 +569,10 @@ enum Demo {
         other.neededBytes = other.bytesToDownload + ModelDownloader.safetyMarginBytes
         return other
     }
+
+    /// A shortcut to talk the user recorded instead of ⌥ Space: ⌃⌥ M (46 is `kVK_ANSI_M`).
+    static let recordedShortcut = TalkShortcut(keyCode: 46, modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue,
+                                               character: "m")
 }
 
 final class DemoConnection: AssistantConnection, @unchecked Sendable {
@@ -549,6 +582,8 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     private var script: Task<Void, Never>?
     /// The settings' tier, which the first-launch screen shows (-demo-setup).
     private var tier = Demo.setup.recommendedTier
+    /// The models of Settings › Advanced, which can be deleted one by one (the other tiers').
+    private var storage = Demo.storageWithOtherTiers
 
     init() {
         (events, sink) = AsyncStream.makeStream()
@@ -573,6 +608,16 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
             play(downloadScript)
         case .pauseDownload:
             play { sink in sink.yield(.downloadStopped(nil)) }
+        case .deleteModel(let id):
+            // As the real engine: never one in use.
+            let left = lock.withLock {
+                if let i = storage.models.firstIndex(where: { $0.id == id && !$0.inUse }) {
+                    storage.usedBytes -= storage.models[i].bytes
+                    storage.models.remove(at: i)
+                }
+                return storage
+            }
+            sink.yield(.storage(left))
         case .stopSpeaking:
             play { [conversationScript] sink in
                 sink.yield(.levels(input: 0, output: 0))
@@ -629,7 +674,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
         let setup = Demo.setup(for: lock.withLock { tier })
         return { sink in
             sink.yield(.setupNeeded(setup))
-            sink.yield(.storage(ModelStorage(usedBytes: 0, unusedBytes: 0, folder: setup.folder)))
+            sink.yield(.storage(ModelStorage(usedBytes: 0, folder: setup.folder)))
         }
     }
 
@@ -661,9 +706,10 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
 
     /// At rest, the user speaks, Maé thinks, then answers; again and again (with -demo-idle: at rest only).
     private var conversationScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
-        { sink in
+        let storage = lock.withLock { self.storage }
+        return { sink in
             sink.yield(.ready(Demo.info))
-            sink.yield(.storage(Demo.storage))
+            sink.yield(.storage(storage))
             guard !ProcessInfo.processInfo.arguments.contains("-demo-idle") else { return }
             while !Task.isCancelled {
                 sink.yield(.state(.listening))

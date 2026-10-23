@@ -37,7 +37,9 @@ struct AdvancedPage: View {
     @ViewBuilder private var models: some View {
         SettingRow("Tier") {
             // Locked while models load or download; another tier is confirmed first ("Change tier?").
-            TierMenu(override: model.settings.tierOverride, recommended: model.recommendedTier) {
+            TierMenu(override: model.settings.tierOverride, recommended: model.recommendedTier,
+                     onThisMac: model.storage?.tiersOnThisMac ?? [])
+            {
                 navigation.sheet = .changeTier($0)
             }
             .disabled(isBusy)
@@ -55,15 +57,15 @@ struct AdvancedPage: View {
                 .textStyle(.value)
                 .foregroundStyle(Palette.ink)
         }
+        // One by one: those the tier uses are in use; another tier's can be deleted on its own.
+        ForEach(model.storage?.models ?? []) { entry in
+            Hairline()
+            ModelItem(entry: entry, isBusy: isBusy, isDownloading: model.isDownloading) {
+                navigation.sheet = .deleteModel(entry.id)
+            }
+        }
         Hairline()
         ActionRow(top: 12, bottom: 14) {
-            if let storage = model.storage, storage.unusedBytes > 0 {
-                Button("Delete the other tiers' models (\(Units.bytes(storage.unusedBytes)))") {
-                    model.deleteUnusedModels()
-                }
-                .buttonStyle(WindowButtonStyle())
-                .disabled(isBusy)
-            }
             Button("Delete the models…") { navigation.sheet = .deleteModels }
                 .buttonStyle(WindowButtonStyle(kind: .danger))
                 .disabled(isBusy || (model.storage?.usedBytes ?? 0) == 0)
@@ -84,6 +86,101 @@ struct AdvancedPage: View {
                 .buttonStyle(WindowButtonStyle())
         }
         .disabled(!wakeLogExists)
+    }
+}
+
+/// A model on this Mac: what it is for and how much space it takes; "In use" (or, the tier's own not all there yet,
+/// "Downloading" or "To download"), or its Delete button.
+private struct ModelItem: View {
+    let entry: ModelStorage.Model
+    /// Models load or download: nothing can be deleted.
+    let isBusy: Bool
+    let isDownloading: Bool
+    let delete: () -> Void
+
+    var body: some View {
+        ListItem(disc: Self.disc(entry.role), name: { Text(verbatim: entry.displayName) }, sub: sub, trailing: {
+            if entry.inUse {
+                HStack(spacing: 8) {
+                    StatusDot(tone: entry.missingBytes == 0 ? .on : .info)
+                    Group {
+                        if entry.missingBytes == 0 {
+                            Text("In use")
+                        } else if isDownloading {
+                            Text("Downloading")
+                        } else {
+                            Text("To download")
+                        }
+                    }
+                    .textStyle(.itemState)
+                    .foregroundStyle(Palette.ink)
+                    .fixedSize()
+                }
+                .accessibilityElement(children: .combine)
+            } else {
+                Button("Delete…", action: delete)
+                    .buttonStyle(WindowButtonStyle(kind: .danger))
+                    .disabled(isBusy)
+                    .accessibilityLabel(Text("Delete \(entry.displayName)…"))
+            }
+        })
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "Language model of the Standard tier · 5.18 GB", "Voice · 1.67 GB"; "· incomplete" for another tier's model whose
+    /// download did not end (the tier's own says it on the right).
+    private var sub: Text {
+        var parts = [Self.purpose(entry), Text(verbatim: Units.bytes(entry.bytes))]
+        if entry.missingBytes > 0, !entry.inUse { parts.append(Text("incomplete")) }
+        // No-break spaces around the dot: a line never starts with it.
+        return parts.dropFirst().reduce(parts[0]) { $0 + Text(verbatim: "\u{00A0}·\u{00A0}") + $1 }
+    }
+
+    static func purpose(_ entry: ModelStorage.Model) -> Text {
+        if entry.role == .languageModel, let tier = tier(of: entry) {
+            return Text("Language model of the \(Text(tierName(tier))) tier")
+        }
+        return Text(StateText.role(entry.role))
+    }
+
+    /// The tier whose language model it is.
+    static func tier(of entry: ModelStorage.Model) -> HardwareTier? {
+        HardwareTier.selectable.first { ModelCatalog.languageModel(for: $0)?.id == entry.id }
+    }
+
+    /// The tier's name, without the memory it suits (which would read like the model's size).
+    static func tierName(_ tier: HardwareTier) -> LocalizedStringKey {
+        switch tier {
+        case .unsupported: "Not supported"
+        case .minimum: "Minimum"
+        case .standard: "Standard"
+        case .comfort: "Comfort"
+        case .max: "Maximum"
+        }
+    }
+
+    /// The colour and icon of the first-launch screen's rows: blue for speech recognition, coral for the voice, sun for
+    /// the language model.
+    private static func disc(_ role: ModelRole) -> FamilyDisc {
+        switch role {
+        case .speechRecognition: FamilyDisc(icon: .microphone, color: Palette.azureSoft)
+        case .voice: FamilyDisc(icon: .speaker, color: Palette.coralSoft)
+        case .languageModel: FamilyDisc(icon: .sparkles, color: Palette.sunSoft)
+        }
+    }
+}
+
+extension ModelStorage {
+    /// The tiers whose models are all on this Mac: choosing one downloads nothing.
+    var tiersOnThisMac: Set<HardwareTier> {
+        Set(HardwareTier.selectable.filter { hasComplete(ModelCatalog.packs(for: $0)) })
+    }
+
+    /// What choosing `tier` would download, partial downloads counted for what they hold.
+    func bytesToDownload(for tier: HardwareTier) -> Int64 {
+        ModelCatalog.packs(for: tier).reduce(0) { total, pack in
+            total + (models.first { $0.id == pack.id }?.missingBytes ?? pack.totalBytes)
+        }
     }
 }
 
@@ -114,7 +211,41 @@ struct ChangeTierSheet: View {
     private var message: String {
         let tier = choice.tier ?? model.recommendedTier ?? .comfort
         guard let pack = ModelCatalog.languageModel(for: tier) else { return "" }
-        return String(localized: "The assistant will restart with \(pack.displayName). If it is not on this Mac yet, it will have to be downloaded (\(Units.bytes(pack.totalBytes))).")
+        guard let storage = model.storage else {
+            return String(localized: "The assistant will restart with \(pack.displayName). If it is not on this Mac yet, it will have to be downloaded (\(Units.bytes(pack.totalBytes))).")
+        }
+        if storage.tiersOnThisMac.contains(tier) {
+            return String(localized: "The assistant will restart with \(pack.displayName), already on this Mac.")
+        }
+        return String(localized: "The assistant will restart with \(pack.displayName). It has to be downloaded first (\(Units.bytes(storage.bytesToDownload(for: tier)))).")
+    }
+}
+
+/// "Delete Gemma 4 E4B?": one model of another tier, which that tier downloads again when it is chosen.
+struct DeleteModelSheet: View {
+    @Bindable var model: AssistantModel
+    let navigation: SettingsNavigation
+    let entry: ModelStorage.Model
+
+    var body: some View {
+        SheetCard(width: 460, title: Text("Delete \(entry.displayName)?"), text: text) {
+            EmptyView()
+        } footer: {
+            Button("Cancel") { navigation.sheet = nil }
+                .buttonStyle(WindowButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Button("Delete") {
+                navigation.sheet = nil
+                model.deleteModel(entry.id)
+            }
+            .buttonStyle(WindowButtonStyle(kind: .solidDanger))
+        }
+    }
+
+    private var text: Text {
+        let size = Units.bytes(entry.bytes)
+        guard let tier = ModelItem.tier(of: entry) else { return Text("This frees \(size) on this Mac.") }
+        return Text("This frees \(size) on this Mac. If you choose the \(Text(ModelItem.tierName(tier))) tier later, it will be downloaded again.")
     }
 }
 

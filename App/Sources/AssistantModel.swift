@@ -100,9 +100,17 @@ final class AssistantModel {
         }
     }
 
-    /// The global shortcut (⌥ Space) is registered: macOS 15.0 and 15.1 refuse it. The window and the settings only
-    /// mention it then.
+    /// The global shortcut to talk from another app: ⌥ Space, or the one the user recorded in Settings › Voice and sound
+    /// (`DesktopPresence.setTalkShortcut`, which saves it).
+    var talkShortcut = TalkShortcut.saved
+
+    /// The global shortcut is registered: macOS 15.0 and 15.1 refuse ⌥ Space, and another app may hold the one the user
+    /// recorded. The window and the capsule only mention it then; the settings say why it does not work.
     var hasTalkShortcut = false
+    /// Why the shortcut does not work, or why the one just pressed while recording another could not replace it.
+    var talkShortcutRefusal: TalkShortcut.Refusal?
+    /// Settings › Voice and sound records another shortcut: the current one is set aside meanwhile.
+    var isRecordingTalkShortcut = false
 
     /// The settings as the engine gets them: with the window closed, push-to-talk instead of hands-free.
     private var engineSettings: AssistantSettings {
@@ -174,7 +182,7 @@ final class AssistantModel {
         case .downloadModels: downloadModels()
         case .pauseDownload: pauseDownload()
         case .deleteModels: deleteModels()
-        case .deleteUnusedModels: deleteUnusedModels()
+        case .deleteModel(let id): deleteModel(id)
         case .updateSettings(let settings): self.settings = settings
         case .newConversation: newConversation()
         case .talkKey(let pressed): setTalkKey(pressed)
@@ -284,8 +292,9 @@ final class AssistantModel {
         connection.send(.deleteModels)
     }
 
-    func deleteUnusedModels() {
-        connection.send(.deleteUnusedModels)
+    /// Settings › Advanced: one model, by its id (the engine refuses one in use and says what is left in `.storage`).
+    func deleteModel(_ id: String) {
+        connection.send(.deleteModel(id))
     }
 
     // MARK: - Events

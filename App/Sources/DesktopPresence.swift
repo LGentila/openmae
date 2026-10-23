@@ -5,19 +5,20 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// OpenMaé outside its window: the icon in the menu bar, the ⌥ Space shortcut, and the capsule that follows the
-/// conversation when the window is not in front. Closing the window leaves all of them running. In the wake-word mode
-/// it also keeps the Mac awake, so that Maé hears « OK Maé ».
+/// OpenMaé outside its window: the icon in the menu bar, the shortcut to talk (⌥ Space, or the user's own), and the
+/// capsule that follows the conversation when the window is not in front. Closing the window leaves all of them running.
+/// In the wake-word mode it also keeps the Mac awake, so that Maé hears « OK Maé ».
 @MainActor
 final class DesktopPresence {
-    /// The app's presence, for the app delegate (a click on the Dock icon brings the window back).
+    /// The app's presence, for the app delegate (a click on the Dock icon brings the window back) and for Settings ›
+    /// Voice and sound, which records another shortcut.
     private(set) static weak var current: DesktopPresence?
 
     private let model: AssistantModel
     private let phone: PhoneAccess
     private var icon: MenuBarIcon?
     private var capsule: CapsuleController?
-    /// ⌥ Space: talk, then finish.
+    /// `model.talkShortcut`: talk, then finish. Set aside while the settings record another one.
     private var talkShortcut: GlobalShortcut?
     /// Escape, only while the capsule offers to cancel or interrupt Maé; the rest of the time it belongs to the app
     /// in front.
@@ -50,8 +51,9 @@ final class DesktopPresence {
         #endif
         icon = MenuBarIcon { [weak self] in self?.showMainWindow() }
         capsule = CapsuleController(model: model)
-        talkShortcut = GlobalShortcut(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in self?.talkPressed() }
-        model.hasTalkShortcut = talkShortcut?.register() == true
+        let shortcut = GlobalShortcut(model.talkShortcut) { [weak self] in self?.talkPressed() }
+        talkShortcut = shortcut
+        registered(shortcut, model.talkShortcut)
         escapeShortcut = GlobalShortcut(keyCode: kVK_Escape, modifiers: 0) { [weak self] in self?.model.stopSpeaking() }
 
         // Whether the window is in front: the app becomes active or not, is hidden, the window goes to the Dock.
@@ -123,13 +125,78 @@ final class DesktopPresence {
 
     // MARK: - Following the conversation
 
-    /// ⌥ Space: talk, or finish talking. Before Maé is ready, it brings the window, which says why.
+    /// The shortcut to talk: talk, or finish talking. Before Maé is ready, it brings the window, which says why.
     private func talkPressed() {
         guard model.isReady else {
             showMainWindow()
             return
         }
         model.toggleTalk()
+    }
+
+    // MARK: - The shortcut to talk
+
+    /// Registers `shortcut`'s keys, and tells the model whether macOS took them. ⌥ Space is registered as before
+    /// shortcuts could be recorded; one the user recorded only if no other app holds it, and then for OpenMaé alone.
+    @discardableResult
+    private func registered(_ hotKey: GlobalShortcut, _ shortcut: TalkShortcut) -> Bool {
+        let status = hotKey.register(exclusive: !shortcut.isStandard)
+        model.hasTalkShortcut = status == noErr
+        model.talkShortcutRefusal = status == noErr ? nil
+            : status == OSStatus(eventHotKeyExistsErr) ? .usedByAnotherApp : .refusedByMacOS
+        return status == noErr
+    }
+
+    /// Settings › Voice and sound starts recording a new shortcut: the current one no longer talks meanwhile, so that
+    /// pressing it is recorded too.
+    func beginRecordingTalkShortcut() {
+        talkShortcut?.unregister()
+        model.talkShortcutRefusal = nil
+        model.isRecordingTalkShortcut = true
+    }
+
+    /// The recording is over (Escape, a click, the page left): the current shortcut talks again. What was refused
+    /// meanwhile is no longer said; why the current one does not work, if it does not, is.
+    func endRecordingTalkShortcut() {
+        guard model.isRecordingTalkShortcut else { return }
+        model.isRecordingTalkShortcut = false
+        if let talkShortcut { registered(talkShortcut, model.talkShortcut) }
+    }
+
+    /// Another shortcut recorded, or ⌥ Space again: it replaces the current one at once, is saved, and ends the
+    /// recording. When it cannot (see `TalkShortcut.Refusal`), the current one stays, the model says why, and the
+    /// recording goes on. Returns whether it was taken.
+    @discardableResult
+    func setTalkShortcut(_ shortcut: TalkShortcut) -> Bool {
+        if shortcut == model.talkShortcut {
+            // The current one pressed while recording: nothing changes. Otherwise it is tried again.
+            if model.isRecordingTalkShortcut {
+                endRecordingTalkShortcut()
+            } else if let talkShortcut, !talkShortcut.isRegistered {
+                registered(talkShortcut, shortcut)
+            }
+            return model.hasTalkShortcut
+        }
+        if let refusal = shortcut.refusal {
+            DebugLog.log("talk shortcut refused: \(refusal)")
+            model.talkShortcutRefusal = refusal
+            return false
+        }
+        let candidate = GlobalShortcut(shortcut) { [weak self] in self?.talkPressed() }
+        let status = candidate.register(exclusive: !shortcut.isStandard)
+        guard status == noErr else {
+            model.talkShortcutRefusal = status == OSStatus(eventHotKeyExistsErr) ? .usedByAnotherApp : .refusedByMacOS
+            return false
+        }
+        talkShortcut?.unregister()
+        talkShortcut = candidate
+        shortcut.save()
+        DebugLog.log("talk shortcut: key \(shortcut.keyCode), modifiers \(shortcut.carbonModifiers)")
+        model.talkShortcut = shortcut
+        model.hasTalkShortcut = true
+        model.talkShortcutRefusal = nil
+        model.isRecordingTalkShortcut = false
+        return true
     }
 
     /// Runs `update` again whenever what it reads in the model changes.
@@ -173,7 +240,8 @@ final class DesktopPresence {
     /// Lets a test script press the shortcuts, move the window and take pictures of the capsule and of the menu bar
     /// icon (see DebugTools.swift):
     ///
-    ///   "OpenMaeDebugShortcut"  "option-space" or "escape", as if pressed (escape only works when it would)
+    ///   "OpenMaeDebugShortcut"  "option-space" (the shortcut to talk, whichever it is) or "escape", as if pressed (escape
+    ///                           only works when it would)
     ///   "OpenMaeDebugWindow"    "close", "show" or "hide" (⌘H)
     ///   "OpenMaeDebugCapsule"   a file path: picture of the capsule's panel as the screen shows it (PNG)
     ///   "OpenMaeDebugMenuBar"   a file path: picture of the menu bar icon (PNG), on a dark and a light bar, and

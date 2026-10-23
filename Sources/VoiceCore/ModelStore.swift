@@ -62,16 +62,29 @@ public struct ModelStore: Sendable {
         Self.allocatedSize(of: root)
     }
 
-    /// Models present on disk (even partly) that `packs` do not use: the language model of another tier.
-    public func unusedPacks(keeping packs: [ModelPack]) -> [ModelPack] {
-        ModelCatalog.all.filter { candidate in
-            !packs.contains { $0.id == candidate.id }
-                && FileManager.default.fileExists(atPath: folder(candidate).path)
+    /// The models of `catalog` on disk, even partly: their folder, or a partial download of one of their files.
+    public func presentPacks(of catalog: [ModelPack] = ModelCatalog.all) -> [ModelPack] {
+        catalog.filter { pack in
+            FileManager.default.fileExists(atPath: folder(pack).path)
+                || pack.files.contains { FileManager.default.fileExists(atPath: partialLocation($0).path) }
         }
     }
 
+    /// Space taken by one model: its folder and its partial downloads.
     public func usedBytes(_ pack: ModelPack) -> Int64 {
-        Self.allocatedSize(of: folder(pack))
+        Self.allocatedSize(of: folder(pack)) + pack.files.reduce(0) { $0 + Self.allocatedSize(ofFile: partialLocation($1)) }
+    }
+
+    /// What Settings › Advanced shows: the total, and each model of `catalog` on disk. `inUse`: the ids of the models
+    /// that cannot be deleted on their own (the tier's, those the engine has loaded).
+    public func storage(inUse: Set<String>, catalog: [ModelPack] = ModelCatalog.all) -> ModelStorage {
+        ModelStorage(
+            usedBytes: usedBytes(),
+            models: presentPacks(of: catalog).map { pack in
+                ModelStorage.Model(id: pack.id, role: pack.role, displayName: pack.displayName, bytes: usedBytes(pack),
+                                   missingBytes: bytesToDownload([pack]), inUse: inUse.contains(pack.id))
+            },
+            folder: root.path)
     }
 
     /// Free space for the models, in bytes. "Important usage" counts the space macOS can free on demand
@@ -94,8 +107,28 @@ public struct ModelStore: Sendable {
 
     // MARK: - Deleting
 
+    /// A path that would leave the models folder: nothing is deleted.
+    public struct OutsideModelsFolder: Error, Equatable {
+        public let name: String
+    }
+
+    /// Deletes one model: its folder and its partial downloads, and nothing else. A pack whose id, or one of whose
+    /// files' fingerprints, is not a plain name of the models folder ("", "..", a path) is refused before anything is
+    /// deleted.
     public func delete(_ pack: ModelPack) throws {
+        for name in [pack.id] + pack.files.map(\.sha256) where !Self.isPlainName(name) {
+            throw OutsideModelsFolder(name: name)
+        }
         try Self.removeIfPresent(folder(pack))
+        for file in pack.files {
+            try Self.removeIfPresent(partialLocation(file))
+        }
+    }
+
+    /// One entry of a folder, by itself: not empty, not "." or "..", no separator, not hidden.
+    static func isPlainName(_ name: String) -> Bool {
+        !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\\") && !name.contains(":")
+            && name.rangeOfCharacter(from: .controlCharacters) == nil
     }
 
     /// Deletes every model and every partial download.
@@ -137,6 +170,12 @@ public struct ModelStore: Sendable {
             total += Int64(values.totalFileAllocatedSize ?? 0)
         }
         return total
+    }
+
+    static func allocatedSize(ofFile url: URL) -> Int64 {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { return 0 }
+        return Int64(values.totalFileAllocatedSize ?? 0)
     }
 
     static func removeIfPresent(_ url: URL) throws {

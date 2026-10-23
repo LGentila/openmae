@@ -29,23 +29,35 @@ final class GlobalShortcut {
         Self.nextID += 1
     }
 
+    /// The shortcut to talk (`TalkShortcut`).
+    convenience init(_ shortcut: TalkShortcut, action: @escaping () -> Void) {
+        self.init(keyCode: Int(shortcut.keyCode), modifiers: shortcut.carbonModifiers, action: action)
+    }
+
     var isRegistered: Bool { hotKey != nil }
 
     /// Returns false when macOS refuses the shortcut.
     @discardableResult
     func register() -> Bool {
-        guard hotKey == nil else { return true }
+        register(exclusive: false) == noErr
+    }
+
+    /// `exclusive`: refused (`eventHotKeyExistsErr`) when another app already registered the same keys, and only this
+    /// app gets them once registered. Returns macOS's answer, `noErr` once registered.
+    func register(exclusive: Bool) -> OSStatus {
+        guard hotKey == nil else { return noErr }
         Self.installHandler()
         var reference: EventHotKeyRef?
         let status = RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: Self.signature, id: id),
-                                         GetApplicationEventTarget(), 0, &reference)
+                                         GetApplicationEventTarget(), exclusive ? OptionBits(kEventHotKeyExclusive) : 0,
+                                         &reference)
         guard status == noErr, let reference else {
             DebugLog.log("shortcut refused by macOS: key \(keyCode), modifiers \(modifiers), status \(status)")
-            return false
+            return status == noErr ? OSStatus(eventHotKeyInvalidErr) : status
         }
         hotKey = reference
         Self.registered[id] = self
-        return true
+        return noErr
     }
 
     func unregister() {

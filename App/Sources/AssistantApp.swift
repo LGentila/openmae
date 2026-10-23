@@ -5,7 +5,7 @@ import VoiceCore
 import VoiceEngineApple
 
 /// The app: one window, the engine running in the same process, and, outside the window, an icon in the menu bar,
-/// the ⌥ Space shortcut and the capsule (DesktopPresence.swift).
+/// the shortcut to talk (⌥ Space by default) and the capsule (DesktopPresence.swift).
 ///
 /// This is the ONLY file of the interface that knows the engine's implementation (`AssistantHost`).
 /// Everything else talks to an `AssistantConnection` through commands and events, so the engine can be
@@ -136,7 +136,7 @@ struct AssistantApp: App {
         // The settings: a window with a sidebar (⌘ , or "All settings…" of the quick panel).
         Window("Settings", id: SettingsNavigation.windowID) {
             SettingsWindowView(model: model, navigation: navigation, tools: tools)
-                .frame(minWidth: 820, minHeight: 560)
+                .frame(minWidth: SettingsWindowView.minimumWidth, minHeight: 560)
                 .environment(phone)
                 .environment(inbound)
                 .environment(relays)
