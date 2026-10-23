@@ -114,6 +114,7 @@ public actor MemoryCalendar: ToolProvider {
             let item = Item(isEvent: true, title: title, date: times.start, end: times.end, hasTime: !times.allDay,
                             place: call.text("lieu"), collection: calendar)
             if let already = alreadyThere(item, context) { return already }
+            if let moved = try await movedInstead(item, context) { return moved }
             eventCount += 1
             let reference = "e\(eventCount)"
             let sayCalendar = named != nil || !calendarNamed
@@ -129,6 +130,7 @@ public actor MemoryCalendar: ToolProvider {
             let list = try collection(named, event: false, context)
             let item = Item(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false, collection: list)
             if let already = alreadyThere(item, context) { return already }
+            if let moved = try await movedInstead(item, context) { return moved }
             reminderCount += 1
             let reference = "r\(reminderCount)"
             return created(item, reference, spoken: ActionPhrases.reminderCreated(
@@ -240,6 +242,19 @@ public actor MemoryCalendar: ToolProvider {
         lastCreated = reference
         return ActionCatalog.alreadyThere(existing, described: describe(existing, reference: reference, context),
                                           collectionName: existing.collection, context: context)
+    }
+
+    /// As in the app: the creation of an item created earlier in this conversation, in another calendar or list that the
+    /// user's sentence of this turn names without asking for a copy (`ActionCatalog.moved`), moves that item there, as a
+    /// change that names it would; the model gets the item, as the last item created (`ActionCatalog.movedNotCreated`).
+    private func movedInstead(_ item: Item, _ context: ToolContext) async throws -> ToolOutcome? {
+        guard let (reference, _) = ActionCatalog.moved(item, collectionName: item.collection, among: items,
+                                                       names: item.isEvent ? calendars : lists, context: context)
+        else { return nil }
+        let move = try await carryOut(ActionCatalog.moveCall(reference, event: item.isEvent, to: item.collection),
+                                      context: context)
+        lastCreated = reference
+        return ActionCatalog.movedNotCreated(move)
     }
 
     private func created(_ item: Item, _ reference: String, spoken: String, _ context: ToolContext) -> ToolOutcome {

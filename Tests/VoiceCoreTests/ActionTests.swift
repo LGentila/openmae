@@ -2490,6 +2490,105 @@ struct RepeatedCreationTests {
         #expect(await calendar.creations.suffix(3) == ["r1", "r2", "r3"])
     }
 
+    /// A creation that repeats an item in all but its calendar or list, in the one the user's sentence of this turn names
+    /// without asking for a copy: that item, which the provider moves there. Anything else: another item, saved as before.
+    @Test func aCreationInAnotherCalendarTheUserNamesIsAMove() {
+        let names = ["Travail", "Maison"]
+        var inHome = meeting
+        inHome.collection = "Maison"
+        inHome.title = "réunion"
+        func moved(_ new: ActionCatalog.SavedItem, _ said: [String], names: [String] = names,
+                   among items: [String: ActionCatalog.SavedItem]? = nil) -> String? {
+            ActionCatalog.moved(new, collectionName: new.collection, among: items ?? ["e1": meeting, "r1": bread],
+                                names: names, context: ToolContext(now: now, timeZone: paris, language: .french,
+                                                                   userSaid: said))?.reference
+        }
+        let request = "Mets la réunion dans mon calendrier Maison."
+        #expect(moved(inHome, [request]) == "e1")
+        #expect(moved(inHome, ["Mets-la dans l'agenda maison."]) == "e1")
+        #expect(moved(inHome, [request], among: ["e1": meeting, "e2": inHome]) == "e1")  // not the one already there
+        #expect(moved(inHome, [request], among: ["e1": meeting, "e3": meeting]) == "e3")  // the latest
+        // A copy asked for, another calendar or none named, an earlier sentence, none (one of several actions).
+        for said in [["Ajoute-la aussi dans mon calendrier Maison."], ["Copie la réunion dans mon calendrier Maison."],
+                     ["Mets-la en plus dans mon calendrier Maison."], ["Mets la réunion dans mon calendrier Travail."],
+                     ["Mets-la dans Maison."], ["D'accord.", request], []] {
+            #expect(moved(inHome, said) == nil, "\(said)")
+        }
+        // Another title, moment, length or place, or the item's own calendar (`repeated`): not a move.
+        func other(_ change: (inout ActionCatalog.SavedItem) -> Void) -> ActionCatalog.SavedItem {
+            var item = inHome
+            change(&item)
+            return item
+        }
+        for new in [other { $0.title = "Réunion d'équipe" }, other { $0.date = date("2026-10-16T11:00") },
+                    other { $0.end = date("2026-10-16T12:00") }, other { $0.place = "Salle 3" },
+                    other { $0.collection = "Travail" }] {
+            #expect(moved(new, [request]) == nil, "\(new)")
+        }
+        // A reminder and a list.
+        var groceries = bread
+        groceries.collection = "Courses"
+        #expect(moved(groceries, ["Mets-le dans ma liste de courses."], names: ["Rappels", "Courses"]) == "r1")
+        #expect(moved(groceries, ["Ajoute-le aussi à ma liste de courses."], names: ["Rappels", "Courses"]) == nil)
+        #expect(ActionCatalog.asksForACopy("Put it in my Home calendar as well.")
+                && ActionCatalog.asksForACopy("Add it to my Home calendar too.")
+                && !ActionCatalog.asksForACopy("Move it to my Home calendar."))
+    }
+
+    /// voice-cli's calendar in memory, as the app's, through the runner as dialogue-bench uses it: the meeting's creation
+    /// written again in « Maison » for « Mets la réunion dans mon calendrier Maison. », as Gemma 4 E2B wrote it, moves the
+    /// meeting there instead of saving a second one; the model gets it, e1, which « dernier » then is; « annule » puts it
+    /// back. Written again without the calendar, the one the user names: the same. Asked for a copy (« aussi »), or at
+    /// another moment: another meeting, as before. The same for a reminder and a list.
+    @Test func memoryCalendarMovesAnItemCreatedAgainWhereTheUserSays() async throws {
+        let calendar = MemoryCalendar(movingItems: false)
+        await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        func said(_ sentences: String...) -> ToolContext {
+            ToolContext(now: now, timeZone: paris, language: .french, userSaid: sentences)
+        }
+        let request = "Ajoute une réunion demain à 10 h."
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(await runner.handle(meeting, context: said(request)).forModel["calendrier"] == "Travail")
+        let bread = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain"])
+        #expect(await runner.handle(bread, context: said("Rappelle-moi d'acheter du pain.")).forModel["id"] == "r1")
+        let inHome = ToolCall(name: "creer_evenement",
+                              arguments: ["calendrier": "Maison", "quand": "demain à 10 h", "titre": "Réunion"])
+        let moved = await runner.handle(inHome, context: said("Mets la réunion dans mon calendrier Maison.", request))
+        #expect(moved.refusal == nil && moved.confirms)
+        #expect(moved.spoken
+                == "C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(moved.forModel == ["id": "e1", "titre": "Réunion", "debut": "2026-10-16T10:00", "fin": "2026-10-16T11:00",
+                                   "calendrier": "Maison", "statut": .string(ActionCatalog.alreadyCreatedMoved)])
+        #expect(await calendar.creations == ["e1", "r1"])
+        #expect(await calendar.touched == ["Réunion"])
+        let later = await runner.handle(ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "quand": "à 11 h"]),
+                                        context: said("Décale-la à 11 h."))
+        #expect(later.forModel["id"] == "e1" && later.forModel["calendrier"] == "Maison"
+                && later.forModel["debut"] == "2026-10-16T11:00")
+        let at = now.addingTimeInterval(30)
+        #expect(await runner.interception(for: "Annule", now: at) == .undo)
+        #expect(await runner.resolve(.undo, context: context(at: at))?.spoken == ActionPhrases.undone(.change, .french))
+        let again = ToolCall(name: "creer_evenement", arguments: ["quand": "demain à 10 h", "titre": "réunion"])
+        let back = await runner.handle(again, context: said("Mets la réunion dans mon calendrier Travail.", request))
+        #expect(back.spoken.hasPrefix("C’est déplacé dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, "))
+        #expect(back.forModel["id"] == "e1")
+        // A copy asked for, or another moment: another meeting, as before.
+        let copy = await runner.handle(inHome, context: said("Ajoute-la aussi dans mon calendrier Maison.", request))
+        #expect(copy.forModel["id"] == "e2" && copy.spoken.hasPrefix("C’est dans ton calendrier «\(nb)Maison\(nb)»"))
+        let other = ToolCall(name: "creer_evenement",
+                             arguments: ["calendrier": "Maison", "quand": "demain à 11 h", "titre": "Réunion"])
+        #expect(await runner.handle(other, context: said("Mets-la à 11 h dans mon calendrier Maison.")).forModel["id"] == "e3")
+
+        let toGroceries = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain", "liste": "Courses"])
+        let list = await runner.handle(toGroceries, context: said("Mets-le dans ma liste de courses."))
+        #expect(list.spoken == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain.")
+        #expect(list.forModel["id"] == "r1" && list.forModel["liste"] == "Courses")
+        #expect(await calendar.creations == ["e1", "r1", "e2", "e3"])
+        #expect(await calendar.touched == ["Réunion", "Réunion", "Réunion", "acheter du pain"])
+    }
+
     /// The model got the item as its call's result: « dernier » is that item now, not one created after it. A deleted
     /// item is not there any more: its creation saves it again.
     @Test func theItemAlreadyThereIsTheLastOne() async throws {

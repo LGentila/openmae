@@ -421,10 +421,61 @@ public enum ActionCatalog {
     public static func repeated(_ new: SavedItem, among items: [String: SavedItem], calendar: Calendar)
         -> (reference: String, item: SavedItem)?
     {
+        latest(items.filter { repeats(new, $0.value, calendar: calendar) })
+    }
+
+    /// The latest created of `items`, by their reference ("e1", "r2").
+    private static func latest(_ items: [String: SavedItem]) -> (reference: String, item: SavedItem)? {
         func rank(_ reference: String) -> Int { Int(reference.dropFirst()) ?? 0 }
-        return items.filter { repeats(new, $0.value, calendar: calendar) }
-            .max { rank($0.key) != rank($1.key) ? rank($0.key) < rank($1.key) : $0.key < $1.key }
+        return items.max { rank($0.key) != rank($1.key) ? rank($0.key) < rank($1.key) : $0.key < $1.key }
             .map { (reference: $0.key, item: $0.value) }
+    }
+
+    /// The item created earlier in this conversation that a creation, `new` as it would be saved, puts in another
+    /// calendar or list: the creation repeats it in all but that (`repeats`), and the user's sentence of this turn names
+    /// the creation's calendar or list (`collectionName`, its name as the user knows it, found among `names`, those an item
+    /// of its kind can go in: `collectionSaid`) without asking for a copy (`asksForACopy`). The provider then moves that
+    /// item there, as a change that names the calendar or the list would (`moveCall`), instead of saving a second one. nil
+    /// otherwise: the creation is another item, saved as before, a copy when the user asks for one (« Ajoute-la aussi dans
+    /// mon calendrier Famille. ») or does not name that calendar.
+    ///
+    /// Asked « Mets la réunion dans mon calendrier Maison. » of a meeting just saved in « Travail », Gemma 4 E2B, whose
+    /// change offers no calendar (`movesItems(on:)`), wrote the meeting's creation again in « Maison » in 11 runs of 30 of
+    /// voice-cli dialogue-bench on 2026-10-23: the app saved a second meeting there and left the first in « Travail ».
+    public static func moved(_ new: SavedItem, collectionName: String, among items: [String: SavedItem], names: [String],
+                             context: ToolContext) -> (reference: String, item: SavedItem)?
+    {
+        guard let sentence = context.userSaid.first, !asksForACopy(sentence),
+              let index = collectionSaid(in: sentence, event: new.isEvent, among: names),
+              folded(names[index]) == folded(collectionName)
+        else { return nil }
+        return latest(items.filter { _, item in
+            var there = new
+            there.collection = item.collection
+            return item.collection != new.collection && repeats(there, item, calendar: context.calendar)
+        })
+    }
+
+    /// The change that moves the item `reference` (an event, `event`, or a reminder) to the calendar or the list of that
+    /// name, for a creation that puts it there (`moved`): the provider carries it out as any change.
+    public static func moveCall(_ reference: String, event: Bool, to collectionName: String) -> ToolCall {
+        ToolCall(name: changeItem.name,
+                 arguments: ["reference": .string(reference), (event ? "calendrier" : "liste"): .string(collectionName)])
+    }
+
+    /// Told the model, in the result of a creation that moved an item instead (`moved`).
+    static let alreadyCreatedMoved = "Déjà créé plus haut dans cette conversation : déplacé là, pas créé une deuxième fois."
+
+    /// What a creation that moved an item instead gives (`moved`): the move's outcome (« C’est déplacé dans ton calendrier
+    /// « Maison » : … », and « annule » puts the item back), the model reading the item with its id, and that it was not
+    /// created again, so that the next turn refers to it.
+    public static func movedNotCreated(_ move: ToolOutcome) -> ToolOutcome {
+        var outcome = move
+        if case .object(var fields) = move.forModel {
+            fields["statut"] = .string(alreadyCreatedMoved)
+            outcome.forModel = .object(fields)
+        }
+        return outcome
     }
 
     /// Told the model, in the result of a creation that repeats an item (`alreadyThere`).
