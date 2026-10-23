@@ -146,10 +146,11 @@ struct SettingsPageScroll<Content: View>: View {
         }
     }
 
+    /// As wide as the window leaves it, never wider: what does not fit wraps or goes under (`SettingRow`, `ActionRow`).
     private var page: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(EdgeInsets(top: 28, leading: 36, bottom: 40, trailing: 36))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -175,23 +176,35 @@ struct PageHead<Trailing: View>: View {
         self.trailing = trailing()
     }
 
+    /// The state or the action on the right of the title; under it when the window is too narrow for both.
     var body: some View {
-        HStack(spacing: 12) {
-            if let back {
-                Button(action: back) { IconView(icon: .back, size: 18) }
-                    .buttonStyle(RoundButtonStyle())
-                    .accessibilityLabel(backLabel)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                start
+                Spacer(minLength: 10)
+                trailing
             }
-            title
-                .textStyle(.pageTitle)
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 10)
-            trailing
+            .frame(minHeight: 44)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) { start }
+                    .frame(minHeight: 44)
+                trailing
+            }
         }
-        .frame(minHeight: 44)
+    }
+
+    @ViewBuilder private var start: some View {
+        if let back {
+            Button(action: back) { IconView(icon: .back, size: 18) }
+                .buttonStyle(RoundButtonStyle())
+                .accessibilityLabel(backLabel)
+        }
+        title
+            .textStyle(.pageTitle)
+            .foregroundStyle(Palette.ink)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -269,7 +282,8 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
-/// A setting: its label (and a line under it), its control on the right. 58 points at least.
+/// A setting: its label (and a line under it), its control on the right. 58 points at least. In a narrow window, the
+/// control goes under the label (`SettingRowLayout`).
 struct SettingRow<Control: View>: View {
     let label: Text
     var sub: Text?
@@ -286,7 +300,7 @@ struct SettingRow<Control: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
+        SettingRowLayout {
             VStack(alignment: .leading, spacing: 0) {
                 label
                     .textBox(.setting)
@@ -299,10 +313,74 @@ struct SettingRow<Control: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 0)
-            control
+            // One view, whatever the control is made of (several views, or none).
+            HStack(spacing: 16) { control }
         }
-        .frame(minHeight: 58)
+    }
+}
+
+/// A setting's label and its control: side by side, the control on the right, both centred on a row of 58 points at
+/// least; or, when the width would leave the label less than `minLabelWidth` (or its own width, if shorter) next to the
+/// control, the control under the label, at its start, and no wider than the row.
+struct SettingRowLayout: Layout {
+    var spacing: CGFloat = 16
+    var minHeight: CGFloat = 58
+    var minLabelWidth: CGFloat = 140
+
+    struct Cache {
+        var label: CGSize
+        var control: CGSize
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(label: subviews.first?.sizeThatFits(.unspecified) ?? .zero,
+              control: subviews.dropFirst().first?.sizeThatFits(.unspecified) ?? .zero)
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
+    private func sideBySide(_ width: CGFloat, _ cache: Cache) -> Bool {
+        cache.control.width + spacing + min(cache.label.width, minLabelWidth) <= width
+    }
+
+    /// Under the label: room above, between and below.
+    private static let stacked = (top: CGFloat(14), gap: CGFloat(10), bottom: CGFloat(14))
+    private var stacked: (top: CGFloat, gap: CGFloat, bottom: CGFloat) { Self.stacked }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        guard let width = proposal.width, width.isFinite else {
+            return CGSize(width: cache.label.width + spacing + cache.control.width,
+                          height: max(minHeight, cache.label.height, cache.control.height))
+        }
+        if sideBySide(width, cache) {
+            let label = subviews[0].sizeThatFits(ProposedViewSize(width: width - spacing - cache.control.width,
+                                                                  height: nil))
+            return CGSize(width: width, height: max(minHeight, label.height, cache.control.height))
+        }
+        let label = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let control = subviews[1].sizeThatFits(ProposedViewSize(width: min(cache.control.width, width), height: nil))
+        return CGSize(width: width, height: stacked.top + label.height + stacked.gap + control.height + stacked.bottom)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        guard subviews.count == 2 else { return }
+        if sideBySide(bounds.width, cache) {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                              proposal: ProposedViewSize(width: bounds.width - spacing - cache.control.width,
+                                                         height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(cache.control))
+        } else {
+            let label = subviews[0].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + stacked.top), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + stacked.top + label.height + stacked.gap),
+                              anchor: .topLeading,
+                              proposal: ProposedViewSize(width: min(cache.control.width, bounds.width), height: nil))
+        }
     }
 }
 
@@ -370,16 +448,70 @@ struct Caption: View {
     }
 }
 
-/// Buttons in a row, under a setting.
+/// Buttons in a row, under a setting; on more lines when the window is too narrow for them.
 struct ActionRow<Content: View>: View {
     var top: CGFloat = -2
     var bottom: CGFloat = 14
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(spacing: 10) { content }
+        FlowLayout(spacing: 10, lineSpacing: 10) { content }
             .padding(.top, top)
             .padding(.bottom, bottom)
+    }
+}
+
+/// Its views in a row, left to right, going on to the next line when the next one would not fit; each centred on its
+/// line. As wide as its views when they fit on one line, as the width given otherwise; a view wider than that alone is
+/// offered that width.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 10
+    var lineSpacing: CGFloat = 10
+
+    private struct Line {
+        var items: [(index: Int, size: CGSize)] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = lines(within: proposal.width, subviews)
+        return CGSize(width: lines.map(\.width).max() ?? 0,
+                      height: lines.reduce(0) { $0 + $1.height } + lineSpacing * CGFloat(max(0, lines.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in lines(within: bounds.width, subviews) {
+            var x = bounds.minX
+            for item in line.items {
+                subviews[item.index].place(at: CGPoint(x: x, y: y + line.height / 2), anchor: .leading,
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
+            }
+            y += line.height + lineSpacing
+        }
+    }
+
+    private func lines(within width: CGFloat?, _ subviews: Subviews) -> [Line] {
+        let available = width.map { max(0, $0) } ?? .infinity
+        var lines: [Line] = []
+        var line = Line()
+        for index in subviews.indices {
+            var size = subviews[index].sizeThatFits(.unspecified)
+            if size.width > available {
+                size = subviews[index].sizeThatFits(ProposedViewSize(width: available, height: nil))
+            }
+            if !line.items.isEmpty, line.width + spacing + size.width > available {
+                lines.append(line)
+                line = Line()
+            }
+            line.width += (line.items.isEmpty ? 0 : spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.items.append((index: index, size: size))
+        }
+        if !line.items.isEmpty { lines.append(line) }
+        return lines
     }
 }
 
@@ -499,7 +631,8 @@ struct FamilyDisc: View {
     }
 }
 
-/// An item of a list (agent, tool, device, source): its disc, name and line, and what is on its right.
+/// An item of a list (agent, tool, device, source): its disc, name and line, and what is on its right (under its words
+/// when the window is too narrow for both, `TrailingLayout`).
 struct ListItem<Name: View, Trailing: View>: View {
     let disc: FamilyDisc
     @ViewBuilder var name: Name
@@ -508,25 +641,96 @@ struct ListItem<Name: View, Trailing: View>: View {
     var isHovered = false
 
     var body: some View {
-        HStack(spacing: 14) {
-            disc
-            VStack(alignment: .leading, spacing: 0) {
-                name
-                    .textBox(.rowTitle)
-                    .foregroundStyle(Palette.ink)
-                    .underline(isHovered, color: Palette.ink.opacity(0.25).color)
-                    .lineLimit(1)
-                if let sub {
-                    sub
-                        .textBox(.rowSub)
-                        .foregroundStyle(Palette.inkMuted)
-                        .lineLimit(2)
+        TrailingLayout(spacing: 8, indent: TrailingLayout.wordsInset) {
+            HStack(spacing: 14) {
+                disc
+                VStack(alignment: .leading, spacing: 0) {
+                    name
+                        .textBox(.rowTitle)
+                        .foregroundStyle(Palette.ink)
+                        .underline(isHovered, color: Palette.ink.opacity(0.25).color)
+                        .lineLimit(1)
+                    if let sub {
+                        sub
+                            .textBox(.rowSub)
+                            .foregroundStyle(Palette.inkMuted)
+                            .lineLimit(2)
+                    }
                 }
             }
-            Spacer(minLength: 8)
-            trailing
+            .frame(minHeight: 72)
+            HStack(spacing: 0) { trailing }
         }
-        .frame(minHeight: 72)
+    }
+}
+
+/// An item's own part and what is on its right (a state, a switch, buttons): side by side, both centred, the item as
+/// wide as the width; or, when the width would leave the item's words less than `minWords` (or their own width, if
+/// shorter), what was on the right goes under them, `indent` points in.
+struct TrailingLayout: Layout {
+    var spacing: CGFloat
+    var indent: CGFloat
+    var minWords: CGFloat = 140
+    var bottom: CGFloat = 14
+
+    /// Where a list item's words start: after its 44-point disc.
+    static let wordsInset: CGFloat = 44 + 14
+
+    struct Cache {
+        var leading: CGSize
+        var trailing: CGSize
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(leading: subviews.first?.sizeThatFits(.unspecified) ?? .zero,
+              trailing: subviews.dropFirst().first?.sizeThatFits(.unspecified) ?? .zero)
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
+    private func gap(_ cache: Cache) -> CGFloat { cache.trailing.width > 0 ? spacing : 0 }
+
+    private func sideBySide(_ width: CGFloat, _ cache: Cache) -> Bool {
+        let words = max(0, cache.leading.width - indent)
+        return cache.trailing.width == 0
+            || indent + min(words, minWords) + gap(cache) + cache.trailing.width <= width
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        guard let width = proposal.width, width.isFinite else {
+            return CGSize(width: cache.leading.width + gap(cache) + cache.trailing.width,
+                          height: max(cache.leading.height, cache.trailing.height))
+        }
+        if sideBySide(width, cache) {
+            let leading = subviews[0].sizeThatFits(ProposedViewSize(width: width - gap(cache) - cache.trailing.width,
+                                                                    height: nil))
+            return CGSize(width: width, height: max(leading.height, cache.trailing.height))
+        }
+        let leading = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let trailing = subviews[1].sizeThatFits(ProposedViewSize(width: min(cache.trailing.width, width - indent),
+                                                                 height: nil))
+        return CGSize(width: width, height: leading.height + trailing.height + bottom)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        guard subviews.count == 2 else { return }
+        if sideBySide(bounds.width, cache) {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                              proposal: ProposedViewSize(width: bounds.width - gap(cache) - cache.trailing.width,
+                                                         height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(cache.trailing))
+        } else {
+            let leading = subviews[0].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.minX + indent, y: bounds.minY + leading.height), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: min(cache.trailing.width, bounds.width - indent),
+                                                         height: nil))
+        }
     }
 }
 
@@ -541,7 +745,7 @@ struct OpeningListItem<Name: View, Trailing: View>: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        TrailingLayout(spacing: 12, indent: TrailingLayout.wordsInset) {
             Button(action: open) {
                 ListItem(disc: disc, name: { name }, sub: sub, trailing: { EmptyView() }, isHovered: isHovered)
                     .contentShape(Rectangle())
@@ -549,7 +753,7 @@ struct OpeningListItem<Name: View, Trailing: View>: View {
             .buttonStyle(.plain)
             .onHover { isHovered = $0 }
             .accessibilityLabel(openLabel)
-            trailing
+            HStack(spacing: 0) { trailing }
         }
     }
 }
@@ -786,7 +990,8 @@ struct WindowSegmented<Value: Hashable>: View {
     }
 }
 
-/// A pop-up menu drawn like the design's: its value in bold and up and down chevrons.
+/// A pop-up menu drawn like the design's: its value in bold and up and down chevrons. As wide as its value; narrower,
+/// with its value cut short, when the window leaves it less.
 struct PopUpMenu<Items: View>: View {
     let title: Text
     var label: Text?
@@ -801,7 +1006,7 @@ struct PopUpMenu<Items: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(label.map { $0 + Text(verbatim: " : ") + title } ?? title)
     }
 }

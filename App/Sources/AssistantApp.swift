@@ -134,7 +134,7 @@ struct AssistantApp: App {
         // The settings: a window with a sidebar (⌘ , or "All settings…" of the quick panel).
         Window("Settings", id: SettingsNavigation.windowID) {
             SettingsWindowView(model: model, navigation: navigation, tools: tools)
-                .frame(minWidth: 820, minHeight: 560)
+                .frame(minWidth: SettingsWindowView.minimumWidth, minHeight: 560)
                 .environment(phone)
                 .environment(inbound)
                 .environment(navigation)

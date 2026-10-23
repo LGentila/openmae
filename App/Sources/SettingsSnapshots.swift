@@ -300,6 +300,18 @@ extension Snapshots {
                           }),
             SettingsScene(name: "RgWeb-retirer-cle", page: .webSearch, settings: search(.brave, key: true),
                           prepare: { navigation, _, _ in navigation.sheet = .removeBraveKey }),
+            // Memory (not in the design): off, then on with its history and a few entries.
+            SettingsScene(name: "RgMemoire-eteinte", page: .memory),
+            SettingsScene(name: "RgMemoire", page: .memory,
+                          events: [.memory(MemoryOverview(entries: ["Allergique aux noix",
+                                                                    "Ma sœur s’appelle Camille et habite à Lyon",
+                                                                    "Le code du portail est dans le carnet bleu"],
+                                                          characters: 112, capacity: 2_000, exchanges: 48,
+                                                          folder: "/Users/me/Library/Application Support/OpenMaé/Memory"))],
+                          settings: { s in
+                              s.memory.enabled = true
+                              s.memory.journal = true
+                          }),
             // Connected tools (drawn, greyed in the sidebar)
             SettingsScene(name: "RgMcp", page: .tools, tools: tools),
             SettingsScene(name: "RgMcpVide", page: .tools),
@@ -388,7 +400,9 @@ extension Snapshots {
                           prepare: { navigation, _, _ in navigation.sheet = .changeTier(.forced(.standard)) }),
         ]
 
-        for scene in scenes {
+        // Each scene at the window's first width, then at its narrowest (…-etroit).
+        let widths: [(width: CGFloat, suffix: String)] = [(960, ""), (SettingsWindowView.minimumWidth, "-etroit")]
+        for (scene, size) in scenes.flatMap({ scene in widths.map { (scene, $0) } }) {
             let events = scene.startsReady ? ready + scene.events : scene.events
             let model = AssistantModel(connection: ScriptedConnection(events))
             model.hasTalkShortcut = true
@@ -416,9 +430,9 @@ extension Snapshots {
                 .environment(\.unscrolledPages, true)
                 .environment(\.stillFrame, 1.7)
                 .preferredColorScheme(.light)
-            let height = max(scene.minHeight, NSHostingView(rootView: view.frame(width: 960)).fittingSize.height)
-            await save(view, size: CGSize(width: 960, height: height.rounded(.up)),
-                       to: folder.appending(path: scene.name + ".png"))
+            let height = max(scene.minHeight, NSHostingView(rootView: view.frame(width: size.width)).fittingSize.height)
+            await save(view, size: CGSize(width: size.width, height: height.rounded(.up)),
+                       to: folder.appending(path: scene.name + size.suffix + ".png"))
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
 

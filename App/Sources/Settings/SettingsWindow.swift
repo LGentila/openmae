@@ -54,11 +54,16 @@ struct SettingsWindowView: View {
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
     @Environment(InboundAccess.self) private var inbound: InboundAccess?
 
+    /// The narrowest the window gets: half of a 1512-point screen, with room to spare. Every page fits in it.
+    static let minimumWidth: CGFloat = 720
+
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(model: model, navigation: navigation, tools: tools)
+            // Never wider than what the sidebar leaves: a page too wide for it would push the whole window's content
+            // out on both sides.
             page
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .id(pageIdentity)
         }
         .background(StatePalette(.listening).surface)
