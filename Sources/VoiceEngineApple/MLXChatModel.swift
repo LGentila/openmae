@@ -783,9 +783,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// the other. Computing the history ahead left 1.8 to 3.1 GB of them with Gemma 4 26B on the reference Mac (a request
     /// leaves about 0.1 GB), most often all compressed by the next request (requests 30 to 150 s apart in `voice-cli
     /// conversation`, the usual apps open): one read its 42 new tokens in 5.77 s, the weights and the cache all in RAM, and
-    /// the others 44 to 63 tokens in 0.78 to 1.02 s, against 0.42 s for the one that found none compressed. The next
-    /// computation gets new buffers instead: in the same conversation, every request but the first read its new tokens in
-    /// 0.42 to 0.47 s, and the process's footprint between requests went down from 18.3–19.6 GB to 16.2–16.6 GB.
+    /// the five others that found them compressed 44 to 63 tokens in 0.78 to 1.02 s, against 0.42 and 0.62 s for the two
+    /// that found nothing compressed. The next computation gets new buffers instead: with the same requests, every one but
+    /// the first after launch read its new tokens in 0.42 to 0.47 s, and the process's footprint between requests went
+    /// down from 18.3–19.6 GB to 16.2–16.6 GB.
     private func releaseFreeBuffers() {
         let kept = Memory.cacheMemory
         guard kept > Self.idleBuffers else { return }
