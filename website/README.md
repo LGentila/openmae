@@ -71,4 +71,5 @@ docker run --rm -p 8080:8080 openmae-website
 
 Put it behind a reverse proxy that terminates TLS for openmae.com. `nginx.conf` sends a strict
 Content-Security-Policy (no inline script or style, no other origin but a.openmae.com, none at all on `/p`): keep the
-pages that way.
+pages that way. Pages, styles and scripts go out with `Cache-Control: no-cache`, since their names carry no version:
+browsers and a CDN check them again at each visit, so a deployment shows at once. Only the fonts are cached for a year.
