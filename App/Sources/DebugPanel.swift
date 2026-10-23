@@ -154,7 +154,7 @@ struct DebugPanel: View {
     // MARK: - Helpers
 
     private func count(_ value: Int?) -> String {
-        value.map { $0.formatted() } ?? "—"
+        value.map(Units.count) ?? "—"
     }
 
     private func latencyColor(_ ms: Double?) -> Color {

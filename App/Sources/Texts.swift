@@ -65,53 +65,62 @@ enum StateText {
 }
 
 /// Numbers with their unit, in the user's language ("1,24 s" in French, "1.24 s" in English).
+///
+/// French formats put a narrow no-break space (U+202F) between thousands and before the unit ("1 200", "17,53 Go").
+/// Figtree has no such space: the Mac borrows a thinner one from another font (none at all at light weights), where
+/// the design and the app's French texts have the no-break space (U+00A0). Every value goes through `shown`, which
+/// puts that one in its place.
 enum Units {
     static func milliseconds(_ value: Double?) -> String {
         guard let value else { return "—" }
-        return Measurement(value: value.rounded(), unit: UnitDuration.milliseconds)
-            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(0))))
+        return shown(Measurement(value: value.rounded(), unit: UnitDuration.milliseconds)
+            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(0)))))
     }
 
     static func seconds(fromMilliseconds value: Double?) -> String {
         guard let value else { return "—" }
-        return Measurement(value: value / 1000, unit: UnitDuration.seconds)
-            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(2))))
+        return shown(Measurement(value: value / 1000, unit: UnitDuration.seconds)
+            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(2)))))
     }
 
     static func gigabytes(_ value: Double?) -> String {
         guard let value, value >= 0 else { return "—" }
-        return Measurement(value: value, unit: UnitInformationStorage.gigabytes)
+        return shown(Measurement(value: value, unit: UnitInformationStorage.gigabytes)
             .formatted(.measurement(width: .abbreviated, usage: .asProvided,
-                                    numberFormatStyle: .number.precision(.fractionLength(1))))
+                                    numberFormatStyle: .number.precision(.fractionLength(1)))))
     }
 
     /// Memory of the Mac: "32 Go".
     static func memory(_ gibibytes: Double) -> String {
-        Measurement(value: gibibytes.rounded(), unit: UnitInformationStorage.gigabytes)
+        shown(Measurement(value: gibibytes.rounded(), unit: UnitInformationStorage.gigabytes)
             .formatted(.measurement(width: .abbreviated, usage: .asProvided,
-                                    numberFormatStyle: .number.precision(.fractionLength(0))))
+                                    numberFormatStyle: .number.precision(.fractionLength(0)))))
     }
 
     /// "17,5 Go" (decimal units, like the Finder).
     static func bytes(_ value: Int64?) -> String {
         guard let value else { return "—" }
-        return value.formatted(.byteCount(style: .file))
+        return shown(value.formatted(.byteCount(style: .file)))
     }
 
-    /// "1 200": a count, grouped as the Mac's region says. French groups with a narrow no-break space (U+202F), which
-    /// Figtree doesn't have (it would draw "1200"): the no-break space of the app's French texts takes its place.
+    /// "1 200": a count, grouped as the Mac's region says.
     static func count(_ value: Int) -> String {
-        value.formatted(.number).replacingOccurrences(of: "\u{202F}", with: "\u{00A0}")
+        shown(value.formatted(.number))
     }
 
     /// "46 %": a share, rounded down (100 % only when it is complete).
     static func percent(_ fraction: Double) -> String {
-        ((fraction * 100).rounded(.down) / 100).formatted(.percent.precision(.fractionLength(0)))
+        shown(((fraction * 100).rounded(.down) / 100).formatted(.percent.precision(.fractionLength(0))))
     }
 
     static func kilohertz(_ hertz: Double?) -> String {
         guard let hertz else { return "—" }
-        return Measurement(value: hertz / 1000, unit: UnitFrequency.kilohertz)
-            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(0...1))))
+        return shown(Measurement(value: hertz / 1000, unit: UnitFrequency.kilohertz)
+            .formatted(.measurement(width: .abbreviated, numberFormatStyle: .number.precision(.fractionLength(0...1)))))
+    }
+
+    /// A formatted value with the no-break space of the design (U+00A0) where Foundation puts a narrow one (U+202F).
+    private static func shown(_ formatted: String) -> String {
+        formatted.replacingOccurrences(of: "\u{202F}", with: "\u{00A0}")
     }
 }
