@@ -192,6 +192,17 @@ public enum AgentPhrases {
                 reason + denials)
     }
 
+    /// For the conversation's history, with the user's next message (`Conversation.noteForNextMessage`): a task ended on
+    /// its own and its notification told the user, so the model no longer takes it for one still running. Written for the
+    /// model, in French like the other notes (a timer's, received information's), whatever the conversation's language.
+    /// Its state only, never the agent's words: they come from outside, and the calls the model writes after the user's
+    /// message are carried out; etat_taches gives them, to be summed up without any call carried out.
+    public static func historyNote(for task: AgentTask) -> String {
+        let ending = task.status == .finished ? "s'est terminée" : "s'est arrêtée sans aboutir"
+        return "(Entre-temps, la tâche \(task.reference) « \(task.title) » confiée à \(task.agentName) \(ending) ; "
+            + "l'utilisateur l'a appris par une notification.)"
+    }
+
     /// "Pas autorisé sans ton accord : npm install."
     public static func notAllowed(_ denials: [String], _ language: SpeechLanguage) -> String {
         let list = denials.prefix(3).joined(separator: ", ") + (denials.count > 3 ? "…" : "")

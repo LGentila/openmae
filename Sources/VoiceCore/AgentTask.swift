@@ -3,7 +3,8 @@ import Foundation
 // Delegation: a long or heavy request ("lance le développement d'un site pour la boulangerie de ma sœur") is handed
 // to an agent the user installed — Claude Code — which works on its own, usually with an online model: that such a
 // task leaves the Mac is the point. Maé reads the task back and waits for the user's "oui", follows it, says where it
-// stands when asked, and a notification (never the voice) tells when it is over.
+// stands when asked, and a notification (never the voice) tells when it is over; the conversation learns it with the
+// user's next message (`AgentPhrases.historyNote`).
 //
 // The tasks and the tools that hand them over live here (AgentTools.swift); each kind of agent is reached through
 // an `AgentConnector` (Claude Code's runs its command, in VoiceEngineApple).

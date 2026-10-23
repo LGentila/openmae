@@ -191,6 +191,15 @@ each turn, how many answers said nothing to the user and how often the item the 
 .build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10
 ```
 
+The same with Claude Code switched on (`Tests/Fixtures/agents-dialogues-fr.json`): a task is handed over, read back and
+confirmed as in the app, then ended by the dialogue (`[tâche terminée]`), as when the agent is done; the user then asks
+for the same work again (it must be handed over again, or the answer must say it is over, never that it still runs), or
+for something else (an appointment, saved without bringing the task up):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli dialogue-bench --corpus Tests/Fixtures/agents-dialogues-fr.json --repeats 10
+```
+
 The memory's tool (`memoire`: remember, search the history, forget): requests to remember, search and forget, and above
 all traps — small talk, general knowledge, a real web search, an action, and facts said without asking Maé to remember
 them, which must not be remembered; `--memory` offers the tool with the other corpora too (with an empty sheet):
