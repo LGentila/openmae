@@ -149,6 +149,9 @@ public struct Conversation: Sendable {
     /// The answer the history ends with was cut off or cut by a drop, and its note waits for the next message
     /// (`CutOffPlacement.afterUserWords`): `nextUserMessage` and `nextNoteMessage` add it.
     private var dueNote: String?
+    /// What happened meanwhile that the user learnt elsewhere (`noteForNextMessage`), waiting for the next message of the
+    /// user's role.
+    private var meanwhile: [String] = []
 
     public init(systemPrompt: String = Conversation.defaultSystemPrompt) {
         self.systemPrompt = systemPrompt
@@ -162,28 +165,51 @@ public struct Conversation: Sendable {
     /// with the date and time (`ActionCatalog.dateLine`): in the message rather than in the system prompt, so the
     /// prompt stays constant, and kept in history so the model's memory of the conversation stays valid.
     /// `note`: the note of an answer cut off or cut by a drop, which follows the user's words
-    /// (`CutOffPlacement.afterUserWords`).
+    /// (`CutOffPlacement.afterUserWords`). `meanwhile`: what happened since that the user learnt elsewhere
+    /// (`noteForNextMessage`), after it.
     public static func userMessage(_ text: String, language: SpeechLanguage, dateLine: String? = nil,
-                                   note: String? = nil) -> ChatMessage
+                                   note: String? = nil, meanwhile: [String] = []) -> ChatMessage
     {
         var content = text
         if let note { content += "\n" + note }
+        for event in meanwhile { content += "\n" + event }
         if let dateLine { content += "\n" + dateLine }
         if language == .english { content += englishHint }
         return ChatMessage(.user, content)
     }
 
     /// The user's next message as the history will keep it (`userMessage`): after an answer cut off or cut by a drop,
-    /// with its note after their words when it goes there (`CutOffPlacement.afterUserWords`).
+    /// with its note after their words when it goes there (`CutOffPlacement.afterUserWords`); then what happened
+    /// meanwhile (`noteForNextMessage`).
     public func nextUserMessage(_ text: String, language: SpeechLanguage, dateLine: String? = nil) -> ChatMessage {
-        Self.userMessage(text, language: language, dateLine: dateLine, note: dueNote)
+        Self.userMessage(text, language: language, dateLine: dateLine, note: dueNote, meanwhile: meanwhile)
     }
 
     /// The note of what the app says on its own next (`VoicePipeline.announce`) as the history will keep it: as the
     /// user's message, before what was said; after an answer cut off or cut by a drop, followed by its note when it goes
-    /// there.
+    /// there; then what happened meanwhile (`noteForNextMessage`).
     public func nextNoteMessage(_ note: String) -> ChatMessage {
-        ChatMessage(.user, dueNote.map { note + "\n" + $0 } ?? note)
+        ChatMessage(.user, ([note] + (dueNote.map { [$0] } ?? []) + meanwhile).joined(separator: "\n"))
+    }
+
+    /// Tells the model something that happened meanwhile, which the user learnt elsewhere: a task handed to an agent
+    /// ended, and a notification told them (`AgentPhrases.historyNote`), never the voice. It goes with the next message
+    /// of the user's role (`nextUserMessage`, `nextNoteMessage`), after their words (`ToolContext.userSaid` reads its
+    /// first line), and stays in the history with it, until that message is recorded (`record`): a message made before
+    /// it came, for a turn already under way, goes without it, and the note waits for the next one.
+    ///
+    /// Without it, the history ended with the task handed over (« C’est parti : tu auras une notification quand ce sera
+    /// fini. »): asked for the same work again after the notification, Gemma 4 26B answered « C'est déjà en cours. Je te
+    /// préviens dès que Claude Code a terminé son travail. », without a call. In voice-cli dialogue-bench
+    /// (Tests/Fixtures/agents-dialogues-fr.json), where that request must then be handed over again or answered with the
+    /// task over: without the note, 7, 8 and 10 times out of 10 on Gemma 4 26B, E4B and E2B; with it, 10, 8 and 10 (the
+    /// 26B and E2B ask etat_taches, then say the task is over). E4B stays near 85 % whatever the note's place or words
+    /// (17 of 20 after the user's words, 35 of 40 before them, 15 of 20 as the app's own message read just before
+    /// theirs): it then answers the note rather than the request (« J'ai bien compris la situation. »). A sentence in the
+    /// note on how to do the work again made it take the note for the user's words (« Je vois que tu veux refaire cette
+    /// tâche… », 8 of 20), and a rule in the prompt did not help (15 of 20).
+    public mutating func noteForNextMessage(_ note: String) {
+        meanwhile.append(note)
     }
 
     /// Messages to send for a new user turn (history is not modified: the turn may be speculative).
@@ -223,6 +249,7 @@ public struct Conversation: Sendable {
                                 ending: Ending)
     {
         exchanges.append(message)
+        meanwhile.removeAll { message.content.contains($0) }  // told with this message; the others wait for the next
         exchanges += steps
         exchanges.append(ChatMessage(.assistant, answer))
         switch cutOffPlacement {
@@ -269,5 +296,6 @@ public struct Conversation: Sendable {
     public mutating func clear() {
         exchanges.removeAll()
         dueNote = nil
+        meanwhile.removeAll()
     }
 }
