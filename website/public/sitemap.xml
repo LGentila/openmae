@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://openmae.com/</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://openmae.com/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://openmae.com/en/"/>
+  </url>
+  <url>
+    <loc>https://openmae.com/en/</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://openmae.com/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://openmae.com/en/"/>
+  </url>
+  <url>
+    <loc>https://openmae.com/confidentialite/</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://openmae.com/confidentialite/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://openmae.com/en/privacy/"/>
+  </url>
+  <url>
+    <loc>https://openmae.com/en/privacy/</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://openmae.com/confidentialite/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://openmae.com/en/privacy/"/>
+  </url>
+</urlset>

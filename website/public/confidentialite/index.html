@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vie privée · OpenMaé</title>
+<meta name="description" content="Ce qui reste sur ton Mac et ce qui part sur internet avec OpenMaé, fonction par fonction.">
+<link rel="canonical" href="https://openmae.com/confidentialite/">
+<link rel="alternate" hreflang="fr" href="https://openmae.com/confidentialite/">
+<link rel="alternate" hreflang="en" href="https://openmae.com/en/privacy/">
+<link rel="alternate" hreflang="x-default" href="https://openmae.com/confidentialite/">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="OpenMaé">
+<meta property="og:title" content="Vie privée · OpenMaé">
+<meta property="og:description" content="Ce qui reste sur ton Mac et ce qui part sur internet, fonction par fonction.">
+<meta property="og:url" content="https://openmae.com/confidentialite/">
+<meta property="og:image" content="https://openmae.com/assets/og-fr.png">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#fbf6ec">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/assets/fonts/BricolageGrotesque-latin-opsz.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/Figtree-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/analytics.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="OpenMaé, accueil">
+      <svg class="brand-mark" viewBox="0 0 28 22" aria-hidden="true"><circle cx="8.5" cy="11.5" r="7.5" fill="#FF6A4D"/><circle cx="17" cy="8.5" r="6.5" fill="#FFC83D"/><circle cx="19" cy="14.5" r="6" fill="#14BFAE"/></svg>
+      <span class="wordmark">Open<b>Maé</b></span>
+    </a>
+    <nav class="site-nav" aria-label="Navigation principale">
+      <span class="nav-sections">
+        <a href="/#fonctions">Ce qu’elle fait</a>
+        <a href="/#vie-privee" aria-current="page">Vie privée</a>
+        <a href="/#iphone">iPhone</a>
+        <a href="/#configuration">Ce qu’il te faut</a>
+      </span>
+      <a href="https://github.com/LGentila/openmae">GitHub</a>
+      <a class="lang" href="/en/privacy/" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<main id="contenu" class="page">
+  <div class="wrap">
+    <div class="page-head">
+      <h1>Ce qui reste sur ton Mac, et ce qui en sort.</h1>
+      <p class="lead">OpenMaé est fait pour que ta voix reste chez toi. Voici, fonction par fonction, ce qui reste sur ton Mac et ce qui part sur internet.</p>
+    </div>
+
+    <div class="prose">
+      <h2>Toujours sur ton Mac</h2>
+      <ul>
+        <li><strong>Ta voix.</strong> Le son du micro est traité sur ton Mac et n’est envoyé nulle part.</li>
+        <li><strong>Les modèles.</strong> La reconnaissance vocale, le modèle de langage et la voix de Maé tournent sur ton Mac.</li>
+        <li><strong>La mémoire et l’historique,</strong> si tu les actives, restent dans un dossier de ton Mac&nbsp;: jamais sur internet, jamais sur iCloud. Les Réglages montrent ce que Maé a retenu et peuvent tout effacer.</li>
+        <li><strong>Pas de compte, pas de télémétrie.</strong> OpenMaé n’envoie aucune statistique d’utilisation.</li>
+      </ul>
+
+      <h2>Une seule fois&nbsp;: le téléchargement des modèles</h2>
+      <p>Au premier lancement, OpenMaé télécharge ses modèles depuis Hugging Face, de 5,7 à 30,1&nbsp;Go selon la mémoire de ton Mac. Chaque fichier est vérifié avant d’être utilisé&nbsp;: ce sont exactement les versions qui ont été testées. Ensuite, Maé marche sans internet.</p>
+
+      <h2>Seulement si tu l’actives</h2>
+      <p>Tout ce qui suit est désactivé tant que tu ne l’actives pas dans les Réglages.</p>
+      <div class="flow">
+        <article class="card">
+          <h3>Recherche sur internet</h3>
+          <dl>
+            <dt>Ce qui part</dt><dd>Les quelques mots-clés de la recherche.</dd>
+            <dt>Vers</dt><dd>Brave Search, avec ta propre clé, ou ton propre serveur SearXNG.</dd>
+            <dt>À savoir</dt><dd>Les résultats ne sont pas gardés&nbsp;: ils ne vivent que dans la conversation.</dd>
+          </dl>
+        </article>
+        <article class="card">
+          <h3>Météo, cours et trajets</h3>
+          <dl>
+            <dt>Ce qui part</dt><dd>Le lieu, la devise ou la crypto que tu demandes. Si tu dis «&nbsp;ici&nbsp;», la position de ton Mac, que macOS te demande une fois.</dd>
+            <dt>Vers</dt><dd>Open-Meteo pour la météo, Frankfurter pour les taux de la Banque centrale européenne, CoinGecko pour les cryptos, Plans d’Apple pour les trajets.</dd>
+          </dl>
+        </article>
+        <article class="card">
+          <h3>Rendez-vous, rappels, minuteurs et raccourcis</h3>
+          <dl>
+            <dt>Ce qui part</dt><dd>Rien de la part d’OpenMaé. macOS synchronise tes calendriers et tes rappels comme d’habitude, et tes raccourcis font ce que tu leur as appris.</dd>
+          </dl>
+        </article>
+        <article class="card">
+          <h3>Tâches longues confiées à Claude Code</h3>
+          <dl>
+            <dt>Ce qui part</dt><dd>La tâche que tu confies, et ce dont Claude Code a besoin pour la faire.</dd>
+            <dt>Vers</dt><dd>Claude Code, installé sur ton Mac avec ton compte, qui travaille avec les modèles en ligne d’Anthropic.</dd>
+          </dl>
+        </article>
+        <article class="card">
+          <h3>iPhone et iPad</h3>
+          <dl>
+            <dt>Ce qui part</dt><dd>Ta voix et les réponses de Maé, chiffrées de bout en bout entre ton appareil et ton Mac.</dd>
+            <dt>Par</dt><dd>Ton Wi-Fi, en direct, à la maison. Ailleurs, un relais OpenMaé&nbsp;: celui du projet, ou le tien.</dd>
+            <dt>À savoir</dt><dd>Le relais voit les adresses IP et la quantité de données qui passent. Jamais un mot, jamais un son.</dd>
+          </dl>
+        </article>
+        <article class="card">
+          <h3>Informations reçues</h3>
+          <dl>
+            <dt>Ce qui arrive</dt><dd>Les phrases que tes systèmes, comme Home Assistant ou un script, envoient à Maé.</dd>
+            <dt>Par</dt><dd>Le relais maison, sur une machine de chez toi, ou un relais sur internet, qui ne peut pas lire ce qui passe.</dd>
+            <dt>À savoir</dt><dd>Ces phrases l’informent seulement&nbsp;: elles ne déclenchent jamais d’action.</dd>
+          </dl>
+        </article>
+      </div>
+
+      <h2>Ce site</h2>
+      <ul>
+        <li>Ce site compte ses visites avec Umami, installé sur un serveur du projet, sans cookie. Pour chaque page vue, il note la page, le site d’où tu viens, ton pays et ta ville, ton navigateur et sa langue, ton système et la taille de ton écran. Ton pays et ta ville sont déduits de ton adresse IP, qu’il n’enregistre pas. Ces chiffres servent seulement à savoir combien de personnes passent ici.</li>
+        <li>Ses polices viennent du site lui-même.</li>
+        <li>Le code QR qui relie ton iPhone à ton Mac ouvre une adresse de ce site, <code>openmae.com/p</code>. La clé de ton Mac et le code à usage unique sont après le signe #&nbsp;: ton navigateur n’envoie jamais cette partie de l’adresse au site. Cette page ne compte pas les visites.</li>
+      </ul>
+
+      <h2>Vérifier par toi-même</h2>
+      <p>Le code d’OpenMaé est public&nbsp;: tout ce qui est écrit ici se vérifie <a href="https://github.com/LGentila/openmae">sur GitHub</a>. Une question&nbsp;? <a href="https://github.com/LGentila/openmae/issues">Pose-la sur GitHub</a>.</p>
+      <p class="note">Mis à jour le 23&nbsp;octobre 2026.</p>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div>
+      <a class="brand" href="/" aria-label="OpenMaé, accueil">
+        <svg class="brand-mark" viewBox="0 0 28 22" aria-hidden="true"><circle cx="8.5" cy="11.5" r="7.5" fill="#FF6A4D"/><circle cx="17" cy="8.5" r="6.5" fill="#FFC83D"/><circle cx="19" cy="14.5" r="6" fill="#14BFAE"/></svg>
+        <span class="wordmark">Open<b>Maé</b></span>
+      </a>
+      <p class="tagline">L’assistant vocal qui vit sur ton Mac.</p>
+    </div>
+    <div>
+      <ul class="footer-links">
+        <li><a href="/confidentialite/" aria-current="page">Vie privée</a></li>
+        <li><a href="https://github.com/LGentila/openmae">GitHub</a></li>
+        <li><a href="/en/privacy/" hreflang="en" lang="en">English</a></li>
+      </ul>
+      <p class="footer-small">© 2026 OpenMaé</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
