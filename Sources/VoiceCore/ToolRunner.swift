@@ -102,6 +102,15 @@ public actor ToolRunner {
         return ActionPhrases.oneMoment(language)
     }
 
+    /// Whether a call to `tool` that the model writes after words of its own is left out: not carried out, kept out of the
+    /// history, and nothing said of it, the words being the answer (`ToolProvider.ignoresAfterWords`, with or without the
+    /// actions). A misspelled name is read as its tool's.
+    public func ignoresAfterWords(_ tool: String) async -> Bool {
+        let name = ToolNames.match(tool, among: names) ?? tool
+        guard let provider = byName[name] else { return false }
+        return await provider.ignoresAfterWords(name, actions: offersActions)
+    }
+
     /// The call with the name of the tool it stands for, when the model misspelled it ("crer_rappel"); unchanged
     /// otherwise (`ToolNames`). It is what goes into the history, so the model does not see its slip again.
     public func named(_ call: ToolCall) -> ToolCall {

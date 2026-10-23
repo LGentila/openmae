@@ -314,6 +314,10 @@ public protocol ToolProvider: Sendable {
     /// What the app says while the model writes a call to this tool, instead of "Un instant, je m'en occupe tout de
     /// suite." (nil).
     func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String?
+    /// Whether a call to this tool that the model writes after words of its own is left out, for a runner with the
+    /// built-in actions or without them: not carried out, kept out of the history, and nothing said of it (the words are
+    /// the answer). Never by default.
+    func ignoresAfterWords(_ tool: String, actions: Bool) async -> Bool
     /// What the app says to ask for the user's "oui" for a sensitive call, ending with "On y va ?". Several sensitive calls
     /// of one request wait together for one "oui": the app then asks one question for them all, made of these sentences
     /// without their question (`ActionPhrases.pendingQuestion`).
@@ -344,6 +348,7 @@ extension ToolProvider {
     }
     public func check(_ call: ToolCall, context: ToolContext) async throws {}
     public func waitingPhrase(for tool: String, language: SpeechLanguage) async -> String? { nil }
+    public func ignoresAfterWords(_ tool: String, actions: Bool) async -> Bool { false }
     public func summary(of call: ToolCall, context: ToolContext) async -> String { call.name }
     public func dropped(_ call: ToolCall) async {}
     public func undo(_ token: UndoToken, context: ToolContext) async throws -> String {

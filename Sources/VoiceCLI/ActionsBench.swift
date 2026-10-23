@@ -43,7 +43,8 @@
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
 // has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
 // what the date line is, the delegation's part is the one for the tools on their own (with its own example call, and
-// on the smallest tier its example exchanges), and a request whose tool is not offered expects no call.
+// on the smallest tier its example exchanges), a request whose tool is not offered expects no call, and a hand-over
+// written after words of the model's own counts as none, the app leaving it out (`AgentCatalog.ignoredAfterWords`).
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -189,6 +190,9 @@ private struct CaseResult: Encodable {
     var arguments: [String: JSONValue]?
     /// The model went on to another call after this one (the app carries out one action per request).
     var moreCalls: Bool?
+    /// A call written after words of the model's own that the app leaves out, saying nothing of it
+    /// (`AgentCatalog.ignoredAfterWords`: a hand-over without the actions), as written: `chosen` is then "aucun".
+    var leftOutAfterWords: String?
     var text: String
     var toolOK: Bool
     var argumentsOK: Bool?
@@ -377,6 +381,8 @@ func runActionsBench(_ o: Options) async throws {
         var callTime: Double?
         var callStart: Double?
         var nameRead: Double?
+        /// What the model wrote before its first call.
+        var textBeforeCall: String?
         /// A second pass (a summary, a second try) took the model's memory past this request's beginning.
         var secondPass = false
         let start = clock.now
@@ -384,7 +390,9 @@ func runActionsBench(_ o: Options) async throws {
             if firstOutput == nil { firstOutput = milliseconds(clock.now - start) }
             switch output {
             case .text(let piece): text += piece
-            case .toolCallStarted: if callStart == nil { callStart = milliseconds(clock.now - start) }
+            case .toolCallStarted:
+                if callStart == nil { callStart = milliseconds(clock.now - start) }
+                if textBeforeCall == nil { textBeforeCall = text }
             case .toolCallNamed: if nameRead == nil { nameRead = milliseconds(clock.now - start) }
             case .toolCall(let made):
                 if call == nil {
@@ -399,8 +407,20 @@ func runActionsBench(_ o: Options) async throws {
         }
         var filter = ReasoningFilter()
         text = (filter.push(text) + filter.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
-        let written = call?.name
+        var written = call?.name
         call = call.map(named)
+        // As in the app (`ToolRunner.ignoresAfterWords`): a call to some tools written after words of the model's own is
+        // left out, and the app says nothing of it (without the actions, a hand-over after an answer).
+        var leftOut: String?
+        if let made = call, AgentCatalog.ignoredAfterWords(made.name, actions: actions) {
+            var before = ReasoningFilter()
+            if !SpeakableText.clean(before.push(textBeforeCall ?? "") + before.flush()).isEmpty {
+                leftOut = describe(made, written: written)
+                call = nil
+                written = nil
+                callTime = nil
+            }
+        }
 
         var expectedTool = item.expected?.tool ?? "aucun"
         // Without the actions, a request for one of them expects no call: no tool does it.
@@ -410,7 +430,8 @@ func runActionsBench(_ o: Options) async throws {
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
                                 moreCalls: moreCalls ? true : nil, text: text, toolOK: chosen == expectedTool,
                                 firstOutputMs: firstOutput, callMs: callTime)
-        if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
+        if let callStart, let nameRead, call != nil { result.nameReadMs = nameRead - callStart }
+        result.leftOutAfterWords = leftOut
         result.peakGB = await model.lastRequestPeakGB
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
@@ -572,6 +593,7 @@ func runActionsBench(_ o: Options) async throws {
                    $0 * 100, result.bestCallAt ?? 0)
         } ?? ""
         print("      → \(detail)" + (result.resolved.map { " = \($0)" } ?? "") + (result.refusal.map { "  [refused: \($0)]" } ?? "")
+              + (leftOut.map { "  [then \($0), left out: after the model's own words]" } ?? "")
               + (moreCalls ? "  [then another call, not carried out]" : "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
         if let second = result.secondTry {
@@ -1233,6 +1255,9 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     print("requests without an action that triggered one: \(falseTriggers.count) / \(others.count)"
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
+    let leftOut = results.filter { $0.leftOutAfterWords != nil }
+    print("calls written after the model's own words, left out as in the app (a hand-over without the actions): "
+          + "\(leftOut.count)" + leftOut.map { "\n    · \($0.phrase) (expected: \($0.expected))" }.joined())
     let more = results.filter { $0.moreCalls == true }
     print("requests with another call after the first (an action more than asked when one is expected): \(more.count)"
           + more.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined())

@@ -84,6 +84,21 @@ public enum AgentCatalog {
                                          + "cartes de l'utilisateur."),
                                  ]))
 
+    /// Whether a call to `tool` that the model writes after words of its own is left out: not carried out, kept out of
+    /// the history, and nothing said of it (`ToolRunner.ignoresAfterWords`). Only a hand-over without the actions: the
+    /// delegation's part of the prompt then has the model write the call first, its whole answer
+    /// (`promptAddendumWithoutActions`), so a hand-over after an answer is a task nobody asked for.
+    ///
+    /// In two runs of voice-cli actions-bench with that part (Tests/Fixtures/agents-fr.json, --no-actions), Gemma 4 E4B
+    /// handed over three tasks nobody asked for, each after an answer of its own to a question (« Est-ce que Claude Code
+    /// est payant ? » : « Non, Claude Code est gratuit pour toi. », then a task « Rôle de Claude Code »), and the user
+    /// heard « Je confie … à Claude Code, on y va ? » after the answer. Of the 109 tasks Gemma 4 26B, E4B and E2B rightly
+    /// handed over in two runs each, one came after words (E4B: « Je peux confier ça à un agent. »). With the actions,
+    /// the rule does not apply: nothing changes for them.
+    public static func ignoredAfterWords(_ tool: String, actions: Bool) -> Bool {
+        !actions && tool == delegateName
+    }
+
     /// The exchanges conversations start with when the delegation is offered without the actions, on the tier whose
     /// model needs the actions' (`ActionCatalog.showsExamples`): three tasks of different kinds (an application, files,
     /// a document), each handed over at once with the user's words, as if it had happened. With `review` (the default
