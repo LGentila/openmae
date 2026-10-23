@@ -98,6 +98,12 @@ enum Units {
         return value.formatted(.byteCount(style: .file))
     }
 
+    /// "1 200": a count, grouped as the Mac's region says. French groups with a narrow no-break space (U+202F), which
+    /// Figtree doesn't have (it would draw "1200"): the no-break space of the app's French texts takes its place.
+    static func count(_ value: Int) -> String {
+        value.formatted(.number).replacingOccurrences(of: "\u{202F}", with: "\u{00A0}")
+    }
+
     /// "46 %": a share, rounded down (100 % only when it is complete).
     static func percent(_ fraction: Double) -> String {
         ((fraction * 100).rounded(.down) / 100).formatted(.percent.precision(.fractionLength(0)))

@@ -37,7 +37,8 @@ struct PagedList<Item, Content: View>: View {
     }
 }
 
-/// "11–20 of 37" on the left; "Newer" and "Older" on the right, greyed at either end.
+/// "11–20 of 37" on the left; "Newer" and "Older" on the right, greyed at either end. In a narrow window, where the three
+/// don't fit on one line, the range goes above the buttons.
 private struct ListPageFooter: View {
     let first: Int
     let last: Int
@@ -46,30 +47,46 @@ private struct ListPageFooter: View {
     let older: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("\(first)–\(last) of \(total)")
-                .textStyle(.pageRange)
-                .foregroundStyle(Palette.inkMuted)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            Button { newer?() } label: {
-                HStack(spacing: 6) {
-                    IconView(icon: .back, size: 16)
-                    Text("Newer")
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                range
+                Spacer(minLength: 0)
+                buttons
             }
-            .buttonStyle(WindowButtonStyle())
-            .disabled(newer == nil)
-            Button { older?() } label: {
-                HStack(spacing: 6) {
-                    Text("Older")
-                    IconView(icon: .forward, size: 16)
-                }
+            .frame(minHeight: 58)
+            VStack(alignment: .leading, spacing: 10) {
+                range
+                HStack(spacing: 10) { buttons }
             }
-            .buttonStyle(WindowButtonStyle())
-            .disabled(older == nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 14)
         }
-        .frame(minHeight: 58)
         .accessibilityElement(children: .contain)
+    }
+
+    private var range: some View {
+        Text("\(first)–\(last) of \(total)")
+            .textStyle(.pageRange)
+            .foregroundStyle(Palette.inkMuted)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder private var buttons: some View {
+        Button { newer?() } label: {
+            HStack(spacing: 6) {
+                IconView(icon: .back, size: 16)
+                Text("Newer")
+            }
+        }
+        .buttonStyle(WindowButtonStyle())
+        .disabled(newer == nil)
+        Button { older?() } label: {
+            HStack(spacing: 6) {
+                Text("Older")
+                IconView(icon: .forward, size: 16)
+            }
+        }
+        .buttonStyle(WindowButtonStyle())
+        .disabled(older == nil)
     }
 }
