@@ -193,9 +193,12 @@ nor said done):
 .build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10
 ```
 
-The memory's tool (`memoire`: remember, search the history, forget): requests to remember, search and forget, and above
-all traps — small talk, general knowledge, a real web search, an action, and facts said without asking Maé to remember
-them, which must not be remembered; `--memory` offers the tool with the other corpora too (with an empty sheet):
+The memory's tool (`memoire`: remember, forget an entry, erase everything): requests to remember, forget and erase
+everything, and above all traps — small talk, general knowledge, a real web search, an action, and facts said without
+asking Maé to remember them, which must not be remembered; `--memory` offers the tool with the other corpora too (with
+an empty sheet). Its journal of past exchanges (searching them, erasing a period of them) is offered only as the app
+offers it, which it does not in this version: `--journal` offers it; without it, the requests that need it are left out
+of the score and reported apart. The same goes for `dialogue-bench` and `cache-check`:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/memory-actions-fr.json

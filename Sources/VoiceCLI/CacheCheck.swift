@@ -14,7 +14,7 @@
 //
 //   voice-cli cache-check [--tier comfort] [--llm folder] [--now 2026-10-15T18:42] [--agents] [--scenario name]
 //                         [--cut-off ahead|after-user-words] [--bfloat16-prompts] [--bfloat16-experts]
-//                         [--unpadded-experts]
+//                         [--unpadded-experts] [--memory [--journal]]
 //
 // --cut-off says where the history tells the model that an answer was cut off; by default as the app does on the tier
 // (`Conversation.cutOffPlacement(on:)`): "ahead", a note of its own right after the answer, or "after-user-words", the
@@ -419,6 +419,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let scenario = arguments.firstIndex(of: "--scenario").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     let agents = arguments.contains("--agents")
     let memory = arguments.contains("--memory")
+    // The memory's journal as the app offers it, or with --journal.
+    let journal = MemorySettings.journalOffered || arguments.contains("--journal")
     let timeZone = TimeZone.current
     guard let now = LocalDateTime.parse(o.now ?? "2026-10-15T18:42", in: timeZone)?.date else {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
@@ -448,7 +450,7 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let tools = ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
         + (agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
             : [])
-        + (memory ? [MemoryCatalog.tool(journal: true)] : [])
+        + (memory ? [MemoryCatalog.tool(journal: journal)] : [])
     await model.useTools(tools)
     let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
     await model.limitToolCalls(maxCalls)
@@ -457,11 +459,12 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     base.cutOffPlacement = placement
     let fixedAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         + (agents ? [AgentCatalog.promptAddendum] : [])
-    base.systemAddenda = fixedAddenda + (memory ? [MemoryCatalog.promptAddendum(sheet: memorySheet, journal: true)] : [])
+    base.systemAddenda = fixedAddenda
+        + (memory ? [MemoryCatalog.promptAddendum(sheet: memorySheet, journal: journal)] : [])
     /// The beginning with this sheet (the memory's part last, as in the app).
     func withSheet(_ sheet: [String]) -> Conversation {
         var conversation = base
-        conversation.systemAddenda = fixedAddenda + [MemoryCatalog.promptAddendum(sheet: sheet, journal: true)]
+        conversation.systemAddenda = fixedAddenda + [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal)]
         return conversation
     }
     if memory {
@@ -472,7 +475,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         let empty = try await model.tokenCount(withSheet([]).messages)
         let usual = try await model.tokenCount(withSheet(memorySheet).messages)
         let full = try await model.tokenCount(withSheet(fullSheet).messages)
-        print("memory: the prompt without it \(without) tokens; its rules with an empty sheet +\(empty - without); with "
+        print("memory (\(journal ? "with the journal" : "without the journal, as the app")): the prompt without it "
+              + "\(without) tokens; its rules with an empty sheet +\(empty - without); with "
               + "\(memorySheet.count) entries (\(MemorySheet(entries: memorySheet).characters) characters) +\(usual - without); "
               + "with a full sheet (\(fullSheet.count) entries, \(MemorySheet(entries: fullSheet).characters) characters) "
               + "+\(full - without), of which the entries \(full - empty)")
