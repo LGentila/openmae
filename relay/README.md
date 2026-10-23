@@ -267,8 +267,9 @@ To turn it on:
    public relay needs Let's Encrypt to raise it, or its inbound domain on the
    [Public Suffix List](https://publicsuffix.org), which makes each name a registered domain of its own.
 
-Then, in OpenMaé on the Mac, a source with the origin "Internet" gets its `https://` address once the Mac has its
-certificate, a few seconds after the first such source is added. Try it from anywhere:
+Then, in OpenMaé on the Mac, with this relay chosen as the internet relay (Settings › Relay), a source that goes
+through the internet relay gets its `https://` address once the Mac has its certificate, a few seconds after the
+first such source is added. Try it from anywhere:
 `curl -d 'Hello from the internet' https://<inbound name>.in.example.com/in/<secret>`.
 
 Limits, per inbound name (that is, per Mac): 30 connections per minute and 5 at once. Per caller: 20 a minute (per /64

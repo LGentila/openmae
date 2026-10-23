@@ -52,7 +52,9 @@ struct MemoryPage: View {
             }
             Hairline()
             if let memory = model.memory {
-                Caption(Text("\(memory.characters) of \(memory.capacity) characters used."))
+                // In the app's language, whatever the Mac's region: « 1 200 », "1,200".
+                let number = { (count: Int) in count.formatted(.number.locale(TaskText.locale)) }
+                Caption(Text("\(number(memory.characters)) of \(number(memory.capacity)) characters used."))
                     .padding(.top, 14)
             }
         }

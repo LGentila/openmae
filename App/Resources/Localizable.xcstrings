@@ -71,6 +71,16 @@
         }
       }
     },
+    "%@ of %@ characters used.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ caractères utilisés sur %2$@."
+          }
+        }
+      }
+    },
     "%@ settings": {
       "localizations": {
         "fr": {
@@ -117,16 +127,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld min %lld s"
-          }
-        }
-      }
-    },
-    "%lld of %lld characters used.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld caractères utilisés sur %2$lld."
           }
         }
       }
@@ -3367,16 +3367,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Protégé par un mot de passe"
-          }
-        }
-      }
-    },
-    "Public relay": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Relais public"
           }
         }
       }

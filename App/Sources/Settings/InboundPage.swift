@@ -738,7 +738,7 @@ enum InboundWords {
     static func path(_ path: InboundPath?) -> String {
         switch path {
         case .homeRelay: String(localized: "Home relay")
-        case .publicRelay: String(localized: "Public relay")
+        case .publicRelay: String(localized: "Internet relay")
         case nil: String(localized: "Your test")
         }
     }
