@@ -25,6 +25,10 @@ struct ContentView: View {
     @Bindable var model: AssistantModel
     @Bindable var window: WindowState
 
+    /// The narrowest the window gets: half of a 1512-point screen, with room to spare (as the settings window). 960 ×
+    /// 700 points at first.
+    static let minimumWidth: CGFloat = 720
+
     var body: some View {
         VStack(spacing: 0) {
             topBar

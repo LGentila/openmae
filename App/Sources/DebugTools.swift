@@ -145,7 +145,14 @@ enum Snapshots {
              .handsFree),
             ("problem-2-microphone", [.problem(.microphoneDenied)], nil, .handsFree),
         ]
-        for scenario in scenarios {
+        // Each scene at the window's first width, then at its narrowest (…-narrow). The first-launch screen scrolls
+        // there: it is also drawn whole, as in a window tall enough for it (…-narrow-whole).
+        let whole = (size: CGSize(width: ContentView.minimumWidth, height: 1300), suffix: "-narrow-whole")
+        let sizes = { (name: String) -> [(size: CGSize, suffix: String)] in
+            windowWidths.map { (CGSize(width: $0.width, height: 700), $0.suffix) }
+                + (name.hasPrefix("setup-") ? [whole] : [])
+        }
+        for (scenario, size) in scenarios.flatMap({ scenario in sizes(scenario.name).map { (scenario, $0) } }) {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
             model.settings.listening = scenario.listening  // the scenario's, not the user's own setting
@@ -158,21 +165,23 @@ enum Snapshots {
             let view = ContentView(model: model, window: window)
                 .environment(\.stillFrame, 1.7)
                 .preferredColorScheme(.light)
-            await save(view, size: CGSize(width: 960, height: 700), to: folder.appending(path: scenario.name + ".png")) {
+            await save(view, size: size.size, to: folder.appending(path: scenario.name + size.suffix + ".png")) {
                 // Once the window has started the (scripted) engine, which closes any panel.
                 window.panel = scenario.panel
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
         // At rest, with a shortcut the user recorded instead of ⌥ Space.
-        let ownShortcut = await scriptedModel(ready)
-        let savedSettings = ownShortcut.settings
-        ownShortcut.settings.listening = .handsFree
-        ownShortcut.talkShortcut = Demo.recordedShortcut
-        await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
-            .preferredColorScheme(.light), size: CGSize(width: 960, height: 700),
-                   to: folder.appending(path: "main-1-rest-own-shortcut.png"))
-        ownShortcut.settings = savedSettings
+        for (width, suffix) in windowWidths {
+            let ownShortcut = await scriptedModel(ready)
+            let savedSettings = ownShortcut.settings
+            ownShortcut.settings.listening = .handsFree
+            ownShortcut.talkShortcut = Demo.recordedShortcut
+            await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
+                .preferredColorScheme(.light), size: CGSize(width: width, height: 700),
+                       to: folder.appending(path: "main-1-rest-own-shortcut" + suffix + ".png"))
+            ownShortcut.settings = savedSettings
+        }
         let shortcuts = ["Allumer le salon", "Mode concentration"]
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
@@ -209,13 +218,21 @@ enum Snapshots {
         let draft = task(3, "site du club de randonnée", "Crée un site pour le club de randonnée de Lucie, avec le "
                          + "calendrier des sorties et une page de contact.", .awaitingConfirmation, minutesAgo: 0)
 
-        let history = await scriptedModel(conversation + [.tasks([done, running, draft])])
-        let window = WindowState()
-        await save(ContentView(model: history, window: window).environment(\.stillFrame, 1.7).preferredColorScheme(.light),
-                   size: CGSize(width: 960, height: 1100), to: folder.appending(path: "main-11-history-tasks.png")) {
-            window.panel = .history
+        for (width, suffix) in windowWidths {
+            let history = await scriptedModel(conversation + [.tasks([done, running, draft])])
+            let window = WindowState()
+            await save(ContentView(model: history, window: window).environment(\.stillFrame, 1.7)
+                .preferredColorScheme(.light), size: CGSize(width: width, height: 1100),
+                       to: folder.appending(path: "main-11-history-tasks" + suffix + ".png")) {
+                window.panel = .history
+            }
         }
     }
+
+    /// The conversation window's scenes are drawn at its first width, then at its narrowest (…-narrow).
+    @MainActor private static let windowWidths: [(width: CGFloat, suffix: String)] = [
+        (960, ""), (ContentView.minimumWidth, "-narrow"),
+    ]
 
     /// The capsule over a pretend desktop, as in the design's Overlay screen (at rest: no capsule, the icon's
     /// outline), and the menu bar icon in its four states on a dark and a light bar.
