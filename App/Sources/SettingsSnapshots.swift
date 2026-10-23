@@ -24,6 +24,8 @@ extension Snapshots {
         var minHeight: CGFloat = 700
         /// The engine is ready (else: the scene's events say where it is).
         var startsReady = true
+        /// The page a paged list shows (`PagedList`), from 0.
+        var listPage = 0
     }
 
     @MainActor
@@ -148,6 +150,41 @@ extension Snapshots {
             InboundLogEntry(date: ago(minutes: 140), path: .homeRelay, form: .json, result: .kept,
                             caller: "192.168.1.40", text: "Le lave-vaisselle a fini."),
         ]
+        // A month of a source's deliveries, ten at a time.
+        let station = InboundSource(name: "Station météo", created: ago(minutes: 50_000))
+        let stationTexts: [(String, InboundLogEntry.Result)] = [
+            ("Il a plu 4\u{00A0}mm cette nuit.", .said), ("Le vent dépasse 60\u{00A0}km/h.", .said),
+            ("Il gèle dehors\u{00A0}: pense aux plantes.", .expired), ("Le vent dépasse 60\u{00A0}km/h.", .duplicate),
+            ("Il fait 31\u{00A0}degrés au jardin.", .said), ("La batterie de la station est faible.", .kept),
+        ]
+        var month = connected
+        month.sources = [homeAssistant, station, garage]
+        month.addresses[station.id] = relay.appending(path: inboundName).appending(path: "in").appending(path: secret(6))
+        month.logs[station.id] = (0..<37).map { i in
+            let (text, result) = stationTexts[i % stationTexts.count]
+            return InboundLogEntry(date: ago(minutes: 7 + Double(i) * 1_100), path: .homeRelay, form: .json,
+                                   result: result, caller: "192.168.1.50", text: text)
+        }
+
+        // Memory: what Maé remembers, oldest first, as the engine sends it.
+        let remembered = ["Allergique aux noix de cajou", "Sa fille s’appelle Inès", "Préfère le train à l’avion",
+                     "Le garagiste s’appelle Rémi, à Pontivy", "Boit son café sans sucre",
+                     "Anniversaire de sa mère le 3 mars", "Le voisin garde un double des clés",
+                     "Va à la piscine le mardi soir", "Le chat s’appelle Biscotte", "Préfère les réponses courtes",
+                     "Travaille de chez lui le vendredi", "Son dentiste est le docteur Le Gall",
+                     "Ne mange pas de viande le lundi", "Contrôle technique de la voiture en mai",
+                     "Aime le jazz manouche", "Son frère habite à Nantes", "Arrose les tomates tous les deux jours",
+                     "Lit un roman de Pagnol en ce moment", "Joue au badminton le jeudi",
+                     "Rendez-vous chez le notaire en novembre", "Préfère le thé vert l’après-midi",
+                     "Réunion d’équipe le lundi à 9\u{00A0}h", "Aime randonner sur le GR34",
+                     "Lave le linge à 30\u{00A0}degrés",
+                     "Ses parents arrivent pour Noël"]
+        func memory(_ entries: [String]) -> AssistantEvent {
+            .memory(MemoryOverview(entries: entries, characters: entries.reduce(0) { $0 + $1.count },
+                                   capacity: MemorySheet.capacity, exchanges: 0,
+                                   folder: "/Users/me/Library/Application Support/OpenMaé/Memory"))
+        }
+        let memoryOn: (inout AssistantSettings) -> Void = { $0.memory.enabled = true }
 
         // Relay. As the user's own: the OpenMaé relay, two devices, a source from the internet, no home relay.
         let homeAssistantOnline = InboundSource(name: "Home Assistant", origin: .internet, mayBeUrgent: true,
@@ -351,8 +388,19 @@ extension Snapshots {
                               search(.brave, key: true)(&s)
                               s.builtInSources = true
                           }),
+            SettingsScene(name: "RgWeb-meteo-seule", page: .webSearch, settings: { $0.builtInSources = true }),
             SettingsScene(name: "RgWeb-retirer-cle", page: .webSearch, settings: search(.brave, key: true),
                           prepare: { navigation, _, _ in navigation.sheet = .removeBraveKey }),
+            // Memory (not in the design): what Maé remembers, ten at a time
+            SettingsScene(name: "RgMemoire", page: .memory, events: [memory(remembered)], settings: memoryOn),
+            SettingsScene(name: "RgMemoire-page-3", page: .memory, events: [memory(remembered)], settings: memoryOn,
+                          listPage: 2),
+            SettingsScene(name: "RgMemoire-quelques-notes", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)))], settings: memoryOn),
+            SettingsScene(name: "RgMemoire-vide", page: .memory, events: [memory([])], settings: memoryOn),
+            SettingsScene(name: "RgMemoire-eteinte", page: .memory, events: [memory(remembered)]),
+            SettingsScene(name: "RgMemoire-tout-effacer", page: .memory, events: [memory(remembered)],
+                          settings: memoryOn, prepare: { navigation, _, _ in navigation.sheet = .eraseMemory }),
             // Connected tools (drawn, greyed in the sidebar)
             SettingsScene(name: "RgMcp", page: .tools, tools: tools),
             SettingsScene(name: "RgMcpVide", page: .tools),
@@ -447,16 +495,16 @@ extension Snapshots {
                               inbound.page = .source(garage.id)
                               inbound.sheet = .remove(garage.id)
                           }),
-            SettingsScene(name: "RgInfos-aide-home-assistant", page: .inbound, inbound: connected,
-                          prepare: { _, _, inbound in
-                              inbound.page = .source(homeAssistant.id)
-                              inbound.sheet = .homeAssistant(homeAssistant.id)
-                          },
-                          minHeight: 1400),
             SettingsScene(name: "RgInfos-heures-calmes", page: .inbound, inbound: quiet),
             SettingsScene(name: "RgInfos-annonces-coupees", page: .inbound, inbound: silent),
             SettingsScene(name: "RgInfosSource-garder", page: .inbound, inbound: keeping,
                           prepare: { _, _, inbound in inbound.page = .source(gladys.id) }),
+            SettingsScene(name: "RgInfosSource-37", page: .inbound, inbound: month,
+                          prepare: { _, _, inbound in inbound.page = .source(station.id) }),
+            SettingsScene(name: "RgInfosSource-37-page-2", page: .inbound, inbound: month,
+                          prepare: { _, _, inbound in inbound.page = .source(station.id) }, listPage: 1),
+            SettingsScene(name: "RgInfosSource-37-page-4", page: .inbound, inbound: month,
+                          prepare: { _, _, inbound in inbound.page = .source(station.id) }, listPage: 3),
             // Advanced
             SettingsScene(name: "RgAvance", page: .advanced, events: [bigStorage], settings: wakeWordLog),
             SettingsScene(name: "RgAvanceTelechargement", page: .advanced, events: setup, settings: wakeWordLog,
@@ -499,6 +547,7 @@ extension Snapshots {
                 .environment(relays)
                 .environment(navigation)
                 .environment(\.unscrolledPages, true)
+                .environment(\.firstListPage, scene.listPage)
                 .environment(\.stillFrame, 1.7)
                 .preferredColorScheme(.light)
             let height = max(scene.minHeight, NSHostingView(rootView: view.frame(width: 960)).fittingSize.height)

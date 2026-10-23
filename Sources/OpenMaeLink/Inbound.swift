@@ -10,7 +10,7 @@ import VoiceCore
 // per source.
 
 /// A delivery in its source's log: when, by which path, in which form, what became of it, from which address, and
-/// its text, cleaned. Never the body as it came.
+/// its text, cleaned, its first 500 characters at most (`InboundHost.logTextLimit`). Never the body as it came.
 public struct InboundLogEntry: Codable, Sendable, Equatable, Identifiable {
     public enum Result: String, Codable, Sendable {
         /// Waiting to be said.
@@ -189,8 +189,12 @@ public actor InboundHost {
     /// 64 KB of body at most, sent within 10 seconds.
     public static let maxBody = 64 * 1024
     /// Log entries kept per source, and for how long.
-    public static let logLength = 20
-    public static let logAge: TimeInterval = 7 * 86_400
+    public static let logLength = 200
+    public static let logAge: TimeInterval = 30 * 86_400
+    /// Characters of a delivery's text the log keeps (stopped after its last complete sentence within them): a body may
+    /// hold 64 KB, and 200 entries per source are saved in one file, received-information.json, written at each
+    /// delivery. Maé says 280 at most (`InboundText.spokenLimit`).
+    public static let logTextLimit = 500
 
     public nonisolated let status: AsyncStream<InboundStatus>
     private nonisolated let statusSink: AsyncStream<InboundStatus>.Continuation
@@ -624,6 +628,8 @@ public actor InboundHost {
 
     @discardableResult
     private func log(_ entry: InboundLogEntry, for source: UUID) -> UUID {
+        var entry = entry
+        entry.text = entry.text.map { InboundText.shortened($0, limit: Self.logTextLimit) }
         var entries = state.logs[source] ?? []
         entries.insert(entry, at: 0)
         state.logs[source] = Self.pruned(entries, now: now())

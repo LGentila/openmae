@@ -253,7 +253,7 @@ final class AssistantModel {
         connection.send(.forgetMemoryEntry(entry))
     }
 
-    /// "Clear history": the journal of past exchanges, erased.
+    /// The journal of past exchanges, erased. Not offered while the journal is not (`MemorySettings.journalOffered`).
     func clearMemoryJournal() {
         connection.send(.clearMemoryJournal)
     }

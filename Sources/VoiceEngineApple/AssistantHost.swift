@@ -602,12 +602,13 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Memory
 
-    /// Switches the memory and its journal as the settings say. Returns true when what the model sees changed (its tool,
-    /// or `chercher` with the journal).
+    /// Switches the memory and its journal as the settings say (the journal only while it is offered:
+    /// `MemorySettings.journalOffered`). Returns true when what the model sees changed (its tool, or `chercher` with the
+    /// journal).
     @discardableResult
     private func configureMemory() async -> Bool {
         let memory = settings.memory
-        let changed = await memoryTools.configure(enabled: memory.enabled, journal: memory.journal)
+        let changed = await memoryTools.configure(enabled: memory.enabled, journal: memory.journalOn)
         if memory.journalOn {
             let writer = journalWriter ?? StoreJournal(store: memoryStore)
             journalWriter = writer

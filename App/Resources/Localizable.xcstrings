@@ -111,16 +111,6 @@
         }
       }
     },
-    "%lld exchanges kept.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld échanges gardés."
-          }
-        }
-      }
-    },
     "%lld min %lld s": {
       "localizations": {
         "fr": {
@@ -171,6 +161,16 @@
         }
       }
     },
+    "%lld–%lld of %lld": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld–%2$lld sur %3$lld"
+          }
+        }
+      }
+    },
     "1 source": {
       "localizations": {
         "fr": {
@@ -187,36 +187,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "1 outil"
-          }
-        }
-      }
-    },
-    "1 year": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "1 an"
-          }
-        }
-      }
-    },
-    "30 days": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "30 jours"
-          }
-        }
-      }
-    },
-    "<the source’s address>": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "<l’adresse de la source>"
           }
         }
       }
@@ -491,12 +461,12 @@
         }
       }
     },
-    "After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it is kept for later.": {
+    "After a chime, Maé says it as soon as nobody is speaking. If she couldn’t say it within a minute, she keeps it and tells you when you ask “What’s new?”.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Après un carillon, Maé la dit dès que personne ne parle. Pas dite dans la minute, elle est gardée pour plus tard."
+            "value": "Après un carillon, Maé la dit dès que personne ne parle. Si elle n’a pas pu la dire dans la minute, elle la garde et te la dit quand tu demandes « Quoi de neuf ? »."
           }
         }
       }
@@ -831,16 +801,6 @@
         }
       }
     },
-    "Check": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vérifier"
-          }
-        }
-      }
-    },
     "Checking…": {
       "localizations": {
         "fr": {
@@ -917,36 +877,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude Code s’est arrêté sans donner de résultat."
-          }
-        }
-      }
-    },
-    "Clear": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Effacer"
-          }
-        }
-      }
-    },
-    "Clear history…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Effacer l’historique…"
-          }
-        }
-      }
-    },
-    "Clear the history?": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Effacer l’historique ?"
           }
         }
       }
@@ -1157,16 +1087,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copier les mesures"
-          }
-        }
-      }
-    },
-    "Copy the address from the source’s page.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Copie l’adresse depuis la page de la source."
           }
         }
       }
@@ -1451,12 +1371,12 @@
         }
       }
     },
-    "Every exchange kept is erased from this Mac. What Maé remembers stays.": {
+    "Everything Maé remembers is erased from this Mac, with the history of past exchanges if there is one.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tous les échanges gardés sont effacés de ce Mac. Ce que Maé retient reste."
+            "value": "Tout ce que Maé retient est effacé de ce Mac, avec l’historique des échanges passés s’il y en a un."
           }
         }
       }
@@ -1751,16 +1671,6 @@
         }
       }
     },
-    "History of exchanges": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Historique des échanges"
-          }
-        }
-      }
-    },
     "History size": {
       "localizations": {
         "fr": {
@@ -1797,16 +1707,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maintiens la barre d’espace pour parler"
-          }
-        }
-      }
-    },
-    "Home Assistant sends Maé a sentence with a REST command. Add it to its configuration, then restart Home Assistant.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Home Assistant envoie une phrase à Maé avec une commande REST. Ajoute-la à sa configuration, puis redémarre Home Assistant."
           }
         }
       }
@@ -1961,42 +1861,12 @@
         }
       }
     },
-    "In Developer tools › Actions, switch to YAML mode and run:": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dans Outils de développement › Actions, passe en mode YAML et lance :"
-          }
-        }
-      }
-    },
-    "In configuration.yaml": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dans configuration.yaml"
-          }
-        }
-      }
-    },
     "In progress": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "En cours"
-          }
-        }
-      }
-    },
-    "In secrets.yaml": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dans secrets.yaml"
           }
         }
       }
@@ -2191,42 +2061,12 @@
         }
       }
     },
-    "Keep for": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Garder pendant"
-          }
-        }
-      }
-    },
     "Keep for later": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Garder pour plus tard"
-          }
-        }
-      }
-    },
-    "Keep the history": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Garder l’historique"
-          }
-        }
-      }
-    },
-    "Keep the history for": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Garder l’historique pendant"
           }
         }
       }
@@ -2461,12 +2301,12 @@
         }
       }
     },
-    "Maé answers the weather, a currency’s or a crypto’s rate and travel times from dedicated services, without searching. The place you ask about goes to Open-Meteo or Apple, the currency or the crypto to the European Central Bank’s rates or to CoinGecko; the rest of the conversation stays on your Mac.": {
+    "Maé can remember what you tell her, from one conversation to the next. Everything stays on your Mac, in a folder of its own, and never goes to the internet.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé te donne la météo, le cours d’une devise ou d’une cryptomonnaie et les temps de trajet grâce à des services dédiés, sans chercher sur internet. L’endroit que tu demandes va à Open-Meteo ou à Apple, la devise ou la cryptomonnaie aux taux de la Banque centrale européenne ou à CoinGecko ; le reste de la conversation reste sur ton Mac."
+            "value": "Maé peut retenir ce que tu lui dis, d’une conversation à l’autre. Tout reste sur ton Mac, dans un dossier à part, et ne passe jamais par internet."
           }
         }
       }
@@ -2477,6 +2317,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé ne peut pas s’en servir. Autorise OpenMaé dans Réglages Système, Confidentialité et sécurité."
+          }
+        }
+      }
+    },
+    "Maé gives you the weather, the rate of a currency or a crypto, and travel times, through dedicated services.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te donne la météo, le cours d’une devise ou d’une crypto et les temps de trajet grâce à des services dédiés."
           }
         }
       }
@@ -2551,22 +2401,12 @@
         }
       }
     },
-    "Maé looks up what she can’t know: the news, a score, opening hours, a price. What you search for goes to the chosen engine; the rest of the conversation stays on your Mac.": {
+    "Maé looks up what she can’t know by herself, on the web or from dedicated services. What you ask goes only to the engine or the service that answers it; the rest of the conversation stays on your Mac.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Maé cherche ce qu’elle ne peut pas savoir : l’actualité, un score, des horaires, un prix. Ce que tu cherches part chez le moteur choisi ; le reste de la conversation reste sur ton Mac."
-          }
-        }
-      }
-    },
-    "Maé remembers what you ask her to (“remember that…”), and uses it when it helps, in every new conversation. With the history on, she can also find what you told her before (“what did I tell you about…”). Everything stays on your Mac, in a folder of its own, and never goes to the internet.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maé retient ce que tu lui demandes de retenir (« retiens que… ») et s’en sert quand c’est utile, à chaque nouvelle conversation. Avec l’historique, elle retrouve aussi ce que tu lui as dit avant (« qu’est-ce que je t’avais dit sur… »). Tout reste sur ton Mac, dans un dossier à part, et ne passe jamais par internet."
+            "value": "Maé va chercher ce qu’elle ne peut pas savoir seule, sur le web ou auprès de services dédiés. Ce que tu demandes part seulement chez le moteur ou le service qui y répond ; le reste de la conversation reste sur ton Mac."
           }
         }
       }
@@ -2577,16 +2417,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé lance le raccourci dès que tu le demandes."
-          }
-        }
-      }
-    },
-    "Maé says it right away. Then call the same action from any automation.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maé la dit tout de suite. Ensuite, appelle la même action depuis n’importe quelle automatisation."
           }
         }
       }
@@ -2617,6 +2447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maé dit « %@ »"
+          }
+        }
+      }
+    },
+    "Maé searches the web with the engine you choose: the news, a score, opening hours, a price.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé cherche sur le web avec le moteur que tu choisis : l’actualité, un score, des horaires, un prix."
           }
         }
       }
@@ -2877,6 +2717,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "Newer": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plus récentes"
           }
         }
       }
@@ -3187,6 +3037,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Désactivé : tes sources d’internet n’ont pas d’adresse."
+          }
+        }
+      }
+    },
+    "Older": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plus anciennes"
           }
         }
       }
@@ -3711,6 +3571,16 @@
         }
       }
     },
+    "Remember when you ask": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retenir quand tu le demandes"
+          }
+        }
+      }
+    },
     "Remove": {
       "localizations": {
         "fr": {
@@ -3891,6 +3761,16 @@
         }
       }
     },
+    "Say “remember that…”: Maé keeps it here and uses it when it helps, in every conversation.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis « retiens que… » : Maé le garde ici et s’en sert quand c’est utile, dans chaque conversation."
+          }
+        }
+      }
+    },
     "Scan a code with the OpenMaé app: the conversation goes through your device, your Mac does the work.": {
       "localizations": {
         "fr": {
@@ -3947,16 +3827,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Envoyer un essai"
-          }
-        }
-      }
-    },
-    "Send from Home Assistant": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Envoyer depuis Home Assistant"
           }
         }
       }
@@ -4437,16 +4307,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’adresse n’est pas encore prête."
-          }
-        }
-      }
-    },
-    "The address of the source is secret: it stays in secrets.yaml.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "L’adresse de la source est secrète : elle reste dans secrets.yaml."
           }
         }
       }
@@ -4971,16 +4831,6 @@
         }
       }
     },
-    "Try it": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Essaie"
-          }
-        }
-      }
-    },
     "Turn on %@": {
       "localizations": {
         "fr": {
@@ -5007,26 +4857,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Active les actions pour choisir les autorisations et les raccourcis."
-          }
-        }
-      }
-    },
-    "Turn the memory on to see what Maé remembers.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active la mémoire pour voir ce que Maé retient."
-          }
-        }
-      }
-    },
-    "Turn the search on to choose its engine.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active la recherche pour choisir son moteur."
           }
         }
       }
@@ -5061,16 +4891,6 @@
         }
       }
     },
-    "Unlimited": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sans limite"
-          }
-        }
-      }
-    },
     "Unreachable": {
       "localizations": {
         "fr": {
@@ -5087,6 +4907,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Palier non testé : performances estimées."
+          }
+        }
+      }
+    },
+    "Urgent information is said at once, whatever the mode, without cutting you off. If Maé can’t speak, a notification shows it and she keeps it for “What’s new?”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une information urgente est dite aussitôt, quel que soit le mode, sans te couper. Si Maé ne peut pas parler, une notification l’affiche et elle la garde pour « Quoi de neuf ? »."
           }
         }
       }
@@ -5201,12 +5031,12 @@
         }
       }
     },
-    "Welcome home": {
+    "Web search": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retour à la maison"
+            "value": "Recherche sur le web"
           }
         }
       }
@@ -5257,16 +5087,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce que Maé retient"
-          }
-        }
-      }
-    },
-    "What Maé remembers and the history of exchanges are erased from this Mac.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ce que Maé retient et l’historique des échanges sont effacés de ce Mac."
           }
         }
       }
@@ -5341,16 +5161,6 @@
         }
       }
     },
-    "When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours. If she cannot speak (announcements off, not ready yet), it shows in a notification and is kept for later.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quand elle marque une information comme urgente, Maé la dit tout de suite, quel que soit le mode : elle peut couper sa propre phrase, jamais la tienne. Si elle ne peut pas parler (annonces coupées, pas encore prête), l’information s’affiche en notification et est gardée pour plus tard."
-          }
-        }
-      }
-    },
     "When she acts": {
       "localizations": {
         "fr": {
@@ -5397,16 +5207,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Avec mon compte"
-          }
-        }
-      }
-    },
-    "With “news: true”, Maé says the text, then the news she kept for you. For example, when you come home:": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Avec « nouvelles: true », Maé dit le texte, puis les nouvelles qu’elle a gardées pour toi. Par exemple, quand tu rentres :"
           }
         }
       }
@@ -5691,42 +5491,12 @@
         }
       }
     },
-    "Your words and Maé’s answers, to find them again when you ask. Off, nothing is written.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tes mots et les réponses de Maé, pour les retrouver quand tu le demandes. Désactivé, rien n’est écrit."
-          }
-        }
-      }
-    },
-    "action: rest_command.notify_mae\ndata:\n  message: \"Test from Home Assistant\"": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "action: rest_command.prevenir_mae\ndata:\n  texte: \"Essai depuis Home Assistant\""
-          }
-        }
-      }
-    },
     "already here": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "déjà là"
-          }
-        }
-      }
-    },
-    "automation:\n  - alias: \"Back home: Maé welcomes you\"\n    triggers:\n      - trigger: state\n        entity_id: person.<you>\n        to: \"home\"\n    actions:\n      - action: rest_command.notify_mae\n        data:\n          message: \"Good evening, welcome back.\"\n          news: true": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation:\n  - alias: \"Retour à la maison : Maé accueille\"\n    triggers:\n      - trigger: state\n        entity_id: person.<toi>\n        to: \"home\"\n    actions:\n      - action: rest_command.prevenir_mae\n        data:\n          texte: \"Bonsoir, bon retour.\"\n          nouvelles: true"
           }
         }
       }
@@ -5811,32 +5581,12 @@
         }
       }
     },
-    "mae_address: \"%@\"": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "adresse_mae: \"%@\""
-          }
-        }
-      }
-    },
     "or press": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "ou appuie sur"
-          }
-        }
-      }
-    },
-    "rest_command:\n  notify_mae:\n    # the address copied from OpenMaé\n    url: !secret mae_address\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': message, 'news': news | default(false)} | to_json }}\"": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "rest_command:\n  prevenir_mae:\n    # l’adresse copiée depuis OpenMaé\n    url: !secret adresse_mae\n    method: post\n    content_type: \"application/json\"\n    payload: \"{{ {'text': texte, 'news': nouvelles | default(false)} | to_json }}\""
           }
         }
       }

@@ -109,11 +109,18 @@ public enum MemoryRetention: String, Sendable, Codable, CaseIterable {
 
 /// Maé's memory, kept on this Mac only (Application Support/<name>/Memory), never sent anywhere: a sheet of what the user
 /// asked her to remember, which goes into the beginning of each conversation, and, with its own switch, a journal of past
-/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…").
+/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…"). The journal is not offered in this version
+/// (`journalOffered`).
 public struct MemorySettings: Sendable, Codable, Equatable {
+    /// The journal is switched off for everyone, whatever `journal` says: nothing is written to it, Maé does not search it
+    /// (her tool offers `retenir` and `oublier` only), and it is never purged (a journal already on disk stays as it is,
+    /// until "Erase everything"). Its code stays, for when it comes back once measured.
+    public static let journalOffered = false
+
     /// Off by default. On, the sheet is on.
     public var enabled = false
-    /// The journal of past exchanges, off by default even with the memory on.
+    /// The journal of past exchanges, off by default even with the memory on. Kept as it was saved, and not used while
+    /// the journal is not offered.
     public var journal = false
     public var retention = MemoryRetention.thirtyDays
     /// Searching the journal by meaning too (embeddings): off, and not built while the plain search is enough.
@@ -130,8 +137,8 @@ public struct MemorySettings: Sendable, Codable, Equatable {
         semanticSearch = try c.decodeIfPresent(Bool.self, forKey: .semanticSearch) ?? false
     }
 
-    /// The journal is written and searched: the memory and the journal both switched on.
-    public var journalOn: Bool { enabled && journal }
+    /// The journal is written and searched: offered, and the memory and the journal both switched on.
+    public var journalOn: Bool { Self.journalOffered && enabled && journal }
 }
 
 /// What the memory page shows (`AssistantEvent.memory`).
