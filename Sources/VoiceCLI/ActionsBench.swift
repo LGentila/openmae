@@ -1221,6 +1221,11 @@ private func checkMemory(_ call: ToolCall, sheet: [String], journal: Bool, conte
         guard let wanted = call.text("reference") ?? text, MemoryTools.entry(wanted, in: sheet) != nil else {
             throw refusal("Aucune entrée de la mémoire ne correspond.")
         }
+    case .toutOublier:
+        if let said = context.userSaid.first, !MemoryCatalog.asksToEraseEverything(said) {
+            throw refusal("L'utilisateur n'a pas demandé d'effacer toute ta mémoire.")
+        }
+        guard !sheet.isEmpty else { throw refusal("La mémoire est déjà vide : il n'y a rien à effacer.") }
     }
 }
 
