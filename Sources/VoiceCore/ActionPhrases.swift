@@ -195,6 +195,29 @@ public enum ActionPhrases {
         }
     }
 
+    /// A change that changed nothing and named the calendar the event is already in (`ActionCatalog.changed`): where it
+    /// is, then the event, as when it was saved.
+    public static func eventAlreadyIn(calendarName: String, title: String, start: Date, end: Date, allDay: Bool,
+                                      _ context: ToolContext) -> String
+    {
+        let when = span(start, end, allDay: allDay, context)
+        switch context.language {
+        case .french: return "C’est déjà dans ton calendrier «\(nb)\(calendarName)\(nb)»\(nb): \(title), \(when)."
+        case .english: return "It’s already in your “\(calendarName)” calendar: \(title), \(when)."
+        }
+    }
+
+    /// The same for a reminder already in the list the change named.
+    public static func reminderAlreadyIn(listName: String, title: String, due: Date?, hasTime: Bool,
+                                         _ context: ToolContext) -> String
+    {
+        let when = due.map { ", " + moment($0, hasTime: hasTime, context) } ?? ""
+        switch context.language {
+        case .french: return "C’est déjà dans ta liste «\(nb)\(listName)\(nb)»\(nb): \(title)\(when)."
+        case .english: return "It’s already in your “\(listName)” list: \(title)\(when)."
+        }
+    }
+
     /// A change that changed nothing (`ActionCatalog.changed`): what can be changed, for an event (`event`), a reminder,
     /// or an item not known yet (nil).
     public static func nothingChanged(event: Bool?, _ language: SpeechLanguage) -> String {

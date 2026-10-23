@@ -8,11 +8,13 @@
 // try says nothing, the app says its question); the actions are carried out on a calendar kept in memory
 // (`MemoryCalendar`), which gives the model the results and the user the sentences the app would. The history keeps
 // each turn as the app records it, and the next sentence follows, until the dialogue's goal is reached (the item the
-// user wanted is saved, or changed) or its sentences run out. The model samples its answers: each dialogue runs
-// --repeats times (default 10), and the report counts, turn by turn, what the model did, which items its changes named
-// (« dernier », "r1"), how many answers said nothing to the user, how many second tries answered in words that say it
-// was done (« C'est noté », with nothing saved) and how often the goal was reached; and, for a dialogue that creates an
-// item on the way that its later sentences must leave as it was, how often that item was changed or deleted.
+// user wanted is saved, or changed) or its sentences run out; a dialogue whose last sentence asks for what is already
+// so (an item put in the calendar it is in) has its goal checked at the end: nothing done, and nothing said done. The
+// model samples its answers: each dialogue runs --repeats times (default 10), and the report counts, turn by turn, what
+// the model did, which items its changes named (« dernier », "r1"), how many answers said nothing to the user, how many
+// second tries answered in words that say it was done (« C'est noté », with nothing saved) and how often the goal was
+// reached; and, for a dialogue that creates an item on the way that its later sentences must leave as it was, how often
+// that item was changed or deleted.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web] [--memory]
@@ -61,7 +63,10 @@ private struct DialogueCorpus: Decodable {
     /// The item the user wants saved: by this tool, its title containing `title` (whatever the accents and case), at
     /// `when` ("2026-10-16T16:00", or the day alone), in the calendar or the list `calendar` (whatever the accents and
     /// case). With `modifier_element`, an item created earlier in the dialogue that the user wants changed: the app
-    /// changed it (it did not create it), its title, date and calendar as wanted.
+    /// changed it (it did not create it), its title, date and calendar as wanted. With `aucun` (`nothingToDo`), the last
+    /// sentence asks for what is already so, checked once it is said: in its turn, no item changed or deleted, and an
+    /// answer (the model's words and the app's sentences) that does not say anything was done, changed or moved. The
+    /// report also counts the runs that created an item in that turn (the same one again, say).
     struct Goal: Decodable {
         var tool: String
         var title: String?
@@ -75,6 +80,9 @@ private struct DialogueCorpus: Decodable {
         var kept: String?
         var notRemembered: String?
         var answerMentions: [String]?
+
+        /// The goal's tool for a last sentence that asks for nothing new.
+        static let nothingToDo = "aucun"
     }
 }
 
@@ -175,6 +183,7 @@ func runDialogueBench(_ o: Options) async throws {
         }
         await calendar.use(calendars: dialogue.calendars, lists: dialogue.lists)
         let memoryGoal = dialogue.goal.tool == MemoryCatalog.name
+        let nothingToDo = dialogue.goal.tool == DialogueCorpus.Goal.nothingToDo
         for run in 1...repeats {
             print("■ \(dialogue.name) — run \(run)/\(repeats)" + (at == now ? "" : " · at \(LocalDateTime.format(at, in: timeZone))"))
             var start = base
@@ -203,7 +212,7 @@ func runDialogueBench(_ o: Options) async throws {
                     continue
                 }
                 var turn = try await talk.turn(sentence)
-                turn.goalReached = memoryGoal ? false : turn.passes.contains { reaches($0, dialogue.goal) }
+                turn.goalReached = memoryGoal || nothingToDo ? false : turn.passes.contains { reaches($0, dialogue.goal) }
                 result.turns.append(turn)
                 show(turn, index: index + 1)
                 if let keep = dialogue.keep, result.keptItemTouchedAt == nil,
@@ -233,6 +242,20 @@ func runDialogueBench(_ o: Options) async throws {
                     result.goalAt = result.turns.count
                     result.turns[result.turns.count - 1].goalReached = true
                 }
+            }
+            if nothingToDo, let last = result.turns.last {
+                // The last sentence asked for what was already so.
+                let touched = last.passes.contains { $0.touched != nil }
+                let claimed = saysItWasDone(last.answer)
+                if !touched, !claimed {
+                    result.goalAt = result.turns.count
+                    result.turns[result.turns.count - 1].goalReached = true
+                } else {
+                    print("  ✗ at the last turn: " + [touched ? "an item changed or deleted" : nil,
+                                                      claimed ? "the answer says it was done" : nil]
+                        .compactMap { $0 }.joined(separator: ", "))
+                }
+                if last.passes.contains(where: { $0.created == true }) { print("  ✗ an item created at the last turn") }
             }
             if let keep = dialogue.keep, let touchedAt = result.keptItemTouchedAt {
                 print("  ✗ « \(keep) » changed or deleted at turn \(touchedAt)")
@@ -542,15 +565,19 @@ private func folded(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
 }
 
-/// Whether the model's words say an item was saved or changed: « C'est noté », « C'est fait », « J'ai ajouté… », « Je
-/// l'ai mis… », « … est enregistré ». Said in a pass without a call, nothing was.
+/// Whether words say an item was saved, changed or moved, or is being: « C'est noté », « C'est fait », « C'est
+/// déplacé », « J'ai ajouté… », « Je l'ai mis… », « Je la mets… » (not « Tu veux que je la décale ? »), « … est
+/// enregistré », « … est maintenant dans… ». Said in a pass without a call, nothing was.
 private func saysItWasDone(_ text: String) -> Bool {
     let done = "(ajouté|créé|utilisé|mis|enregistré|noté|programmé|placé|calé|planifié|réservé|inscrit|déplacé|décalé"
         + "|modifié|changé)"
-    let saved = "(noté|fait|enregistré|ajouté|programmé|créé|planifié|réservé|calé|mis|inscrit)"
+    let saved = "(noté|fait|enregistré|ajouté|programmé|créé|planifié|réservé|calé|mis|inscrit|déplacé|décalé|modifié"
+        + "|changé)"
+    let doing = "(mets|ajoute|note|enregistre|programme|place|inscris|déplace|décale|modifie|change)"
     let patterns = [#"\bc'est (bien |donc )?"# + saved + #"\b"#, #"\bj'ai (bien |donc )?"# + done,
                     #"\bje (te |t')?l'ai (bien |donc )?"# + done, #"\btu as (bien )?noté\b"#,
-                    #"\b(est|sont) (bien |maintenant |désormais )?"# + saved]
+                    #"\b(est|sont) (bien |maintenant |désormais )?"# + saved, #"\b(est|sont) (maintenant|désormais)\b"#,
+                    #"(?<!que )\bje (te |t')?(le |la |les |l')?"# + doing + #"\b"#]
     let text = text.replacingOccurrences(of: "’", with: "'")
     return patterns.contains { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
 }
@@ -635,6 +662,13 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             let touched = mine.compactMap(\.keptItemTouchedAt)
             print("« \(keep) » changed or deleted: \(touched.count) / \(mine.count)"
                   + (touched.isEmpty ? "" : " (\(byTurn(touched)))"))
+        }
+        if dialogue.goal.tool == DialogueCorpus.Goal.nothingToDo {
+            // What the last turn did, when it should have done nothing.
+            let last = mine.compactMap(\.turns.last)
+            print("at the last turn: answers that say it was done \(last.filter { saysItWasDone($0.answer) }.count), "
+                  + "items changed or deleted \(last.filter { $0.passes.contains { $0.touched != nil } }.count), "
+                  + "items created \(last.filter { $0.passes.contains { $0.created == true } }.count) / \(last.count)")
         }
         for (index, sentence) in dialogue.turns.enumerated() {
             let turns = mine.compactMap { $0.turns.count > index ? $0.turns[index] : nil }

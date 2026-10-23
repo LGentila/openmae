@@ -344,11 +344,12 @@ public enum ActionCatalog {
 
     /// What a `modifier_element` call makes of `item`: a new title; a new moment, length or place for an event, a new
     /// due date for a reminder (the dates as `changedEvent` and `changedDue` read them); `collection`, the calendar or
-    /// the list it names (as the provider found it). Refused when that changes nothing: what the call gives is already
-    /// the item's, or does not apply to it (a place for a reminder), so that the app never says « C'est modifié » of an
-    /// item it left as it was. `reference`: the item's, for the model.
-    public static func changed(_ item: SavedItem, by call: ToolCall, collection: String?, reference: String,
-                               context: ToolContext) throws -> SavedItem
+    /// the list it names (as the provider found it), `collectionName` its name as the user knows it (nil: `collection` is
+    /// its name). Refused when that changes nothing: what the call gives is already the item's, or does not apply to it
+    /// (a place for a reminder), so that the app never says « C'est modifié » of an item it left as it was (`unchanged`).
+    /// `reference`: the item's, for the model.
+    public static func changed(_ item: SavedItem, by call: ToolCall, collection: String?, collectionName: String? = nil,
+                               reference: String, context: ToolContext) throws -> SavedItem
     {
         var changed = item
         if let title = call.text("titre") { changed.title = title }
@@ -364,14 +365,34 @@ public enum ActionCatalog {
         } else if let due = try changedDue(call, due: item.date.map { ($0, item.hasTime) }, context: context) {
             (changed.date, changed.hasTime) = (due.date, due.hasTime)
         }
-        guard changed != item else { throw unchanged(event: item.isEvent, reference: reference, context: context) }
+        guard changed != item else {
+            // It names the calendar or the list the item is already in: the user hears that it is there.
+            let name = collection.map { collectionName ?? $0 }
+            let spoken = name.map { name in
+                item.isEvent
+                    ? ActionPhrases.eventAlreadyIn(calendarName: name, title: item.title, start: item.date ?? context.now,
+                                                   end: item.end ?? item.date ?? context.now, allDay: !item.hasTime,
+                                                   context)
+                    : ActionPhrases.reminderAlreadyIn(listName: name, title: item.title, due: item.date,
+                                                      hasTime: item.hasTime, context)
+            }
+            throw unchanged(event: item.isEvent, reference: reference, spoken: spoken, context: context)
+        }
         return changed
     }
 
     /// A change that changes nothing, given nothing (`event` nil: the kind of the item is not known yet) or only what the
-    /// item already is. The model reads what a change can give it, then gets its second try; if that try says nothing,
-    /// the user is asked what to change.
-    static func unchanged(event: Bool?, reference: String?, context: ToolContext) -> ToolRefusal {
+    /// item already is. The app answers it at once, without a second try for the model: `spoken`, where the item already
+    /// is when the call names its calendar or its list (`changed`), else that nothing was changed and what can be
+    /// (`ActionPhrases.nothingChanged`). The model reads why, and what a change can give, in the history.
+    ///
+    /// It used to get a second try, which never wrote another call: none of 162 in voice-cli dialogue-bench, on the three
+    /// models, from 2026-10-21 to 2026-10-23. Their words often said the change was made: Gemma 4 26B's in 19 of 30
+    /// (« C'est fait, ton rappel est maintenant dans ta liste Rappels. », as in the app: « C'est fait. La réunion est
+    /// maintenant dans ton calendrier test temp. »), Gemma 4 E4B's in 28 of 62 (« J'ai changé le calendrier de la réunion
+    /// pour Maison. »); Gemma 4 E2B's that it could not be made, in 49 of 70 (« Je ne peux pas modifier cet événement. »).
+    /// Asked « Modifie la réunion. », no model wrote a call with nothing in it: each asked what to change (30 of 30).
+    static func unchanged(event: Bool?, reference: String?, spoken: String? = nil, context: ToolContext) -> ToolRefusal {
         let item = reference.map { " : « \($0) » est déjà comme il le demande" } ?? ""
         let what: String
         switch event {
@@ -384,7 +405,7 @@ public enum ActionCatalog {
                 + "ou la liste d'un rappel (liste)"
         }
         return ToolRefusal(forModel: "Cet appel ne change rien\(item). On peut changer \(what).",
-                           spoken: ActionPhrases.nothingChanged(event: event, context.language))
+                           spoken: spoken ?? ActionPhrases.nothingChanged(event: event, context.language), retryable: false)
     }
 
     // MARK: - Timers and shortcuts

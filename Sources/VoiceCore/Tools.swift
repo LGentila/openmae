@@ -216,7 +216,8 @@ public struct ToolRefusal: Error, Sendable {
     public var forModel: String
     /// The question the app asks the user when the model cannot correct it.
     public var spoken: String
-    /// The model may correct its call (wrong arguments); false when retrying cannot help (permission refused).
+    /// The model may correct its call (wrong arguments); false when retrying cannot help (permission refused, a change
+    /// that changes nothing: `spoken` then answers the user at once).
     public var retryable: Bool
     /// What is refused is one detail of the call, which the answer gives again, whole: a moment already gone, words
     /// about time the app cannot place or none at all, a calendar or a list that does not exist. Right after a creation

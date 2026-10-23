@@ -342,13 +342,14 @@ public actor CalendarTools: ToolProvider {
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
             // Worked out before anything changes: a refused call (a calendar that does not exist, a change that changes
-            // nothing) leaves the event as it was.
+            // nothing, answered by the app at once: « C’est déjà dans ton calendrier « Travail »… ») leaves the event as
+            // it was.
             let calendar = try ActionCatalog.collectionNamed(in: call, event: true).map {
                 try eventCalendar(named: $0, current: event.calendar, context: context)
             }
             let current = state(of: event)
             let changed = try ActionCatalog.changed(current, by: call, collection: calendar?.calendarIdentifier,
-                                                    reference: key, context: context)
+                                                    collectionName: calendar?.title, reference: key, context: context)
             let before = snapshot(event)
             if changed.title != current.title { event.title = changed.title }
             if changed.place != current.place { event.location = changed.place }
@@ -382,7 +383,7 @@ public actor CalendarTools: ToolProvider {
             }
             let current = state(of: reminder, context)
             let changed = try ActionCatalog.changed(current, by: call, collection: list?.calendarIdentifier,
-                                                    reference: key, context: context)
+                                                    collectionName: list?.title, reference: key, context: context)
             let before = snapshot(reminder)
             if changed.title != current.title { reminder.title = changed.title }
             if changed.moved(from: current), let due = changed.date {

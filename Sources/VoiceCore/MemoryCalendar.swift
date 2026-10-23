@@ -164,7 +164,8 @@ public actor MemoryCalendar: ToolProvider {
             }
             let (reference, item) = try referenced(call, context)
             // As in the app: another calendar or list among this conversation's, refused when it does not exist; a change
-            // that changes nothing is refused.
+            // that changes nothing is refused, and the app answers it at once (`ActionCatalog.changed`, which says a
+            // calendar or a list by its name: here the name is what tells it apart).
             let moveTo = try ActionCatalog.collectionNamed(in: call, event: item.isEvent).map {
                 try collection($0, event: item.isEvent, current: item.collection, context)
             }

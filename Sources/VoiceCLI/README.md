@@ -185,7 +185,9 @@ moment already gone, then the user's new moment; or a request whose call the app
 then the user's answer to the app's question) are sent turn after turn, text only and with nothing created: each call
 goes through the app's checks and second try, and is carried out on a calendar kept in memory that answers as the app
 would. The model samples its answers, so each dialogue runs several times, and the report says what the model did at
-each turn, how many answers said nothing to the user and how often the item the user wanted was saved:
+each turn, how many answers said nothing to the user and how often the item the user wanted was saved (for a last
+request that asks for what is already so, as putting a meeting in the calendar it is in: how often nothing was done,
+nor said done):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli dialogue-bench --repeats 10

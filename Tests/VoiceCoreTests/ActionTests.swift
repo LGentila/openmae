@@ -1787,6 +1787,49 @@ struct PipelineActionTests {
         #expect(turn[3].content == "C’est dans ton agenda\(nb): Réunion.")
     }
 
+    /// A meeting saved in the default calendar, then « Mets-la dans mon calendrier Maison. », the calendar it is in: the
+    /// model's change changes nothing, and the app says at once where the meeting is, without a second try (Gemma 4 26B's
+    /// said « C'est fait. La réunion est maintenant dans ton calendrier test temp. »). The model then reads, in the
+    /// history, that its call changed nothing, and what the user heard.
+    @Test func changeIntoItsOwnCalendarIsAnsweredByTheApp() async throws {
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        let change = ToolCall(name: "modifier_element", arguments: ["reference": "e1", "calendrier": "maison"])
+        let thanks: [ModelOutput] = [.text("Avec plaisir, à ton service.")]
+        let model = ScriptedModel(scripts: [[.toolCall(meeting)], [.toolCall(change)], thanks])
+        let (speaker, calendar) = (FakeSpeaker(), MemoryCalendar())
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        let sentences = ["Ajoute une réunion demain à 10 h.", "Mets-la dans mon calendrier Maison.", "Merci"]
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: ScriptedTranscriber(sentences),
+                                     model: model, synthesizer: FakeSynthesizer(), output: speaker,
+                                     tools: ToolRunner(providers: [calendar]), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await calendar.creations == ["e1"])
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 2 }
+        #expect(await model.requests.count == 2)  // no second try
+        let answer = try #require(await log.finished.last?.assistantText)
+        #expect(answer.hasPrefix("C’est déjà dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, "))
+        #expect(!answer.contains("fait") && !answer.contains("modifié") && !answer.contains("déplacé"))
+        #expect(await calendar.touched.isEmpty)
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 3 }
+        // The second turn as the model then sees it: its change, why it changed nothing, and the app's sentence.
+        let turn = Array(try #require(await model.requests.last).suffix(5))
+        #expect(turn.map(\.role) == [.user, .assistant, .tool, .assistant, .user])
+        #expect(turn[1].toolCalls == [change])
+        guard case .object(let result)? = turn[2].toolResult else { Issue.record("no result"); return }
+        #expect(result["erreur"]?.text?.hasPrefix("Cet appel ne change rien : « e1 » est déjà comme il le demande.") == true)
+        #expect(result["erreur"]?.text?.contains(ToolRefusal.secondTry("modifier_element")) == false)
+        #expect(turn[3].content == answer)
+    }
+
     @Test func timerAnnouncementWaitsForSilence() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
@@ -1844,12 +1887,12 @@ struct ChangeTests {
     }
 
     /// What `ActionCatalog.changed` refuses of a change; nil when it changes something.
-    func refusal(_ item: ActionCatalog.SavedItem, _ arguments: [String: JSONValue], collection: String? = nil)
-        -> ToolRefusal?
+    func refusal(_ item: ActionCatalog.SavedItem, _ arguments: [String: JSONValue], collection: String? = nil,
+                 collectionName: String? = nil, _ language: SpeechLanguage = .french) -> ToolRefusal?
     {
         do {
-            _ = try ActionCatalog.changed(item, by: change(arguments), collection: collection, reference: "e1",
-                                          context: context())
+            _ = try ActionCatalog.changed(item, by: change(arguments), collection: collection,
+                                          collectionName: collectionName, reference: "e1", context: context(language))
             return nil
         } catch {
             return error as? ToolRefusal
@@ -1932,37 +1975,74 @@ struct ChangeTests {
                                            allDay: false, moved: false, context()).hasPrefix("C’est modifié\(nb): Réunion"))
     }
 
-    /// What it gives is already the item's, or does not apply to it: refused, with what can be changed and a second try,
-    /// never « C'est modifié ». Given nothing to change, it is refused by the check.
-    @Test func changeThatChangesNothingIsRefused() throws {
+    /// What it gives is already the item's, or does not apply to it: refused, never « C'est modifié », and answered by
+    /// the app at once, without a second try: where the item is when the call names its own calendar or list, else that
+    /// nothing was changed and what can be. The model reads why in the history. Given nothing to change, it is refused by
+    /// the check, and answered the same way.
+    @Test func changeThatChangesNothingIsAnsweredByTheApp() throws {
         let inWork = try #require(refusal(meeting, ["calendrier": "Travail"], collection: "Travail"))
-        #expect(inWork.retryable)
+        #expect(!inWork.retryable)
         #expect(inWork.forModel == "Cet appel ne change rien : « e1 » est déjà comme il le demande. On peut changer son "
                 + "titre (titre), son moment (quand), sa durée (duree), son lieu (lieu) ou son calendrier (calendrier).")
-        #expect(inWork.spoken == ActionPhrases.nothingChanged(event: true, .french) && !inWork.spoken.contains("modifié"))
-        #expect(refusal(meeting, ["titre": "Réunion"]) != nil)
-        #expect(refusal(meeting, ["quand": "à 10 h"]) != nil)  // where it already is
-        #expect(refusal(meeting, ["quand": "demain à 10 h", "duree": "une heure"]) != nil)
+        #expect(inWork.spoken
+                == "C’est déjà dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        // The history keeps why, without the request for another call.
+        #expect(inWork.result(for: change(["calendrier": "Travail"])) == ["erreur": .string(inWork.forModel)])
+        // Found as the provider tells calendars apart (EventKit's identifier), said by its name.
+        var inAnAccount = meeting
+        inAnAccount.collection = "5E1C9A0B-calendar"
+        #expect(refusal(inAnAccount, ["calendrier": "travail"], collection: inAnAccount.collection,
+                        collectionName: "Travail")?.spoken == inWork.spoken)
+        // With other things the item already is: the same.
+        #expect(refusal(meeting, ["calendrier": "Travail", "titre": "Réunion", "quand": "demain à 10 h"],
+                        collection: "Travail")?.spoken == inWork.spoken)
+        #expect(refusal(meeting, ["calendrier": "Travail"], collection: "Travail", .english)?.spoken
+                == "It’s already in your “Travail” calendar: Réunion, Friday, October 16 from 10\(nb)AM to 11\(nb)AM.")
+        // Only its title or its moment, as they are: nothing was changed, and what can be.
+        for arguments: [String: JSONValue] in [["titre": "Réunion"], ["quand": "à 10 h"],
+                                               ["quand": "demain à 10 h", "duree": "une heure"],
+                                               ["titre": "Réunion", "quand": "vendredi à 10 h"]] {
+            let same = try #require(refusal(meeting, arguments), "\(arguments)")
+            #expect(!same.retryable && same.spoken == ActionPhrases.nothingChanged(event: true, .french), "\(arguments)")
+            #expect(same.forModel.hasPrefix("Cet appel ne change rien : « e1 » est déjà comme il le demande."),
+                    "\(arguments)")
+        }
         #expect(refusal(meeting, ["titre": "Réunion d'équipe"]) == nil)
         #expect(refusal(meeting, ["lieu": "Salle 3"]) == nil)
-        // A reminder has no place nor length; already due then.
+        #expect(refusal(meeting, ["calendrier": "Maison"], collection: "Maison") == nil)
+        // A reminder in its own list; a reminder has no place nor length; already due then.
+        let inReminders = try #require(refusal(bread, ["liste": "rappels"], collection: "Rappels"))
+        #expect(!inReminders.retryable)
+        #expect(inReminders.spoken
+                == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): Acheter du pain, vendredi 16 octobre à 10\(nb)h.")
+        #expect(inReminders.forModel.hasSuffix("On peut changer son titre (titre), son moment (quand) ou sa liste (liste)."))
+        var undated = bread
+        undated.date = nil
+        undated.hasTime = false
+        #expect(refusal(undated, ["calendrier": "Rappels"], collection: "Rappels")?.spoken
+                == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): Acheter du pain.")
+        #expect(refusal(undated, ["liste": "Rappels"], collection: "Rappels", .english)?.spoken
+                == "It’s already in your “Rappels” list: Acheter du pain.")
         let place = try #require(refusal(bread, ["lieu": "Boulangerie"]))
-        #expect(place.spoken == ActionPhrases.nothingChanged(event: false, .french))
-        #expect(place.forModel.hasSuffix("On peut changer son titre (titre), son moment (quand) ou sa liste (liste)."))
-        #expect(refusal(bread, ["duree": "une heure"]) != nil)
-        #expect(refusal(bread, ["quand": "demain à 10 h"]) != nil)
+        #expect(!place.retryable && place.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        #expect(refusal(bread, ["duree": "une heure"])?.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        #expect(refusal(bread, ["quand": "demain à 10 h"])?.spoken == ActionPhrases.nothingChanged(event: false, .french))
         #expect(refusal(bread, ["quand": "demain à 11 h"]) == nil)
         for arguments: [String: JSONValue] in [["reference": "e1"], ["reference": "dernier", "titre": " "],
                                                ["reference": "e1", "journee_entiere": true]] {
             let empty = try #require(checkRefusal(ToolCall(name: "modifier_element", arguments: arguments)), "\(arguments)")
-            #expect(empty.retryable && empty.spoken == ActionPhrases.nothingChanged(event: nil, .french), "\(arguments)")
+            #expect(!empty.retryable && empty.spoken == ActionPhrases.nothingChanged(event: nil, .french), "\(arguments)")
             #expect(empty.forModel.hasPrefix("Cet appel ne change rien. On peut changer"), "\(arguments)")
         }
         #expect(checkRefusal(ToolCall(name: "modifier_element", arguments: ["reference": "e1", "duree_minutes": 90])) == nil)
         #expect(checkRefusal(ToolCall(name: "modifier_element", arguments: ["reference": "e1", "liste": "Courses"])) == nil)
         for language in SpeechLanguage.allCases {
-            for event: Bool? in [true, false, nil] {
-                let sentence = ActionPhrases.nothingChanged(event: event, language)
+            var sentences = ([true, false, nil] as [Bool?]).map { ActionPhrases.nothingChanged(event: $0, language) }
+            sentences += [refusal(meeting, ["calendrier": "Travail"], collection: "Travail", language),
+                          refusal(undated, ["liste": "Rappels"], collection: "Rappels", language)].compactMap { $0?.spoken }
+            #expect(sentences.count == 5)
+            for sentence in sentences {
+                #expect(!sentence.contains("modifié") && !sentence.contains("Changed"), "\(sentence)")
                 #expect(ActionPhrases.wordCount(SpeakableText.forVoice(sentence, language: language)) >= 5, "\(sentence)")
             }
         }
@@ -1970,8 +2050,8 @@ struct ChangeTests {
 
     /// voice-cli's calendar in memory, as the app's (through the runner, as dialogue-bench uses it): a meeting created in
     /// the default calendar, then moved to another by name, then « annule »: back where it was. A calendar that does not
-    /// exist and a change that changes nothing are refused, with a second try, and leave it as it was. The same for a
-    /// reminder and its list.
+    /// exist is refused with a second try, a change that changes nothing is answered by the app at once (as by
+    /// `CalendarTools`: `ActionCatalog.changed`), and both leave it as it was. The same for a reminder and its list.
     @Test func memoryCalendarMovesAndUndoesTheMove() async throws {
         let calendar = MemoryCalendar()
         await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
@@ -1985,11 +2065,18 @@ struct ChangeTests {
         let unknown = await runner.handle(change(["reference": "dernier", "calendrier": "Famille"]), context: context())
         #expect(unknown.retryable && unknown.spoken == ActionPhrases.unknownCalendar("Famille", .french))
         let same = await runner.handle(change(["calendrier": "travail"]), context: context())
-        #expect(same.retryable && same.spoken == ActionPhrases.nothingChanged(event: true, .french))
+        #expect(!same.retryable && same.refusal != nil)
+        #expect(same.spoken
+                == "C’est déjà dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
         #expect(same.forModel["erreur"]?.text?.hasPrefix("Cet appel ne change rien : « e1 » est déjà") == true)
-        #expect(same.forModel["erreur"]?.text?.hasSuffix(ToolRefusal.secondTry("modifier_element")) == true)
+        #expect(same.forModel["erreur"]?.text?.contains(ToolRefusal.secondTry("modifier_element")) == false)
+        for arguments: [String: JSONValue] in [["titre": "Réunion"], ["reference": "dernier", "quand": "demain à 10 h"]] {
+            let unchanged = await runner.handle(change(arguments), context: context())
+            #expect(!unchanged.retryable && unchanged.spoken == ActionPhrases.nothingChanged(event: true, .french),
+                    "\(arguments)")
+        }
         let nothing = await runner.handle(change([:]), context: context())
-        #expect(nothing.retryable && nothing.spoken == ActionPhrases.nothingChanged(event: nil, .french))
+        #expect(!nothing.retryable && nothing.spoken == ActionPhrases.nothingChanged(event: nil, .french))
         #expect(await calendar.touched.isEmpty)  // none of them changed it
 
         let moved = await runner.handle(change(["calendrier": "maison"]), context: context())
@@ -2014,7 +2101,10 @@ struct ChangeTests {
         #expect(await runner.interception(for: "annule", now: at) == .undo)
         _ = await runner.resolve(.undo, context: context(at: at))
         let place = await runner.handle(change(["reference": "r1", "lieu": "Boulangerie"]), context: context())
-        #expect(place.retryable && place.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        #expect(!place.retryable && place.spoken == ActionPhrases.nothingChanged(event: false, .french))
+        let inReminders = await runner.handle(change(["reference": "r1", "liste": "Rappels"]), context: context())
+        #expect(!inReminders.retryable
+                && inReminders.spoken == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): Acheter du pain.")
         let back = await runner.handle(change(["reference": "r1", "quand": "demain à 9 h"]), context: context())
         #expect(back.forModel["liste"] == "Rappels")
         #expect(await calendar.touched == ["Réunion", "Réunion", "Acheter du pain", "Acheter du pain"])
