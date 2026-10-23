@@ -127,6 +127,11 @@ public actor AgentTools: ToolProvider {
 
     private var currentAddendum: String? { agents.isEmpty ? nil : AgentCatalog.promptAddendum }
 
+    /// Without the actions, a hand-over written after words of the model's own (`AgentCatalog.ignoredAfterWords`).
+    public func ignoresAfterWords(_ tool: String, actions: Bool) async -> Bool {
+        AgentCatalog.ignoredAfterWords(tool, actions: actions)
+    }
+
     /// `AgentCatalog.examples`, with the agent's name and its read-back setting; none for several agents (their calls
     /// would need the agent's name, which the examples do not show).
     public func exampleExchanges(now: Date) async -> [ChatMessage] {

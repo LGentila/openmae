@@ -1572,7 +1572,9 @@ public actor VoicePipeline {
     /// as it writes them, and its calls are carried out one after the other, in the order it wrote them, at most
     /// `PipelineConfig.actionsPerRequest` of them, each as soon as it is written (once the user's turn is really over),
     /// while the model writes the next one, so that its sentence can be said meanwhile; the last of several such sentences
-    /// is linked to the one before (« Et c’est noté : … », see `confirm`). Then, in this order: the model's
+    /// is linked to the one before (« Et c’est noté : … », see `confirm`). A call to some tools written after words of the
+    /// model's own is left out, with nothing said of it (`ToolRunner.ignoresAfterWords`: a hand-over without the actions,
+    /// after an answer to a question). Then, in this order: the model's
     /// second try for the calls refused for their arguments (one for the request, holding every result already
     /// obtained, and only those calls carried out from it); one pass where it sums up every result that came from outside
     /// (no call carried out then); the app's questions about the refused calls; the one question for the sensitive calls,
@@ -1629,6 +1631,9 @@ public actor VoicePipeline {
             var ignored: [ToolCall] = []
             /// The model's own words in this pass.
             var said = ""
+            /// The call being written comes after words of the model's own in this pass: a call to some tools is then left
+            /// out (`ToolRunner.ignoresAfterWords`).
+            var afterWords = false
             DebugLog.log("turn \(turn.id): LLM request" + (pass == .first ? "" : pass == .secondTry ? " (second try)"
                                                             : " (summing up)"))
             /// A call written, carried out at the model's next output (a token later at most): whether another call
@@ -1645,6 +1650,11 @@ public actor VoicePipeline {
                     case .text?, nil: false
                     }
                     carryingOut: do {
+                        if afterWords, await tools.ignoresAfterWords(call.name) {
+                            // Not carried out, not in the history, nothing said of it: the model's words are the answer.
+                            DebugLog.log("turn \(turn.id): \(call.name) written after the model's own words, left out")
+                            break carryingOut
+                        }
                         guard calls.count < maxCalls else {
                             DebugLog.log("turn \(turn.id): more calls than the app carries out at once: \(call.name)")
                             askedForMore = true
@@ -1706,13 +1716,21 @@ public actor VoicePipeline {
                     chunker.pieces(adding: filter.push(raw)).forEach(send)
                 case .toolCallStarted where pass != .summing:
                     DebugLog.log("turn \(turn.id): tool call started")
-                    if !fillerSaid, let phrase = await waitingPhrase(for: nil, turn) {
+                    var words = ReasoningFilter()
+                    afterWords = !SpeakableText.clean(words.push(said) + words.flush()).isEmpty
+                    // After the model's words, without the actions, the call may be one left out: its name first.
+                    if !fillerSaid, !(afterWords && tools?.offersActions == false),
+                       let phrase = await waitingPhrase(for: nil, turn)
+                    {
                         fillerSaid = true
                         // Not in the history: the model would start saying it in its own answers.
                         deliver(phrase, to: turn, inHistory: false)
                     }
                 case .toolCallNamed(let name) where pass != .summing:
-                    if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
+                    if afterWords, await tools?.ignoresAfterWords(name) == true {
+                        // A call left out: the answer is over, its end is said without waiting for the call's end.
+                        chunker.remainingPieces().forEach(send)
+                    } else if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
                         fillerSaid = true
                         deliver(phrase, to: turn, inHistory: false)
                     }

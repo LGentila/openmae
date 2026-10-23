@@ -803,4 +803,53 @@ struct PipelineAgentTests {
         #expect(await model.requests.count == 1)  // the "oui" went to the app, not to the model
         #expect(await tools.hasRunningTask)
     }
+
+    /// With the actions off, a hand-over the model writes after an answer of its own is left out: the user hears the
+    /// answer alone, without the waiting phrase or the read-back, nothing waits for a "oui" (the next sentence goes to the
+    /// model), and the history keeps the answer without the call. Written first, as the prompt asks, the call is read
+    /// back (above). With the actions, it is carried out after words too: read back, waiting for the "oui".
+    @Test func withoutTheActionsAHandOverAfterAnAnswerIsLeftOut() async throws {
+        let answer = "Non, Claude Code est gratuit pour toi."
+        let delegation = ToolCall(name: AgentCatalog.delegateName, arguments: [
+            "titre": "rôle de Claude Code", "consigne": "Explique ce qu'est Claude Code.",
+        ])
+        let review = AgentPhrases.review(agent: "Claude Code", title: "rôle de Claude Code", folder: nil, .french)
+        for actions in [false, true] {
+            let folder = scratchFolder()
+            let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
+                                   workspace: folder.appending(path: "OpenMae"))
+            let agent = FakeAgent()
+            await tools.configure(agents: [AgentTools.Agent(connector: agent)], folders: [])
+            let model = ScriptedModel(scripts: [
+                [.text(answer), .toolCallStarted, .toolCallNamed(AgentCatalog.delegateName), .toolCall(delegation)],
+                [.text("Avec plaisir, n'hésite pas.")],
+            ])
+            // The waiting phrase on, as in the app.
+            let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                         synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+                                         tools: ToolRunner(providers: [tools], actions: actions))
+            let log = EventRecorder()
+            Task { for await event in pipeline.events { await log.record(event) } }
+            try await pipeline.start()
+            await pipeline.submit(text: "Est-ce que Claude Code est payant ?")
+            guard !actions else {
+                await waitFor { await log.pieces.joined(separator: " ").hasSuffix(review) }
+                #expect(await log.pieces.joined(separator: " ").hasSuffix(review))
+                #expect(await log.pieces.contains(answer))
+                continue
+            }
+            await waitFor { await !model.catchUps.isEmpty }  // the exchange recorded
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(await log.pieces == [answer])
+            await pipeline.submit(text: "Merci")
+            await waitFor { await model.requests.count == 2 }
+            #expect(await model.requests.count == 2)  // not an answer to a read-back: nothing waited for a "oui"
+            let history = try #require(await model.requests.last)
+            #expect(history.allSatisfy { $0.toolCalls.isEmpty && $0.role != .tool })
+            #expect(history.dropLast().last == ChatMessage(.assistant, answer))
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(await agent.started.isEmpty)
+            #expect(await tools.visibleTasks.isEmpty)
+        }
+    }
 }
