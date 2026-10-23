@@ -49,14 +49,27 @@ public actor MemoryCalendar: ToolProvider {
         self.lists = lists.flatMap { $0.isEmpty ? nil : $0 } ?? [Self.listName]
     }
 
+    /// As in the app: a change is checked with the calendar or the list the user's words name, when its call names none
+    /// (`completedChange`): one that gives nothing else is not refused as changing nothing.
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
+            try ActionCatalog.check(refusedCreation.withRefusedDay(completedChange(call, context), said: context.userSaid),
+                                    context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
         }
+    }
+
+    /// As in the app: a change whose call names no calendar and no list, with the one the user's sentence of this turn
+    /// names for its item (`ActionCatalog.withCollectionSaid(change:event:context:names:)`): `event`, the item's kind;
+    /// nil, the kind of the item the call names, when it names one created here. Any other call, unchanged.
+    private func completedChange(_ call: ToolCall, event: Bool? = nil, _ context: ToolContext) -> ToolCall {
+        guard call.name == ActionCatalog.changeItem.name,
+              let event = event ?? (try? referenced(call, context))?.1.isEvent
+        else { return call }
+        return ActionCatalog.withCollectionSaid(change: call, event: event, context: context) { $0 ? calendars : lists }
     }
 
     /// As in the app: a creation whose call names no calendar or no list, with the one the user's words name, or the one
@@ -165,9 +178,11 @@ public actor MemoryCalendar: ToolProvider {
                 return try await perform(creation, context: context)
             }
             let (reference, item) = try referenced(call, context)
-            // As in the app: another calendar or list among this conversation's, refused when it does not exist; a change
-            // that changes nothing is refused, and the app answers it at once (`ActionCatalog.changed`, which says a
-            // calendar or a list by its name: here the name is what tells it apart).
+            // As in the app: no calendar and no list in the call, the one the user's words name (`completedChange`);
+            // another calendar or list among this conversation's, refused when it does not exist; a change that changes
+            // nothing is refused, and the app answers it at once (`ActionCatalog.changed`, which says a calendar or a list
+            // by its name: here the name is what tells it apart).
+            let call = completedChange(call, event: item.isEvent, context)
             let moveTo = try ActionCatalog.collectionNamed(in: call, event: item.isEvent).map {
                 try collection($0, event: item.isEvent, current: item.collection, context)
             }

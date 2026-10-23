@@ -238,7 +238,8 @@ public enum ActionCatalog {
     /// for its missing list (dialogue-bench's « a shopping list that does not exist »: 13 runs of 20 right, against 19 or
     /// 20 without them and 18 or 19 with one word). The 26B did as well with them as without.
     /// A calendar or a list the model writes all the same in a change is applied on every tier (`collectionNamed`), as
-    /// other words it may write are read.
+    /// other words it may write are read; so is the one the user's sentence names, when the change names none
+    /// (`withCollectionSaid(change:event:context:names:)`).
     public static func movesItems(on tier: HardwareTier) -> Bool { tier == .comfort || tier == .max }
 
     /// The reminders' and calendar's tools for this tier's model.
