@@ -158,6 +158,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var lastToolCallChances: (first: Double, best: Double, bestAt: Int)?
     /// With `watchToolCalls(true)`: the last answer exactly as the model wrote it, special tokens included.
     public private(set) var lastRawAnswer = ""
+    /// Benchmark diagnostics, off in the app (as `watchingToolCalls`).
+    private var watchingTokens = false
+    /// With `watchTokens(true)`: the last answer's tokens, each with the chance the model gave it and its likeliest ones.
+    public private(set) var lastTokens: [WatchedToken] = []
 
     /// Template variables: no hidden "thinking" before answering (it would delay the voice).
     private let templateContext: [String: any Sendable] = ["enable_thinking": false]
@@ -272,11 +276,28 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         watchingToolCalls = on
     }
 
+    /// Benchmark diagnostics (`voice-cli story-bench`): every token of the answers, with the chance the model gave it
+    /// and the tokens it found likeliest there (`lastTokens`).
+    public func watchTokens(_ on: Bool) {
+        watchingTokens = on
+    }
+
     /// Benchmark diagnostics (`voice-cli … --bfloat16-prompts`): `false` computes the requests' new tokens and the history
     /// in the model's own type, as before they were computed in float32 (see `readingPrompt`), for comparisons in one
     /// build. The beginning stays in float32.
     public func computePromptsInFloat32(_ on: Bool) {
         promptsInFloat32 = on
+    }
+
+    /// Benchmark diagnostics (`voice-cli … --min-p`): the sampling's min-p instead of the app's (a token less likely than
+    /// this fraction of the likeliest one is never drawn; 0: none), for comparisons in one build.
+    public func sampleWithMinP(_ minP: Float) {
+        parameters.minP = minP
+    }
+
+    /// Diagnostics: how the answers' tokens are drawn.
+    public var sampling: (temperature: Float, topP: Float, minP: Float) {
+        (parameters.temperature, parameters.topP, parameters.minP)
     }
 
     /// Benchmark diagnostics (`voice-cli … --bfloat16-experts`): `true` computes the products of a mixture-of-experts
@@ -911,6 +932,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if !tools.isEmpty {
             components = components.appendingLogitProcessor { UpcomingToken(box: upcoming) }
         }
+        let draws = TokenWatch.Draws()
+        if watchingTokens {
+            components = components.appendingLogitProcessor { TokenWatch(draws: draws) }
+        }
         var iterator = try readingPrompt { try readPrompt(prompt, from: start, components: components) }
         let d = clock.now - t0
         lastPrefill = (reused, prompt.count - reused,
@@ -924,6 +949,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
         var produced: [Int] = []
+        /// With `watchingTokens`: what each token of the answer added to its text, by its index in `produced`.
+        var texts: [Int: String] = [:]
         var callTokens: [Int]?  // inside a tool call
         var callNamed = false
         /// The calls written so far that could be read.
@@ -994,7 +1021,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                 break
             }
             detokenizer.append(token: token)
-            if let text = detokenizer.next(), !text.isEmpty { onOutput(.text(text)) }
+            if let text = detokenizer.next(), !text.isEmpty {
+                onOutput(.text(text))
+                if watchingTokens { texts[produced.count - 1] = text }
+            }
             let pause = clock.now
             if let ranOut = hold.waitWhileHeld(atMost: .milliseconds(1500)) {
                 let paused = clock.now - pause
@@ -1014,6 +1044,17 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             lastToolCallChances = before.indices.max { before[$0] < before[$1] }
                 .map { (before.first ?? 0, before[$0], $0) }
             lastRawAnswer = context.tokenizer.decode(tokenIds: produced, skipSpecialTokens: false)
+        }
+        if watchingTokens {
+            // draws.values[i] is the i-th token drawn, as `produced[i]` (the iterator draws one token ahead: the last
+            // draw may be past the end).
+            func written(_ token: Int) -> String { context.tokenizer.decode(tokenIds: [token], skipSpecialTokens: false) }
+            lastTokens = produced.enumerated().map { index, token in
+                let draw = index < draws.values.count ? draws.values[index] : nil
+                return WatchedToken(
+                    id: token, token: written(token), text: texts[index] ?? "", chance: draw?.chance ?? 0,
+                    likeliest: (draw?.likeliest ?? []).map { WatchedToken.Choice(token: written($0.token), chance: $0.chance) })
+            }
         }
         if let tokens = callTokens {  // cut off before its end
             DebugLog.log("LLM: call cut off before its end: \(tokenTrace(tokens))")
@@ -1386,6 +1427,57 @@ private struct ToolCallWatch: LogitProcessor {
     }
 
     mutating func didSample(token: MLXArray) {}
+}
+
+/// Diagnostics (`MLXChatModel.watchTokens`): a token of an answer, the chance the model gave it there (its probability,
+/// before the sampling's temperature and filters), and the tokens the model found likeliest there.
+public struct WatchedToken: Sendable, Encodable {
+    public struct Choice: Sendable, Encodable {
+        /// The token's text alone, special tokens written out.
+        public var token: String
+        public var chance: Double
+    }
+
+    public var id: Int
+    /// The token's text alone, special tokens written out.
+    public var token: String
+    /// What the answer's text gained with it (`ModelOutput.text`): empty for a token of a call, or one that completes no
+    /// character yet.
+    public var text: String
+    public var chance: Double
+    /// The likeliest tokens there, the likeliest first.
+    public var likeliest: [Choice]
+}
+
+/// Reads, at every token, the chance the model gives to the token it draws and to its likeliest ones (benchmark
+/// diagnostics: a token the model hardly expected, drawn all the same, shows up here).
+private struct TokenWatch: LogitProcessor {
+    final class Draws: @unchecked Sendable {
+        var values: [(chance: Double, likeliest: [(token: Int, chance: Double)])] = []
+        /// The chances at the token being drawn, until it is.
+        var chances: MLXArray?
+    }
+
+    let draws: Draws
+    /// How many of the likeliest tokens are kept.
+    var count = 5
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray {
+        draws.chances = softmax(logits.asType(.float32), axis: -1).reshaped([-1])
+        return logits
+    }
+
+    mutating func didSample(token: MLXArray) {
+        guard let chances = draws.chances else { return }
+        draws.chances = nil
+        let order = argSort(-chances, axis: -1)[..<count]
+        let likeliest = zip(order.asArray(Int32.self), chances.take(order).asArray(Float.self))
+            .map { (token: Int($0), chance: Double($1)) }
+        let drawn = chances[token.item(Int.self)].item(Float.self)
+        draws.values.append((Double(drawn), likeliest))
+    }
 }
 
 /// Keeps the token the iterator has drawn but not yet returned: it reads one token ahead, so when it returns a token,

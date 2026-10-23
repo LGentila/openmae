@@ -1,0 +1,10 @@
+{
+ "_comment": "French requests for a story, for voice-cli story-bench: words split by a hyphen that French spelling does not have. Asked « Raconte-moi l'histoire de la tour Eiffel. » in the app on 2026-10-22, Gemma 4 26B wrote « Elle a été constru-ée » then « constru-e » for « construite », and the voice read them so. The other requests are stories about buildings too, where « construit », « construite » and other past participles come often.",
+ "requests": [
+  "Raconte-moi l'histoire de la tour Eiffel.",
+  "Raconte-moi l'histoire du Mont-Saint-Michel.",
+  "Raconte-moi l'histoire du château de Versailles.",
+  "Raconte-moi l'histoire de la statue de la Liberté.",
+  "Raconte-moi l'histoire du viaduc de Millau."
+ ]
+}
