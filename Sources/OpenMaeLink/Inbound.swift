@@ -304,7 +304,8 @@ public actor InboundHost {
         publish()
     }
 
-    /// The relay the iPhones use (Settings › iPhone and iPad), which is also the internet path's; nil when none is chosen.
+    /// The internet relay (Settings › Relay), which the iPhones use and the internet path goes through; nil when it is
+    /// off.
     public func setPublicRelay(_ address: URL?) {
         guard address != publicRelay || state.publicRelayAddress != address else { return }
         publicRelay = address

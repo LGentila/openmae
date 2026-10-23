@@ -3,8 +3,9 @@ import Observation
 import OpenMaeLink
 import VoiceCore
 
-/// Received information, as the Mac's settings show it: the home relay and its state, the sources with their secret
-/// addresses and their logs. Built from OpenMaeLink.InboundHost's status.
+/// Received information, as the Mac's settings show it: the relays it goes through and their state (set in Settings ›
+/// Relay, through RelayAccess), the sources with their secret addresses and their logs. Built from
+/// OpenMaeLink.InboundHost's status.
 @MainActor
 @Observable
 final class InboundAccess {
@@ -30,16 +31,21 @@ final class InboundAccess {
         status.sources.first { $0.id == id }
     }
 
-    /// What the user typed for the home relay; false when it cannot be an address.
+    /// What the user typed for the home relay (Settings › Relay, through RelayAccess); false when it cannot be an
+    /// address.
     @discardableResult
     func setHomeRelay(_ text: String) -> Bool {
         guard let url = InboundHost.homeRelayURL(from: text) else { return false }
-        Task { await host?.setHomeRelay(url) }
+        setHomeRelayAddress(url)
         return true
     }
 
-    func removeHomeRelay() {
-        Task { await host?.setHomeRelay(nil) }
+    /// The home relay, or none. Shown at once, saved by the host, which then says how it stands.
+    func setHomeRelayAddress(_ address: URL?) {
+        guard address != status.homeRelayAddress else { return }
+        status.homeRelayAddress = address
+        status.homeRelay = address == nil ? .none : .connecting
+        Task { await host?.setHomeRelay(address) }
     }
 
     /// The announcements switch and the quiet hours. Shown at once, saved by the host.
@@ -55,12 +61,12 @@ final class InboundAccess {
         return await host.addSource(name: name, origin: origin, mode: .sayNow)
     }
 
-    /// The relay the iPhones use (Settings › iPhone and iPad), which the internet path goes through.
+    /// The internet relay (Settings › Relay), which the internet path goes through; RelayAccess passes it on.
     func setPublicRelay(_ relay: URL?) {
         Task { await host?.setPublicRelay(relay) }
     }
 
-    /// Whether that relay takes information from the internet, when the panel shows it.
+    /// Whether that relay takes information from the internet, when the settings show it.
     func checkInternetOffer() {
         Task { await host?.checkInternetOffer() }
     }
@@ -83,7 +89,7 @@ final class InboundAccess {
 
     // MARK: - What Settings › Received information shows (InboundPage.swift)
 
-    /// Its page: the paths and the sources, or a source.
+    /// Its page: the relays and the sources, or a source.
     var page = Page.list
     /// The sheet over it.
     var sheet: Sheet?

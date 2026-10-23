@@ -81,12 +81,12 @@
         }
       }
     },
-    "%@, your own relay. It only sees encrypted packets. It sends no notifications.": {
+    "%@. It only sees encrypted packets. It sends no notifications.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@, ton propre relais. Il ne voit que des paquets chiffrés. Il n’envoie pas de notifications."
+            "value": "%@. Il ne voit que des paquets chiffrés. Il n’envoie pas de notifications."
           }
         }
       }
@@ -251,22 +251,12 @@
         }
       }
     },
-    "A home source gets its address once the home relay is set.": {
+    "A name to recognize it, and the relay it goes through. Its page then gives its secret address.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Une source de la maison reçoit son adresse une fois le relais maison réglé."
-          }
-        }
-      }
-    },
-    "A name to recognize it, and where it sends from. Its page then gives its secret address.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Un nom pour la reconnaître, et d’où elle envoie. Sa page donne ensuite son adresse secrète."
+            "value": "Un nom pour la reconnaître, et le relais par lequel elle passe. Sa page donne ensuite son adresse secrète."
           }
         }
       }
@@ -287,6 +277,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un programme sur ce Mac"
+          }
+        }
+      }
+    },
+    "A relay you host yourself, reachable from the internet. Type its address.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un relais que tu héberges toi-même, joignable depuis internet. Tape son adresse."
           }
         }
       }
@@ -571,16 +571,6 @@
         }
       }
     },
-    "Another relay…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Un autre relais…"
-          }
-        }
-      }
-    },
     "Arguments": {
       "localizations": {
         "fr": {
@@ -847,16 +837,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vérifier"
-          }
-        }
-      }
-    },
-    "Checking what your relay offers…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Je regarde ce que propose ton relais…"
           }
         }
       }
@@ -1651,12 +1631,12 @@
         }
       }
     },
-    "From the internet, through your relay, which cannot read what is sent.": {
+    "From the internet, through the internet relay, which cannot read what is sent.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Depuis internet, par ton relais, qui ne peut pas lire ce qui est envoyé."
+            "value": "Depuis internet, par le relais internet, qui ne peut pas lire ce qui est envoyé."
           }
         }
       }
@@ -1681,12 +1661,12 @@
         }
       }
     },
-    "Getting the certificate…": {
+    "Getting ready…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obtention du certificat…"
+            "value": "Préparation…"
           }
         }
       }
@@ -1697,6 +1677,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Passer par"
+          }
+        }
+      }
+    },
+    "Go through the home relay?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passer par le relais maison ?"
+          }
+        }
+      }
+    },
+    "Go through the internet relay?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passer par le relais internet ?"
+          }
+        }
+      }
+    },
+    "Goes through": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passe par"
           }
         }
       }
@@ -1787,16 +1797,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maintiens la barre d’espace pour parler"
-          }
-        }
-      }
-    },
-    "Home": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maison"
           }
         }
       }
@@ -2001,6 +2001,26 @@
         }
       }
     },
+    "Information from home": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informations de la maison"
+          }
+        }
+      }
+    },
+    "Information from the internet": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informations depuis internet"
+          }
+        }
+      }
+    },
     "Instruction": {
       "localizations": {
         "fr": {
@@ -2017,6 +2037,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Internet"
+          }
+        }
+      }
+    },
+    "Internet relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais internet"
           }
         }
       }
@@ -2057,6 +2087,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Elle est arrivée par un chemin que cette source n’accepte pas."
+          }
+        }
+      }
+    },
+    "It can take information from the internet without reading it. No source goes through it yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il peut recevoir des informations depuis internet sans pouvoir les lire. Aucune source ne passe encore par lui."
           }
         }
       }
@@ -2861,42 +2901,12 @@
         }
       }
     },
-    "No home relay": {
+    "No relay is on: a source needs one to get its address.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pas de relais maison"
-          }
-        }
-      }
-    },
-    "No relay": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun relais"
-          }
-        }
-      }
-    },
-    "No relay is chosen, so nothing can come from the internet. Choose one in iPhone and iPad.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun relais n’est choisi, donc rien ne peut venir d’internet. Choisis-en un dans iPhone et iPad."
-          }
-        }
-      }
-    },
-    "No relay is chosen. Choose one in iPhone and iPad to receive from the internet.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun relais n’est choisi. Choisis-en un dans iPhone et iPad pour recevoir depuis internet."
+            "value": "Aucun relais n’est activé : une source en a besoin pour avoir son adresse."
           }
         }
       }
@@ -3131,16 +3141,6 @@
         }
       }
     },
-    "OK": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OK"
-          }
-        }
-      }
-    },
     "Off": {
       "localizations": {
         "fr": {
@@ -3157,6 +3157,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Éteint, Maé n’utilise plus cet outil. La connexion est gardée."
+          }
+        }
+      }
+    },
+    "Off: your iPhone and iPad reach this Mac at home only.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé : ton iPhone et ton iPad ne joignent ce Mac qu’à la maison."
+          }
+        }
+      }
+    },
+    "Off: your sources at home get no address.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé : tes sources de la maison n’ont pas d’adresse."
+          }
+        }
+      }
+    },
+    "Off: your sources from the internet get no address.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé : tes sources d’internet n’ont pas d’adresse."
           }
         }
       }
@@ -3271,16 +3301,6 @@
         }
       }
     },
-    "Open iPhone and iPad": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ouvrir iPhone et iPad"
-          }
-        }
-      }
-    },
     "Open the folder": {
       "localizations": {
         "fr": {
@@ -3337,16 +3357,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Plus de 64 Ko."
-          }
-        }
-      }
-    },
-    "Over the internet": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Par internet"
           }
         }
       }
@@ -3661,12 +3671,42 @@
         }
       }
     },
+    "Relay off": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais désactivé"
+          }
+        }
+      }
+    },
     "Relay unreachable": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Relais injoignable"
+          }
+        }
+      }
+    },
+    "Relays": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relais"
+          }
+        }
+      }
+    },
+    "Relays bring this Mac what comes from elsewhere: your iPhone and iPad away from home, and the information your sources send. This Mac opens no port.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les relais apportent à ce Mac ce qui vient d’ailleurs : ton iPhone et ton iPad loin de la maison, et les informations que tes sources envoient. Ce Mac n’ouvre aucun port."
           }
         }
       }
@@ -3941,32 +3981,22 @@
         }
       }
     },
-    "Set the address…": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choisir l’adresse…"
-          }
-        }
-      }
-    },
-    "Set the home relay": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Régler le relais maison"
-          }
-        }
-      }
-    },
     "Set up %@": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Préparer %@"
+          }
+        }
+      }
+    },
+    "Set up the relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Régler le relais…"
           }
         }
       }
@@ -4371,32 +4401,32 @@
         }
       }
     },
-    "The address appears once a relay is chosen, in iPhone and iPad.": {
+    "The address appears once the home relay is on.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’adresse apparaît une fois un relais choisi, dans iPhone et iPad."
+            "value": "L’adresse apparaît une fois le relais maison activé."
           }
         }
       }
     },
-    "The address appears once the home relay is set.": {
+    "The address appears once the internet relay answers.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’adresse apparaît une fois le relais maison réglé."
+            "value": "L’adresse apparaît dès que le relais internet répond."
           }
         }
       }
     },
-    "The address appears once your relay answers.": {
+    "The address appears once the internet relay is on.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’adresse apparaît dès que ton relais répond."
+            "value": "L’adresse apparaît une fois le relais internet activé."
           }
         }
       }
@@ -4521,12 +4551,12 @@
         }
       }
     },
-    "The last try at the certificate failed, I try again later: %@": {
+    "The internet relay does not answer: what is sent from the internet cannot reach Maé. I keep trying.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le dernier essai pour obtenir le certificat a échoué, je réessaie plus tard : %@"
+            "value": "Le relais internet ne répond pas : ce qui est envoyé depuis internet ne peut pas arriver jusqu’à Maé. Je réessaie toute seule."
           }
         }
       }
@@ -4627,16 +4657,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’ancienne adresse cesse aussitôt de marcher : il faudra coller la nouvelle dans l’autre système."
-          }
-        }
-      }
-    },
-    "The relay does not answer: your devices reach you at home only for now. Maé tries again on her own.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le relais ne répond pas : tes appareils ne te joignent qu’à la maison pour l’instant. Maé réessaie toute seule."
           }
         }
       }
@@ -4771,6 +4791,16 @@
         }
       }
     },
+    "This is not an address. Type it like relay.example.org.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce n’est pas une adresse. Écris-la sous la forme relay.example.org."
+          }
+        }
+      }
+    },
     "This program runs on your Mac with your rights. Only add programs you know.": {
       "localizations": {
         "fr": {
@@ -4817,16 +4847,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ceux qui sont allumés ci-dessous demandent d’abord : Maé dit lequel elle va lancer et attend ton « oui »."
-          }
-        }
-      }
-    },
-    "Through your relay": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Par ton relais"
           }
         }
       }
@@ -5071,6 +5091,16 @@
         }
       }
     },
+    "Used by": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisé par"
+          }
+        }
+      }
+    },
     "User name": {
       "localizations": {
         "fr": {
@@ -5286,7 +5316,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce que tes systèmes envoient passe par lui jusqu’à ce Mac, qui n’ouvre aucun port. Ne le rends jamais joignable depuis Internet."
+            "value": "Ce que tes systèmes envoient passe par lui jusqu’à ce Mac, qui n’ouvre aucun port. Ne le rends jamais joignable depuis internet."
           }
         }
       }
@@ -5327,16 +5357,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Quand elle agit"
-          }
-        }
-      }
-    },
-    "Where it sends from": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "D’où elle envoie"
           }
         }
       }
@@ -5397,26 +5417,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sans clé, Maé ne peut pas chercher. Crée une clé sur le site de Brave, puis colle-la ici : elle est rangée dans le trousseau de ton Mac."
-          }
-        }
-      }
-    },
-    "Without a relay, nothing goes through the internet: only your devices on the same network reach you.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sans relais, rien ne passe par internet : seuls tes appareils connectés à la même box te joignent."
-          }
-        }
-      }
-    },
-    "Without a relay, your devices reach you at home only. Choose a relay to talk to them from anywhere.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sans relais, tes appareils ne te joignent qu’à la maison. Choisis un relais pour leur parler de partout."
           }
         }
       }
@@ -5571,6 +5571,16 @@
         }
       }
     },
+    "Your iPhone and iPad reach this Mac at home only, and no source can send from the internet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton iPhone et ton iPad ne joignent ce Mac qu’à la maison, et aucune source ne peut envoyer depuis internet."
+          }
+        }
+      }
+    },
     "Your iPhone or iPad cannot wake a sleeping Mac. With the lid closed and no external display, the Mac sleeps anyway.": {
       "localizations": {
         "fr": {
@@ -5587,6 +5597,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton iPhone ou ton iPad prête son micro, son haut-parleur et son écran. Maé travaille toujours sur ton Mac."
+          }
+        }
+      }
+    },
+    "Your own relay": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton propre relais"
+          }
+        }
+      }
+    },
+    "Your own relay…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton propre relais…"
           }
         }
       }
@@ -5621,16 +5651,6 @@
         }
       }
     },
-    "Your relay does not answer: what is sent from the internet cannot reach Maé. I keep trying.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton relais ne répond pas : ce qui est envoyé depuis internet ne peut pas arriver jusqu’à Maé. Je réessaie toute seule."
-          }
-        }
-      }
-    },
     "Your relay does not take information from the internet, so internet sources receive nothing.": {
       "localizations": {
         "fr": {
@@ -5657,16 +5677,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton relais ne propose pas l’entrée des informations depuis internet : cette source n’a pas d’adresse."
-          }
-        }
-      }
-    },
-    "Your relay offers it, without being able to read what is sent. Add a source with the origin Internet to use it.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton relais le propose, sans pouvoir lire ce qui est envoyé. Ajoute une source venant d’internet pour t’en servir."
           }
         }
       }

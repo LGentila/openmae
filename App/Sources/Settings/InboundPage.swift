@@ -4,15 +4,14 @@ import SwiftUI
 import VoiceCore
 
 /// Settings › Received information: short texts that other systems (Home Assistant, a script, a service on the
-/// internet…) send Maé to say. The page shows the two paths their deliveries take to this Mac (the home relay, and the
-/// internet path through the iPhones' relay, which cannot read them), the sources, and, once there is one, the
-/// announcements switch and the quiet hours (what is not said goes to the news, « Quoi de neuf ? »); a source's page
-/// shows its secret address, what Maé does with what it sends and its last deliveries. Adding a source, changing its
-/// address, removing it, the home relay's address and how to send from Home Assistant go through sheets. The design
-/// draws the home path only: the internet path and the announcements take the same form.
+/// internet…) send Maé to say. The page shows, once there is a source, the relays the sources go through (set in
+/// Settings › Relay: the internet relay, which cannot read them, and the home relay) and where they stand, the sources,
+/// and the announcements switch and the quiet hours (what is not said goes to the news, « Quoi de neuf ? »); a source's
+/// page shows the relay it goes through, its secret address, what Maé does with what it sends and its last deliveries.
+/// Adding a source, changing its relay or its address, removing it and how to send from Home Assistant go through
+/// sheets. The design draws the home relay only: the internet relay and the announcements take the same form.
 struct InboundPage: View {
     let inbound: InboundAccess
-    @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
 
     private var status: InboundStatus { inbound.status }
 
@@ -24,11 +23,9 @@ struct InboundPage: View {
             }
             PageIntro("Other systems, at home like Home Assistant or on the internet, can send Maé a sentence to say. It only informs her: it never triggers an action.")
             if let note = InboundWords.note(status) { note.padding(.top, 16) }
-            PageSection("At home")
-            SettingsCard { HomeRelayRows(inbound: inbound) }
-            PageSection("Over the internet")
-            SettingsCard {
-                InternetPathRows(status: status) { navigation?.show(.devices) }
+            if !status.sources.isEmpty {
+                PageSection("Relays")
+                SettingsCard { NeededRelays(status: status) }
             }
             PageSection("Sources")
             if status.sources.isEmpty {
@@ -61,10 +58,6 @@ struct InboundPage: View {
             SourceItem(source: source, last: status.logs[source.id]?.first?.date) { inbound.show(.source(source.id)) }
             Hairline()
         }
-        if status.homeRelayAddress == nil, status.sources.contains(where: { $0.origin == .home }) {
-            Caption("A home source gets its address once the home relay is set.")
-                .padding(.top, 18)
-        }
         ActionRow(top: 12, bottom: 12) {
             Button { inbound.sheet = .addSource } label: { IconLabel("Add a source", icon: .plus) }
                 .buttonStyle(WindowButtonStyle(kind: .link, big: true))
@@ -75,7 +68,7 @@ struct InboundPage: View {
 
     static func badge(_ inbound: InboundAccess) -> SidebarBadge? {
         let status = inbound.status
-        if InboundWords.note(status) != nil { return .dot(.warn, Text("To look at")) }
+        if InboundWords.needed(status).contains(where: { $0.tone == .warn }) { return .dot(.warn, Text("To look at")) }
         let count = status.sources.count
         guard count > 0 else { return nil }
         return .count(count, count == 1 ? Text("1 source") : Text("\(count) sources"))
@@ -92,7 +85,8 @@ extension InboundAccess {
     /// What may be shown over them.
     enum Sheet: Hashable {
         case addSource
-        case homeRelay
+        /// The source goes through the other relay: its address changes.
+        case changeRelay(InboundSource.ID, InboundSource.Origin)
         case changeAddress(InboundSource.ID)
         case remove(InboundSource.ID)
         /// How to send from Home Assistant, with the address of the source it was opened from.
@@ -106,75 +100,27 @@ extension InboundAccess {
     }
 }
 
-// MARK: - The paths
+// MARK: - The relays
 
-/// "Home relay": its address in a menu (change it, or none), and what it is for.
-private struct HomeRelayRows: View {
-    let inbound: InboundAccess
-
-    private var address: URL? { inbound.status.homeRelayAddress }
-
-    var body: some View {
-        SettingRow("Home relay") {
-            PopUpMenu(title: address.map { Text(verbatim: InboundWords.shortAddress($0)) } ?? Text("No relay"),
-                      label: Text("Home relay"))
-            {
-                Button { inbound.sheet = .homeRelay } label: {
-                    address == nil ? Text("Set the address…") : Text("Change the address…")
-                }
-                if address != nil {
-                    Divider()
-                    Button { inbound.removeHomeRelay() } label: { Text("None") }
-                }
-            }
-        }
-        if address == nil {
-            Caption("The OpenMaé relay, run in home mode on a machine at home (a NAS, a Raspberry Pi…). It passes on what your systems send: this Mac opens no port.")
-        } else {
-            Caption("What your systems send goes through it to this Mac, which opens no port. Never make it reachable from the internet.")
-        }
-    }
-}
-
-/// "Through your relay": the internet path's state, and what it means.
-private struct InternetPathRows: View {
+/// The relays the sources go through, each in a line that opens Settings › Relay: where it stands, or, when it is off,
+/// what that means.
+private struct NeededRelays: View {
     let status: InboundStatus
-    let openDevices: () -> Void
 
     var body: some View {
-        SettingRow("Through your relay") {
-            let badge = InboundWords.internetBadge(status)
-            StatusPill(text: badge.text, style: .dot(badge.tone))
-        }
-        switch status.internetPath {
-        case .ready:
-            if let expiry = status.certificateExpiry {
-                Caption(Text("Your relay cannot read what is sent: it stays encrypted up to this Mac. The certificate renews by itself (valid until \(expiry.formatted(.dateTime.day().month(.wide).locale(TaskText.locale))))."))
-            } else {
-                Caption("Your relay cannot read what is sent: it stays encrypted up to this Mac.")
+        let origins = InboundWords.relayOrigins(status)
+        ForEach(origins, id: \.self) { origin in
+            if origin != origins.first { Hairline() }
+            switch origin {
+            case .internet:
+                RelayLine(title: Text("Internet relay"),
+                          state: RelayWords.isOn(.internet, status) ? RelayWords.need(.internet, status) : nil,
+                          offText: Text("Off: your sources from the internet get no address."))
+            case .home:
+                RelayLine(title: Text("Home relay"),
+                          state: RelayWords.isOn(.home, status) ? RelayWords.need(.home, status) : nil,
+                          offText: Text("Off: your sources at home get no address."))
             }
-        case .gettingCertificate:
-            if let problem = status.certificateProblem {
-                Caption(Text("The last try at the certificate failed, I try again later: \(problem)"), tone: .warn)
-            } else {
-                Caption("This Mac asks Let’s Encrypt for the certificate that keeps deliveries encrypted up to it. It takes a few seconds.")
-            }
-        case .notOffered:
-            if status.publicRelayAddress == nil {
-                Caption("No relay is chosen. Choose one in iPhone and iPad to receive from the internet.")
-                ActionRow {
-                    Button(action: openDevices) { IconLabel("Open iPhone and iPad", icon: .arrowRight) }
-                        .buttonStyle(WindowButtonStyle())
-                }
-            } else {
-                Caption("Your relay does not take information from the internet. Its operator can turn it on (RELAY_INBOUND_DOMAIN).")
-            }
-        case .unreachable:
-            Caption("Your relay does not answer. I keep trying.", tone: .warn)
-        case .available:
-            Caption("Your relay offers it, without being able to read what is sent. Add a source with the origin Internet to use it.")
-        case .checking:
-            Caption("Checking what your relay offers…")
         }
     }
 }
@@ -280,14 +226,15 @@ private struct SourceItem: View {
         return source.origin == .home ? .home : .globe
     }
 
-    /// "Home · Say right away", or "Internet · Paused".
+    /// "Home relay · Say right away", or "Internet relay · Paused".
     private var detail: String {
         let state = source.paused ? String(localized: "Paused") : InboundWords.mode(source.mode)
         return "\(InboundWords.origin(source.origin)) · \(state)"
     }
 }
 
-/// A source's page: its address, what Maé does with what it sends, its last deliveries, and its removal.
+/// A source's page: the relay it goes through and its address, what Maé does with what it sends, its last deliveries,
+/// and its removal.
 struct InboundSourcePage: View {
     let inbound: InboundAccess
     let source: InboundSource
@@ -303,11 +250,7 @@ struct InboundSourcePage: View {
                 let badge = InboundWords.badge(of: source, status)
                 StatusPill(text: badge.text, style: .dot(badge.tone))
             }
-            if let note = source.origin == .home ? InboundWords.homeNote(status.homeRelay)
-                : InboundWords.internetNote(status)
-            {
-                note.padding(.top, 16)
-            }
+            if let note = RelayWords.trouble(source.origin, status) { note.padding(.top, 16) }
             PageSection("Address")
             SettingsCard { address }
             PageSection("What Maé does")
@@ -322,7 +265,33 @@ struct InboundSourcePage: View {
 
     // MARK: Address
 
+    /// "Goes through": the internet relay or the home relay, a choice once the other one is on too. Another relay
+    /// changes the address: asked first while the source has one.
+    @ViewBuilder private var relay: some View {
+        let other: InboundSource.Origin = source.origin == .internet ? .home : .internet
+        SettingRow("Goes through") {
+            if RelayWords.isOn(other, status) {
+                WindowSegmented(selection: Binding(get: { source.origin }, set: goThrough), options: RelayCaption.options,
+                                label: Text("Goes through"))
+            } else {
+                RelayName(origin: source.origin)
+            }
+        }
+        RelayCaption(origin: source.origin)
+    }
+
+    private func goThrough(_ origin: InboundSource.Origin) {
+        guard origin != source.origin else { return }
+        if status.addresses[source.id] == nil {
+            change { $0.origin = origin }
+        } else {
+            inbound.sheet = .changeRelay(source.id, origin)
+        }
+    }
+
     @ViewBuilder private var address: some View {
+        relay
+        Hairline()
         if let url = status.addresses[source.id] {
             CodeText(text: url.absoluteString, lineLimit: 3)
                 .accessibilityLabel(Text("Address"))
@@ -334,29 +303,25 @@ struct InboundSourcePage: View {
                     .buttonStyle(WindowButtonStyle())
             }
             Caption("Paste it in the other system. Anyone who knows it can send Maé information: keep it to yourself.")
-        } else if source.origin == .internet {
-            switch status.internetPath {
-            case .notOffered where status.publicRelayAddress == nil:
-                Caption("The address appears once a relay is chosen, in iPhone and iPad.")
-                    .padding(.top, 20)
-                ActionRow {
-                    Button { navigation?.show(.devices) } label: { IconLabel("Open iPhone and iPad", icon: .arrowRight) }
-                        .buttonStyle(WindowButtonStyle())
+        } else if !RelayWords.isOn(source.origin, status) {
+            Group {
+                if source.origin == .internet {
+                    Caption("The address appears once the internet relay is on.")
+                } else {
+                    Caption("The address appears once the home relay is on.")
                 }
-            case .notOffered:
-                Caption("Your relay does not take information from the internet: this source has no address.")
-                    .padding(.top, 20)
-            default:
-                Caption("The address appears once your relay answers.")
-                    .padding(.top, 20)
             }
-        } else if status.homeRelayAddress == nil {
-            Caption("The address appears once the home relay is set.")
-                .padding(.top, 20)
+            .padding(.top, 20)
             ActionRow {
-                Button("Set the home relay") { inbound.sheet = .homeRelay }
-                    .buttonStyle(WindowButtonStyle(kind: .link))
+                Button("Set up the relay…") { navigation?.show(.relay) }
+                    .buttonStyle(WindowButtonStyle())
             }
+        } else if source.origin == .internet, status.internetPath == .notOffered {
+            Caption("Your relay does not take information from the internet: this source has no address.")
+                .padding(.top, 20)
+        } else if source.origin == .internet {
+            Caption("The address appears once the internet relay answers.")
+                .padding(.top, 20)
         } else {
             Caption("The address is not ready yet.")
                 .padding(.top, 20)
@@ -479,19 +444,30 @@ private struct LogRow: View {
 
 // MARK: - Sheets
 
-/// "Add a source": its name and where it sends from, then its page opens.
+/// "Add a source": its name and the relay it goes through (a choice once both relays are on), then its page opens. With
+/// no relay on, it says so and opens Settings › Relay.
 struct AddSourceSheet: View {
     let inbound: InboundAccess
     @State private var name = ""
-    @State private var origin = InboundSource.Origin.home
+    /// The relay picked, when both are on.
+    @State private var origin = InboundSource.Origin.internet
     @State private var isAdding = false
     @FocusState private var isFocused: Bool
+    @Environment(SettingsNavigation.self) private var navigation: SettingsNavigation?
 
     private var typed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// The relays a new source may go through: those that are on.
+    private var offered: [InboundSource.Origin] {
+        [InboundSource.Origin.internet, .home].filter { RelayWords.isOn($0, inbound.status) }
+    }
+
+    /// The relay it goes through; nil while none is on.
+    private var chosen: InboundSource.Origin? { offered.contains(origin) ? origin : offered.first }
+
     var body: some View {
         SheetCard(title: Text("Add a source"),
-                  text: Text("A name to recognize it, and where it sends from. Its page then gives its secret address."))
+                  text: Text("A name to recognize it, and the relay it goes through. Its page then gives its secret address."))
         {
             VStack(alignment: .leading, spacing: 0) {
                 LabeledField(label: Text("Name")) {
@@ -500,19 +476,32 @@ struct AddSourceSheet: View {
                         .focused($isFocused)
                         .onSubmit(add)
                 }
-                LabeledField(label: Text("Where it sends from")) {
-                    WindowSegmented(selection: $origin,
-                                    options: [(value: .home, title: "Home"), (value: .internet, title: "Internet")],
-                                    label: Text("Where it sends from"), fills: true)
-                }
-                Group {
-                    if origin == .home {
-                        Caption("From your home network, through the home relay.")
+                LabeledField(label: Text("Goes through")) {
+                    if offered.count > 1 {
+                        WindowSegmented(selection: $origin, options: RelayCaption.options, label: Text("Goes through"),
+                                        fills: true)
+                    } else if let chosen {
+                        RelayName(origin: chosen)
+                            .frame(minHeight: 36, alignment: .leading)
                     } else {
-                        Caption("From the internet, through your relay, which cannot read what is sent.")
+                        Text("No relay is on: a source needs one to get its address.")
+                            .textBox(.step)
+                            .foregroundStyle(Palette.ink)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.top, 4)
+                if let chosen {
+                    RelayCaption(origin: chosen)
+                        .padding(.top, 4)
+                } else {
+                    ActionRow {
+                        Button("Set up the relay…") {
+                            inbound.sheet = nil
+                            navigation?.show(.relay)
+                        }
+                        .buttonStyle(WindowButtonStyle())
+                    }
+                }
             }
             .padding(.top, 18)
         } footer: {
@@ -522,16 +511,15 @@ struct AddSourceSheet: View {
             Button("Add", action: add)
                 .buttonStyle(WindowButtonStyle(kind: .main))
                 .keyboardShortcut(.defaultAction)
-                .disabled(typed.isEmpty || isAdding)
+                .disabled(typed.isEmpty || isAdding || chosen == nil)
         }
         .onAppear { isFocused = true }
     }
 
     private func add() {
-        guard !typed.isEmpty, !isAdding else { return }
+        guard !typed.isEmpty, !isAdding, let origin = chosen else { return }
         isAdding = true
         let name = typed
-        let origin = origin
         Task {
             if let id = await inbound.addSource(name: name, origin: origin) {
                 inbound.show(.source(id))
@@ -541,51 +529,67 @@ struct AddSourceSheet: View {
     }
 }
 
-/// The home relay's address.
-struct HomeRelaySheet: View {
-    let inbound: InboundAccess
-    @State private var text = ""
-    /// What was typed is not an address.
-    @State private var isRefused = false
-    @FocusState private var isFocused: Bool
+/// A relay's name with its icon, where a source has no other relay to go through.
+private struct RelayName: View {
+    let origin: InboundSource.Origin
 
     var body: some View {
-        SheetCard(title: Text("Home relay"),
-                  text: Text("The OpenMaé relay in home mode, on a machine at home. Type the address it listens on."))
+        HStack(spacing: 8) {
+            IconView(icon: origin == .internet ? .globe : .home, size: 18)
+            Group {
+                switch origin {
+                case .internet: Text("Internet relay")
+                case .home: Text("Home relay")
+                }
+            }
+            .textStyle(.control)
+        }
+        .foregroundStyle(Palette.ink)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// What going through a relay means for a source.
+private struct RelayCaption: View {
+    let origin: InboundSource.Origin
+
+    /// The relays a source may go through, as a choice.
+    static let options: [(value: InboundSource.Origin, title: LocalizedStringKey)] = [
+        (value: .internet, title: "Internet relay"), (value: .home, title: "Home relay"),
+    ]
+
+    var body: some View {
+        switch origin {
+        case .internet: Caption("From the internet, through the internet relay, which cannot read what is sent.")
+        case .home: Caption("From your home network, through the home relay.")
+        }
+    }
+}
+
+/// "Go through the home relay?": the source's address changes, the old one stops working at once.
+struct ChangeRelaySheet: View {
+    let inbound: InboundAccess
+    let source: InboundSource.ID
+    let origin: InboundSource.Origin
+
+    var body: some View {
+        SheetCard(width: 460,
+                  title: origin == .home ? Text("Go through the home relay?") : Text("Go through the internet relay?"),
+                  text: Text("The old address stops working at once: you will have to paste the new one in the other system."))
         {
-            LabeledField(label: Text("Address of the home relay")) {
-                TextField(text: $text, prompt: placeholder(Text(verbatim: "192.168.1.10:8080"))) { Text("Address of the home relay") }
-                    .windowField(mono: true, isRefused: isRefused)
-                    .focused($isFocused)
-                    .onSubmit(save)
-            }
-            .padding(.top, 18)
-            if isRefused {
-                Caption("This is not an address. Type it like 192.168.1.10:8080.", tone: .error)
-                    .padding(.top, 4)
-            }
+            EmptyView()
         } footer: {
             Button("Cancel") { inbound.sheet = nil }
                 .buttonStyle(WindowButtonStyle())
                 .keyboardShortcut(.cancelAction)
-            Button("Save", action: save)
-                .buttonStyle(WindowButtonStyle(kind: .main))
-                .keyboardShortcut(.defaultAction)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Change") {
+                inbound.sheet = nil
+                guard var latest = inbound.source(source) else { return }
+                latest.origin = origin
+                inbound.update(latest)
+            }
+            .buttonStyle(WindowButtonStyle(kind: .solidDanger))
         }
-        .onAppear {
-            text = inbound.status.homeRelayAddress.map(InboundWords.shortAddress) ?? ""
-            isFocused = true
-        }
-    }
-
-    private func save() {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard inbound.setHomeRelay(text) else {
-            isRefused = true
-            return
-        }
-        inbound.sheet = nil
     }
 }
 
@@ -773,95 +777,40 @@ private struct CopyButton: View {
 /// How the page says where things stand.
 @MainActor
 enum InboundWords {
-    struct Badge {
-        let text: Text
-        let tone: StatusTone
+    /// The page's head: no source, else where the relays the sources go through stand (Settings › Relay says more).
+    static func badge(_ status: InboundStatus) -> StatusWord {
+        let needs = needed(status)
+        guard let first = needs.first else { return StatusWord(Text("No source"), .off) }
+        guard needs.count > 1 else { return first }
+        if needs.contains(where: { $0.tone == .warn }) { return StatusWord(Text("To look at"), .warn) }
+        return needs.first { $0.tone == .info } ?? needs.first { $0.tone == .off } ?? StatusWord(Text("Ready"), .on)
     }
 
-    /// The page's head: the home relay's state, or the internet path's when only internet sources are there.
-    static func badge(_ status: InboundStatus) -> Badge {
-        if status.sources.isEmpty, status.homeRelayAddress == nil { return Badge(text: Text("No source"), tone: .off) }
-        let internetOnly = !status.sources.isEmpty && status.sources.allSatisfy { $0.origin == .internet }
-        guard internetOnly, status.homeRelayAddress == nil else { return homeBadge(status.homeRelay) }
-        return internetBadge(status)
+    /// A source's head: paused, or the state of the relay it goes through.
+    static func badge(of source: InboundSource, _ status: InboundStatus) -> StatusWord {
+        if source.paused { return StatusWord(Text("Paused"), .off) }
+        return RelayWords.need(source.origin, status)
     }
 
-    /// A source's head: paused, or the state of the path it sends by.
-    static func badge(of source: InboundSource, _ status: InboundStatus) -> Badge {
-        if source.paused { return Badge(text: Text("Paused"), tone: .off) }
-        return source.origin == .home ? homeBadge(status.homeRelay) : internetBadge(status)
+    /// The relays the sources go through: the internet relay, then the home relay.
+    static func relayOrigins(_ status: InboundStatus) -> [InboundSource.Origin] {
+        [InboundSource.Origin.internet, .home].filter { origin in status.sources.contains { $0.origin == origin } }
     }
 
-    static func homeBadge(_ relay: InboundStatus.HomeRelay) -> Badge {
-        switch relay {
-        case .none: Badge(text: Text("No home relay"), tone: .off)
-        case .connecting: Badge(text: Text("Connecting…"), tone: .info)
-        case .connected: Badge(text: Text("Connected"), tone: .on)
-        case .unreachable: Badge(text: Text("Relay unreachable"), tone: .warn)
-        case .notHomeMode: Badge(text: Text("Not in home mode"), tone: .warn)
-        }
+    /// Where the relays the sources go through stand: an off one is to set up.
+    static func needed(_ status: InboundStatus) -> [StatusWord] {
+        relayOrigins(status).map { RelayWords.need($0, status) }
     }
 
-    static func internetBadge(_ status: InboundStatus) -> Badge {
-        switch status.internetPath {
-        case .ready: Badge(text: Text("Ready"), tone: .on)
-        case .gettingCertificate: Badge(text: Text("Getting the certificate…"), tone: .info)
-        case .checking: Badge(text: Text("Connecting…"), tone: .info)
-        case .unreachable: Badge(text: Text("Relay unreachable"), tone: .warn)
-        case .notOffered:
-            status.publicRelayAddress == nil ? Badge(text: Text("No relay"), tone: .off)
-                : Badge(text: Text("Not offered"), tone: .warn)
-        case .available: Badge(text: Text("Available"), tone: .off)
-        }
-    }
-
-    /// What the page's head says: the home relay's trouble, else the internet path's when an internet source waits.
+    /// What the page's head says: why nothing arrives through a relay the sources go through, when it is in trouble.
     static func note(_ status: InboundStatus) -> Note? {
-        if status.sources.contains(where: { $0.origin == .home }) || status.homeRelayAddress != nil,
-           let note = homeNote(status.homeRelay)
-        {
-            return note
-        }
-        return internetNote(status)
-    }
-
-    /// Why nothing arrives, when the home relay does not pass deliveries on. It is tried again meanwhile.
-    static func homeNote(_ relay: InboundStatus.HomeRelay) -> Note? {
-        switch relay {
-        case .unreachable:
-            Note("The home relay does not answer: what your systems send cannot reach Maé. I keep trying.", tone: .warn)
-        case .notHomeMode:
-            Note("This relay is not in home mode, so it passes nothing on to Maé. Start it with RELAY_HOME_INBOUND=true.",
-                 tone: .warn)
-        case .none, .connecting, .connected:
-            nil
-        }
-    }
-
-    /// Why nothing arrives from the internet, when an internet source exists.
-    static func internetNote(_ status: InboundStatus) -> Note? {
-        guard status.sources.contains(where: { $0.origin == .internet }) else { return nil }
-        switch status.internetPath {
-        case .unreachable:
-            return Note("Your relay does not answer: what is sent from the internet cannot reach Maé. I keep trying.",
-                        tone: .warn)
-        case .notOffered:
-            return Note(status.publicRelayAddress == nil
-                ? Text("No relay is chosen, so nothing can come from the internet. Choose one in iPhone and iPad.")
-                : Text("Your relay does not take information from the internet, so internet sources receive nothing."),
-                tone: .warn)
-        case .gettingCertificate where status.certificateProblem != nil:
-            return Note("This Mac could not get its certificate yet: what is sent from the internet cannot reach Maé. I try again later.",
-                        tone: .warn)
-        default:
-            return nil
-        }
+        relayOrigins(status).lazy.compactMap { RelayWords.trouble($0, status) }.first
     }
 
     static func origin(_ origin: InboundSource.Origin) -> String {
         switch origin {
-        case .home: String(localized: "Home")
-        case .internet: String(localized: "Internet")
+        case .home: String(localized: "Home relay")
+        case .internet: String(localized: "Internet relay")
         }
     }
 
@@ -878,12 +827,6 @@ enum InboundWords {
         let date = Calendar.current.date(bySettingHour: minutes / 60 % 24, minute: minutes % 60, second: 0, of: Date())
             ?? Date()
         return date.formatted(.dateTime.hour().minute().locale(TaskText.locale))
-    }
-
-    /// "192.168.1.10:8080": the home relay's address as it is typed, without "http://".
-    static func shortAddress(_ url: URL) -> String {
-        let text = url.absoluteString
-        return text.hasPrefix("http://") ? String(text.dropFirst("http://".count)) : text
     }
 
     /// When a source last sent something: "2 min ago", or "Never".

@@ -6,7 +6,7 @@ import VoiceCore
 
 /// Still pictures of the settings window (see `Snapshots`): every page in the states its design draws, named after the
 /// design's screens (RgVoix, RgActionsRefuse…), each page whole, at its own height; then the states the design does
-/// not draw (the internet path, the sheets of received information, the pairing's expiry…), and the connected tools'
+/// not draw (the Relay page, the sheets of received information, the pairing's expiry…), and the connected tools'
 /// pages, drawn but not reachable yet. The scenes start from the default settings, not the user's.
 extension Snapshots {
     private struct SettingsScene {
@@ -148,6 +148,66 @@ extension Snapshots {
             InboundLogEntry(date: ago(minutes: 140), path: .homeRelay, form: .json, result: .kept,
                             caller: "192.168.1.40", text: "Le lave-vaisselle a fini."),
         ]
+
+        // Relay. As the user's own: the OpenMaé relay, two devices, a source from the internet, no home relay.
+        let homeAssistantOnline = InboundSource(name: "Home Assistant", origin: .internet, mayBeUrgent: true,
+                                                created: ago(minutes: 9000))
+        var online = InboundStatus()
+        online.publicRelayAddress = RelayClient.official
+        online.inboundName = inboundName
+        online.inboundDomain = "in.openmae.com"
+        online.internetPath = .ready
+        online.certificateExpiry = now.addingTimeInterval(80 * 86_400)
+        online.sources = [homeAssistantOnline]
+        online.addresses[homeAssistantOnline.id] = URL(string: "https://\(inboundName).in.openmae.com/in/\(secret(3))")!
+        online.logs[homeAssistantOnline.id] = [
+            InboundLogEntry(date: ago(minutes: 3), path: .publicRelay, form: .json, result: .said,
+                            caller: "203.0.113.7", text: washer),
+        ]
+        let ownRelay = URL(string: "https://relais.example.org")!
+        var ownLink = devices
+        ownLink.relayChoice = .custom(ownRelay)
+        var ownOnline = online
+        ownOnline.publicRelayAddress = ownRelay
+        ownOnline.inboundDomain = "in.example.org"
+        ownOnline.addresses[homeAssistantOnline.id] =
+            URL(string: "https://\(inboundName).in.example.org/in/\(secret(3))")!
+        var noDomain = ownOnline
+        noDomain.inboundDomain = nil
+        noDomain.internetPath = .notOffered
+        noDomain.certificateExpiry = nil
+        noDomain.addresses[homeAssistantOnline.id] = nil
+        var offline = online
+        offline.publicRelayAddress = nil
+        offline.inboundDomain = nil
+        offline.internetPath = .notOffered
+        offline.certificateExpiry = nil
+        offline.addresses[homeAssistantOnline.id] = nil
+        var relayConnecting = devices
+        relayConnecting.relay = .connecting
+        var checking = online
+        checking.internetPath = .checking
+        var onlineDown = online
+        onlineDown.internetPath = .unreachable
+        var gettingCertificate = online
+        gettingCertificate.internetPath = .gettingCertificate
+        gettingCertificate.certificateExpiry = nil
+        var certificateFailing = gettingCertificate
+        certificateFailing.certificateProblem = certificate.certificateProblem
+        // Nothing uses the internet relay yet: what it offers was read.
+        var unused = InboundStatus()
+        unused.publicRelayAddress = RelayClient.official
+        unused.inboundName = inboundName
+        unused.inboundDomain = "in.openmae.com"
+        unused.internetPath = .available
+        var notHomeMode = relayUnreachable
+        notHomeMode.homeRelay = .notHomeMode
+        // Received information without the relays its sources need.
+        var noRelay = InboundStatus()
+        noRelay.inboundName = inboundName
+        noRelay.sources = [homeAssistant, webhook]
+        let relaysForSheets = RelayAccess(phone: PhoneAccess(link: nil, status: devices),
+                                          inbound: InboundAccess(host: nil, status: online), passesInternetRelay: false)
 
         // Connected tools (not reachable yet: their pages are drawn for whoever builds them)
         func action(_ id: String, _ title: String, reads: Bool = false, on: Bool = true) -> ConnectedTool.Action {
@@ -315,6 +375,29 @@ extension Snapshots {
                                                       draft: service,
                                                       trial: .failed("Home Assistant ne répond pas. Vérifie l’adresse et que ce Mac est sur le même réseau."))),
                           sheetTop: 40),
+            // Relay (not in the design)
+            SettingsScene(name: "RgRelais", page: .relay, phone: devices, inbound: online),
+            SettingsScene(name: "RgRelais-ton-relais", page: .relay, phone: ownLink, inbound: ownOnline),
+            SettingsScene(name: "RgRelais-eteint", page: .relay, phone: homeOnly, inbound: offline),
+            SettingsScene(name: "RgRelais-connexion", page: .relay, phone: relayConnecting, inbound: checking),
+            SettingsScene(name: "RgRelais-injoignable", page: .relay, phone: relayDown, inbound: onlineDown),
+            SettingsScene(name: "RgRelais-certificat", page: .relay, phone: devices, inbound: gettingCertificate),
+            SettingsScene(name: "RgRelais-certificat-echec", page: .relay, phone: devices, inbound: certificateFailing),
+            SettingsScene(name: "RgRelais-pas-de-domaine", page: .relay, phone: ownLink, inbound: noDomain),
+            SettingsScene(name: "RgRelais-inutilise", page: .relay, inbound: unused),
+            SettingsScene(name: "RgRelais-maison", page: .relay, phone: devices, inbound: internet),
+            SettingsScene(name: "RgRelais-maison-injoignable", page: .relay, phone: devices, inbound: relayUnreachable),
+            SettingsScene(name: "RgRelais-maison-pas-en-mode-maison", page: .relay, phone: devices,
+                          inbound: notHomeMode),
+            SettingsScene(name: "RgRelais-maison-adresse", page: .relay, phone: devices, inbound: online,
+                          prepare: { navigation, _, _ in navigation.sheet = .homeRelay }),
+            SettingsScene(name: "RgRelais-maison-adresse-refusee", page: .relay, phone: devices, inbound: online,
+                          sheet: AnyView(RelayAddressSheet(kind: .home, relays: relaysForSheets,
+                                                           navigation: navigationForSheets, text: "192.168.1.10 8080",
+                                                           isRefused: true)),
+                          sheetTop: 120),
+            SettingsScene(name: "RgRelais-ton-relais-adresse", page: .relay, phone: devices, inbound: online,
+                          prepare: { navigation, _, _ in navigation.sheet = .ownRelay }),
             // iPhone and iPad
             SettingsScene(name: "RgAppareils", page: .devices, phone: devices),
             SettingsScene(name: "RgAppareilsVide", page: .devices, phone: noDevice),
@@ -339,8 +422,21 @@ extension Snapshots {
                           prepare: { _, _, inbound in inbound.page = .source(webhook.id) }),
             SettingsScene(name: "RgInfos-ajouter-source", page: .inbound, inbound: internet,
                           prepare: { _, _, inbound in inbound.sheet = .addSource }),
-            SettingsScene(name: "RgInfos-relais-maison", page: .inbound, inbound: connected,
-                          prepare: { _, _, inbound in inbound.sheet = .homeRelay }),
+            SettingsScene(name: "RgInfos-relais-internet", page: .inbound, phone: devices, inbound: online),
+            SettingsScene(name: "RgInfosSource-relais-internet", page: .inbound, phone: devices, inbound: online,
+                          prepare: { _, _, inbound in inbound.page = .source(homeAssistantOnline.id) }),
+            SettingsScene(name: "RgInfos-ajouter-source-un-relais", page: .inbound, phone: devices, inbound: online,
+                          prepare: { _, _, inbound in inbound.sheet = .addSource }),
+            SettingsScene(name: "RgInfos-sans-relais", page: .inbound, phone: homeOnly, inbound: noRelay),
+            SettingsScene(name: "RgInfosSource-sans-relais", page: .inbound, phone: homeOnly, inbound: noRelay,
+                          prepare: { _, _, inbound in inbound.page = .source(webhook.id) }),
+            SettingsScene(name: "RgInfos-ajouter-source-sans-relais", page: .inbound, phone: homeOnly, inbound: noRelay,
+                          prepare: { _, _, inbound in inbound.sheet = .addSource }),
+            SettingsScene(name: "RgInfos-changer-relais", page: .inbound, inbound: internet,
+                          prepare: { _, _, inbound in
+                              inbound.page = .source(homeAssistant.id)
+                              inbound.sheet = .changeRelay(homeAssistant.id, .internet)
+                          }),
             SettingsScene(name: "RgInfos-changer-adresse", page: .inbound, inbound: connected,
                           prepare: { _, _, inbound in
                               inbound.page = .source(homeAssistant.id)
@@ -389,6 +485,7 @@ extension Snapshots {
             navigation.show(scene.page)
             let phone = PhoneAccess(link: nil, status: scene.phone)
             let inbound = InboundAccess(host: nil, status: scene.inbound)
+            let relays = RelayAccess(phone: phone, inbound: inbound, passesInternetRelay: false)
             let tools = ConnectedToolsAccess(tools: scene.tools)
             scene.prepare(navigation, phone, inbound)
             let view = SettingsWindowView(model: model, navigation: navigation, tools: tools)
@@ -399,6 +496,7 @@ extension Snapshots {
                 }
                 .environment(phone)
                 .environment(inbound)
+                .environment(relays)
                 .environment(navigation)
                 .environment(\.unscrolledPages, true)
                 .environment(\.stillFrame, 1.7)

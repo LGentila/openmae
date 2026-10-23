@@ -11,7 +11,8 @@ final class PhoneAccess {
     private(set) var status = LinkStatus()
     /// The iPhone whose removal is being confirmed in Settings › iPhone and iPad.
     var removing: PairedDevice.ID?
-    /// Told the relay's address at first, then on every change (the internet path of received information follows it).
+    /// Told the internet relay's address at first, then on every change (RelayAccess passes it on to received
+    /// information, whose internet path follows it).
     @ObservationIgnored var relayChanged: ((URL?) -> Void)?
     @ObservationIgnored private var toldRelay: URL??
     @ObservationIgnored private let link: LinkHost?
@@ -95,7 +96,10 @@ final class PhoneAccess {
         Task { await link?.remove(device.id) }
     }
 
+    /// The internet relay (Settings › Relay, through RelayAccess). Shown at once; the link saves it and tells the
+    /// iPhones.
     func setRelay(_ choice: RelayChoice) {
+        status.relayChoice = choice
         Task { await link?.setRelay(choice) }
     }
 

@@ -5,10 +5,11 @@ import SwiftUI
 import VoiceCore
 
 /// Settings › iPhone and iPad: the paired devices (or an empty page that offers the first one), how reachable this Mac
-/// is, the relay and the sleep setting. Adding a device (its QR code, its expiry, "iPhone added") and removing one go
-/// through sheets.
+/// is, the internet relay in one line (set in Settings › Relay) and the sleep setting. Adding a device (its QR code,
+/// its expiry, "iPhone added") and removing one go through sheets.
 struct DevicesPage: View {
     let phone: PhoneAccess
+    @Environment(RelayAccess.self) private var relays: RelayAccess?
 
     var body: some View {
         SettingsPageScroll {
@@ -28,12 +29,17 @@ struct DevicesPage: View {
                 }
                 .padding(.top, 22)
             } else {
-                if let note { note.padding(.top, 16) }
                 PageSection("Devices")
                 SettingsCard { devices }
             }
-            PageSection("Relay")
-            SettingsCard { RelayChooser(phone: phone) }
+            if let relays {
+                PageSection("Relay")
+                SettingsCard {
+                    RelayLine(title: Text("Internet relay"),
+                              state: relays.isInternetRelayOn ? RelayWords.internet(relays.internetState) : nil,
+                              offText: Text("Off: your iPhone and iPad reach this Mac at home only."))
+                }
+            }
             PageSection("Sleep")
             SettingsCard {
                 SwitchRow("Keep this Mac awake when plugged in",
@@ -73,19 +79,6 @@ struct DevicesPage: View {
         }
     }
 
-    /// Why the devices reach this Mac at home only, when they do.
-    private var note: Note? {
-        switch phone.reach {
-        case .homeOnly:
-            Note("Without a relay, your devices reach you at home only. Choose a relay to talk to them from anywhere.")
-        case .relayUnreachable:
-            Note("The relay does not answer: your devices reach you at home only for now. Maé tries again on her own.",
-                 tone: .warn)
-        default:
-            nil
-        }
-    }
-
     static func reachText(_ reach: PhoneAccess.Reach) -> Text {
         switch reach {
         case .noPhone: Text("No device")
@@ -107,82 +100,6 @@ struct DevicesPage: View {
 
     static func badge(_ phone: PhoneAccess) -> SidebarBadge {
         .dot(tone(phone.reach), reachText(phone.reach))
-    }
-}
-
-/// "Go through": the OpenMaé relay, none, or one's own.
-private struct RelayChooser: View {
-    let phone: PhoneAccess
-    @State private var custom = ""
-    @State private var editingCustom = false
-
-    var body: some View {
-        SettingRow("Go through") {
-            PopUpMenu(title: title, label: Text("Relay")) {
-                Button { choose(.official) } label: { Text("OpenMaé relay") }
-                Button { editingCustom = true } label: { Text("Another relay…") }
-                Divider()
-                Button { choose(.none) } label: { Text("None") }
-            }
-        }
-        if editingCustom {
-            LabeledField(label: Text("Address of the relay")) {
-                HStack(spacing: 10) {
-                    TextField(text: $custom, prompt: placeholder(Text(verbatim: "https://relay.example.org"))) {
-                        Text("Address of the relay")
-                    }
-                    .windowField(mono: true)
-                    .onSubmit(saveCustom)
-                    Button("OK", action: saveCustom)
-                        .buttonStyle(WindowButtonStyle())
-                        .disabled(customURL == nil)
-                    Button("Cancel") { editingCustom = false }
-                        .buttonStyle(WindowButtonStyle())
-                }
-            }
-        }
-        Caption(help)
-    }
-
-    private var title: Text {
-        switch phone.status.relayChoice {
-        case .official: Text("OpenMaé relay")
-        case .custom(let url): Text(verbatim: url.host() ?? url.absoluteString)
-        case .none: Text("None")
-        }
-    }
-
-    private var help: Text {
-        let host = Text(verbatim: phone.status.relayChoice.url?.host() ?? "")
-        switch (phone.status.relayChoice, phone.reach) {
-        case (.none, _):
-            return Text("Without a relay, nothing goes through the internet: only your devices on the same network reach you.")
-        case (_, .relayUnreachable):
-            return Text("\(host) does not answer for now. Next try in a few seconds.")
-        case (.official, _):
-            return Text("\(host). It only sees encrypted packets: neither your voice nor your texts.")
-        case (.custom, _):
-            return Text("\(host), your own relay. It only sees encrypted packets. It sends no notifications.")
-        }
-    }
-
-    private var customURL: URL? {
-        var text = custom.trimmingCharacters(in: .whitespaces)
-        if !text.contains("://") { text = "https://" + text }
-        guard let url = URL(string: text), ["https", "http"].contains(url.scheme ?? ""), url.host() != nil else {
-            return nil
-        }
-        return url
-    }
-
-    private func saveCustom() {
-        guard let url = customURL else { return }
-        choose(.custom(url))
-    }
-
-    private func choose(_ choice: RelayChoice) {
-        editingCustom = false
-        phone.setRelay(choice)
     }
 }
 

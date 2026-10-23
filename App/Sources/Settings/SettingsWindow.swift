@@ -10,7 +10,7 @@ import VoiceCore
 final class SettingsNavigation {
     /// The pages of the sidebar, in its order.
     enum Page: Hashable, CaseIterable {
-        case voice, actions, agents, webSearch, memory, tools, devices, inbound, advanced
+        case voice, actions, agents, webSearch, memory, tools, relay, devices, inbound, advanced
     }
 
     /// The sheets of the pages; those of iPhone and iPad and of Received information follow PhoneAccess and
@@ -24,6 +24,9 @@ final class SettingsNavigation {
         case eraseMemory
         case addTool
         case removeTool(ConnectedTool.ID)
+        /// Relay: the address of one's own internet relay, or of the home relay.
+        case ownRelay
+        case homeRelay
     }
 
     var page = Page.voice
@@ -44,13 +47,14 @@ final class SettingsNavigation {
     }
 }
 
-/// The settings window: a sidebar of nine pages in three groups, and the page. 960 × 700 points at first.
+/// The settings window: a sidebar of ten pages in three groups, and the page. 960 × 700 points at first.
 struct SettingsWindowView: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
     let tools: ConnectedToolsAccess
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
     @Environment(InboundAccess.self) private var inbound: InboundAccess?
+    @Environment(RelayAccess.self) private var relays: RelayAccess?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -70,6 +74,9 @@ struct SettingsWindowView: View {
             phone?.removing = nil
             if page == .inbound { inbound?.show(.list) }
         }
+        // The internet relay's state in the sidebar: what it offers is read when the window opens and when it changes.
+        .onAppear { relays?.readInternetOffer() }
+        .onChange(of: inbound?.status.publicRelayAddress) { relays?.readInternetOffer() }
         .background(WindowReader { SettingsWindowLink.window = $0 })
     }
 
@@ -91,6 +98,8 @@ struct SettingsWindowView: View {
             } else {
                 ToolsPage(tools: tools, navigation: navigation)
             }
+        case .relay:
+            if let relays { RelayPage(relays: relays) }
         case .devices:
             if let phone { DevicesPage(phone: phone) }
         case .inbound:
@@ -125,6 +134,7 @@ private struct SettingsSidebar: View {
     let tools: ConnectedToolsAccess
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
     @Environment(InboundAccess.self) private var inbound: InboundAccess?
+    @Environment(RelayAccess.self) private var relays: RelayAccess?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -137,6 +147,7 @@ private struct SettingsSidebar: View {
             item(.memory)
             item(.tools)
             group("Devices and sources")
+            if relays != nil { item(.relay) }
             if phone != nil { item(.devices) }
             if inbound != nil { item(.inbound) }
             Color.clear.frame(height: 14)
@@ -185,6 +196,7 @@ private struct SettingsSidebar: View {
         case .webSearch: WebSearchPage.badge(model)
         case .memory: MemoryPage.badge(model)
         case .tools: ConnectedToolsAccess.isAvailable ? ToolsPage.badge(tools) : .soon
+        case .relay: relays.map(RelayPage.badge)
         case .devices: phone.map(DevicesPage.badge)
         case .inbound: inbound.flatMap(InboundPage.badge)
         }
@@ -270,6 +282,7 @@ extension SettingsNavigation.Page {
         case .webSearch: Text("Search the internet")
         case .memory: Text("Memory")
         case .tools: Text("Connected tools")
+        case .relay: Text("Relay")
         case .devices: Text("iPhone and iPad")
         case .inbound: Text("Received information")
         case .advanced: Text("Advanced")
@@ -284,6 +297,7 @@ extension SettingsNavigation.Page {
         case .webSearch: .search
         case .memory: .bulb
         case .tools: .plug
+        case .relay: .globe
         case .devices: .phone
         case .inbound: .inbox
         case .advanced: .settings
@@ -295,7 +309,7 @@ extension SettingsNavigation.Page {
         switch self {
         case .voice: Palette.azureSoft
         case .actions, .agents, .webSearch, .memory, .tools: Palette.sunSoft
-        case .devices, .inbound: Palette.turquoiseSoft
+        case .relay, .devices, .inbound: Palette.turquoiseSoft
         case .advanced: Palette.advancedDisc
         }
     }
@@ -303,14 +317,15 @@ extension SettingsNavigation.Page {
 
 // MARK: - Sheets
 
-/// The sheet over the window, with its veil: the settings' own, the iPhone pairing and removal, and those of received
-/// information. Escape or "Cancel" closes it.
+/// The sheet over the window, with its veil: the settings' own (the relays' addresses among them), the iPhone pairing
+/// and removal, and those of received information. Escape or "Cancel" closes it.
 private struct SettingsSheetLayer: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
     let tools: ConnectedToolsAccess
     @Environment(PhoneAccess.self) private var phone: PhoneAccess?
     @Environment(InboundAccess.self) private var inbound: InboundAccess?
+    @Environment(RelayAccess.self) private var relays: RelayAccess?
 
     var body: some View {
         if let sheet = activeSheet {
@@ -346,6 +361,11 @@ private struct SettingsSheetLayer: View {
                 guard let tool = tools.tool(id) else { return nil }
                 return Shown(view: AnyView(RemoveToolSheet(tools: tools, tool: tool, navigation: navigation)),
                              top: 120)
+            case .ownRelay, .homeRelay:
+                guard let relays else { return nil }
+                return Shown(view: AnyView(RelayAddressSheet(kind: sheet == .homeRelay ? .home : .own, relays: relays,
+                                                             navigation: navigation)),
+                             top: 120)
             }
         }
         if navigation.page == .devices, let phone, let sheet = phone.sheet {
@@ -361,12 +381,14 @@ private struct SettingsSheetLayer: View {
             case .changeAddress(let source): return Shown(view: AnyView(ChangeAddressSheet(inbound: inbound,
                                                                                             source: source)),
                                                           top: 120)
+            case .changeRelay(let source, let origin):
+                return Shown(view: AnyView(ChangeRelaySheet(inbound: inbound, source: source, origin: origin)),
+                             top: 120)
             case .remove(let source): return Shown(view: AnyView(RemoveSourceSheet(inbound: inbound, source: source)),
                                                    top: 120)
             case .homeAssistant(let source): return Shown(view: AnyView(HomeAssistantSheet(inbound: inbound,
                                                                                             source: source)),
                                                           top: 24)
-            case .homeRelay: return Shown(view: AnyView(HomeRelaySheet(inbound: inbound)), top: 120)
             }
         }
         return nil

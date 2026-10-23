@@ -19,6 +19,7 @@ struct AssistantApp: App {
     @State private var presence: DesktopPresence
     @State private var phone: PhoneAccess
     @State private var inbound: InboundAccess
+    @State private var relays: RelayAccess
     @State private var navigation = SettingsNavigation()
     @State private var tools = ConnectedToolsAccess()
 
@@ -74,18 +75,19 @@ struct AssistantApp: App {
         let model = AssistantModel(connection: link)
         let phone = PhoneAccess(link: link)
         let inboundAccess = InboundAccess(host: inbound)
-        // The internet path goes through the iPhones' relay, and follows when it changes.
+        // The relays are set once for the whole app: the internet path of received information goes through the
+        // internet relay the iPhones use, and follows when it changes (the inbound test gives it a relay of its own).
         #if DEBUG
-        if InboundTestHook.publicRelay == nil {
-            phone.relayChanged = { inboundAccess.setPublicRelay($0) }
-        }
+        let relays = RelayAccess(phone: phone, inbound: inboundAccess,
+                                 passesInternetRelay: InboundTestHook.publicRelay == nil)
         #else
-        phone.relayChanged = { inboundAccess.setPublicRelay($0) }
+        let relays = RelayAccess(phone: phone, inbound: inboundAccess)
         #endif
         _model = State(initialValue: model)
         _presence = State(initialValue: DesktopPresence(model: model, phone: phone))
         _phone = State(initialValue: phone)
         _inbound = State(initialValue: inboundAccess)
+        _relays = State(initialValue: relays)
     }
 
     var body: some Scene {
@@ -137,6 +139,7 @@ struct AssistantApp: App {
                 .frame(minWidth: 820, minHeight: 560)
                 .environment(phone)
                 .environment(inbound)
+                .environment(relays)
                 .environment(navigation)
                 .preferredColorScheme(.light)
         }
