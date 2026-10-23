@@ -158,6 +158,46 @@ extension MLXChatModel {
                                     firstTokens: firstTokens)
     }
 
+    /// A token of an answer read again (`rereadChances`): the chance the model gives it there, and its likeliest token
+    /// there with that token's chance.
+    public struct RereadChance: Sendable, Encodable {
+        public var chance: Double
+        public var likeliest: String
+        public var likeliestChance: Double
+    }
+
+    /// Diagnostics (`voice-cli story-bench --reread`): `answer`, the tokens the model wrote in answer to `conversation`, read
+    /// again in one pass as a prompt is read, rather than one token after the other as they were written: from the
+    /// beginning the model keeps, the request read in float32 (as `generate` reads it), then the answer's tokens in the
+    /// model's own type (`inFloat32` false) or in float32 (`computeInFloat32`). For each token of the answer, the chance the
+    /// model gives it there, and its likeliest token there. The model's memory is left as it was.
+    public func rereadChances(_ conversation: [ChatMessage], answer: [Int], inFloat32: Bool) throws -> [RereadChance] {
+        guard let beginning else { throw BeginningsError(description: "no beginning kept") }
+        let prompt = try render(conversation, generationPrompt: true)
+        guard prompt.count > beginning.tokens.count, prompt.starts(with: beginning.tokens), !answer.isEmpty else {
+            throw BeginningsError(description: "the request does not start with the beginning")
+        }
+        let cache = beginning.cache.map { $0.copy() }
+        // The request but its last token, as `generate` reads it; then its last token and the answer but its last token,
+        // whose outputs give the chances of the answer's tokens.
+        try computeInFloat32(cache) { try feed(prompt[beginning.tokens.count ..< prompt.count - 1], into: $0) }
+        let tokens = [prompt[prompt.count - 1]] + answer.dropLast()
+        func read(_ cache: [KVCache]) -> MLXArray {
+            context.model(MLXArray(tokens.map { Int32($0) }).reshaped([1, -1]), cache: cache)
+        }
+        let logits = inFloat32 ? computeInFloat32(cache, read) : read(cache)
+        let chances = softmax(logits[0].asType(.float32), axis: -1)
+        let drawn = takeAlong(chances, MLXArray(answer.map { Int32($0) }).reshaped([-1, 1]), axis: -1).reshaped([-1])
+        let likeliest = argMax(chances, axis: -1)
+        let likeliestChances = chances.max(axis: -1)
+        eval(drawn, likeliest, likeliestChances)
+        let ids = likeliest.asArray(Int32.self)
+        return zip(drawn.asArray(Float.self), zip(ids, likeliestChances.asArray(Float.self))).map {
+            RereadChance(chance: Double($0), likeliest: tokenizer.decode(tokens: [Int($1.0)], skipSpecialTokens: false),
+                         likeliestChance: Double($1.1))
+        }
+    }
+
     /// Processes `tokens` into `cache` as `prefill` does.
     private func feed(_ tokens: ArraySlice<Int>, into cache: [KVCache], parameters: GenerateParameters? = nil) throws {
         let input = LMInput(tokens: MLXArray(tokens.map { Int32($0) }))

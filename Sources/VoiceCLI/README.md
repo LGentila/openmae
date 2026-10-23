@@ -286,6 +286,22 @@ device heard, then the note, `--drop cut-off` what it heard as an answer the use
 .build/xcode/Build/Products/Release/voice-cli cut-off-bench --corpus Tests/Fixtures/drops-fr.json --actions
 ```
 
+Words the voice is given misspelled (« constru-ée » for « construite », « Aujourd'elle »): the requests for a story of
+`Tests/Fixtures/stories-fr.json`, each answered `--repeats` times (20 by default) in a new conversation, text only.
+Each answer goes to the voice as in the app, and every token the model drew is kept with the chance the model gave it
+and the tokens it found likeliest there. A hyphenated word the system's French spell checker does not know is a split
+word, and every word it does not know is reported too: the report prints each one with the tokens the model drew for
+it, and counts per request the answers holding one, in what the model wrote and in what the voice is given.
+`--request "…"` asks that instead of the corpus; `--actions`, `--agents`, `--web`, `--sources`, `--news` and `--memory`
+put those tools in the prompt as in the app; `--hold 1` holds the model a second after each piece, as while the voice
+needs the GPU; `--reread` reads each answer again in one pass, as a prompt is read, in the model's own type and in
+float32, and shows the chances the model gives each such word's tokens then; `--min-p` draws the tokens with another
+min-p than the app's, and `--bfloat16-prompts` computes the requests in bfloat16, to compare in one build:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli story-bench --actions --agents --web --sources --memory --reread
+```
+
 Hand a task to Claude Code the way the app does, without the app or a language model (it uses the Claude Code
 signed in on this Mac; `--check` only says whether it is installed and signed in):
 

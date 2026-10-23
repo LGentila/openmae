@@ -133,6 +133,28 @@ struct TextForSpeechTests {
         SpeakableText.record("C'est noté.", in: &answer)
         #expect(answer.hasSuffix("porte. C'est noté."))
     }
+
+    /// The words reach the voice as the model wrote them, hyphens included, whatever pieces it writes them in (Gemma 4
+    /// writes « construite » in two, « constru » then « ite »): the way to the voice neither splits a word nor joins one.
+    /// « constru-ée », heard in the app, was written so by the model (`voice-cli story-bench`).
+    @Test func wordsReachTheVoiceAsTheModelWroteThem() {
+        func voice(_ tokens: [String]) -> String {
+            var filter = ReasoningFilter()
+            var chunker = SentenceChunker()
+            var pieces: [String] = []
+            for token in tokens { pieces += chunker.push(filter.push(token)) }
+            pieces += chunker.push(filter.flush()) + chunker.flush()
+            return pieces.map { SpeakableText.forVoice(SpeakableText.clean($0), language: .french) }.joined(separator: " ")
+        }
+        let story = ["La", " tour", " Eiffel", " est", " un", " monument", " fascinant", ".", " Elle", " a", " été",
+                     " constru", "ite", " pour", " l", "'", "Exposition", " universelle", " de", " ", "1", "8", "8", "9",
+                     " sur", " le", " Champ", "-", "de", "-", "Mars", ".", " C", "'", "est", " peut", "-", "être", " le",
+                     " plus", " beau", " monument", " du", " dix", "-", "neu", "vième", " siècle", "."]
+        #expect(voice(story) == story.joined())
+        #expect(voice(story).contains(" construite pour"))
+        let split = ["Elle", " a", " été", " constru", "-", "ée", " pour", " l", "'", "Exposition", " universelle", "."]
+        #expect(voice(split) == "Elle a été constru-ée pour l'Exposition universelle.")
+    }
 }
 
 @Suite("Language")
