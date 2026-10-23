@@ -316,6 +316,26 @@ struct MemoryTests {
         #expect(again.memory == all.memory)
     }
 
+    /// The journal is not offered in this version: switched on in saved settings, it is still off. The tool configured
+    /// as the host does it offers no search, and the prompt says nothing of a journal.
+    @Test func theJournalIsNotOfferedWhateverTheSettingsSay() async throws {
+        #expect(!MemorySettings.journalOffered)
+        var settings = MemorySettings()
+        settings.enabled = true
+        settings.journal = true
+        #expect(!settings.journalOn)
+        let tools = MemoryTools(store: TransientMemoryStore(sheet: ["Allergique aux noix"]))
+        await tools.configure(enabled: settings.enabled, journal: settings.journalOn)
+        let runner = ToolRunner(providers: [tools])
+        let specs = await runner.tools()
+        #expect(specs.first?.parameters.contains { $0.name == "quand" } == false)
+        let addendum = try #require(await tools.promptAddendum())
+        #expect(!addendum.contains("chercher"))
+        #expect(addendum.hasSuffix("- Allergique aux noix"))
+        let search = ToolCall(name: MemoryCatalog.name, arguments: ["action": "chercher", "texte": "garagiste"])
+        #expect(await runner.handle(search, context: context(["Cherche"])).spoken == MemoryPhrases.journalOff(.french))
+    }
+
     /// "Delete the models…" removes the models' folder only: the memory is next to it, never inside.
     @Test func deletingTheModelsSparesTheMemory() throws {
         #expect(!AppIdentity.memoryDirectory.standardizedFileURL.path
