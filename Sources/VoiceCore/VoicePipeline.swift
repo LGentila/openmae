@@ -622,6 +622,13 @@ public actor VoicePipeline {
         startAnnouncementIfIdle()
     }
 
+    /// Something happened that the user learnt elsewhere, never said by the voice (a task handed to an agent ended: a
+    /// notification told them): the model reads `note` with the next message of the user's role, and the history keeps
+    /// it there (`Conversation.noteForNextMessage`).
+    public func noteForNextMessage(_ note: String) {
+        conversation.noteForNextMessage(note)
+    }
+
     /// Takes back an announcement that is still waiting. False when it has started, or is over.
     public func withdrawAnnouncement(_ id: UUID) -> Bool {
         guard let index = announcements.firstIndex(where: { $0.id == id }) else { return false }

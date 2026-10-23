@@ -1,0 +1,36 @@
+{
+ "_comment": "French dialogues with Claude Code switched on, for voice-cli dialogue-bench (--corpus Tests/Fixtures/agents-dialogues-fr.json). The reference time is Thursday 15 October 2026, 18:42. The agent does nothing: a task handed over (read back, then the user's « Oui. », answered by the app) runs until the sentence « [tâche terminée] », which ends it as finished, as when Claude Code is done: the app shows its notification, and the conversation gets its note with the user's next message. In the first dialogue, the user then asks for the same work again: its goal is that work handed over again (a call to deleguer_tache, which the app reads back) or an answer that says the task is over (one of answerMentions), never one that says it still runs, nor one that copies the note (one of answerNeverMentions). In the second, the user then asks for something else, an appointment: its goal is the appointment saved, as in the other corpora, and an answer that does not bring the task up nor copy the note (answerNeverMentions), since the notification already told the user. In both, a run in which no task ended (the first request was not handed over) does not reach the goal.",
+ "now": "2026-10-15T18:42",
+ "agents": true,
+ "dialogues": [
+  {
+   "name": "the same request after the task finished",
+   "turns": [
+    "Demande à Claude Code d'écrire un poème sur la mer dans un fichier et une recette de crêpes dans un autre.",
+    "Oui.",
+    "[tâche terminée]",
+    "Demande à Claude Code d'écrire un poème sur la mer dans un fichier et une recette de crêpes dans un autre."
+   ],
+   "goal": {
+    "tool": "deleguer_tache",
+    "answerMentions": ["termin", "fini", "déjà fait", "c'est fait", "est fait", "déjà écrit", "déjà rédigé", "est prêt", "sont prêts"],
+    "answerNeverMentions": ["en cours", "préviens", "pas encore", "toujours en train", "y travaille", "travaille encore", "travaille dessus", "aura fini", "aura terminé", "va finir", "dès qu", "recevras", "l'utilisateur"]
+   }
+  },
+  {
+   "name": "an appointment after the task finished",
+   "turns": [
+    "Demande à Claude Code d'écrire un poème sur la mer dans un fichier et une recette de crêpes dans un autre.",
+    "Oui.",
+    "[tâche terminée]",
+    "Ajoute un rendez-vous chez le dentiste demain à 16 h."
+   ],
+   "goal": {
+    "tool": "creer_evenement",
+    "title": "dentiste",
+    "when": "2026-10-16T16:00",
+    "answerNeverMentions": ["Claude", "poème", "crêpe", "tâche", "notification", "utilisateur"]
+   }
+  }
+ ]
+}

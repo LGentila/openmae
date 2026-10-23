@@ -263,6 +263,40 @@ struct TierAndConversationTests {
         #expect(c.nextNoteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)")
     }
 
+    /// What happened meanwhile that the user learnt elsewhere (a task that ended, told by a notification) goes with the
+    /// next message of the user's role: after their words (still its first line) and the note of an answer cut off, before
+    /// the date line; an announcement's note carries it too. It is told once, with the message recorded: one made before
+    /// it came (a turn already under way) is recorded without it, and it waits for the next. A new conversation forgets
+    /// what was not told yet.
+    @Test func whatHappenedMeanwhileGoesWithTheNextMessage() {
+        let dateLine = "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)"
+        let ended = "(Entre-temps, la tâche d1 « poème » confiée à Claude Code s'est terminée ; "
+            + "l'utilisateur l'a appris par une notification.)"
+        var c = Conversation(systemPrompt: "S")
+        c.cutOffPlacement = .afterUserWords
+        c.record(user: "Raconte-moi une histoire.", language: .french, assistant: "Il était une fois", interrupted: true)
+        let early = c.nextUserMessage("Attends.", language: .french, dateLine: dateLine)  // before the task ended
+        c.noteForNextMessage(ended)
+        let message = c.nextUserMessage("Attends.", language: .french, dateLine: dateLine)
+        #expect(message.content == "Attends.\n" + Conversation.cutOffNote + "\n" + ended + "\n" + dateLine)
+        #expect(c.nextNoteMessage("(Le minuteur a sonné.)").content
+            == "(Le minuteur a sonné.)\n" + Conversation.cutOffNote + "\n" + ended)
+        #expect(c.nextUserMessage("Hello", language: .english).content == "Hello\n" + Conversation.cutOffNote + "\n"
+            + ended + Conversation.englishHint)
+        // Recorded without it: it waits for the next message.
+        c.record(user: early, steps: [], assistant: "Oui ?", interrupted: false)
+        let next = c.nextUserMessage("Rien.", language: .french)
+        #expect(next.content == "Rien.\n" + ended)
+        // Recorded with it: kept in the history as the model read it, and told once.
+        c.record(user: next, steps: [], assistant: "D'accord.", interrupted: false)
+        #expect(c.messages.suffix(2) == [next, ChatMessage(.assistant, "D'accord.")])
+        #expect(c.nextUserMessage("Merci.", language: .french).content == "Merci.")
+        c.noteForNextMessage(ended)
+        c.clear()
+        #expect(c.nextUserMessage("Bonjour", language: .french).content == "Bonjour")
+        #expect(c.nextNoteMessage("(Le minuteur a sonné.)").content == "(Le minuteur a sonné.)")
+    }
+
     /// An answer cut by a drop goes into the history as the pipeline gives it (as the model wrote it), then a note of its
     /// own says the link dropped, and how far the user heard it, not that the user cut it off
     /// (`Conversation.dropMessage`); the user's next message stays their words. An answer the user cuts off still gets

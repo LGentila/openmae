@@ -21,15 +21,20 @@
 //                            [--memory [--journal]]
 //                            [--examples app|none|file] [--addendum file] [--watch-calls] [--out measurements]
 //
-// --agents and --web offer Claude Code's tools and the web search too, as in the app when they are on (nothing is
-// handed over or searched: a call to them is declined). --memory (or "memory": true, as in
-// Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet kept in memory, and its journal of
-// past exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal: a dialogue may start
-// with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet read again), and its
-// goal is checked once all its sentences are said (what the sheet holds, what the last answer says). --now replaces
-// every reference time of the corpus (a dialogue may have its own). --examples and --addendum are those of
-// actions-bench. --watch-calls adds each first pass's chance of opening a call (at its first token, and at its most
-// tempted token).
+// --agents (or "agents": true, as in Tests/Fixtures/agents-dialogues-fr.json) offers Claude Code's tools too, as in the
+// app when it is on, with the app's read-back and the user's "oui", but an agent that does nothing: its tasks run until
+// a sentence "[tâche terminée]" ends them, as finished, and the conversation gets the note the app gives it then
+// (`AgentPhrases.historyNote`), with the user's next message. A dialogue whose goal is the delegation (deleguer_tache)
+// reaches it in a turn after a task ended: the work handed over again (a call the app read back), or an answer that says
+// the task is over (`answerMentions`); either way, never an answer that says it still runs (`answerNeverMentions`, which
+// any goal may have). --web offers the web search too (nothing is searched: a call is declined). --memory (or
+// "memory": true, as in Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet kept in memory,
+// and its journal of past exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal: a
+// dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet
+// read again), and its goal is checked once all its sentences are said (what the sheet holds, what the last answer
+// says). --now replaces every reference time of the corpus (a dialogue may have its own). --examples and --addendum are
+// those of actions-bench. --watch-calls adds each first pass's chance of opening a call (at its first token, and at its
+// most tempted token).
 
 import Foundation
 import VoiceCore
@@ -84,6 +89,9 @@ private struct DialogueCorpus: Decodable {
         var notRemembered: String?
         var erased: Bool?
         var answerMentions: [String]?
+        /// The turn that reaches the goal must not say any of these (whatever the accents and case): for the delegation,
+        /// that the task still runs.
+        var answerNeverMentions: [String]?
 
         /// The goal's tool for a last sentence that asks for nothing new.
         static let nothingToDo = "aucun"
@@ -127,6 +135,8 @@ private struct RunResult: Encodable {
     var goalAt: Int?
     /// The turn (from 1) at which the item to keep (`Dialogue.keep`) was first changed or deleted.
     var keptItemTouchedAt: Int?
+    /// The tasks handed to the agent that "[tâche terminée]" ended.
+    var tasksEnded: Int?
 }
 
 func runDialogueBench(_ o: Options) async throws {
@@ -159,9 +169,21 @@ func runDialogueBench(_ o: Options) async throws {
     if memory {
         print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)"))
     }
-    let providers: [any ToolProvider] = [calendar, TimerTools()] + (agents ? [DryAgents()] : [])
-        + (web ? [DryWebSearch()] : []) + [memoryTools]
-    let runner = ToolRunner(providers: providers)
+    // Claude Code's tasks and their folders go into a folder of their own, removed at the end.
+    let agentsFolder = FileManager.default.temporaryDirectory
+        .appending(path: "openmae-dialogue-bench-\(UUID().uuidString)", directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: agentsFolder) }
+    /// The app's tools, Claude Code's with an agent of their own: a fresh one for each run, with no task left from the
+    /// run before.
+    func makeRunner() async -> (ToolRunner, BenchAgents?) {
+        let bench = agents ? await BenchAgents(folder: agentsFolder.appending(path: UUID().uuidString)) : nil
+        let providers: [any ToolProvider] = [calendar, TimerTools()] + (bench.map { [$0.tools] } ?? [])
+            + (web ? [DryWebSearch()] : []) + [memoryTools]
+        let runner = ToolRunner(providers: providers)
+        _ = await runner.tools()
+        return (runner, bench)
+    }
+    var (runner, benchAgents) = await makeRunner()
     await model.useTools(await runner.tools())
     await model.watchToolCalls(o.watchCalls)
     let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
@@ -192,8 +214,11 @@ func runDialogueBench(_ o: Options) async throws {
         await calendar.use(calendars: dialogue.calendars, lists: dialogue.lists)
         let memoryGoal = dialogue.goal.tool == MemoryCatalog.name
         let nothingToDo = dialogue.goal.tool == DialogueCorpus.Goal.nothingToDo
+        let delegationGoal = dialogue.goal.tool == AgentCatalog.delegateName
+        let endsTasks = dialogue.turns.contains(taskEndedMarker)
         for run in 1...repeats {
             print("■ \(dialogue.name) — run \(run)/\(repeats)" + (at == now ? "" : " · at \(LocalDateTime.format(at, in: timeZone))"))
+            if agents { (runner, benchAgents) = await makeRunner() }
             var start = base
             if memory {
                 // The dialogue's sheet, read as at a new conversation (the beginning changes with it).
@@ -219,10 +244,30 @@ func runDialogueBench(_ o: Options) async throws {
                     print("  — new conversation")
                     continue
                 }
+                if sentence == taskEndedMarker {
+                    // As in the app when the agent is done: the task ends on its own, a notification tells the user, and
+                    // the conversation gets its note with the user's next message.
+                    let ended = await benchAgents?.endTasks() ?? []
+                    for task in ended { talk.conversation.noteForNextMessage(AgentPhrases.historyNote(for: task)) }
+                    result.tasksEnded = (result.tasksEnded ?? 0) + ended.count
+                    print("  — " + (ended.isEmpty ? "no task was running"
+                        : ended.map { "\($0.reference) « \($0.title) » ended" }.joined(separator: ", ")))
+                    continue
+                }
                 var turn = try await talk.turn(sentence)
-                turn.goalReached = memoryGoal || nothingToDo ? false : turn.passes.contains { reaches($0, dialogue.goal) }
+                if memoryGoal || nothingToDo || (endsTasks && (result.tasksEnded ?? 0) == 0) {
+                    // A dialogue about a task that ended reaches nothing before one did.
+                    turn.goalReached = false
+                } else if delegationGoal {
+                    turn.goalReached = handsOverOrSaysOver(turn, dialogue.goal)
+                } else {
+                    turn.goalReached = turn.passes.contains { reaches($0, dialogue.goal) }
+                }
+                let said = turn.goalReached ? mentioned(dialogue.goal.answerNeverMentions, in: turn.answer) : nil
+                if said != nil { turn.goalReached = false }
                 result.turns.append(turn)
                 show(turn, index: index + 1)
+                if let said { print("  ✗ the answer says « \(said) »") }
                 if let keep = dialogue.keep, result.keptItemTouchedAt == nil,
                    turn.passes.contains(where: { $0.touched.map { folded($0).contains(folded(keep)) } ?? false })
                 {
@@ -313,7 +358,9 @@ private struct Talk {
     }
 
     mutating func turn(_ text: String) async throws -> TurnResult {
-        let message = Conversation.userMessage(text, language: .french, dateLine: ActionCatalog.dateLine(now, timeZone: timeZone))
+        // With what happened meanwhile (a task that ended), as the app makes it.
+        let message = conversation.nextUserMessage(text, language: .french,
+                                                   dateLine: ActionCatalog.dateLine(now, timeZone: timeZone))
         // As the app: what the user said, this turn then the two before (their messages without the date line).
         let earlier = conversation.exchanges.filter { $0.role == .user }.suffix(2).reversed()
             .map { $0.content.components(separatedBy: "\n").first ?? "" }
@@ -513,20 +560,81 @@ private struct Talk {
     }
 }
 
-/// Claude Code switched on, as the model sees it: its tools and its part of the prompt. Nothing is handed over: a call
-/// is declined.
-private struct DryAgents: ToolProvider {
-    let identifier = "agents"
-    func tools() async -> [ToolSpec] {
-        AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: [])
+/// The sentence of a dialogue that ends the tasks handed to the agent (`BenchAgents.endTasks`).
+private let taskEndedMarker = "[tâche terminée]"
+
+/// Claude Code switched on, as in the app: the app's own tools (`AgentTools`), with its part of the prompt, its read-back
+/// and the user's "oui" (the default setting), but an agent that does nothing (`BenchAgent`): its tasks run until
+/// `endTasks`.
+private struct BenchAgents {
+    let tools: AgentTools
+    private let agent = BenchAgent()
+    private let ended = EndedTasks()
+
+    init(folder: URL) async {
+        tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks", directoryHint: .isDirectory)),
+                           workspace: folder.appending(path: "OpenMae", directoryHint: .isDirectory))
+        let ended = ended
+        await tools.observe(onChange: { _ in }, onEnd: { task in Task { await ended.add(task) } })
+        await tools.configure(agents: [AgentTools.Agent(connector: agent)], folders: [])
     }
-    func promptAddendum() async -> String? { AgentCatalog.promptAddendum }
-    func check(_ call: ToolCall, context: ToolContext) async throws {
-        try AgentCatalog.check(call, context: context, agents: [ClaudeCode.displayName], folders: [])
+
+    /// Ends the tasks that run, as finished; returns them once the app's tools have told their end (`onEnd`, which shows
+    /// the notification in the app), within five seconds.
+    func endTasks() async -> [AgentTask] {
+        let count = agent.finishAll()
+        for _ in 0..<500 where await ended.count < count { try? await Task.sleep(for: .milliseconds(10)) }
+        return await ended.take()
     }
-    func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
-        throw ToolRefusal(forModel: "Action non effectuée (essai).", spoken: ActionPhrases.declined(context.language),
-                          retryable: false)
+}
+
+/// The tasks whose end the app's tools told.
+private actor EndedTasks {
+    private var tasks: [AgentTask] = []
+    var count: Int { tasks.count }
+    func add(_ task: AgentTask) { tasks.append(task) }
+    func take() -> [AgentTask] {
+        defer { tasks = [] }
+        return tasks
+    }
+}
+
+/// An agent that does nothing: each run waits for `finishAll`, then ends with a short result, as Claude Code's does.
+private final class BenchAgent: AgentConnector, @unchecked Sendable {
+    let agentID = ClaudeCode.agentID
+    let displayName = ClaudeCode.displayName
+    private let lock = NSLock()
+    private var runs: [UUID: AsyncThrowingStream<AgentUpdate, Error>.Continuation] = [:]
+
+    func availability() async -> AgentAvailability { .ready(version: nil) }
+
+    func start(_ task: AgentTask) -> AsyncThrowingStream<AgentUpdate, Error> {
+        let (stream, run) = AsyncThrowingStream<AgentUpdate, Error>.makeStream()
+        run.yield(.session(task.id.uuidString))
+        lock.withLock { runs[task.id] = run }
+        return stream
+    }
+
+    func followUp(_ task: AgentTask, message: String) -> AsyncThrowingStream<AgentUpdate, Error> { start(task) }
+
+    /// Ends every run, as finished; returns how many there were.
+    func finishAll() -> Int {
+        let ending = lock.withLock {
+            defer { runs = [:] }
+            return Array(runs.values)
+        }
+        for run in ending {
+            run.yield(.result(AgentResult(text: "Le travail demandé est fait : tout est dans le dossier de la tâche.")))
+            run.finish()
+        }
+        return ending.count
+    }
+
+    /// As Claude Code: a run stopped still ends with a result, an error.
+    func cancel(_ task: AgentTask) async {
+        let run = lock.withLock { runs.removeValue(forKey: task.id) }
+        run?.yield(.result(AgentResult(text: "", failure: .agent("error_during_execution"))))
+        run?.finish()
     }
 }
 
@@ -573,6 +681,26 @@ private func reaches(_ pass: Pass, _ goal: DialogueCorpus.Goal) -> Bool {
 
 private func folded(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+}
+
+/// Whether a turn after a task ended reached the delegation's goal: the work handed over again (a deleguer_tache call the
+/// app did not refuse: read back, waiting for the "oui"), or an answer that says the task is over (one of
+/// `answerMentions`). What it must not say (`answerNeverMentions`: that the task still runs) is checked apart.
+private func handsOverOrSaysOver(_ turn: TurnResult, _ goal: DialogueCorpus.Goal) -> Bool {
+    turn.passes.contains { $0.call?.name == AgentCatalog.delegateName && $0.refused != true }
+        || mentioned(goal.answerMentions, in: turn.answer) != nil
+}
+
+/// The first of `words` that the answer says, whatever the accents, the case and the apostrophes; nil if none.
+private func mentioned(_ words: [String]?, in answer: String) -> String? {
+    func plain(_ text: String) -> String { folded(text).replacingOccurrences(of: "’", with: "'") }
+    let text = plain(answer)
+    return words?.first { text.contains(plain($0)) }
+}
+
+/// The sentences of a dialogue that are not the user's: a new conversation, the end of the agent's tasks.
+private func isMarker(_ sentence: String) -> Bool {
+    sentence == "[nouvelle conversation]" || sentence == taskEndedMarker
 }
 
 /// Whether words say an item was saved, changed or moved, or is being: « C'est noté », « C'est fait », « C'est
@@ -684,10 +812,18 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
                   + "items changed or deleted \(last.filter { $0.passes.contains { $0.touched != nil } }.count), "
                   + "items created \(last.filter { $0.passes.contains { $0.created == true } }.count) / \(last.count)")
         }
-        for (index, sentence) in dialogue.turns.enumerated() {
-            let turns = mine.compactMap { $0.turns.count > index ? $0.turns[index] : nil }
+        // The runs' turns are the user's sentences only: the markers ("[nouvelle conversation]", "[tâche terminée]")
+        // are counted in the turns' numbers, as in the runs' lines, but have no turn of their own.
+        var said = -1
+        for (index, sentence) in dialogue.turns.enumerated() where !isMarker(sentence) {
+            said += 1
+            let turns = mine.compactMap { $0.turns.count > said ? $0.turns[said] : nil }
             guard !turns.isEmpty else { continue }
             print("turn \(index + 1) “\(sentence)” (\(turns.count) runs)")
+            if let words = dialogue.goal.answerNeverMentions, dialogue.turns[..<index].contains(taskEndedMarker) {
+                let saying = turns.filter { mentioned(words, in: $0.answer) != nil }.count
+                print("  answers that say one of « \(words.joined(separator: " », « ")) »: \(saying) / \(turns.count)")
+            }
             print("  first pass: " + counts(turns.map { $0.passes.first.map(outcome) ?? "answered by the app" }))
             let second = turns.compactMap { $0.passes.count > 1 ? $0.passes[1] : nil }
             if !second.isEmpty { print("  second pass: " + counts(second.map(outcome))) }

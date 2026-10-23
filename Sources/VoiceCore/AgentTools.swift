@@ -72,7 +72,8 @@ public actor AgentTools: ToolProvider {
     }
 
     /// `onChange`: the tasks to show (the most recent last). `onEnd`: a task finished or failed on its own (the app
-    /// shows a notification; a task the user stopped gets none). `onFirstTask`: once, when the first task starts
+    /// shows a notification and tells the conversation, `AgentPhrases.historyNote`; a task the user stopped gets
+    /// neither). `onFirstTask`: once, when the first task starts
     /// (the app asks for notifications then; not awaited, so macOS's dialog does not hold up the answer).
     /// `onRunning`: true when a first task starts running, false once none runs any more (each ended, failed or was
     /// stopped), in that order; a task that goes on with a follow-up queued meanwhile does not end in between. The app

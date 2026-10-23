@@ -175,13 +175,22 @@ public actor AssistantHost: AssistantConnection {
         let awake = tasksAwake
         await agentTools.observe(
             onChange: { emit.yield(.tasks($0)) },
-            onEnd: { task in
+            onEnd: { [weak self] task in
                 // Announced by a notification only, never out loud: the user may be talking about something else.
                 let notification = AgentPhrases.notification(for: task)
                 Notifier.post(title: notification.title, body: notification.body, folder: task.folder)
+                // The conversation learns it with the user's next message: otherwise, asked for the same work again,
+                // the model answered from the history, which ends with the task handed over, that it was still running.
+                Task { await self?.taskEnded(task) }
             },
             onFirstTask: { await Notifier.requestPermission() },
             onRunning: { awake.set($0) })
+    }
+
+    /// A task ended on its own (finished or failed): its note waits for the user's next message. A pipeline still
+    /// loading starts a new conversation, which has nothing to correct.
+    private func taskEnded(_ task: AgentTask) async {
+        await pipeline?.noteForNextMessage(AgentPhrases.historyNote(for: task))
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
