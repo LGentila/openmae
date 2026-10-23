@@ -205,11 +205,18 @@ extension Snapshots {
 
         var downloading = DownloadProgress(doneBytes: 8_060_000_000, totalBytes: 17_520_000_000)
         downloading.currentModel = "Gemma 4 26B-A4B"
-        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .downloadProgress(downloading),
-                                       .storage(ModelStorage(usedBytes: 8_050_000_000, unusedBytes: 8_480_000_000,
-                                                             folder: Demo.setup.folder))]
-        let bigStorage = AssistantEvent.storage(ModelStorage(usedBytes: 26_000_000_000, unusedBytes: 8_480_000_000,
-                                                             folder: Demo.storage.folder))
+        // The first download: speech recognition and the voice are there, the language model on its way.
+        var halfway = Demo.storage
+        halfway.usedBytes = 8_050_000_000
+        halfway.models[2].bytes = 5_900_000_000
+        halfway.models[2].missingBytes = 9_470_000_000
+        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .downloadProgress(downloading), .storage(halfway)]
+        // The comfort tier's models, and the minimum and standard tiers' language models kept from earlier tries.
+        let bigStorage = AssistantEvent.storage(Demo.storageWithOtherTiers)
+        let standardModel = ModelCatalog.languageModel(for: .standard)!
+        var oneDeleted = Demo.storageWithOtherTiers
+        oneDeleted.models.removeAll { $0.id == standardModel.id }
+        oneDeleted.usedBytes -= standardModel.totalBytes
         func wakeWordLog(_ s: inout AssistantSettings) {
             s.listening = .wakeWord
             s.wakeLog = true
@@ -371,7 +378,13 @@ extension Snapshots {
             }),
             SettingsScene(name: "RgAvanceSupprimer", page: .advanced, events: [bigStorage], settings: wakeWordLog,
                           prepare: { navigation, _, _ in navigation.sheet = .deleteModels }),
+            SettingsScene(name: "RgAvance-supprimer-un-modele", page: .advanced, events: [bigStorage],
+                          prepare: { navigation, _, _ in navigation.sheet = .deleteModel(standardModel.id) }),
+            SettingsScene(name: "RgAvance-un-modele-supprime", page: .advanced, events: [.storage(oneDeleted)]),
+            // Its model is here: nothing to download. Then a tier whose model is not.
             SettingsScene(name: "RgAvance-changer-palier", page: .advanced, events: [bigStorage],
+                          prepare: { navigation, _, _ in navigation.sheet = .changeTier(.forced(.standard)) }),
+            SettingsScene(name: "RgAvance-changer-palier-telecharger", page: .advanced, events: [.storage(oneDeleted)],
                           prepare: { navigation, _, _ in navigation.sheet = .changeTier(.forced(.standard)) }),
         ]
 

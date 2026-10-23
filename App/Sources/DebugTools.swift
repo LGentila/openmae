@@ -117,7 +117,7 @@ enum Snapshots {
         forced.items[0].missingBytes = 0
         forced.items[1].missingBytes = 0
         forced.bytesToDownload = 5_180_000_000
-        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .storage(ModelStorage(usedBytes: 0, unusedBytes: 0,
+        let setup: [AssistantEvent] = [.setupNeeded(Demo.setup), .storage(ModelStorage(usedBytes: 0,
                                                                                        folder: Demo.setup.folder))]
 
         let scenarios: [(name: String, events: [AssistantEvent], panel: WindowState.Panel?, listening: ListeningMode)] = [
@@ -511,8 +511,24 @@ enum Demo {
     static let info = EngineInfo(chip: "Apple M1 Pro", memoryGiB: 32, tier: .comfort, recommendedTier: .comfort,
                                  languageModel: "Gemma 4 26B-A4B", speechRecognition: "Parakeet TDT 0.6B v3",
                                  voice: "Pocket TTS · estelle")
-    static let storage = ModelStorage(usedBytes: 17_520_000_000, unusedBytes: 0,
+    /// The comfort tier's three models, in use.
+    static let storage = ModelStorage(usedBytes: 17_520_000_000, models: tierModels,
                                       folder: NSHomeDirectory() + "/Library/Application Support/OpenMaé/Models")
+    /// The same, with the language models of the minimum and standard tiers kept from earlier tries: 26.29 GB, as on
+    /// the reference Mac.
+    static let storageWithOtherTiers = ModelStorage(
+        usedBytes: 26_290_000_000,
+        models: Array(tierModels.prefix(2))
+            + [HardwareTier.minimum, .standard].compactMap { ModelCatalog.languageModel(for: $0) }
+            .map { model($0, inUse: false) } + tierModels.suffix(1),
+        folder: storage.folder)
+
+    private static let tierModels = ModelCatalog.packs(for: .comfort).map { model($0, inUse: true) }
+
+    private static func model(_ pack: ModelPack, inUse: Bool) -> ModelStorage.Model {
+        ModelStorage.Model(id: pack.id, role: pack.role, displayName: pack.displayName, bytes: pack.totalBytes,
+                           missingBytes: 0, inUse: inUse)
+    }
     static let setup = ModelSetup(
         chip: "Apple M1 Pro", memoryGiB: 32, tier: .comfort, recommendedTier: .comfort,
         items: [
@@ -549,6 +565,8 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
     private var script: Task<Void, Never>?
     /// The settings' tier, which the first-launch screen shows (-demo-setup).
     private var tier = Demo.setup.recommendedTier
+    /// The models of Settings › Advanced, which can be deleted one by one (the other tiers').
+    private var storage = Demo.storageWithOtherTiers
 
     init() {
         (events, sink) = AsyncStream.makeStream()
@@ -573,6 +591,16 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
             play(downloadScript)
         case .pauseDownload:
             play { sink in sink.yield(.downloadStopped(nil)) }
+        case .deleteModel(let id):
+            // As the real engine: never one in use.
+            let left = lock.withLock {
+                if let i = storage.models.firstIndex(where: { $0.id == id && !$0.inUse }) {
+                    storage.usedBytes -= storage.models[i].bytes
+                    storage.models.remove(at: i)
+                }
+                return storage
+            }
+            sink.yield(.storage(left))
         case .stopSpeaking:
             play { [conversationScript] sink in
                 sink.yield(.levels(input: 0, output: 0))
@@ -629,7 +657,7 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
         let setup = Demo.setup(for: lock.withLock { tier })
         return { sink in
             sink.yield(.setupNeeded(setup))
-            sink.yield(.storage(ModelStorage(usedBytes: 0, unusedBytes: 0, folder: setup.folder)))
+            sink.yield(.storage(ModelStorage(usedBytes: 0, folder: setup.folder)))
         }
     }
 
@@ -661,9 +689,10 @@ final class DemoConnection: AssistantConnection, @unchecked Sendable {
 
     /// At rest, the user speaks, Maé thinks, then answers; again and again (with -demo-idle: at rest only).
     private var conversationScript: @Sendable (AsyncStream<AssistantEvent>.Continuation) async -> Void {
-        { sink in
+        let storage = lock.withLock { self.storage }
+        return { sink in
             sink.yield(.ready(Demo.info))
-            sink.yield(.storage(Demo.storage))
+            sink.yield(.storage(storage))
             guard !ProcessInfo.processInfo.arguments.contains("-demo-idle") else { return }
             while !Task.isCancelled {
                 sink.yield(.state(.listening))

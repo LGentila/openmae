@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    " · on this Mac": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · sur ce Mac"
+          }
+        }
+      }
+    },
     " · untested": {
       "localizations": {
         "fr": {
@@ -971,6 +981,16 @@
         }
       }
     },
+    "Comfort": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confort"
+          }
+        }
+      }
+    },
     "Comfort (32 to 36 GB)": {
       "localizations": {
         "fr": {
@@ -1241,6 +1261,26 @@
         }
       }
     },
+    "Delete %@?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer %@ ?"
+          }
+        }
+      }
+    },
+    "Delete %@…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer %@…"
+          }
+        }
+      }
+    },
     "Delete the models?": {
       "localizations": {
         "fr": {
@@ -1261,12 +1301,12 @@
         }
       }
     },
-    "Delete the other tiers' models (%@)": {
+    "Delete…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Supprimer les modèles des autres paliers (%@)"
+            "value": "Supprimer…"
           }
         }
       }
@@ -2001,6 +2041,16 @@
         }
       }
     },
+    "In use": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisé"
+          }
+        }
+      }
+    },
     "Instruction": {
       "localizations": {
         "fr": {
@@ -2231,6 +2281,16 @@
         }
       }
     },
+    "Language model of the %@ tier": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de langage du palier %@"
+          }
+        }
+      }
+    },
     "Last actions": {
       "localizations": {
         "fr": {
@@ -2357,6 +2417,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mac"
+          }
+        }
+      }
+    },
+    "Maximum": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum"
           }
         }
       }
@@ -2707,6 +2777,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Format du micro"
+          }
+        }
+      }
+    },
+    "Minimum": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimum"
           }
         }
       }
@@ -4181,6 +4261,16 @@
         }
       }
     },
+    "Standard": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
+          }
+        }
+      }
+    },
     "Standard (16 to 24 GB)": {
       "localizations": {
         "fr": {
@@ -4441,12 +4531,32 @@
         }
       }
     },
+    "The assistant will restart with %@, already on this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’assistant va redémarrer avec %@, déjà sur ce Mac."
+          }
+        }
+      }
+    },
     "The assistant will restart with %@. If it is not on this Mac yet, it will have to be downloaded (%@).": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "L’assistant va redémarrer avec %@. S’il n’est pas encore sur ce Mac, il faudra le télécharger (%@)."
+          }
+        }
+      }
+    },
+    "The assistant will restart with %@. It has to be downloaded first (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’assistant va redémarrer avec %1$@. Il faut d’abord le télécharger (%2$@)."
           }
         }
       }
@@ -4757,6 +4867,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cette conversation"
+          }
+        }
+      }
+    },
+    "This frees %@ on this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cela libère %@ sur ce Mac."
+          }
+        }
+      }
+    },
+    "This frees %@ on this Mac. If you choose the %@ tier later, it will be downloaded again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cela libère %1$@ sur ce Mac. Si tu choisis plus tard le palier %2$@, il sera téléchargé de nouveau."
           }
         }
       }
@@ -5777,6 +5907,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "iPhone · ajouté le %@"
+          }
+        }
+      }
+    },
+    "incomplete": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "incomplet"
           }
         }
       }

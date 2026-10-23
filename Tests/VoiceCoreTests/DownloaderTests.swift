@@ -326,14 +326,18 @@ struct CatalogTests {
             + "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe/" + pack.files[0].path)
     }
 
-    @Test func modelsOfAnotherTierAreSeenAsUnused() throws {
+    @Test func modelsOfAnotherTierAreListedAndCanBeDeleted() throws {
         let store = ModelStore(root: FileManager.default.temporaryDirectory
             .appending(path: "OpenMaeTests-" + UUID().uuidString).appending(path: "Models"))
         let small = ModelCatalog.languageModel(for: .minimum)!
         try FileManager.default.createDirectory(at: store.folder(small), withIntermediateDirectories: true)
         try Data(count: 1_000).write(to: store.folder(small).appending(path: "x"))
-        #expect(store.unusedPacks(keeping: ModelCatalog.packs(for: .comfort)).map(\.id) == [small.id])
-        #expect(store.unusedPacks(keeping: ModelCatalog.packs(for: .minimum)).isEmpty)
+        let comfort = store.storage(inUse: Set(ModelCatalog.packs(for: .comfort).map(\.id)))
+        #expect(comfort.models.map(\.id) == [small.id] && comfort.models[0].inUse == false)
+        #expect(comfort.models[0].missingBytes == small.totalBytes)  // a file that is not one of its own
+        #expect(store.storage(inUse: Set(ModelCatalog.packs(for: .minimum).map(\.id))).models[0].inUse)
+        try store.delete(small)
+        #expect(store.presentPacks().isEmpty)
         try store.deleteAll()
         #expect(store.usedBytes() == 0)
     }

@@ -60,8 +60,8 @@ Only the comfort tier could be measured so far. The app says so when it runs on 
 4. The first loading of the models takes one to two minutes (macOS prepares speech recognition for the
    chip), then about twenty seconds at each launch.
 
-Settings › Advanced shows the space taken by the models, and can delete the models of the other tiers, or
-all of them.
+Settings › Advanced lists the models on the Mac with the space each one takes, and can delete another tier's
+model on its own, or all of them.
 
 ## How it works
 

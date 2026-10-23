@@ -18,6 +18,8 @@ final class SettingsNavigation {
     enum Sheet: Hashable {
         case changeTier(TierChoice)
         case deleteModels
+        /// One model of Settings › Advanced (`ModelStorage.Model.id`).
+        case deleteModel(String)
         case eraseWakeLog
         case removeBraveKey
         case clearMemoryJournal
@@ -332,6 +334,10 @@ private struct SettingsSheetLayer: View {
                              top: 120)
             case .deleteModels:
                 return Shown(view: AnyView(DeleteModelsSheet(model: model, navigation: navigation)), top: 120)
+            case .deleteModel(let id):
+                guard let entry = model.storage?.models.first(where: { $0.id == id }) else { return nil }
+                return Shown(view: AnyView(DeleteModelSheet(model: model, navigation: navigation, entry: entry)),
+                             top: 120)
             case .eraseWakeLog:
                 return Shown(view: AnyView(EraseWakeLogSheet(navigation: navigation)), top: 120)
             case .removeBraveKey:

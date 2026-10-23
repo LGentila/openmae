@@ -174,7 +174,7 @@ final class AssistantModel {
         case .downloadModels: downloadModels()
         case .pauseDownload: pauseDownload()
         case .deleteModels: deleteModels()
-        case .deleteUnusedModels: deleteUnusedModels()
+        case .deleteModel(let id): deleteModel(id)
         case .updateSettings(let settings): self.settings = settings
         case .newConversation: newConversation()
         case .talkKey(let pressed): setTalkKey(pressed)
@@ -284,8 +284,9 @@ final class AssistantModel {
         connection.send(.deleteModels)
     }
 
-    func deleteUnusedModels() {
-        connection.send(.deleteUnusedModels)
+    /// Settings › Advanced: one model, by its id (the engine refuses one in use and says what is left in `.storage`).
+    func deleteModel(_ id: String) {
+        connection.send(.deleteModel(id))
     }
 
     // MARK: - Events
