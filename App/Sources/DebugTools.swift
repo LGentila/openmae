@@ -66,7 +66,11 @@ enum DebugCommands {
 /// Draws the screens in typical states into PNG files, with a scripted engine instead of the real one, so
 /// the layout can be checked without clicking through a 17 GB download.
 ///
-///   OpenMae.app/Contents/MacOS/OpenMae -snapshots <folder> [-AppleLanguages '(en)']
+///   OpenMae.app/Contents/MacOS/OpenMae -snapshots <folder> [-snapshots-only <prefix>[,<prefix>…]] [-AppleLanguages '(en)']
+///
+/// `-snapshots-only` draws only the pictures whose name starts with one of the prefixes (`RgVoix`, `main-`, `overlay`…).
+/// The settings the scenes change are never saved in the app's own defaults (`defaults`): the render can be stopped
+/// at any time.
 enum Snapshots {
     static var folder: URL? {
         let arguments = ProcessInfo.processInfo.arguments
@@ -74,17 +78,50 @@ enum Snapshots {
         return URL(fileURLWithPath: arguments[i + 1])
     }
 
-    /// Draws every picture once, then quits. Called when the app has finished launching.
+    /// The prefixes of `-snapshots-only`; nil: every picture.
+    static let only: [String]? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let i = arguments.firstIndex(of: "-snapshots-only"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }()
+
+    /// Whether the picture named `name` (without ".png") is drawn.
+    static func wants(_ name: String) -> Bool {
+        only?.contains { name.hasPrefix($0) } ?? true
+    }
+
+    /// The domain where the settings and the shortcut to talk are saved while the pictures are drawn (`AppDefaults`),
+    /// instead of the app's own, which is the user's: a debug build has the same bundle identifier as the normal app,
+    /// and the scenes change the settings until the last one. It starts as a copy of the user's settings, which the main
+    /// window's scenes are drawn over, as before, and is removed at the end; a render stopped before leaves it behind,
+    /// and the next one starts it again. Nil outside `-snapshots`.
+    nonisolated(unsafe) static let defaults: UserDefaults? = {
+        guard folder != nil else { return nil }
+        let name = defaultsName
+        guard name != Bundle.main.bundleIdentifier, let defaults = UserDefaults(suiteName: name) else {
+            // Never the user's own instead.
+            FileHandle.standardError.write(Data("snapshots: no defaults domain of their own (\(name))\n".utf8))
+            exit(1)
+        }
+        defaults.removePersistentDomain(forName: name)
+        for key in [AssistantModel.settingsKey, TalkShortcut.defaultsKey] {
+            if let value = UserDefaults.standard.object(forKey: key) { defaults.set(value, forKey: key) }
+        }
+        return defaults
+    }()
+
+    private static var defaultsName: String { (Bundle.main.bundleIdentifier ?? "OpenMae") + ".snapshots" }
+
+    /// Draws every picture once (or those of `-snapshots-only`), then quits. Called when the app has finished launching.
     @MainActor
     static func start() {
         guard let folder else { return }
         Task {
-            // Each scene puts back the settings it changed, but a view torn down later (a pop-up menu's picker) can
-            // still write the value it showed: the user's own settings are put back as they were before quitting.
-            let settings = UserDefaults.standard.data(forKey: AssistantModel.settingsKey)
             await render(to: folder)
-            UserDefaults.standard.set(settings, forKey: AssistantModel.settingsKey)
-            UserDefaults.standard.synchronize()  // before exit(0)
+            // The scenes' settings went to their own domain, which goes now (a view torn down after its scene, such as
+            // a pop-up menu's picker, could still write the value it showed there).
+            defaults?.removePersistentDomain(forName: defaultsName)
+            defaults?.synchronize()  // before exit(0)
             exit(0)
         }
     }
@@ -145,7 +182,7 @@ enum Snapshots {
              .handsFree),
             ("problem-2-microphone", [.problem(.microphoneDenied)], nil, .handsFree),
         ]
-        for scenario in scenarios {
+        for scenario in scenarios where wants(scenario.name) {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
             model.settings.listening = scenario.listening  // the scenario's, not the user's own setting
@@ -165,14 +202,16 @@ enum Snapshots {
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
         // At rest, with a shortcut the user recorded instead of ⌥ Space.
-        let ownShortcut = await scriptedModel(ready)
-        let savedSettings = ownShortcut.settings
-        ownShortcut.settings.listening = .handsFree
-        ownShortcut.talkShortcut = Demo.recordedShortcut
-        await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
-            .preferredColorScheme(.light), size: CGSize(width: 960, height: 700),
-                   to: folder.appending(path: "main-1-rest-own-shortcut.png"))
-        ownShortcut.settings = savedSettings
+        if wants("main-1-rest-own-shortcut") {
+            let ownShortcut = await scriptedModel(ready)
+            let savedSettings = ownShortcut.settings
+            ownShortcut.settings.listening = .handsFree
+            ownShortcut.talkShortcut = Demo.recordedShortcut
+            await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
+                .preferredColorScheme(.light), size: CGSize(width: 960, height: 700),
+                       to: folder.appending(path: "main-1-rest-own-shortcut.png"))
+            ownShortcut.settings = savedSettings
+        }
         let shortcuts = ["Allumer le salon", "Mode concentration"]
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
@@ -184,6 +223,7 @@ enum Snapshots {
     /// (its instruction shown).
     @MainActor
     private static func renderTasks(to folder: URL, conversation: [AssistantEvent], shortcuts: [String]) async {
+        guard wants("main-11-history-tasks") else { return }
         let now = Date()
         func task(_ number: Int, _ title: String, _ instruction: String, _ status: AgentTask.Status,
                   minutesAgo: Double) -> AgentTask
@@ -237,7 +277,7 @@ enum Snapshots {
             // The shortcut the user recorded finishes the turn.
             ("overlay-5-listening-own-shortcut", heard, .userSpeaking, .handsFree),
         ]
-        for scene in scenes {
+        for scene in scenes where wants(scene.name) {
             let model = await scriptedModel(scene.events)
             if scene.name.hasSuffix("own-shortcut") { model.talkShortcut = Demo.recordedShortcut }
             let saved = model.settings
@@ -254,6 +294,7 @@ enum Snapshots {
             await save(view, size: CGSize(width: 1280, height: 720), to: folder.appending(path: scene.name + ".png"))
             model.settings = saved
         }
+        guard wants("menubar-icons") else { return }
         await save(MenuBarIconSheet().preferredColorScheme(.light), size: CGSize(width: 640, height: 300),
                    to: folder.appending(path: "menubar-icons.png"))
     }

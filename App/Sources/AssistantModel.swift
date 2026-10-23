@@ -467,16 +467,16 @@ final class AssistantModel {
 
     // MARK: - Saved settings
 
-    static let settingsKey = "settings"
+    nonisolated static let settingsKey = "settings"
 
     private static func loadSettings() -> AssistantSettings {
-        guard let data = UserDefaults.standard.data(forKey: settingsKey),
+        guard let data = AppDefaults.store.data(forKey: settingsKey),
               let settings = try? JSONDecoder().decode(AssistantSettings.self, from: data)
         else { return AssistantSettings() }
         return settings
     }
 
     private static func save(_ settings: AssistantSettings) {
-        UserDefaults.standard.set(try? JSONEncoder().encode(settings), forKey: settingsKey)
+        AppDefaults.store.set(try? JSONEncoder().encode(settings), forKey: settingsKey)
     }
 }

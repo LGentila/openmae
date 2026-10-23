@@ -41,7 +41,7 @@ struct TalkShortcut: Codable, Equatable, Sendable {
 
     /// The one the user recorded, or ⌥ Space.
     static var saved: TalkShortcut {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        guard let data = AppDefaults.store.data(forKey: defaultsKey),
               let shortcut = try? JSONDecoder().decode(TalkShortcut.self, from: data)
         else { return .standard }
         return shortcut
@@ -50,9 +50,9 @@ struct TalkShortcut: Codable, Equatable, Sendable {
     /// ⌥ Space is not written: an app that never recorded one keeps ⌥ Space, as before.
     func save() {
         if isStandard {
-            UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
+            AppDefaults.store.removeObject(forKey: Self.defaultsKey)
         } else {
-            UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.defaultsKey)
+            AppDefaults.store.set(try? JSONEncoder().encode(self), forKey: Self.defaultsKey)
         }
     }
 

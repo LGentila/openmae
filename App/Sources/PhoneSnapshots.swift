@@ -37,7 +37,7 @@ extension Snapshots {
             ("phone-11-on-iphone-speaking", onPhoneHome, speaking),
             ("phone-13-on-ipad", onIPad, speaking),
         ]
-        for scenario in scenarios {
+        for scenario in scenarios where wants(scenario.name) {
             let model = await scriptedModel(scenario.events)
             let saved = model.settings
             model.settings.listening = .handsFree

@@ -553,7 +553,8 @@ extension Snapshots {
 
         // Each scene at the window's first width, then at its narrowest (…-etroit).
         let widths: [(width: CGFloat, suffix: String)] = [(960, ""), (SettingsWindowView.minimumWidth, "-etroit")]
-        for (scene, size) in scenes.flatMap({ scene in widths.map { (scene, $0) } }) {
+        for (scene, size) in scenes.flatMap({ scene in widths.map { (scene, $0) } })
+        where wants(scene.name + size.suffix) {
             let events = scene.startsReady ? ready + scene.events : scene.events
             let model = AssistantModel(connection: ScriptedConnection(events))
             model.talkShortcut = .standard  // not the one this Mac's user may have recorded
@@ -597,7 +598,7 @@ extension Snapshots {
             ("RgRapides", ready + [actions(.granted), claudeCodeReady], claudeCode(review: true, mode: .acceptEdits)),
             ("RgRapides-premier-lancement", [AssistantEvent.setupNeeded(Demo.setup)],
              { (_: inout AssistantSettings) in }),
-        ] as [(String, [AssistantEvent], (inout AssistantSettings) -> Void)] {
+        ] as [(String, [AssistantEvent], (inout AssistantSettings) -> Void)] where wants(name) {
             let model = AssistantModel(connection: ScriptedConnection(events))
             model.talkShortcut = .standard
             model.hasTalkShortcut = true
