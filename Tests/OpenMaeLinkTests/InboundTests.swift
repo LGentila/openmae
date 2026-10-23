@@ -575,6 +575,56 @@ struct InboundTests {
         let raw = try String(contentsOf: store, encoding: .utf8)
         #expect(!raw.contains(secrets.secret(for: id)!))  // the secret is never in the file
     }
+
+    // MARK: - Log
+
+    /// A clock the test moves forward.
+    private final class TestClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var date = Date(timeIntervalSince1970: 1_800_000_000)
+        var now: Date { lock.withLock { date } }
+        func advance(_ seconds: TimeInterval) { lock.withLock { date += seconds } }
+    }
+
+    /// 200 entries per source, newest first, each for 30 days.
+    @Test func theLogKeeps200EntriesFor30Days() async {
+        let clock = TestClock()
+        let identity = FileIdentityStore(url: FileManager.default.temporaryDirectory
+            .appending(path: "inbound-tests-\(UUID().uuidString)/keys"))
+        // Without an announcer, "Send a test" is kept for later at once: no waiting.
+        let host = InboundHost(announcer: nil, identityStore: identity, secrets: MemoryInboundSecrets(), storeURL: nil,
+                               now: { clock.now })
+        let id = await host.addSource(name: "Gladys")
+        for _ in 0..<(InboundHost.logLength + 5) {
+            await host.sendTest(id)
+            clock.advance(60)
+        }
+        let log = await host.current.logs[id] ?? []
+        #expect(log.count == 200)
+        #expect(zip(log, log.dropFirst()).allSatisfy { $0.date > $1.date })
+        // 29 days on, they are all still there; past 30 days, only the new one is.
+        clock.advance(29 * 86_400)
+        await host.sendTest(id)
+        #expect(await host.current.logs[id]?.count == 200)
+        clock.advance(2 * 86_400)
+        await host.sendTest(id)
+        #expect(await host.current.logs[id]?.count == 2)
+    }
+
+    /// A long delivery is said within 280 characters, and the log keeps 500 at most, stopped after a sentence.
+    @Test func aLongTextIsCutInTheLog() async throws {
+        let rig = await makeRig()
+        let long = String(repeating: "La sauvegarde de cette nuit a réussi. ", count: 120)  // 4,560 characters
+        let tube = await rig.post(#"{"text": "\#(long)"}"#)
+        #expect(tube.status == 202)
+        #expect(await eventually { await rig.log().first?.result == .said })
+        let text = try #require(await rig.log().first?.text)
+        #expect(text.count <= InboundHost.logTextLimit)
+        #expect(text.count > InboundHost.logTextLimit - 40)
+        #expect(text.hasPrefix("La sauvegarde de cette nuit a réussi.") && text.hasSuffix("réussi."))
+        let said = try #require(await rig.announcer.said.first)
+        #expect(said.text.count <= InboundText.spokenLimit)
+    }
 }
 
 @Suite("Minimal HTTP/1.1")
