@@ -5,7 +5,7 @@ import VoiceCore
 import VoiceEngineApple
 
 /// The app: one window, the engine running in the same process, and, outside the window, an icon in the menu bar,
-/// the ⌥ Space shortcut and the capsule (DesktopPresence.swift).
+/// the shortcut to talk (⌥ Space by default) and the capsule (DesktopPresence.swift).
 ///
 /// This is the ONLY file of the interface that knows the engine's implementation (`AssistantHost`).
 /// Everything else talks to an `AssistantConnection` through commands and events, so the engine can be

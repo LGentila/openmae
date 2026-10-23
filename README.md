@@ -13,7 +13,7 @@ own devices.
 
 <p align="center">
   <img src=".github/readme/capsule.webp" alt="The capsule that follows the conversation while another app is in front" width="500">
-  <br><sub>From any app: press ⌥ Space, and a small capsule follows the conversation.</sub>
+  <br><sub>From any app: press ⌥ Space (by default), and a small capsule follows the conversation.</sub>
 </p>
 
 > **Status:** proof of concept, under active development. There is no signed download yet: for now the app is built
@@ -23,7 +23,8 @@ own devices.
 
 - **Real-time conversation.** Maé starts talking before her answer is fully written.
 - **Interrupt her any time.** Just speak over her.
-- **From any app.** Press ⌥ Space and talk; a small capsule shows that she is listening.
+- **From any app.** Press ⌥ Space by default, or your own shortcut, and talk; a small capsule shows that she is
+  listening.
 - **« OK Maé ».** Hands-free: say her name, then what you want.
 - **French first, English too.** She answers in the language you speak.
 - **Actions.** Calendar events, reminders, timers and your own Shortcuts.

@@ -18,6 +18,8 @@ extension Snapshots {
         var inbound = InboundStatus()
         var tools: [ConnectedTool] = []
         var prepare: @MainActor (SettingsNavigation, PhoneAccess, InboundAccess) -> Void = { _, _, _ in }
+        /// What the model holds besides the engine's events (the shortcut to talk and its recording).
+        var model: @MainActor (AssistantModel) -> Void = { _ in }
         /// A sheet that starts further on than the page can open it (adding a tool, half filled in).
         var sheet: AnyView?
         var sheetTop: CGFloat = 52
@@ -217,6 +219,9 @@ extension Snapshots {
         var oneDeleted = Demo.storageWithOtherTiers
         oneDeleted.models.removeAll { $0.id == standardModel.id }
         oneDeleted.usedBytes -= standardModel.totalBytes
+        func ownShortcut(_ model: AssistantModel) {
+            model.talkShortcut = Demo.recordedShortcut
+        }
         func wakeWordLog(_ s: inout AssistantSettings) {
             s.listening = .wakeWord
             s.wakeLog = true
@@ -250,6 +255,20 @@ extension Snapshots {
                 s.listening = .pushToTalk
             }),
             SettingsScene(name: "RgVoix-ok-mae", page: .voice, settings: { $0.listening = .wakeWord }),
+            // The shortcut to talk: one of the user's own, being recorded, refused, refused by macOS at launch.
+            SettingsScene(name: "RgVoix-raccourci-perso", page: .voice, model: ownShortcut),
+            SettingsScene(name: "RgVoix-raccourci-enregistrement", page: .voice, model: { model in
+                ownShortcut(model)
+                model.isRecordingTalkShortcut = true
+            }),
+            SettingsScene(name: "RgVoix-raccourci-refuse", page: .voice, model: { model in
+                model.isRecordingTalkShortcut = true
+                model.talkShortcutRefusal = .usedByApps
+            }),
+            SettingsScene(name: "RgVoix-raccourci-indisponible", page: .voice, model: { model in
+                model.hasTalkShortcut = false
+                model.talkShortcutRefusal = .refusedByMacOS
+            }),
             // Actions
             SettingsScene(name: "RgActions", page: .actions, events: [actions(.granted)], settings: { s in
                 s.actionsEnabled = true
@@ -405,7 +424,9 @@ extension Snapshots {
         for (scene, size) in scenes.flatMap({ scene in widths.map { (scene, $0) } }) {
             let events = scene.startsReady ? ready + scene.events : scene.events
             let model = AssistantModel(connection: ScriptedConnection(events))
+            model.talkShortcut = .standard  // not the one this Mac's user may have recorded
             model.hasTalkShortcut = true
+            scene.model(model)
             let saved = model.settings
             // Before the events arrive: a change of the search's settings forgets the last test.
             var settings = AssistantSettings()
@@ -443,6 +464,7 @@ extension Snapshots {
              { (_: inout AssistantSettings) in }),
         ] as [(String, [AssistantEvent], (inout AssistantSettings) -> Void)] {
             let model = AssistantModel(connection: ScriptedConnection(events))
+            model.talkShortcut = .standard
             model.hasTalkShortcut = true
             let saved = model.settings
             var fresh = AssistantSettings()

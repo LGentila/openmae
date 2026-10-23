@@ -451,6 +451,16 @@
         }
       }
     },
+    "Add ⌘, ⌥ or ⌃: without them, this key would no longer type in your apps.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajoute ⌘, ⌥ ou ⌃ : sans eux, cette touche ne taperait plus dans tes apps."
+          }
+        }
+      }
+    },
     "Address": {
       "localizations": {
         "fr": {
@@ -581,12 +591,32 @@
         }
       }
     },
+    "Another app already uses this shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une autre app utilise déjà ce raccourci."
+          }
+        }
+      }
+    },
     "Another relay…": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Un autre relais…"
+          }
+        }
+      }
+    },
+    "Apps already use ⌘ with this key. Add ⌥ or ⌃.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les apps utilisent déjà ⌘ avec cette touche. Ajoute ⌥ ou ⌃."
           }
         }
       }
@@ -727,6 +757,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Retour"
+          }
+        }
+      }
+    },
+    "Back to %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revenir à %@"
           }
         }
       }
@@ -977,6 +1017,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer l’historique ?"
+          }
+        }
+      }
+    },
+    "Click, then press the new shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clique, puis appuie sur le nouveau raccourci."
           }
         }
       }
@@ -1507,6 +1557,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer le journal…"
+          }
+        }
+      }
+    },
+    "Escape cancels.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échap annule."
           }
         }
       }
@@ -2921,6 +2981,16 @@
         }
       }
     },
+    "New shortcut": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nouveau raccourci"
+          }
+        }
+      }
+    },
     "No answer": {
       "localizations": {
         "fr": {
@@ -3381,6 +3451,16 @@
         }
       }
     },
+    "OpenMaé already uses this shortcut in its menus.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenMaé utilise déjà ce raccourci dans ses menus."
+          }
+        }
+      }
+    },
     "OpenMaé relay": {
       "localizations": {
         "fr": {
@@ -3567,6 +3647,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appuie une fois pour parler, une seconde fois pour finir. Quand la fenêtre est fermée, Maé attend toujours « OK Maé »."
+          }
+        }
+      }
+    },
+    "Press the new shortcut: ⌘, ⌥ or ⌃ with a key. Escape cancels.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appuie sur le nouveau raccourci : ⌘, ⌥ ou ⌃ avec une touche. Échap annule."
           }
         }
       }
@@ -4077,6 +4167,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réglages…"
+          }
+        }
+      }
+    },
+    "Shortcut to talk": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raccourci pour parler"
           }
         }
       }
@@ -5931,6 +6031,26 @@
         }
       }
     },
+    "macOS already uses this shortcut.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS utilise déjà ce raccourci."
+          }
+        }
+      }
+    },
+    "macOS refuses this shortcut. Choose another one.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS refuse ce raccourci. Choisis-en un autre."
+          }
+        }
+      }
+    },
     "macOS will ask for access the first time you need it.": {
       "localizations": {
         "fr": {
@@ -6047,16 +6167,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "« Mots » = tokens, les morceaux de mots du modèle."
-          }
-        }
-      }
-    },
-    "⌥ Space": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⌥ Espace"
           }
         }
       }

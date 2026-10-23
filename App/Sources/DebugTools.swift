@@ -164,6 +164,15 @@ enum Snapshots {
             }
             model.settings = saved  // the scripted model saves the settings like the real one: put them back
         }
+        // At rest, with a shortcut the user recorded instead of ⌥ Space.
+        let ownShortcut = await scriptedModel(ready)
+        let savedSettings = ownShortcut.settings
+        ownShortcut.settings.listening = .handsFree
+        ownShortcut.talkShortcut = Demo.recordedShortcut
+        await save(ContentView(model: ownShortcut, window: WindowState()).environment(\.stillFrame, 1.7)
+            .preferredColorScheme(.light), size: CGSize(width: 960, height: 700),
+                   to: folder.appending(path: "main-1-rest-own-shortcut.png"))
+        ownShortcut.settings = savedSettings
         let shortcuts = ["Allumer le salon", "Mode concentration"]
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
@@ -223,11 +232,14 @@ enum Snapshots {
             ("overlay-1-listening", heard, .userSpeaking, .handsFree),
             ("overlay-2-thinking", thinking, .thinking, .handsFree),
             ("overlay-3-speaking", speaking, .speaking, .handsFree),
-            // Woken by « OK Maé », the window closed: no ⌥ Space to press.
+            // Woken by « OK Maé », the window closed: no shortcut to press.
             ("overlay-4-wake-word-awake", ready + [.awake(true)], .userSpeaking, .wakeWord),
+            // The shortcut the user recorded finishes the turn.
+            ("overlay-5-listening-own-shortcut", heard, .userSpeaking, .handsFree),
         ]
         for scene in scenes {
             let model = await scriptedModel(scene.events)
+            if scene.name.hasSuffix("own-shortcut") { model.talkShortcut = Demo.recordedShortcut }
             let saved = model.settings
             model.settings.listening = scene.listening
             let capsule = CapsuleState()
@@ -249,6 +261,7 @@ enum Snapshots {
     @MainActor
     static func scriptedModel(_ events: [AssistantEvent]) async -> AssistantModel {
         let model = AssistantModel(connection: ScriptedConnection(events))
+        model.talkShortcut = .standard  // not the one this Mac's user may have recorded
         model.hasTalkShortcut = true  // as on a Mac that accepts ⌥ Space (snapshots register no shortcut)
         try? await Task.sleep(for: .milliseconds(150))  // the model applies the events asynchronously
         return model
@@ -556,6 +569,10 @@ enum Demo {
         other.neededBytes = other.bytesToDownload + ModelDownloader.safetyMarginBytes
         return other
     }
+
+    /// A shortcut to talk the user recorded instead of ⌥ Space: ⌃⌥ M (46 is `kVK_ANSI_M`).
+    static let recordedShortcut = TalkShortcut(keyCode: 46, modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue,
+                                               character: "m")
 }
 
 final class DemoConnection: AssistantConnection, @unchecked Sendable {

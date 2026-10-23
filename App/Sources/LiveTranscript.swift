@@ -5,11 +5,11 @@ import VoiceCore
 /// One sentence at a time; at rest, only an invitation to talk.
 struct LiveTranscript: View {
     enum Invitation: Equatable {
-        /// `orShortcut`: "… or press ⌥ Space" too (the global shortcut works).
-        case speak(orShortcut: Bool)
-        case holdSpace(orShortcut: Bool)
+        /// `shortcut`: "… or press ⌥ Space" too, with the Mac's global shortcut (⌥ Space or the user's own) when it works.
+        case speak(shortcut: Text?)
+        case holdSpace(shortcut: Text?)
         /// The wake-word mode, while Maé waits for the phrase.
-        case sayWakeWord(orShortcut: Bool)
+        case sayWakeWord(shortcut: Text?)
         /// The wake-word mode, while Maé listens to any voice (after the phrase alone, or after an answer).
         case awake
         case loading(LoadingStep?)
@@ -189,33 +189,33 @@ private struct InvitationView: View {
     var body: some View {
         Group {
             switch invitation {
-            case .speak(let orShortcut):
-                if orShortcut {
+            case .speak(let shortcut):
+                if let shortcut {
                     HStack(spacing: 8) {
                         Text("Speak whenever you like or press")
-                        KeyCap(title: Text("⌥ Space"))
+                        KeyCap(title: shortcut)
                     }
                     .accessibilityElement(children: .combine)
                 } else {
                     Text("Speak whenever you like")
                 }
-            case .holdSpace(let orShortcut):
+            case .holdSpace(let shortcut):
                 HStack(spacing: 8) {
                     Text("Hold")
                     KeyCap(title: Text("Space"))
-                    if orShortcut {
+                    if let shortcut {
                         Text("or press")
-                        KeyCap(title: Text("⌥ Space"))
+                        KeyCap(title: shortcut)
                     } else {
                         Text("to talk")
                     }
                 }
                 .accessibilityElement(children: .combine)
-            case .sayWakeWord(let orShortcut):
-                if orShortcut {
+            case .sayWakeWord(let shortcut):
+                if let shortcut {
                     HStack(spacing: 8) {
                         Text("Say “OK Maé” or press")
-                        KeyCap(title: Text("⌥ Space"))
+                        KeyCap(title: shortcut)
                     }
                     .accessibilityElement(children: .combine)
                 } else {

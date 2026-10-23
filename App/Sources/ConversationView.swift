@@ -35,11 +35,11 @@ struct ConversationView: View {
     private var invitation: LiveTranscript.Invitation {
         if isLoading { return .loading(loadingStep) }
         if phone?.hand != nil { return .onPhone }
-        let shortcut = model.hasTalkShortcut
+        let shortcut = model.hasTalkShortcut ? model.talkShortcut.title : nil
         switch model.settings.listening {
-        case .handsFree: return .speak(orShortcut: shortcut)
-        case .wakeWord: return model.isAwake ? .awake : .sayWakeWord(orShortcut: shortcut)
-        case .pushToTalk: return .holdSpace(orShortcut: shortcut)
+        case .handsFree: return .speak(shortcut: shortcut)
+        case .wakeWord: return model.isAwake ? .awake : .sayWakeWord(shortcut: shortcut)
+        case .pushToTalk: return .holdSpace(shortcut: shortcut)
         }
     }
 
