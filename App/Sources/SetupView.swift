@@ -4,32 +4,45 @@ import VoiceCore
 
 /// First launch (and after another tier was chosen, or the models deleted). On the left, the orb wakes up
 /// while the models download, with what is going on and the button; on the right, the Mac, its tier (chosen
-/// here), and the three models with their progress.
+/// here), and the three models with their progress. In a window narrower than the design's, the cards go under the
+/// button instead, and the screen scrolls.
 struct SetupView: View {
     let model: AssistantModel
     let setup: ModelSetup
 
+    /// Two columns from the design's window on (820 points wide); below it, one.
+    static let twoColumnsMinWidth: CGFloat = 820
+    /// The cards' width when they are under the button.
+    static let stackedCardsWidth: CGFloat = 460
+
     var body: some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: 36) {
-                welcome
-                    .frame(width: 330)
-                VStack(spacing: 14) {
-                    MacCard(setup: setup, tierOverride: model.settings.tierOverride, isLocked: model.isDownloading,
-                            onThisMac: model.storage?.tiersOnThisMac ?? [])
-                    {
-                        // No "Change tier?" here: nothing runs yet. The engine starts again on that tier and says
-                        // what it needs (`setupNeeded`): the models card follows.
-                        model.settings.tierOverride = $0
+        GeometryReader { proxy in
+            let twoColumns = proxy.size.width >= Self.twoColumnsMinWidth
+            // The same views in both layouts: the orb goes on where it was when the window is resized.
+            let layout = twoColumns ? AnyLayout(HStackLayout(alignment: .top, spacing: 36))
+                : AnyLayout(VStackLayout(spacing: 36))
+            ScrollView {
+                layout {
+                    welcome
+                        .frame(width: 330)
+                    VStack(spacing: 14) {
+                        MacCard(setup: setup, tierOverride: model.settings.tierOverride, isLocked: model.isDownloading,
+                                onThisMac: model.storage?.tiersOnThisMac ?? [])
+                        {
+                            // No "Change tier?" here: nothing runs yet. The engine starts again on that tier and says
+                            // what it needs (`setupNeeded`): the models card follows.
+                            model.settings.tierOverride = $0
+                        }
+                        ModelsCard(setup: setup, progress: model.download, isDownloading: model.isDownloading)
                     }
-                    ModelsCard(setup: setup, progress: model.download, isDownloading: model.isDownloading)
+                    .frame(maxWidth: twoColumns ? .infinity : Self.stackedCardsWidth)
                 }
+                .padding(EdgeInsets(top: 50, leading: 32, bottom: 30, trailing: 32))
                 .frame(maxWidth: .infinity)
             }
-            .padding(EdgeInsets(top: 50, leading: 32, bottom: 30, trailing: 32))
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.automatic)
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(.automatic)
     }
 
     private var welcome: some View {

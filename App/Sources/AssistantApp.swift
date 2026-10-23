@@ -105,7 +105,7 @@ struct AssistantApp: App {
                 ContentView(model: model, window: window)
                 #endif
             }
-            .frame(minWidth: 820, minHeight: 700)
+            .frame(minWidth: ContentView.minimumWidth, minHeight: 700)
             .environment(phone)
             .environment(inbound)
             .environment(navigation)
