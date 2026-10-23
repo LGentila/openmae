@@ -195,8 +195,8 @@ public enum ActionPhrases {
         }
     }
 
-    /// A change that changed nothing and named the calendar the event is already in (`ActionCatalog.changed`): where it
-    /// is, then the event, as when it was saved.
+    /// A change that changed nothing and named the calendar the event is already in (`ActionCatalog.changed`), or the
+    /// creation of an event already there (`ActionCatalog.alreadyThere`): where it is, then the event, as when it was saved.
     public static func eventAlreadyIn(calendarName: String, title: String, start: Date, end: Date, allDay: Bool,
                                       _ context: ToolContext) -> String
     {
@@ -207,7 +207,7 @@ public enum ActionPhrases {
         }
     }
 
-    /// The same for a reminder already in the list the change named.
+    /// The same for a reminder already in the list the change named, or created again there.
     public static func reminderAlreadyIn(listName: String, title: String, due: Date?, hasTime: Bool,
                                          _ context: ToolContext) -> String
     {

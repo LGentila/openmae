@@ -98,10 +98,11 @@ public actor MemoryCalendar: ToolProvider {
             let times = try ActionCatalog.eventTimes(call, context: context)
             let named = call.text("calendrier")
             let calendar = try collection(named, event: true, context)
-            eventCount += 1
-            let reference = "e\(eventCount)"
             let item = Item(isEvent: true, title: title, date: times.start, end: times.end, hasTime: !times.allDay,
                             place: call.text("lieu"), collection: calendar)
+            if let already = alreadyThere(item, context) { return already }
+            eventCount += 1
+            let reference = "e\(eventCount)"
             let sayCalendar = named != nil || !calendarNamed
             calendarNamed = true
             return created(item, reference, spoken: ActionPhrases.eventCreated(
@@ -113,9 +114,10 @@ public actor MemoryCalendar: ToolProvider {
             let due = try ActionCatalog.reminderDue(call, context: context)
             let named = call.text("liste")
             let list = try collection(named, event: false, context)
+            let item = Item(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false, collection: list)
+            if let already = alreadyThere(item, context) { return already }
             reminderCount += 1
             let reference = "r\(reminderCount)"
-            let item = Item(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false, collection: list)
             return created(item, reference, spoken: ActionPhrases.reminderCreated(
                 title: title, due: due?.date, hasTime: due?.hasTime ?? false, listName: named != nil ? list : nil,
                 context), context)
@@ -211,6 +213,18 @@ public actor MemoryCalendar: ToolProvider {
         if undo.before != nil { lastCreated = undo.reference }
         guard undo.before == nil, let current else { return ActionPhrases.undone(.change, context.language) }
         return ActionPhrases.undone(current.isEvent ? .event : .reminder, context.language)
+    }
+
+    /// As in the app: the creation of an item created earlier in this conversation, in its own calendar or list
+    /// (`ActionCatalog.repeated`), is not saved again; the user hears where the item is, and the model gets it, as the last
+    /// item created (`ActionCatalog.alreadyThere`).
+    private func alreadyThere(_ item: Item, _ context: ToolContext) -> ToolOutcome? {
+        guard let (reference, existing) = ActionCatalog.repeated(item, among: items, calendar: context.calendar) else {
+            return nil
+        }
+        lastCreated = reference
+        return ActionCatalog.alreadyThere(existing, described: describe(existing, reference: reference, context),
+                                          collectionName: existing.collection, context: context)
     }
 
     private func created(_ item: Item, _ reference: String, spoken: String, _ context: ToolContext) -> ToolOutcome {

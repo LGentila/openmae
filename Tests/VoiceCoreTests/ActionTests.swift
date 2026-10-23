@@ -1830,6 +1830,50 @@ struct PipelineActionTests {
         #expect(turn[3].content == answer)
     }
 
+    /// The same request answered with the meeting's creation written again, as Gemma 4 E4B wrote it in 8 runs of 10 of
+    /// voice-cli dialogue-bench: the meeting is not saved a second time, the app says at once where it is, without
+    /// another pass of the model, and the model then reads, in the history, the meeting it already has as its call's
+    /// result, and what the user heard.
+    @Test func creationOfAnItemAlreadyThereIsAnsweredByTheApp() async throws {
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        let again = ToolCall(name: "creer_evenement",
+                             arguments: ["titre": "réunion", "quand": "demain à 10 h", "calendrier": "maison"])
+        let thanks: [ModelOutput] = [.text("Avec plaisir, à ton service.")]
+        let model = ScriptedModel(scripts: [[.toolCall(meeting)], [.toolCall(again)], thanks])
+        let (speaker, calendar) = (FakeSpeaker(), MemoryCalendar())
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        let sentences = ["Ajoute une réunion demain à 10 h.", "Mets-la dans mon calendrier Maison.", "Merci"]
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: ScriptedTranscriber(sentences),
+                                     model: model, synthesizer: FakeSynthesizer(), output: speaker,
+                                     tools: ToolRunner(providers: [calendar]), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        let created = try #require(await log.finished.last?.assistantText)
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 2 }
+        #expect(await calendar.creations == ["e1"])  // not saved again
+        #expect(await model.requests.count == 2)  // no other pass
+        let answer = try #require(await log.finished.last?.assistantText)
+        #expect(answer.hasPrefix("C’est déjà dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, "))
+        #expect(answer.dropFirst("C’est déjà dans ton calendrier «\(nb)Maison\(nb)»".count)
+                == created.dropFirst("C’est dans ton calendrier «\(nb)Maison\(nb)»".count))  // the same meeting
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await model.requests.count == 3 }
+        // The second turn as the model then sees it: its creation, the meeting it already has, the app's sentence.
+        let turn = Array(try #require(await model.requests.last).suffix(5))
+        #expect(turn.map(\.role) == [.user, .assistant, .tool, .assistant, .user])
+        #expect(turn[1].toolCalls == [again])
+        #expect(turn[2].toolResult?["id"] == "e1" && turn[2].toolResult?["calendrier"] == "Maison")
+        #expect(turn[2].toolResult?["statut"] == .string(ActionCatalog.alreadyCreated))
+        #expect(turn[3].content == answer)
+    }
+
     @Test func timerAnnouncementWaitsForSilence() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
@@ -2135,5 +2179,194 @@ struct ChangeTests {
             #expect(made.spoken.hasPrefix("C’est dans ton calendrier «\(nb)Maison\(nb)»\(nb): réunion"), "\(next.name)")
             #expect(await calendar.creations == ["e1"], "\(next.name)")
         }
+    }
+}
+
+// MARK: - A creation of an item already there
+
+@Suite("Creations of an item already there")
+struct RepeatedCreationTests {
+    /// A meeting in « Travail », tomorrow from 10 h to 11 h, and a reminder without a date in « Rappels ».
+    let meeting = ActionCatalog.SavedItem(isEvent: true, title: "Réunion", date: date("2026-10-16T10:00"),
+                                          end: date("2026-10-16T11:00"), hasTime: true, collection: "Travail")
+    let bread = ActionCatalog.SavedItem(isEvent: false, title: "Acheter du pain", date: nil, hasTime: false,
+                                        collection: "Rappels")
+
+    func repeats(_ new: ActionCatalog.SavedItem, _ item: ActionCatalog.SavedItem) -> Bool {
+        ActionCatalog.repeats(new, item, calendar: context().calendar)
+    }
+
+    /// Of the same kind, in the same calendar or list, with the same title whatever the case and accents, at the same
+    /// moment, and no place the item does not have: the same item. Anything else given (another title, moment, length,
+    /// place, calendar or kind): another one.
+    @Test func aCreationRepeatsAnItemOnlyWhenItGivesNothingElse() {
+        var same = meeting
+        same.title = " reunion "
+        #expect(repeats(meeting, meeting) && repeats(same, meeting))
+        same.date = date("2026-10-16T10:00").addingTimeInterval(20)  // seconds, as EventKit may keep them
+        #expect(repeats(same, meeting))
+        func other(_ change: (inout ActionCatalog.SavedItem) -> Void) -> ActionCatalog.SavedItem {
+            var item = meeting
+            change(&item)
+            return item
+        }
+        #expect(!repeats(other { $0.title = "Réunion d'équipe" }, meeting))
+        #expect(!repeats(other { $0.date = date("2026-10-16T11:00"); $0.end = date("2026-10-16T12:00") }, meeting))
+        #expect(!repeats(other { $0.end = date("2026-10-16T12:00") }, meeting))  // two hours
+        #expect(!repeats(other { $0.collection = "Maison" }, meeting))  // a copy in another calendar
+        #expect(!repeats(other { $0.isEvent = false }, meeting))
+        // A place the item does not have makes another one; none, or the item's own, the same.
+        let placed = other { $0.place = "Salle 3" }
+        #expect(!repeats(placed, meeting))
+        #expect(repeats(other { $0.place = "salle 3" }, placed) && repeats(meeting, placed))
+        #expect(repeats(other { $0.place = " " }, meeting))
+        // The whole day, as EventKit may end it (23:59:59) or as the app does (the next midnight).
+        let birthday = ActionCatalog.SavedItem(isEvent: true, title: "Anniversaire", date: date("2026-10-17T00:00"),
+                                               end: date("2026-10-18T00:00"), hasTime: false, collection: "Travail")
+        var read = birthday
+        read.end = date("2026-10-17T23:59").addingTimeInterval(59)
+        #expect(repeats(birthday, read) && repeats(read, birthday))
+        var twoDays = birthday
+        twoDays.end = date("2026-10-19T00:00")
+        #expect(!repeats(twoDays, birthday))
+        var atMidnight = birthday
+        atMidnight.hasTime = true
+        #expect(!repeats(atMidnight, birthday))
+        // A reminder: without a date, or due at the same moment.
+        #expect(repeats(bread, bread))
+        var due = bread
+        due.date = date("2026-10-16T10:00")
+        due.hasTime = true
+        #expect(repeats(due, due) && !repeats(due, bread) && !repeats(bread, due))
+        var later = due
+        later.date = date("2026-10-16T11:00")
+        #expect(!repeats(later, due))
+        var onTheDay = bread
+        onTheDay.date = date("2026-10-16T00:00")
+        var nextDay = onTheDay
+        nextDay.date = date("2026-10-17T00:00")
+        #expect(repeats(onTheDay, onTheDay) && !repeats(nextDay, onTheDay) && !repeats(onTheDay, due))
+        // Among the items created in the conversation: the latest one it repeats.
+        let items = ["e1": meeting, "r1": bread, "e2": placed, "e10": meeting, "r2": due]
+        let calendar = context().calendar
+        #expect(ActionCatalog.repeated(same, among: items, calendar: calendar)?.reference == "e10")
+        #expect(ActionCatalog.repeated(placed, among: items, calendar: calendar)?.reference == "e2")
+        #expect(ActionCatalog.repeated(bread, among: items, calendar: calendar)?.reference == "r1")
+        #expect(ActionCatalog.repeated(later, among: items, calendar: calendar) == nil)
+        #expect(ActionCatalog.repeated(meeting, among: [:], calendar: calendar) == nil)
+    }
+
+    /// Answered as a change that names the calendar or the list the item is already in: where it is. The model reads the
+    /// item, with its id, and that it was not created again; « annule » is left to what was done before.
+    @Test func aCreationOfAnItemAlreadyThereIsAnsweredWithIt() {
+        let outcome = ActionCatalog.alreadyThere(meeting, described: ["id": "e1", "titre": "Réunion"],
+                                                 collectionName: "Travail", context: context())
+        #expect(outcome.spoken
+                == "C’est déjà dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(outcome.forModel == ["id": "e1", "titre": "Réunion", "statut": .string(ActionCatalog.alreadyCreated)])
+        #expect(outcome.nothingDone && outcome.undo == nil && !outcome.modelSpeaks)
+        // The same sentence as for that change.
+        let change = ToolCall(name: "modifier_element", arguments: ["reference": "e1", "calendrier": "Travail"])
+        #expect(throws: Never.self) {
+            do {
+                _ = try ActionCatalog.changed(meeting, by: change, collection: "Travail", reference: "e1", context: context())
+            } catch let refusal as ToolRefusal {
+                #expect(refusal.spoken == outcome.spoken)
+            }
+        }
+        // Found as the provider tells them apart (EventKit's identifier), said by its name.
+        var inAnAccount = bread
+        inAnAccount.collection = "5E1C9A0B-list"
+        let reminder = ActionCatalog.alreadyThere(inAnAccount, described: ["id": "r1"], collectionName: "Rappels",
+                                                  context: context())
+        #expect(reminder.spoken == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): Acheter du pain.")
+        #expect(ActionCatalog.alreadyThere(inAnAccount, described: ["id": "r1"], collectionName: "Rappels",
+                                           context: context(.english)).spoken
+                == "It’s already in your “Rappels” list: Acheter du pain.")
+    }
+
+    /// voice-cli's calendar in memory, as the app's (through the runner, as dialogue-bench uses it), as dialogue-bench's
+    /// « meeting put in the calendar it is already in »: the meeting created in « Travail », the default calendar, then
+    /// its creation written again for « Mets-la dans mon calendrier Travail. », as Gemma 4 E4B wrote it: not saved again,
+    /// the app says where it is, the model gets the meeting, e1, and « annule » takes back its creation, as after a change
+    /// that changes nothing. Another title, moment, length, place or calendar: saved as before. The same for a reminder
+    /// and its list (as `CalendarTools`: `ActionCatalog.repeated` and `alreadyThere`).
+    @Test func memoryCalendarDoesNotSaveAnItemAgain() async throws {
+        let calendar = MemoryCalendar()
+        await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(await runner.handle(meeting, context: context()).forModel["id"] == "e1")
+        let again = ToolCall(name: "creer_evenement",
+                             arguments: ["titre": "réunion", "quand": "vendredi à 10 h", "calendrier": "Travail"])
+        let answer = ToolContext(now: now, timeZone: paris, language: .french,
+                                 userSaid: ["Mets-la dans mon calendrier Travail.", "Ajoute une réunion demain à 10 h."])
+        let same = await runner.handle(again, context: answer)
+        #expect(same.refusal == nil && !same.retryable && same.confirms)
+        #expect(same.spoken
+                == "C’est déjà dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(same.forModel == ["id": "e1", "titre": "Réunion", "debut": "2026-10-16T10:00", "fin": "2026-10-16T11:00",
+                                  "calendrier": "Travail", "statut": .string(ActionCatalog.alreadyCreated)])
+        // Written again as it was, without a calendar: the same, in the default one.
+        #expect(await runner.handle(meeting, context: context()).forModel["id"] == "e1")
+        #expect(await calendar.creations == ["e1"])
+        // « annule »: the meeting's creation is taken back; then it is created again.
+        let at = now.addingTimeInterval(30)
+        #expect(await runner.interception(for: "Annule", now: at) == .undo)
+        #expect(await runner.resolve(.undo, context: context(at: at))?.spoken == ActionPhrases.undone(.event, .french))
+        #expect(await runner.handle(meeting, context: context()).forModel["id"] == "e2")
+        // Anything else given: another item, saved as before (a copy in another calendar too).
+        let others: [[String: JSONValue]] = [
+            ["titre": "Réunion d'équipe", "quand": "demain à 10 h"], ["titre": "Réunion", "quand": "demain à 11 h"],
+            ["titre": "Réunion", "quand": "demain à 10 h", "duree": "2 heures"],
+            ["titre": "Réunion", "quand": "demain à 10 h", "lieu": "Salle 3"],
+            ["titre": "Réunion", "quand": "demain à 10 h", "calendrier": "Maison"],
+        ]
+        for (index, arguments) in others.enumerated() {
+            let made = await runner.handle(ToolCall(name: "creer_evenement", arguments: arguments), context: context())
+            #expect(made.forModel["id"] == .string("e\(index + 3)") && made.forModel["statut"] == nil, "\(arguments)")
+            #expect(made.spoken.hasPrefix("C’est dans "), "\(arguments)")
+        }
+        #expect(await calendar.creations == ["e1", "e2", "e3", "e4", "e5", "e6", "e7"])
+        #expect(await calendar.touched.isEmpty)
+
+        let bread = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain"])
+        #expect(await runner.handle(bread, context: context()).forModel["liste"] == "Rappels")
+        let inReminders = await runner.handle(
+            ToolCall(name: "creer_rappel", arguments: ["titre": "Acheter du pain", "liste": "rappels"]), context: context())
+        #expect(inReminders.spoken == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): acheter du pain.")
+        #expect(inReminders.forModel == ["id": "r1", "titre": "acheter du pain", "liste": "Rappels",
+                                         "statut": .string(ActionCatalog.alreadyCreated)])
+        #expect(await runner.handle(bread, context: context()).forModel["id"] == "r1")
+        let groceries = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain", "liste": "Courses"])
+        #expect(await runner.handle(groceries, context: context()).forModel["id"] == "r2")
+        let tomorrow = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain", "quand": "demain à 9 h"])
+        #expect(await runner.handle(tomorrow, context: context()).forModel["id"] == "r3")
+        #expect(await runner.handle(tomorrow, context: context()).forModel["id"] == "r3")
+        #expect(await calendar.creations.suffix(3) == ["r1", "r2", "r3"])
+    }
+
+    /// The model got the item as its call's result: « dernier » is that item now, not one created after it. A deleted
+    /// item is not there any more: its creation saves it again.
+    @Test func theItemAlreadyThereIsTheLastOne() async throws {
+        let calendar = MemoryCalendar()
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        _ = await runner.handle(meeting, context: context())
+        _ = await runner.handle(ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain"]), context: context())
+        #expect(await runner.handle(meeting, context: context()).forModel["id"] == "e1")
+        let later = await runner.handle(ToolCall(name: "modifier_element",
+                                                 arguments: ["reference": "dernier", "quand": "à 11 h"]),
+                                        context: context())
+        #expect(later.spoken == "C’est déplacé\(nb): Réunion, vendredi 16 octobre de 11\(nb)h à midi.")
+        #expect(await calendar.touched == ["Réunion"])
+        let deleted = await runner.handle(ToolCall(name: "supprimer_element", arguments: ["reference": "e1"]),
+                                          context: context())
+        #expect(deleted.spoken == ActionPhrases.deleted(event: true, title: "Réunion", .french))
+        let moved = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 11 h"])
+        #expect(await runner.handle(moved, context: context()).forModel["id"] == "e2")
+        #expect(await calendar.creations == ["e1", "r1", "e2"])
     }
 }

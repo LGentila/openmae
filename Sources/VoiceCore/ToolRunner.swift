@@ -287,7 +287,8 @@ public actor ToolRunner {
     {
         do {
             let outcome = try await provider.perform(call, context: context)
-            if risk != .read {
+            // What did nothing (`ToolOutcome.nothingDone`) leaves « annule » to the actions before, as a refusal does.
+            if risk != .read, !outcome.nothingDone {
                 if !lastIsThisRequest {
                     last = []
                     lastIsThisRequest = true

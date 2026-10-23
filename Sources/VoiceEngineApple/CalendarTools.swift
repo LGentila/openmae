@@ -163,6 +163,10 @@ public actor CalendarTools: ToolProvider {
         let times = try ActionCatalog.eventTimes(call, context: context)
         let named = call.text("calendrier")
         let calendar = try eventCalendar(named: named, context: context)
+        let asked = ActionCatalog.SavedItem(isEvent: true, title: title, date: times.start, end: times.end,
+                                            hasTime: !times.allDay, place: call.text("lieu"),
+                                            collection: calendar.calendarIdentifier)
+        if let already = alreadyThere(asked, context) { return already }
         let event = EKEvent(eventStore: store)
         event.title = title
         event.startDate = times.start
@@ -196,6 +200,9 @@ public actor CalendarTools: ToolProvider {
         let due = try ActionCatalog.reminderDue(call, context: context)
         let named = call.text("liste")
         let list = try reminderList(named: named, context: context)
+        let asked = ActionCatalog.SavedItem(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false,
+                                            collection: list.calendarIdentifier)
+        if let already = alreadyThere(asked, context) { return already }
         let reminder = EKReminder(eventStore: store)
         reminder.title = title
         reminder.calendar = list
@@ -218,6 +225,38 @@ public actor CalendarTools: ToolProvider {
                 listName: named != nil || testCollection != nil ? saved.calendar?.title : nil, context),
             forModel: describe(saved, reference: reference, context),
             undo: addUndo(.delete(.reminder(saved.calendarItemIdentifier))))
+    }
+
+    /// The creation of an item created earlier in this conversation, in its own calendar or list, as EventKit has it now
+    /// (`ActionCatalog.repeated`): not saved again. The user hears where the item is, and the model gets it, as the last
+    /// item created (`ActionCatalog.alreadyThere`). Only items of the creation's kind are read (access to that kind was
+    /// just checked), and only those still there: not deleted, nor done since for a reminder.
+    private func alreadyThere(_ asked: ActionCatalog.SavedItem, _ context: ToolContext) -> ToolOutcome? {
+        var states: [String: ActionCatalog.SavedItem] = [:]
+        var found: [String: (described: JSONValue, collectionName: String)] = [:]
+        for (reference, item) in created {
+            switch item {
+            case .event(let id) where asked.isEvent:
+                guard let event = store.event(withIdentifier: id) else { continue }
+                states[reference] = state(of: event)
+                found[reference] = (describe(event, reference: reference, context), event.calendar?.title ?? "")
+            case .reminder(let id) where !asked.isEvent:
+                // Done since (ticked in the Reminders app): no longer there to do.
+                guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder, !reminder.isCompleted
+                else { continue }
+                states[reference] = state(of: reminder, context)
+                found[reference] = (describe(reminder, reference: reference, context), reminder.calendar?.title ?? "")
+            default:
+                continue
+            }
+        }
+        guard let (reference, item) = ActionCatalog.repeated(asked, among: states, calendar: context.calendar),
+              let existing = found[reference]
+        else { return nil }
+        DebugLog.log("calendar: \(asked.isEvent ? "event" : "reminder") already there, not saved again")
+        lastCreated = reference
+        return ActionCatalog.alreadyThere(item, described: existing.described, collectionName: existing.collectionName,
+                                          context: context)
     }
 
     private func readAgenda(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {

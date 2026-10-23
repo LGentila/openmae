@@ -367,18 +367,83 @@ public enum ActionCatalog {
         }
         guard changed != item else {
             // It names the calendar or the list the item is already in: the user hears that it is there.
-            let name = collection.map { collectionName ?? $0 }
-            let spoken = name.map { name in
-                item.isEvent
-                    ? ActionPhrases.eventAlreadyIn(calendarName: name, title: item.title, start: item.date ?? context.now,
-                                                   end: item.end ?? item.date ?? context.now, allDay: !item.hasTime,
-                                                   context)
-                    : ActionPhrases.reminderAlreadyIn(listName: name, title: item.title, due: item.date,
-                                                      hasTime: item.hasTime, context)
-            }
+            let spoken = collection.map { alreadyIn(item, named: collectionName ?? $0, context: context) }
             throw unchanged(event: item.isEvent, reference: reference, spoken: spoken, context: context)
         }
         return changed
+    }
+
+    /// Where `item` already is, as the user hears it: `name`, its calendar or its list as the user knows it, then the
+    /// item, as when it was saved (« C’est déjà dans ton calendrier « Travail » : Réunion, vendredi 16 octobre de 10 h à
+    /// 11 h. »: `ActionPhrases.eventAlreadyIn`, `reminderAlreadyIn`).
+    static func alreadyIn(_ item: SavedItem, named name: String, context: ToolContext) -> String {
+        item.isEvent
+            ? ActionPhrases.eventAlreadyIn(calendarName: name, title: item.title, start: item.date ?? context.now,
+                                           end: item.end ?? item.date ?? context.now, allDay: !item.hasTime, context)
+            : ActionPhrases.reminderAlreadyIn(listName: name, title: item.title, due: item.date, hasTime: item.hasTime,
+                                              context)
+    }
+
+    // MARK: - A creation of an item already there, shared by the providers
+
+    /// Whether a creation, `new` as it would be saved, repeats `item`, an item created earlier in this conversation (as it
+    /// is now): of the same kind, in the same calendar or list (`collection`, as the provider tells them apart), with the
+    /// same title whatever the case and accents, at the same moment (an event's start and end, a reminder's due date, or
+    /// none), and no place `item` does not have. A creation that gives anything else (another title, moment, length, place
+    /// or calendar) is another item, saved as before: in another calendar, the user may want a copy there (« Ajoute-la
+    /// aussi dans mon calendrier Famille. »).
+    ///
+    /// Asked « Mets-la dans mon calendrier Travail. » of a meeting just saved there (the default calendar), Gemma 4 E4B
+    /// wrote its creation again in 8 runs of 10 of voice-cli dialogue-bench, on 2026-10-23, and the app saved a second
+    /// meeting; asked « Mets-le dans ma liste Rappels. » of a reminder in that list, E4B and E2B wrote its creation again
+    /// in 1 to 3 runs of 10.
+    ///
+    /// Moments are compared as the provider may read them back: a time to the minute; a day alone (an event for the whole
+    /// day, a reminder due on a day) by its days, as EventKit may end a whole day at 23:59:59 instead of midnight.
+    public static func repeats(_ new: SavedItem, _ item: SavedItem, calendar: Calendar) -> Bool {
+        guard new.isEvent == item.isEvent, new.collection == item.collection, new.hasTime == item.hasTime,
+              folded(new.title) == folded(item.title)
+        else { return false }
+        if let place = new.place.map(folded), !place.isEmpty, place != item.place.map(folded) { return false }
+        func same(_ one: Date?, _ other: Date?, isEnd: Bool = false) -> Bool {
+            guard let one, let other else { return one == nil && other == nil }
+            if new.hasTime { return abs(one.timeIntervalSince(other)) < 60 }
+            // A whole day ends at the next midnight: its last day is the one before.
+            func day(_ date: Date) -> Date { calendar.startOfDay(for: isEnd ? date.addingTimeInterval(-1) : date) }
+            return day(one) == day(other)
+        }
+        return same(new.date, item.date) && (!new.isEvent || same(new.end, item.end, isEnd: true))
+    }
+
+    /// The item a creation repeats (`repeats`) among `items`, those created in this conversation by their reference ("e1",
+    /// "r2"), the latest created first; nil when it repeats none.
+    public static func repeated(_ new: SavedItem, among items: [String: SavedItem], calendar: Calendar)
+        -> (reference: String, item: SavedItem)?
+    {
+        func rank(_ reference: String) -> Int { Int(reference.dropFirst()) ?? 0 }
+        return items.filter { repeats(new, $0.value, calendar: calendar) }
+            .max { rank($0.key) != rank($1.key) ? rank($0.key) < rank($1.key) : $0.key < $1.key }
+            .map { (reference: $0.key, item: $0.value) }
+    }
+
+    /// Told the model, in the result of a creation that repeats an item (`alreadyThere`).
+    static let alreadyCreated = "Déjà créé plus haut dans cette conversation : pas créé une deuxième fois."
+
+    /// What a creation that repeats `item` gives (`repeated`), instead of saving it again: the app says at once where the
+    /// item already is (`alreadyIn`, as for a change that names its calendar or its list: `changed`), and the model reads,
+    /// as the call's result, that item with its id (`described`: as the provider describes it to the model) and that it
+    /// was not created again, so that the next turn refers to it. `collectionName`: its calendar or its list as the user
+    /// knows it. Nothing was done: « annule » still takes back what the request before did (`ToolOutcome.nothingDone`).
+    public static func alreadyThere(_ item: SavedItem, described: JSONValue, collectionName: String,
+                                    context: ToolContext) -> ToolOutcome
+    {
+        var result = described
+        if case .object(var fields) = described {
+            fields["statut"] = .string(alreadyCreated)
+            result = .object(fields)
+        }
+        return ToolOutcome(spoken: alreadyIn(item, named: collectionName, context: context), forModel: result,
+                           nothingDone: true)
     }
 
     /// A change that changes nothing, given nothing (`event` nil: the kind of the item is not known yet) or only what the

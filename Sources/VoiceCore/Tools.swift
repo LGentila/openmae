@@ -185,6 +185,9 @@ public struct ToolOutcome: Sendable {
     /// The model says it from `forModel` instead: a text that came from outside, to sum up (an agent's report).
     /// `spoken` is then only said if the model gives nothing.
     public var modelSpeaks: Bool
+    /// Nothing was done, as what the call asks for already is (an item created again in its own calendar:
+    /// `ActionCatalog.alreadyThere`): « annule » still takes back what the request before did, as after a refused call.
+    public var nothingDone: Bool
 
     /// Told the model when, summing up such a text, it writes a call and nothing else (no call is carried out then):
     /// it gets one more pass to answer with what it has.
@@ -200,13 +203,14 @@ public struct ToolOutcome: Sendable {
     public static let onlyRefusedCalls = "Appel non fait : seuls les appels refusés plus haut peuvent être corrigés."
 
     public init(spoken: String, forModel: JSONValue, undo: UndoToken? = nil, cannotUndo: String? = nil,
-                modelSpeaks: Bool = false)
+                modelSpeaks: Bool = false, nothingDone: Bool = false)
     {
         self.spoken = spoken
         self.forModel = forModel
         self.undo = undo
         self.cannotUndo = cannotUndo
         self.modelSpeaks = modelSpeaks
+        self.nothingDone = nothingDone
     }
 }
 
