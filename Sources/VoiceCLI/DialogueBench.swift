@@ -537,10 +537,11 @@ private struct DryWebSearch: ToolProvider {
 /// Whether a pass saved the goal's item: an item of the goal's tool's kind (an event for creer_evenement, a reminder for
 /// creer_rappel) that the app created, its title, date and calendar or list as wanted. Whatever call the model wrote: a
 /// change of the item whose creation was just refused creates it. For modifier_element: an item that the app changed,
-/// not created.
+/// not created, whatever call the model wrote but a deletion: a creation of an item already there, written again in
+/// another calendar or list the user names, moves it (`ActionCatalog.moved`).
 private func reaches(_ pass: Pass, _ goal: DialogueCorpus.Goal) -> Bool {
     let change = goal.tool == ActionCatalog.changeItem.name
-    let saved = change ? pass.call?.name == ActionCatalog.changeItem.name && pass.touched != nil && pass.created != true
+    let saved = change ? pass.call?.name != ActionCatalog.deleteItem.name && pass.touched != nil && pass.created != true
         : pass.created == true
     guard saved, pass.refused != true, case .object(let fields)? = pass.result, fields["id"] != nil,
           change || (fields["liste"] != nil) == (goal.tool == ActionCatalog.createReminder.name)
@@ -637,6 +638,7 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             return SpeakableText.clean(pass.text).isEmpty ? "nothing said" : "no call"
         }
         let creation = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(call.name)
+        if creation, pass.refused != true, pass.touched != nil { return call.name + " (moved)" }
         return call.name + (pass.refused == true ? " (refused)" : pass.created == true && !creation ? " (created)" : "")
     }
     /// "creer_evenement (refused) 9, no call 1": the most frequent first.

@@ -173,6 +173,19 @@ extension ActionCatalog {
         return placedNames.count == 1 ? placedNames.first : nil
     }
 
+    /// Whether a sentence asks for an item in another calendar or list as well, a copy, rather than there instead
+    /// (`moved`): « aussi », « également », « en plus », « copie »… (« Ajoute-la aussi dans mon calendrier Famille. »), in
+    /// English « also », « too », « as well », « copy »…
+    static func asksForACopy(_ sentence: String) -> Bool {
+        let words = placeWords(sentence)
+        if words.contains(where: copyWords.contains) { return true }
+        return zip(words, words.dropFirst()).contains { ($0 == "en" && $1 == "plus") || ($0 == "as" && $1 == "well") }
+    }
+
+    private static let copyWords: Set<String> = [
+        "aussi", "egalement", "copie", "copier", "copies", "duplique", "dupliquer", "also", "too", "copy", "duplicate",
+    ]
+
     /// The words for a calendar or a list, in both languages: what `collectionSaid` looks for a name after (or before).
     private static let collectionWords: Set<String> = [
         "calendrier", "calendriers", "agenda", "agendas", "calendar", "calendars", "liste", "listes", "list", "lists",
