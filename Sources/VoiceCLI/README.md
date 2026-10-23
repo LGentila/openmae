@@ -29,6 +29,12 @@ A conversation, with the latency of each stage:
 .build/xcode/Build/Products/Release/voice-cli conversation measurements/audio/0*.wav
 ```
 
+`--gaps 30-150` leaves between two turns that many seconds of silence (drawn in the range, the same at every run), as
+when the user asks for something now and then. With `VOICE_DEBUG=1 VOICE_DEBUG_MEMORY=1`, the log then says, before each
+request, how much of the weights, of the conversation's memory (the cache and its copies) and of the process's memory
+macOS had compressed or written to swap, and how much MLX kept of its free buffers; then how long the request took to
+read its new tokens (“LLM: prefill”).
+
 Interruptions (speaking over the assistant):
 
 ```bash

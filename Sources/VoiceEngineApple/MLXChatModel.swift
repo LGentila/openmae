@@ -178,7 +178,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         toolCallStart = tokenizer.convertTokenToId("<|tool_call>")
         toolCallEnd = tokenizer.convertTokenToId("<tool_call|>")
         cache = try context.model.newCache(parameters: parameters)
-        weightPages = MemoryResidency.ranges(context.model.parameters().flattened().map(\.1))
+        // Not the small weights computing in float32 swaps for copies (`prepareFloat32Swap`): once swapped, the arrays
+        // loaded go, and with MLX's free buffers given back (`releaseFreeBuffers`), so does their memory, which `wakeUp`
+        // reads off the actor. They are smaller than a page anyway, so far.
+        weightPages = MemoryResidency.ranges(context.model.parameters().flattened().map(\.1).filter { !Self.isSmall($0) })
     }
 
     /// Gives back to macOS the GPU memory MLX keeps for reuse, once a model has been released (tier change,
@@ -520,6 +523,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         return try body()
     }
 
+    /// The small half-precision weights `withFloat32Activations` swaps for float32 copies: norm weights, scalars, the
+    /// router's scales.
+    private static func isSmall(_ array: MLXArray) -> Bool {
+        array.ndim <= 1 && (array.dtype == .bfloat16 || array.dtype == .float16)
+    }
+
     /// Prepares what `withFloat32Activations` swaps in and out (`float32Swap`): the small half-precision weights and their
     /// float32 copies (computed here, once), the quantized embedding tables as `Float32Rows`, and the experts of a
     /// mixture-of-experts model as `ReadingExperts` (which share their weights).
@@ -534,9 +543,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             guard let experts = module as? QuantizedSwitchLinear, let reading = ReadingExperts(experts) else { return nil }
             return (key, experts, reading)
         }
-        let small = model.parameters().flattened().filter { _, array in
-            array.ndim <= 1 && (array.dtype == .bfloat16 || array.dtype == .float16)
-        }
+        let small = model.parameters().flattened().filter { Self.isSmall($0.1) }
         let float32 = small.map { ($0.0, $0.1.asType(.float32)) }
         // Copies of their own, made from the float32 ones (the same values): the update puts new values into the very
         // arrays the model holds, those `parameters()` gave (and `asType` to their own type gives them back as they are).
@@ -586,6 +593,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `async` like the protocol's default (see `useTools`).
     public func catchUp(with conversation: [ChatMessage]) async {
         lastCatchUp = (0, 0)
+        defer { releaseFreeBuffers() }
         guard let tokens = try? render(conversation, generationPrompt: false) else { return }
         let common = commonPrefix(cachedTokens, tokens, answering: false)
         guard common < tokens.count else { return }
@@ -616,6 +624,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let clock = ContinuousClock()
         var spent = Duration.zero
         var computed = 0
+        if backgroundAllowed, pendingRequests.load(ordering: .relaxed) == 0 {
+            let t0 = clock.now
+            bringCacheBack()
+            spent += clock.now - t0
+        }
         while backgroundAllowed, pendingRequests.load(ordering: .relaxed) == 0, cacheUses == uses, !Task.isCancelled,
               cachedTokens.count < tokens.count
         {
@@ -649,6 +662,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard start < tokens.count else { return 0 }
         let clock = ContinuousClock()
         let t0 = clock.now
+        bringCacheBack()
         // The iterator also samples one token, which we ignore.
         _ = try readingPrompt { try readPrompt(tokens, from: start) }
         eval(cache.flatMap(\.state))
@@ -718,11 +732,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let touched = clock.now
         eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
+        releaseFreeBuffers()
     }
 
     /// Someone started to speak (see `KeepsWarm`): the weights macOS compressed or wrote to swap since the last keep-warm
     /// pass come back while they speak, several pages at a time, rather than during the request. Off the actor, so that
-    /// a request that comes meanwhile does not wait for it; at most once every 5 s.
+    /// a request that comes meanwhile does not wait for it; at most once every 5 s. The conversation's memory comes back
+    /// meanwhile too (`wakeConversationUp`).
     public nonisolated func wakeUp() {
         guard lastWakeUp.claim(spacing: .seconds(5)) else { return }
         DispatchQueue.global(qos: .userInitiated).async { [self] in
@@ -730,7 +746,55 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             MemoryResidency.touch(weightPages, threads: 4)
             DebugLog.log("LLM: weights woken up in \(ContinuousClock.now - start)")
         }
+        Task(priority: .userInitiated) { await self.wakeConversationUp() }
     }
+
+    /// `wakeUp` for the conversation's memory: the cache, its copies and the conversations' beginning, read from the CPU on
+    /// the actor (they change with every request), as soon as nothing else uses the cache.
+    ///
+    /// `wakeUp` brought back only the weights, and the cache the request then read was sometimes out of RAM: macOS
+    /// compresses it as it does the weights, between two keep-warm passes, and within seconds of being computed while the
+    /// voice loads. The GPU brings such memory back one page after the other (see `releaseFreeBuffers`), far more slowly
+    /// than reads from several CPU threads: on the reference Mac (Gemma 4 26B, the usual apps open, requests 30 to 150 s
+    /// apart in `voice-cli conversation`), a request that found the cache and its copies compressed (0.77 GB), with a fifth
+    /// of the weights, read its 54 new tokens in 1.76 s instead of about 0.45 s. See also `bringCacheBack`.
+    private func wakeConversationUp() {
+        let clock = ContinuousClock()
+        let start = clock.now
+        MemoryResidency.touch(MemoryResidency.ranges(conversationMemory), threads: 4)
+        DebugLog.log("LLM: conversation's memory woken up in \(clock.now - start)")
+        logResidency("after waking up")
+    }
+
+    /// Reads the cache's every page from the CPU, several threads at once, right before the GPU computes on it (a
+    /// request, the history computed ahead or again): what macOS compressed or wrote to swap since it was last used comes
+    /// back now rather than one page at a time as the GPU reads it (see `wakeConversationUp`). With the cache all in RAM
+    /// it costs 7 ms (14 at most) with Gemma 4 26B and 0.24 to 0.31 GB of cache, on the reference Mac.
+    private func bringCacheBack() {
+        let clock = ContinuousClock()
+        let start = clock.now
+        MemoryResidency.touch(MemoryResidency.ranges(cache.flatMap(\.state)), threads: 4)
+        DebugLog.log("LLM: cache brought back in \(clock.now - start)")
+    }
+
+    /// Gives back to macOS the buffers MLX keeps for reuse once a computation is over, when they are more than
+    /// `idleBuffers`: nobody uses them until the next computation, and macOS compresses them, or writes them to swap, like
+    /// any memory left unused; the computation that reuses them then waits while the GPU brings them back, one page after
+    /// the other. Computing the history ahead left 1.8 to 3.1 GB of them with Gemma 4 26B on the reference Mac (a request
+    /// leaves about 0.1 GB), most often all compressed by the next request (requests 30 to 150 s apart in `voice-cli
+    /// conversation`, the usual apps open): one read its 42 new tokens in 5.77 s, the weights and the cache all in RAM, and
+    /// the others 44 to 63 tokens in 0.78 to 1.02 s, against 0.42 s for the one that found none compressed. The next
+    /// computation gets new buffers instead: in the same conversation, every request but the first read its new tokens in
+    /// 0.42 to 0.47 s, and the process's footprint between requests went down from 18.3–19.6 GB to 16.2–16.6 GB.
+    private func releaseFreeBuffers() {
+        let kept = Memory.cacheMemory
+        guard kept > Self.idleBuffers else { return }
+        Memory.clearCache()
+        DebugLog.log(String(format: "LLM: gave back %.2f GB of free buffers", Double(kept) / 1e9))
+    }
+
+    /// What MLX may keep of its free buffers between two computations (see `releaseFreeBuffers`).
+    static let idleBuffers = 256 * 1024 * 1024
 
     /// The cache, its copies and a shortened history in preparation.
     private var conversationMemory: [MLXArray] {
@@ -750,7 +814,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let current = MemoryResidency.count(MemoryResidency.ranges(cache.flatMap(\.state)))
         DebugLog.log("LLM memory \(moment): weights \(weights.text), conversation \(conversation.text) (beginning: "
             + "\(kept.text); cache: \(current.text)); "
-            + String(format: "MLX free buffers %.2f GB", Double(Memory.cacheMemory) / 1e9) + " (read in \(clock.now - t0))")
+            + String(format: "MLX free buffers %.2f GB; ", Double(Memory.cacheMemory) / 1e9)
+            + MemoryResidency.processText + " (read in \(clock.now - t0))")
     }
 
     /// Shortening the history changes its beginning, so the whole rest must be recomputed (seconds
@@ -783,6 +848,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
         rebuildTask = nil
         DebugLog.log("LLM: background rebuild complete")
+        releaseFreeBuffers()
     }
 
     private func advanceRebuild(chunk: Int) {
@@ -819,6 +885,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let wentBack = from != .cache
         let clock = ContinuousClock()
         let t0 = clock.now
+        bringCacheBack()
         let start = reused == 0 || from == .beginning
             ? try feedEarlierTurns(of: conversation, prompt: prompt, from: reused) : reused
         let turn = conversation.lastIndex { $0.role == .user }.map { Turn(index: $0, message: conversation[$0]) }
@@ -869,6 +936,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             cachedTokens = Array(all.prefix(cachedTokenCount(upTo: all.count)))
             DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
                                 produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
+            releaseFreeBuffers()
         }
         while let token = iterator.next() {
             produced.append(token)

@@ -105,6 +105,28 @@ enum MemoryResidency {
         }
     }
 
+    /// Diagnostics: the process's memory as macOS counts it (`task_info`): its footprint, what of it is in RAM, what macOS
+    /// compressed or wrote to swap, the same for its GPU memory alone (Metal's buffers: the weights, the cache and its
+    /// copies, MLX's free buffers, the voice's), then the swap in use on the whole Mac.
+    static var processText: String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return "process: unknown" }
+        var swap = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.size
+        let swapUsed = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 ? Double(swap.xsu_used) / 1e9 : -1
+        return String(format: "process: footprint %.2f GB, %.2f GB in RAM, %.2f GB compressed or in swap (GPU memory: "
+                      + "%.2f GB, %.2f GB of it compressed or in swap); the Mac's swap in use: %.2f GB",
+                      Double(info.phys_footprint) / 1e9, Double(info.resident_size) / 1e9,
+                      Double(info.compressed) / 1e9, Double(info.ledger_tag_graphics_footprint) / 1e9,
+                      Double(info.ledger_tag_graphics_footprint_compressed) / 1e9, swapUsed)
+    }
+
     /// How many of the pages are in RAM, how many macOS compressed or wrote to swap, and how many it counts as used lately
     /// (`mincore`).
     static func count(_ ranges: [Range<UInt>]) -> Count {

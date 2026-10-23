@@ -80,6 +80,8 @@
 //   --no-partials            the user's words are not transcribed while they speak (the app shows them; for comparison)
 //   --talk-key               conversation: the talk key is held while each phrase is said, released after it
 //   --release-after <s>      with --talk-key: seconds between the end of the recording and the release (default 0.25)
+//   --gaps <min>-<max>       conversation: seconds of silence between two turns, drawn in that range (the same at every
+//                            run), as when the user asks for something now and then (default: 0.5 s)
 //   --max-calls <n>          the most actions carried out in one request (default: the tier's, 3 or 1)
 //   --barge-in mac|iphone    what it takes to interrupt Maé: the Mac's (default), or an iPhone's as the app has it while
 //                            an iPhone has the conversation (BargeInProfile; VOICE_BARGE_IN_IPHONE_DB/_MS apply)
@@ -115,6 +117,9 @@ struct Options {
     /// conversation: the talk key held while each phrase is said (as ⌥ Space in the app), released this long after it.
     var talkKey = false
     var releaseAfter = 0.25
+    /// conversation: seconds of silence between two turns, drawn in this range (the same draws at every run), as when
+    /// the user asks for something now and then; none: half a second.
+    var gaps: ClosedRange<Double>?
     /// What it takes to interrupt Maé (`PipelineConfig.bargeIn`).
     var bargeIn = BargeInProfile.mac
     var voices = ["estelle"]
@@ -229,6 +234,9 @@ struct Options {
             case "--no-partials": o.noPartials = true
             case "--talk-key": o.talkKey = true
             case "--release-after": o.releaseAfter = Double(it.next() ?? "") ?? o.releaseAfter
+            case "--gaps":
+                let bounds = (it.next() ?? "").split(separator: "-").compactMap { Double($0) }
+                if bounds.count == 2, bounds[0] <= bounds[1] { o.gaps = bounds[0]...bounds[1] }
             case "--barge-in":
                 switch it.next() {
                 case "mac": o.bargeIn = .mac
@@ -474,7 +482,13 @@ func waitForAnswer(_ e: Engine, mic: SimulatedMicrophone, after count: Int, time
 func runConversation(_ o: Options, _ e: Engine) async throws {
     let mic = SimulatedMicrophone(pipeline: e.pipeline)
     try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
+    var draws = SplitMix64(seed: 131)
     for (i, file) in o.files.enumerated() {
+        if i > 0, let gaps = o.gaps {
+            let gap = gaps.lowerBound + (gaps.upperBound - gaps.lowerBound) * Double(draws.next() >> 11) / Double(1 << 53)
+            print(String(format: "  … %.0f s of silence", gap))
+            await mic.silence(gap)
+        }
         print("■ turn \(i + 1) — \(file.lastPathComponent)")
         let before = await e.log.completedTurns
         if o.talkKey {
@@ -515,6 +529,19 @@ func runConversation(_ o: Options, _ e: Engine) async throws {
     print(String(format: "memory: %.2f GB · cache rebuilds: %d · back to a snapshot: %d",
                  ProcessMemory.footprintGB, await e.model.cacheRebuilds, await e.model.snapshotRestores))
     try save(turns, name: "conversation", options: o)
+}
+
+/// Pseudo-random numbers from a seed, the same at every run (`--gaps`).
+struct SplitMix64 {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
 }
 
 func runInterruption(_ o: Options, _ e: Engine) async throws {
