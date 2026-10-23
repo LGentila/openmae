@@ -17,16 +17,19 @@
 // that item was changed or deleted.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
-//                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web] [--memory]
+//                            [--corpus Tests/Fixtures/dialogues-fr.json] [--repeats 10] [--agents] [--web]
+//                            [--memory [--journal]]
 //                            [--examples app|none|file] [--addendum file] [--watch-calls] [--out measurements]
 //
 // --agents and --web offer Claude Code's tools and the web search too, as in the app when they are on (nothing is
 // handed over or searched: a call to them is declined). --memory (or "memory": true, as in
-// Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet and a journal kept in memory: a
-// dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet
-// read again), and its goal is checked once all its sentences are said (what the sheet holds, what the last answer says). --now replaces every reference time of the corpus (a dialogue
-// may have its own). --examples and --addendum are those of actions-bench. --watch-calls adds each first pass's chance
-// of opening a call (at its first token, and at its most tempted token).
+// Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet kept in memory, and its journal of
+// past exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal: a dialogue may start
+// with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet read again), and its
+// goal is checked once all its sentences are said (what the sheet holds, what the last answer says). --now replaces
+// every reference time of the corpus (a dialogue may have its own). --examples and --addendum are those of
+// actions-bench. --watch-calls adds each first pass's chance of opening a call (at its first token, and at its most
+// tempted token).
 
 import Foundation
 import VoiceCore
@@ -38,7 +41,7 @@ private struct DialogueCorpus: Decodable {
     var agents: Bool?
     /// The web search switched on (as with --web).
     var web: Bool?
-    /// The memory switched on, with its journal (as with --memory).
+    /// The memory switched on (as with --memory).
     var memory: Bool?
     var dialogues: [Dialogue]
 
@@ -73,12 +76,13 @@ private struct DialogueCorpus: Decodable {
         var when: String?
         var calendar: String?
         /// The memory (`memoire`), checked once the dialogue's sentences are all said: at the end, the sheet holds an
-        /// entry with this word (`remembered`), none (`forgotten`, `notRemembered`), or still one (`kept`); and the last
-        /// answer mentions one of `answerMentions` (whatever the accents and case).
+        /// entry with this word (`remembered`), none (`forgotten`, `notRemembered`), or still one (`kept`); it is empty
+        /// (`erased`); and the last answer mentions one of `answerMentions` (whatever the accents and case).
         var remembered: String?
         var forgotten: String?
         var kept: String?
         var notRemembered: String?
+        var erased: Bool?
         var answerMentions: [String]?
 
         /// The goal's tool for a last sentence that asks for nothing new.
@@ -149,8 +153,12 @@ func runDialogueBench(_ o: Options) async throws {
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
     // The memory last, as in the app; off, it offers nothing.
     let memory = corpus.memory == true || o.memory
+    let journal = MemorySettings.journalOffered || o.journal
     let memoryStore = TransientMemoryStore()
-    let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: true)
+    let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: journal)
+    if memory {
+        print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)"))
+    }
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (agents ? [DryAgents()] : [])
         + (web ? [DryWebSearch()] : []) + [memoryTools]
     let runner = ToolRunner(providers: providers)
@@ -233,6 +241,7 @@ func runDialogueBench(_ o: Options) async throws {
                 if let word = goal.kept { reached = reached && sheet.contains(MemoryText.folded(word)) }
                 if let word = goal.forgotten { reached = reached && !sheet.contains(MemoryText.folded(word)) }
                 if let word = goal.notRemembered { reached = reached && !sheet.contains(MemoryText.folded(word)) }
+                if goal.erased == true { reached = reached && sheet.isEmpty }
                 if let words = goal.answerMentions {
                     let answer = MemoryText.folded(last.answer)
                     reached = reached && words.contains { answer.contains(MemoryText.folded($0)) }
@@ -639,7 +648,10 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
         }
         let creation = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(call.name)
         if creation, pass.refused != true, pass.touched != nil { return call.name + " (moved)" }
-        return call.name + (pass.refused == true ? " (refused)" : pass.created == true && !creation ? " (created)" : "")
+        // The memory's action too: « memoire/tout_oublier ».
+        let action = call.name == MemoryCatalog.name ? "/" + (MemoryCatalog.action(call)?.rawValue ?? "?") : ""
+        return call.name + action
+            + (pass.refused == true ? " (refused)" : pass.created == true && !creation ? " (created)" : "")
     }
     /// "creer_evenement (refused) 9, no call 1": the most frequent first.
     func counts(_ outcomes: [String]) -> String {

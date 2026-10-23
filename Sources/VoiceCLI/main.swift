@@ -198,8 +198,10 @@ struct Options {
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
     var agents = false
-    /// actions-bench, dialogue-bench, cache-check: the memory's tool offered too (`memoire`, with the journal).
+    /// actions-bench, dialogue-bench, cache-check: the memory's tool offered too (`memoire`), with the journal of past
+    /// exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal.
     var memory = false
+    var journal = false
     var searxng: String?
     var searxngUser: String?
     var record: String?
@@ -287,6 +289,7 @@ struct Options {
             case "--web": o.web = true
             case "--agents": o.agents = true
             case "--memory": o.memory = true
+            case "--journal": o.journal = true
             case "--searxng": o.searxng = it.next()
             case "--searxng-user": o.searxngUser = it.next()
             case "--record": o.record = it.next()
