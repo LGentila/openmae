@@ -1556,7 +1556,8 @@ public actor VoicePipeline {
         case first
         /// The request's second try, after calls refused for their arguments: only those calls are carried out from it.
         case secondTry
-        /// Summing up the results that came from outside: no call is carried out.
+        /// Summing up the results that came from outside: no call is carried out, but one they allow (opening the page
+        /// of a search's result, `ToolOutcome.allowedWhileSumming`), whose result is then summed up in turn.
         case summing
     }
 
@@ -1567,9 +1568,10 @@ public actor VoicePipeline {
     /// is linked to the one before (« Et c’est noté : … », see `confirm`). Then, in this order: the model's
     /// second try for the calls refused for their arguments (one for the request, holding every result already
     /// obtained, and only those calls carried out from it); one pass where it sums up every result that came from outside
-    /// (no call carried out then); the app's questions about the refused calls; the one question for the sensitive calls,
-    /// which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out at
-    /// once, how many it does (`ActionPhrases.atMost`), once.
+    /// (no call carried out then, but the one call such a result allows: the page of one of a search's results, which it
+    /// then sums up in turn, `ToolOutcome.callsWhileSumming` such calls at most in the turn); the app's questions about
+    /// the refused calls; the one question for the sensitive calls, which wait together for the user's "oui"; and, when
+    /// the model asked for more calls than the app carries out at once, how many it does (`ActionPhrases.atMost`), once.
     ///
     /// The history keeps each pass's calls as the model wrote them, one assistant message with all of them, then their
     /// results in the same order, as Gemma 4's template renders them: the next request goes on from the model's memory.
@@ -1597,11 +1599,19 @@ public actor VoicePipeline {
         /// Some sensitive call waits for the user's "oui": the question for all of them ends the turn.
         var waitsForYes = false
         /// What came from outside for the model to sum up (an agent's report, search results, see
-        /// `ToolOutcome.modelSpeaks`): what to say for each when the model says nothing. The summing pass carries out
-        /// none of the calls the model writes, since such a text could carry instructions of its own; and once such a
-        /// result is in the request, no other pass carries any out either (no second try then).
-        var toSum: [String] = []
-        /// The model, summing up, wrote calls and nothing else, and was told to sum up once more.
+        /// `ToolOutcome.modelSpeaks`): what to say for each when the model says nothing, and the only tools whose calls
+        /// summing it up still carries out (`ToolOutcome.allowedWhileSumming`: a search's results, opening the page of one
+        /// of them). The summing pass carries out none of the other calls the model writes, since such a text could carry
+        /// instructions of its own; and once such a result is in the request, no other pass carries any out either (no
+        /// second try then). A page opened while summing up takes the place of the results it comes from: what to say,
+        /// and what its summing up still allows (another page, once, when it could not be read).
+        var toSum: [(fallback: String, allows: Set<String>)] = []
+        /// The calls carried out while summing up, in the turn: a page, and another when the first could not be read
+        /// (`ToolOutcome.callsWhileSumming`). Whatever that page says, summing it up carries out nothing more.
+        var callsWhileSumming = 0
+        /// The model, summing up, wrote calls that are not carried out (not allowed, or past the limit) and nothing else,
+        /// and was told so and to sum up once more (`ToolOutcome.noCallWhileSummingUp`): once in a turn, and that pass
+        /// carries out no call at all, not even an allowed one.
         var summedUpAgain = false
         /// The user asked for several actions at once (the model's first answer wrote more than one call, or went on to
         /// another): their sentence holds the other actions' moments and lengths too, so the app reads only each call's
@@ -1610,14 +1620,19 @@ public actor VoicePipeline {
         /// reminder, without a moment, got Friday).
         var several = false
         while true {
+            /// The tools whose calls this pass may still carry out while it sums up.
+            let allowed = pass == .summing && !summedUpAgain && callsWhileSumming < ToolOutcome.callsWhileSumming
+                ? Set(toSum.flatMap(\.allows)).sorted() : []
             /// This pass's calls carried out or refused, as named, in order, and what each one gave the model.
             var calls: [ToolCall] = []
             var results: [JSONValue] = []
             /// Refused calls of this pass that a second try may correct: where they are in `calls`, and why.
             var refused: [(index: Int, question: String, refusal: ToolRefusal)] = []
             var unreadable = false
-            /// The calls written while summing up (not carried out).
-            var ignored: [ToolCall] = []
+            /// The calls written while summing up, in order, and among them the one carried out once the pass is over:
+            /// the first one the results allow (`allowed`), if any. The others are not carried out.
+            var summingCalls: [ToolCall] = []
+            var opening: Int?
             /// The model's own words in this pass.
             var said = ""
             DebugLog.log("turn \(turn.id): LLM request" + (pass == .first ? "" : pass == .secondTry ? " (second try)"
@@ -1678,7 +1693,7 @@ public actor VoicePipeline {
                         } else {
                             carriedOut.append(named)
                             if reply.modelSpeaks {
-                                toSum.append(reply.spoken)
+                                toSum.append((reply.spoken, reply.allowedWhileSumming))
                             } else {
                                 // The request's last action, when no other can be carried out after it: no other call
                                 // of this pass (from a second try, only corrections of refused calls), and no second
@@ -1702,7 +1717,7 @@ public actor VoicePipeline {
                         // Not in the history: the model would start saying it in its own answers.
                         deliver(phrase, to: turn, inHistory: false)
                     }
-                case .toolCallNamed(let name) where pass != .summing:
+                case .toolCallNamed(let name) where pass != .summing || ToolNames.match(name, among: allowed) != nil:
                     if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {
                         fillerSaid = true
                         deliver(phrase, to: turn, inHistory: false)
@@ -1717,8 +1732,12 @@ public actor VoicePipeline {
                     unreadable = true
                 case .toolCallStarted, .toolCallNamed, .moreToolCalls, .unreadableToolCall: break
                 case .toolCall(let call):
-                    DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
-                    ignored.append(call)
+                    if opening == nil, ToolNames.match(call.name, among: allowed) != nil {
+                        opening = summingCalls.count
+                    } else {
+                        DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
+                    }
+                    summingCalls.append(call)
                 }
             }
             chunker.pieces(adding: filter.flush()).forEach(send)
@@ -1726,18 +1745,46 @@ public actor VoicePipeline {
             let modelSpoke = !SpeakableText.clean(cleaned.push(said) + cleaned.flush()).isEmpty
             if pass == .summing {
                 chunker.remainingPieces().forEach(send)
+                let notCarriedOut: JSONValue = ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]
+                if let opening, let tools {
+                    // A call the results allow (a search's: opening the page of one of them), carried out like any, as
+                    // one more of the request's (it must not drop what waits for the user's "oui"), then summed up in
+                    // turn. The history keeps the pass's calls as written; the others are not carried out.
+                    let named = await tools.named(summingCalls[opening])
+                    summingCalls[opening] = named
+                    callsWhileSumming += 1
+                    metrics.tool = (metrics.tool.map { $0 + ", " } ?? "") + named.name
+                    DebugLog.log("turn \(turn.id): tool call while summing up \(named.name) \(named.arguments)")
+                    let reply = await tools.handle(named, context: toolContext(turn, now: now), sameRequest: true)
+                    turn.steps += [.calls(summingCalls)] + summingCalls.indices.map {
+                        .result(of: summingCalls[$0], $0 == opening ? reply.forModel : notCarriedOut)
+                    }
+                    if reply.modelSpeaks {
+                        let summed = (fallback: reply.spoken, allows: reply.allowedWhileSumming)
+                        if let from = toSum.lastIndex(where: { $0.allows.contains(named.name) }) {
+                            toSum[from] = summed
+                        } else {
+                            toSum.append(summed)
+                        }
+                        // Another page it may still open gets the waiting phrase again.
+                        if !summed.allows.isEmpty { fillerSaid = false }
+                        request = conversation.messages(adding: turn.userMessage!) + turn.steps
+                        continue
+                    }
+                    DebugLog.log("turn \(turn.id): tool call refused while summing up: \(reply.forModel)")
+                }
+                let ignored = summingCalls.indices.filter { $0 != opening }.map { summingCalls[$0] }
                 if !modelSpoke, !ignored.isEmpty, !summedUpAgain {
-                    // Calls instead of a summary (often another search, when the results do not hold the answer): rather
-                    // than the app's sentence, the model is told they are not carried out and sums up once more, still
-                    // without any call carried out.
+                    // Calls instead of a summary (often another search, when the results or the page do not hold the
+                    // answer; or a page past the limit): rather than the app's sentence, the model is told they are not
+                    // carried out and sums up once more, then without any call carried out.
                     DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
                     summedUpAgain = true
-                    turn.steps += [.calls(ignored)]
-                        + ignored.map { .result(of: $0, ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]) }
+                    if opening == nil { turn.steps += [.calls(ignored)] + ignored.map { .result(of: $0, notCarriedOut) } }
                     request = conversation.messages(adding: turn.userMessage!) + turn.steps
                     continue
                 }
-                if !modelSpoke { for fallback in toSum.uniqued() { say(fallback, to: turn) } }
+                if !modelSpoke { for fallback in toSum.map(\.fallback).uniqued() { say(fallback, to: turn) } }
                 break
             }
             // A second try only before anything from outside is in the request (see `toSum`): otherwise the refusals
@@ -1780,6 +1827,8 @@ public actor VoicePipeline {
             if !toSum.isEmpty, !calls.isEmpty {
                 DebugLog.log("turn \(turn.id): the model sums up the results")
                 pass = .summing
+                // A call it may still write gets its own waiting phrase (opening a page adds a few seconds).
+                if toSum.contains(where: { !$0.allows.isEmpty }) { fillerSaid = false }
                 request = conversation.messages(adding: turn.userMessage!) + turn.steps
                 continue
             }

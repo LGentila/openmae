@@ -392,6 +392,15 @@ enum WebResultText {
         "raquo": "»", "lsquo": "‘", "rsquo": "’", "ldquo": "“", "rdquo": "”", "ndash": "–", "mdash": "—", "euro": "€",
         "eacute": "é", "egrave": "è", "ecirc": "ê", "euml": "ë", "agrave": "à", "acirc": "â", "ccedil": "ç",
         "icirc": "î", "iuml": "ï", "ocirc": "ô", "ugrave": "ù", "ucirc": "û", "oelig": "œ", "Eacute": "É", "deg": "°",
+        // Pages use more of them than snippets do.
+        "Egrave": "È", "Ecirc": "Ê", "Agrave": "À", "Ccedil": "Ç", "OElig": "Œ", "aacute": "á", "iacute": "í",
+        "oacute": "ó", "uacute": "ú", "ntilde": "ñ", "auml": "ä", "ouml": "ö", "uuml": "ü", "szlig": "ß",
+        "shy": "\u{00AD}", "thinsp": "\u{2009}", "ensp": " ", "emsp": " ", "zwnj": "\u{200B}", "zwj": "\u{200B}",
+        "lrm": "\u{200B}", "rlm": "\u{200B}", "middot": "·", "bull": "•", "times": "×", "divide": "÷", "minus": "−",
+        "plusmn": "±", "permil": "‰", "copy": "©", "reg": "®", "trade": "™", "pound": "£", "yen": "¥", "cent": "¢",
+        "sect": "§", "para": "¶", "frac12": "½", "frac14": "¼", "frac34": "¾", "sup2": "²", "sup3": "³",
+        "lsaquo": "‹", "rsaquo": "›", "sbquo": "‚", "bdquo": "„", "prime": "′", "Prime": "″", "rarr": "→", "larr": "←",
+        "uarr": "↑", "darr": "↓", "dollar": "$", "percnt": "%", "num": "#", "excl": "!", "quest": "?",
     ]
 
     /// A web page's address (http or https), nil for anything else.

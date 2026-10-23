@@ -42,6 +42,7 @@
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
 //                                                       see Delegate.swift)
 //   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
+//   voice-cli read-page <address> [--words "…"]         one page read as the app reads it (see WebSearch.swift)
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
@@ -190,6 +191,8 @@ struct Options {
     var webAddendum: String?
     /// actions-bench: the delegation's part of the system prompt, read from this file.
     var agentsAddendum: String?
+    /// actions-bench: the note the model reads first in a search's results, read from this file.
+    var resultsNote: String?
     var examples: String?
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
@@ -208,6 +211,12 @@ struct Options {
     /// this file.
     var news = false
     var newsAddendum: String?
+    /// actions-bench: the page tool offered ("on") or not ("off"), whatever the tier (default: as the app does).
+    var pages: Bool?
+    /// actions-bench: the pages the model opens are read on the internet, not in the corpus.
+    var livePages = false
+    /// actions-bench: where to write the pages the model opened, as it read them (the corpus's "pages" shape).
+    var recordPages: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -279,6 +288,7 @@ struct Options {
             case "--addendum": o.addendum = it.next()
             case "--web-addendum": o.webAddendum = it.next()
             case "--agents-addendum": o.agentsAddendum = it.next()
+            case "--results-note": o.resultsNote = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
@@ -291,6 +301,9 @@ struct Options {
             case "--news-addendum": o.newsAddendum = it.next()
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
+            case "--pages": o.pages = it.next() != "off"
+            case "--live-pages": o.livePages = true
+            case "--record-pages": o.recordPages = it.next()
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -752,7 +765,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
-    "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+    "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "read-page", "inbound"]
+    .contains(options.command)
 {
     do {
         switch options.command {
@@ -768,6 +782,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)
+        case "read-page": try await runReadPage(CommandLine.arguments)
         case "inbound": try await runInbound(CommandLine.arguments)
         case "voice-pace": try await runVoicePace(options)
         default: try await runVoiceOnset(options)
@@ -825,6 +840,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--no-actions] [--addendum file] [--web-addendum file]
                                        [--agents-addendum file] [--sources] [--live-sources]
                                        [--record-sources file.json] [--news] [--news-addendum file]
+                                       [--pages on|off] [--live-pages] [--record-pages file.json]
                                        [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
@@ -839,6 +855,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--note-role system|user] [--drop written|heard|cut-off|none|whole]
                                        [--dialogue name]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
+               voice-cli read-page <address> [--words "…"] [--language fr|en] [--repeats 1]
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
                                   [--follow-up "…"] [--stop-after seconds]
