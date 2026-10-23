@@ -20,7 +20,6 @@ final class SettingsNavigation {
         case deleteModels
         case eraseWakeLog
         case removeBraveKey
-        case clearMemoryJournal
         case eraseMemory
         case addTool
         case removeTool(ConnectedTool.ID)
@@ -336,8 +335,6 @@ private struct SettingsSheetLayer: View {
                 return Shown(view: AnyView(EraseWakeLogSheet(navigation: navigation)), top: 120)
             case .removeBraveKey:
                 return Shown(view: AnyView(RemoveBraveKeySheet(model: model, navigation: navigation)), top: 120)
-            case .clearMemoryJournal:
-                return Shown(view: AnyView(ClearMemoryJournalSheet(model: model, navigation: navigation)), top: 120)
             case .eraseMemory:
                 return Shown(view: AnyView(EraseMemorySheet(model: model, navigation: navigation)), top: 120)
             case .addTool:
@@ -363,9 +360,6 @@ private struct SettingsSheetLayer: View {
                                                           top: 120)
             case .remove(let source): return Shown(view: AnyView(RemoveSourceSheet(inbound: inbound, source: source)),
                                                    top: 120)
-            case .homeAssistant(let source): return Shown(view: AnyView(HomeAssistantSheet(inbound: inbound,
-                                                                                            source: source)),
-                                                          top: 24)
             case .homeRelay: return Shown(view: AnyView(HomeRelaySheet(inbound: inbound)), top: 120)
             }
         }

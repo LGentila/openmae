@@ -8,7 +8,7 @@ import VoiceCore
 /// internet path through the iPhones' relay, which cannot read them), the sources, and, once there is one, the
 /// announcements switch and the quiet hours (what is not said goes to the news, « Quoi de neuf ? »); a source's page
 /// shows its secret address, what Maé does with what it sends and its last deliveries. Adding a source, changing its
-/// address, removing it, the home relay's address and how to send from Home Assistant go through sheets. The design
+/// address, removing it and the home relay's address go through sheets. The design
 /// draws the home path only: the internet path and the announcements take the same form.
 struct InboundPage: View {
     let inbound: InboundAccess
@@ -44,10 +44,6 @@ struct InboundPage: View {
             } else {
                 SettingsCard { sources }
             }
-            SettingsCard {
-                NavigationLine(title: Text("Send from Home Assistant")) { inbound.sheet = .homeAssistant(nil) }
-            }
-            .padding(.top, 14)
             if !status.sources.isEmpty {
                 PageSection("Announcements")
                 SettingsCard { AnnouncementRows(inbound: inbound) }
@@ -95,8 +91,6 @@ extension InboundAccess {
         case homeRelay
         case changeAddress(InboundSource.ID)
         case remove(InboundSource.ID)
-        /// How to send from Home Assistant, with the address of the source it was opened from.
-        case homeAssistant(InboundSource.ID?)
     }
 
     /// Opens a page, leaving any sheet.
@@ -361,8 +355,6 @@ struct InboundSourcePage: View {
             Caption("The address is not ready yet.")
                 .padding(.top, 20)
         }
-        Hairline()
-        NavigationLine(title: Text("Send from Home Assistant")) { inbound.sheet = .homeAssistant(source.id) }
     }
 
     // MARK: What Maé does
@@ -385,7 +377,8 @@ struct InboundSourcePage: View {
         }
         switch source.mode {
         case .sayNow:
-            Caption("After a chime, Maé says it as soon as nobody is speaking. Not said within a minute, it is kept for later.")
+            // Never said late: still waiting after a minute (or the `expires` it came with), it goes to the news.
+            Caption("After a chime, Maé says it as soon as nobody is speaking. If she couldn’t say it within a minute, she keeps it and tells you when you ask “What’s new?”.")
         case .keepForLater:
             Caption("Maé keeps it without a word, and reads it when you ask “What’s new?”.")
         case .notifyOnly:
@@ -393,7 +386,7 @@ struct InboundSourcePage: View {
         }
         Hairline()
         SwitchRow("May ask for an urgent announcement", isOn: binding(\.mayBeUrgent))
-        Caption("When it marks something urgent, Maé says it at once, whatever the mode: she may cut her own sentence, never yours. If she cannot speak (announcements off, not ready yet), it shows in a notification and is kept for later.")
+        Caption("Urgent information is said at once, whatever the mode, without cutting you off. If Maé can’t speak, a notification shows it and she keeps it for “What’s new?”.")
         Hairline()
         SwitchRow("Pause this source", isOn: binding(\.paused))
         Caption("While it is paused, its address answers as if it did not exist.")
@@ -417,7 +410,7 @@ struct InboundSourcePage: View {
     }
 }
 
-/// A source's last deliveries, newest first.
+/// A source's last deliveries, newest first, ten at a time.
 private struct InboundLog: View {
     let entries: [InboundLogEntry]
 
@@ -426,9 +419,11 @@ private struct InboundLog: View {
             Caption("Nothing received yet.")
                 .padding(.top, 20)
         } else {
-            ForEach(entries) { entry in
-                if entry.id != entries.first?.id { Hairline() }
-                LogRow(entry: entry)
+            PagedList(items: entries) { page in
+                ForEach(page) { entry in
+                    if entry.id != page.first?.id { Hairline() }
+                    LogRow(entry: entry)
+                }
             }
         }
     }
@@ -637,116 +632,6 @@ struct RemoveSourceSheet: View {
     }
 }
 
-/// How to send from Home Assistant: a REST command in its configuration, the source's address in its secrets, and a
-/// test from its developer tools. The examples follow the interface's language.
-struct HomeAssistantSheet: View {
-    let inbound: InboundAccess
-    /// Opened from a source's page: its address goes in the secrets.
-    let source: InboundSource.ID?
-
-    private var address: URL? { source.flatMap { inbound.status.addresses[$0] } }
-
-    var body: some View {
-        SheetCard(title: Text("Send from Home Assistant"),
-                  text: Text("Home Assistant sends Maé a sentence with a REST command. Add it to its configuration, then restart Home Assistant."))
-        {
-            VStack(alignment: .leading, spacing: 0) {
-                PageSection("In configuration.yaml")
-                CodeBlock(code: HomeAssistantExample.configuration)
-                PageSection("In secrets.yaml")
-                CodeBlock(code: HomeAssistantExample.secrets(address))
-                Group {
-                    if address == nil {
-                        Caption("Copy the address from the source’s page.")
-                    } else {
-                        Caption("The address of the source is secret: it stays in secrets.yaml.")
-                    }
-                }
-                .padding(.top, 16)
-                PageSection("Try it")
-                Text("In Developer tools › Actions, switch to YAML mode and run:")
-                    .textStyle(.step)
-                    .foregroundStyle(Palette.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 10)
-                CodeBlock(code: HomeAssistantExample.test)
-                Caption("Maé says it right away. Then call the same action from any automation.")
-                    .padding(.top, 16)
-                PageSection("Welcome home")
-                Text("With “news: true”, Maé says the text, then the news she kept for you. For example, when you come home:")
-                    .textStyle(.step)
-                    .foregroundStyle(Palette.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 10)
-                CodeBlock(code: HomeAssistantExample.welcome)
-            }
-            .padding(.top, -6)
-        } footer: {
-            Button("Done") { inbound.sheet = nil }
-                .buttonStyle(WindowButtonStyle(kind: .main))
-                .keyboardShortcut(.defaultAction)
-        }
-    }
-}
-
-/// The Home Assistant example of the help, in the interface's language (its names included: `prevenir_mae` in French).
-private enum HomeAssistantExample {
-    static var configuration: String {
-        String(localized: """
-            rest_command:
-              notify_mae:
-                # the address copied from OpenMaé
-                url: !secret mae_address
-                method: post
-                content_type: "application/json"
-                payload: "{{ {'text': message, 'news': news | default(false)} | to_json }}"
-            """)
-    }
-
-    /// An automation for coming home: the text, then the news.
-    static var welcome: String {
-        String(localized: """
-            automation:
-              - alias: "Back home: Maé welcomes you"
-                triggers:
-                  - trigger: state
-                    entity_id: person.<you>
-                    to: "home"
-                actions:
-                  - action: rest_command.notify_mae
-                    data:
-                      message: "Good evening, welcome back."
-                      news: true
-            """)
-    }
-
-    /// With the source's address, or a placeholder.
-    static func secrets(_ address: URL?) -> String {
-        let address = address?.absoluteString ?? String(localized: "<the source’s address>")
-        return String(localized: "mae_address: \"\(address)\"")
-    }
-
-    static var test: String {
-        String(localized: """
-            action: rest_command.notify_mae
-            data:
-              message: "Test from Home Assistant"
-            """)
-    }
-}
-
-/// A few lines to paste elsewhere, with "Copy".
-private struct CodeBlock: View {
-    let code: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CodeText(text: code)
-            CopyButton(text: code)
-        }
-    }
-}
-
 /// "Copy": puts a text on the pasteboard, and says so for a moment.
 private struct CopyButton: View {
     let text: String
@@ -892,10 +777,17 @@ enum InboundWords {
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated).locale(TaskText.locale))
     }
 
-    /// "14:32" today, "Thursday 14:32" before (a log keeps a week).
+    /// "14:32" today, "Thursday 14:32" within the week, "12 October 14:32" before (a log keeps 30 days).
     static func time(_ date: Date) -> String {
-        let style: Date.FormatStyle = Calendar.current.isDateInToday(date) ? .dateTime.hour().minute()
-            : .dateTime.weekday(.wide).hour().minute()
+        let calendar = Calendar.current
+        let weekAgo = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: Date())) ?? Date()
+        let style: Date.FormatStyle = if calendar.isDateInToday(date) {
+            .dateTime.hour().minute()
+        } else if date >= weekAgo {
+            .dateTime.weekday(.wide).hour().minute()
+        } else {
+            .dateTime.day().month(.wide).hour().minute()
+        }
         return date.formatted(style.locale(TaskText.locale))
     }
 

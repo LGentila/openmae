@@ -2,8 +2,10 @@ import SwiftUI
 import VoiceCore
 import VoiceEngineApple
 
-/// Settings › Internet search: the switch, the engine (Brave Search, offered first, or the user's own SearXNG) with the
-/// fields of the chosen one only, and a test. Brave's key and the SearXNG's password are kept in the keychain.
+/// Settings › Internet search: two capabilities, each in its own section and starting with its own switch. The web
+/// search: its switch, the engine (Brave Search, offered first, or the user's own SearXNG) with the fields of the chosen
+/// one only, and a test, all in one card. Then the weather, the rates and the travel times, which come from dedicated
+/// services. Brave's key and the SearXNG's password are kept in the keychain.
 struct WebSearchPage: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
@@ -28,28 +30,24 @@ struct WebSearchPage: View {
     var body: some View {
         SettingsPageScroll {
             PageHead(Text("Search the internet"))
-            PageIntro("Maé looks up what she can’t know: the news, a score, opening hours, a price. What you search for goes to the chosen engine; the rest of the conversation stays on your Mac.")
-            PageSection("Setting")
+            PageIntro("Maé looks up what she can’t know by herself, on the web or from dedicated services. What you ask goes only to the engine or the service that answers it; the rest of the conversation stays on your Mac.")
+            PageSection("Web search")
             SettingsCard {
                 SwitchRow("On", isOn: $model.settings.webSearch.enabled)
-                    .accessibilityLabel(Text("Search the internet"))
-                if !search.enabled {
-                    Caption("Turn the search on to choose its engine.")
-                }
-            }
-            if search.enabled {
-                PageSection("Engine")
-                SettingsCard {
+                    .accessibilityLabel(Text("Web search"))
+                Caption("Maé searches the web with the engine you choose: the news, a score, opening hours, a price.")
+                if search.enabled {
+                    Hairline()
                     SettingRow("Engine") { engineMenu }
                     Hairline()
                     switch search.source {
                     case .brave: braveRows
                     case .searxng: searxngRows
                     }
-                }
-                if canTest || model.webSearchTest != nil {
-                    PageSection("Check")
-                    SettingsCard { testRows }
+                    if canTest || model.webSearchTest != nil {
+                        Hairline()
+                        testRows
+                    }
                 }
             }
             sourcesSection
@@ -70,14 +68,14 @@ struct WebSearchPage: View {
 
     // MARK: - The built-in sources
 
-    /// One switch for the weather, the rates and the travel times, which come from dedicated services rather than from
-    /// the search's engine, with what leaves the Mac and the services' credits.
+    /// One switch for the weather, the rates and the travel times, which come from dedicated services on the internet
+    /// rather than from the search's engine, with the services' credits.
     @ViewBuilder private var sourcesSection: some View {
         PageSection("Weather, rates and travel times")
         SettingsCard {
             SwitchRow("On", isOn: $model.settings.builtInSources)
                 .accessibilityLabel(Text("Weather, rates and travel times"))
-            Caption("Maé answers the weather, a currency’s or a crypto’s rate and travel times from dedicated services, without searching. The place you ask about goes to Open-Meteo or Apple, the currency or the crypto to the European Central Bank’s rates or to CoinGecko; the rest of the conversation stays on your Mac.")
+            Caption("Maé gives you the weather, the rate of a currency or a crypto, and travel times, through dedicated services.")
             if model.settings.builtInSources {
                 if let tier = model.tier, !BuiltInSources.offered(on: tier) {
                     Caption("Not on this level yet: Maé’s model on it hasn’t been checked with these sources.", tone: .warn)
