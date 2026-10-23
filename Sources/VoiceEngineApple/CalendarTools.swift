@@ -18,6 +18,11 @@ public actor CalendarTools: ToolProvider {
     private enum Item: Sendable, Equatable {
         case event(String)  // EventKit identifiers
         case reminder(String)
+
+        var isEvent: Bool {
+            if case .event = self { return true }
+            return false
+        }
     }
     /// Saved values of an item, to put it back as it was ("annule" after a change).
     private struct Snapshot: Sendable {
@@ -64,14 +69,30 @@ public actor CalendarTools: ToolProvider {
 
     /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
     /// (`completed`): the answer then creates it there. Its moment is checked as it is carried out: on the day of the
-    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`).
+    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`). A change
+    /// is checked with the calendar or the list the user's words name, when its call names none (`completedChange`): one
+    /// that gives nothing else is not refused as changing nothing.
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
+            try ActionCatalog.check(refusedCreation.withRefusedDay(completedChange(call, context), said: context.userSaid),
+                                    context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
+        }
+    }
+
+    /// A change whose call names no calendar and no list, with the one the user's sentence of this turn names among the
+    /// writable ones of its item's kind (`ActionCatalog.withCollectionSaid(change:event:context:names:)`): `event`, the
+    /// item's kind; nil, the kind of the item the call names, when it names one created in this conversation. Any other
+    /// call, unchanged.
+    private func completedChange(_ call: ToolCall, event: Bool? = nil, _ context: ToolContext) -> ToolCall {
+        guard call.name == ActionCatalog.changeItem.name,
+              let event = event ?? (try? referenced(call, context))?.item.isEvent
+        else { return call }
+        return ActionCatalog.withCollectionSaid(change: call, event: event, context: context) {
+            writable($0 ? .event : .reminder)
         }
     }
 
@@ -382,7 +403,8 @@ public actor CalendarTools: ToolProvider {
             }
             // Worked out before anything changes: a refused call (a calendar that does not exist, a change that changes
             // nothing, answered by the app at once: « C’est déjà dans ton calendrier « Travail »… ») leaves the event as
-            // it was.
+            // it was. No calendar in the call: the one the user's words name (`completedChange`).
+            let call = completedChange(call, event: true, context)
             let calendar = try ActionCatalog.collectionNamed(in: call, event: true).map {
                 try eventCalendar(named: $0, current: event.calendar, context: context)
             }
@@ -417,6 +439,7 @@ public actor CalendarTools: ToolProvider {
                 throw ToolRefusal(forModel: "Le rappel \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
+            let call = completedChange(call, event: false, context)
             let list = try ActionCatalog.collectionNamed(in: call, event: false).map {
                 try reminderList(named: $0, current: reminder.calendar, context: context)
             }

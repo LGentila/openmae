@@ -1232,6 +1232,49 @@ struct CollectionSaidTests {
         #expect(answered(answer, again: nil) == meeting)
     }
 
+    /// A change that names no calendar and no list, with the one this turn's sentence names: a calendar for an event, a
+    /// list for a reminder, among the ones there are, its own too (the provider then says the item is already there).
+    @Test func putsItInAChangeThatNamesNone() {
+        let names: (Bool) -> [String] = { $0 ? ["Travail", "Maison"] : ["Rappels", "Courses"] }
+        func amended(_ call: ToolCall, event: Bool = true, said: [String]) -> ToolCall {
+            ActionCatalog.withCollectionSaid(change: call, event: event,
+                                             context: ToolContext(now: now, timeZone: paris, language: .french,
+                                                                  userSaid: said),
+                                             names: names)
+        }
+        let meeting = ToolCall(name: "modifier_element",
+                               arguments: ["reference": "e1", "titre": "réunion", "quand": "vendredi à 10 h"])
+        var inHome = meeting
+        inHome.arguments["calendrier"] = "Maison"
+        #expect(amended(meeting, said: ["Mets la réunion dans mon calendrier Maison."]) == inHome)
+        #expect(amended(meeting, said: ["Mets-la dans mon calendrier Travail."]).text("calendrier") == "Travail")
+        let bare = ToolCall(name: "modifier_element", arguments: ["reference": "dernier"])
+        #expect(amended(bare, said: ["Mets-la dans l'agenda maison."])
+                == ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "calendrier": "Maison"]))
+        let bread = ToolCall(name: "modifier_element", arguments: ["reference": "r1", "titre": "acheter du pain"])
+        #expect(amended(bread, event: false, said: ["Mets-le dans ma liste de courses."])
+                == ToolCall(name: "modifier_element",
+                            arguments: ["reference": "r1", "titre": "acheter du pain", "liste": "Courses"]))
+        #expect(amended(bread, event: false, said: ["Mets-le dans ma liste Rappels."]).text("liste") == "Rappels")
+        // A calendar for a reminder, a list for an event: nothing.
+        #expect(amended(bread, event: false, said: ["Mets-le dans mon calendrier Maison."]) == bread)
+        #expect(amended(meeting, said: ["Mets la réunion dans ma liste Courses."]) == meeting)
+        // A sentence that names none, or one that does not exist; an earlier one; none (one of several actions).
+        for said in [["Mets la réunion à la même heure."], ["Mets la réunion dans mon calendrier."],
+                     ["Mets la réunion dans mon calendrier Famille."],
+                     ["La réunion de demain à 10 h.", "Mets la réunion dans mon calendrier Maison."], []] {
+            #expect(amended(meeting, said: said) == meeting, "\(said)")
+        }
+        // The model's own, under either word; a creation (`withCollectionSaid(_:context:again:answer:names:)`).
+        for own: [String: JSONValue] in [["calendrier": "Travail"], ["liste": "Travail"]] {
+            var named = meeting
+            named.arguments.merge(own) { $1 }
+            #expect(amended(named, said: ["Mets la réunion dans mon calendrier Maison."]) == named, "\(own)")
+        }
+        let creation = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(amended(creation, said: ["Ajoute une réunion demain à 10 h dans mon calendrier Maison."]) == creation)
+    }
+
     /// The same creation written again right after it was refused gets the refused one's calendar or list; another call
     /// does not.
     @Test func aCreationWrittenAgainKeepsTheRefusedOnesCollection() throws {
@@ -1874,6 +1917,38 @@ struct PipelineActionTests {
         #expect(turn[3].content == answer)
     }
 
+    /// On a tier whose change offers no calendar (Gemma 4 E4B's, E2B's), « Mets la réunion dans mon calendrier Maison. »
+    /// answered with the meeting as it is, as E4B wrote it: the meeting is moved to « Maison », the calendar the user's
+    /// sentence of this turn names, at once.
+    @Test func changeThatLeavesTheCalendarOutMovesItWhereTheUserSays() async throws {
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "réunion", "quand": "demain à 10 h"])
+        let change = ToolCall(name: "modifier_element",
+                              arguments: ["reference": "e1", "titre": "réunion", "quand": "demain à 10 h"])
+        let model = ScriptedModel(scripts: [[.toolCall(meeting)], [.toolCall(change)]])
+        let (speaker, calendar) = (FakeSpeaker(), MemoryCalendar(movingItems: false))
+        await calendar.use(calendars: ["Travail", "Maison"], lists: nil)
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        let sentences = ["Ajoute une réunion demain à 10 h.", "Mets la réunion dans mon calendrier Maison."]
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: ScriptedTranscriber(sentences),
+                                     model: model, synthesizer: FakeSynthesizer(), output: speaker,
+                                     tools: ToolRunner(providers: [calendar]), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        let created = try #require(await log.finished.last?.assistantText)
+        #expect(created.hasPrefix("C’est dans ton calendrier «\(nb)Travail\(nb)»\(nb): réunion, "))
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 2 }
+        #expect(await model.requests.count == 2)  // no second try
+        let answer = try #require(await log.finished.last?.assistantText)
+        #expect(answer.hasPrefix("C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): réunion, "))
+        #expect(await calendar.touched == ["réunion"])
+    }
+
     @Test func timerAnnouncementWaitsForSilence() async throws {
         let (model, speaker) = (ScriptedModel(), FakeSpeaker())
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
@@ -2179,6 +2254,74 @@ struct ChangeTests {
             #expect(made.spoken.hasPrefix("C’est dans ton calendrier «\(nb)Maison\(nb)»\(nb): réunion"), "\(next.name)")
             #expect(await calendar.creations == ["e1"], "\(next.name)")
         }
+    }
+
+    /// voice-cli's calendar in memory, through the runner as dialogue-bench uses it, without the move in the tool (Gemma 4
+    /// E4B's and E2B's tiers) or with it: a change that names no calendar and no list takes the one the user's sentence of
+    /// this turn names, as if it named it (as `CalendarTools`: `ActionCatalog.withCollectionSaid(change:…)`). The meeting as
+    /// it is, as E4B and E2B wrote it, to « Mets-la dans mon calendrier Travail. »: where it already is; to « Mets la
+    /// réunion dans mon calendrier Maison. »: moved there, and « annule » puts it back. A change that gives nothing else is
+    /// not refused by the check. The same for a reminder and a list. A sentence that names no calendar, or one that does
+    /// not exist, an earlier sentence, none (one of several actions), a calendar for a reminder: what it gave before.
+    @Test(arguments: [false, true])
+    func memoryCalendarMovesAnItemWhereTheUserSays(movingItems: Bool) async throws {
+        let calendar = MemoryCalendar(movingItems: movingItems)
+        await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
+        let runner = ToolRunner(providers: [calendar])
+        let tool = await runner.tools().first { $0.name == ActionCatalog.changeItem.name }
+        #expect(tool == (movingItems ? ActionCatalog.changeItemMoving : ActionCatalog.changeItem))
+        func said(_ sentences: String...) -> ToolContext {
+            ToolContext(now: now, timeZone: paris, language: .french, userSaid: sentences)
+        }
+        let request = "Ajoute une réunion demain à 10 h."
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(await runner.handle(meeting, context: said(request)).forModel["calendrier"] == "Travail")
+        let asItIs = change(["titre": "Réunion", "quand": "vendredi à 10 h"])
+        let own = await runner.handle(asItIs, context: said("Mets-la dans mon calendrier Travail.", request))
+        #expect(!own.retryable && own.refusal != nil)
+        #expect(own.spoken
+                == "C’est déjà dans ton calendrier «\(nb)Travail\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(own.forModel["erreur"]?.text?.hasPrefix("Cet appel ne change rien : « e1 » est déjà") == true)
+        for context in [said("Change la réunion.", request), said("Mets la réunion dans mon calendrier Famille.", request),
+                        said("La réunion de demain à 10 h.", "Mets la réunion dans mon calendrier Maison."), said()] {
+            let unchanged = await runner.handle(asItIs, context: context)
+            #expect(!unchanged.retryable && unchanged.spoken == ActionPhrases.nothingChanged(event: true, .french),
+                    "\(context.userSaid)")
+        }
+        let nothing = await runner.handle(change([:]), context: said("Change la réunion.", request))
+        #expect(!nothing.retryable && nothing.spoken == ActionPhrases.nothingChanged(event: nil, .french))
+        #expect(await calendar.touched.isEmpty)
+
+        let moved = await runner.handle(asItIs, context: said("Mets la réunion dans mon calendrier Maison.", request))
+        #expect(moved.refusal == nil)
+        #expect(moved.spoken
+                == "C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(moved.forModel["calendrier"] == "Maison" && moved.forModel["debut"] == "2026-10-16T10:00")
+        let at = now.addingTimeInterval(30)
+        #expect(await runner.interception(for: "Annule", now: at) == .undo)
+        #expect(await runner.resolve(.undo, context: context(at: at))?.spoken == ActionPhrases.undone(.change, .french))
+        let bare = await runner.handle(change(["reference": "dernier"]), context: said("Mets-la dans l'agenda Maison."))
+        #expect(bare.spoken.hasPrefix("C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, "))
+        let later = await runner.handle(change(["quand": "à 11 h"]), context: said("Décale-la à 11 h dans mon calendrier Maison."))
+        #expect(later.spoken == "C’est déplacé\(nb): Réunion, vendredi 16 octobre de 11\(nb)h à midi.")  // its own now
+        #expect(later.forModel["calendrier"] == "Maison")
+
+        let breadRequest = "Rappelle-moi d'acheter du pain."
+        let bread = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain"])
+        #expect(await runner.handle(bread, context: said(breadRequest)).forModel["liste"] == "Rappels")
+        let breadAsItIs = change(["reference": "r1", "titre": "acheter du pain"])
+        let inReminders = await runner.handle(breadAsItIs, context: said("Mets-le dans ma liste Rappels.", breadRequest))
+        #expect(!inReminders.retryable && inReminders.spoken == "C’est déjà dans ta liste «\(nb)Rappels\(nb)»\(nb): acheter du pain.")
+        for context in [said("Mets-le dans mon calendrier Maison.", breadRequest),
+                        said("Mets-le dans ma liste Bricolage.", breadRequest)] {
+            let unchanged = await runner.handle(breadAsItIs, context: context)
+            #expect(unchanged.spoken == ActionPhrases.nothingChanged(event: false, .french), "\(context.userSaid)")
+        }
+        let groceries = await runner.handle(breadAsItIs, context: said("Mets-le dans ma liste de courses.", breadRequest))
+        #expect(groceries.spoken == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain.")
+        #expect(groceries.forModel["liste"] == "Courses")
+        #expect(await calendar.touched == ["Réunion", "Réunion", "Réunion", "acheter du pain"])
+        #expect(await calendar.creations == ["e1", "r1"])
     }
 }
 
