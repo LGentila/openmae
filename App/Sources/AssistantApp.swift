@@ -196,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// (`AssistantHost.windDown`): AppKit's `exit` destroys the C++ objects MLX keeps for the whole process, and a
     /// computation of the language model still under way crashed under them (the app quit as a keep-warm pass started: 2
     /// crash reports in 11 quits; as the conversations' beginning started at launch: 4 in 5). After `windDownLimit` it
-    /// ends all the same.
+    /// ends all the same, without destroying them (`endNow`).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !quitting else { return .terminateLater }  // quit again meanwhile: the first quit's answer ends the app
         if DesktopPresence.current?.hasRunningTask == true {
@@ -216,21 +216,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         Task {
             try? await Task.sleep(for: Self.windDownLimit)
-            if !quitAnswered { DebugLog.log("quit: the engine did not wind down in \(Self.windDownLimit), quitting anyway") }
-            endQuitting()
+            guard !quitAnswered else { return }
+            DebugLog.log("quit: the engine did not wind down in \(Self.windDownLimit), quitting anyway")
+            Self.endNow()
         }
         return .terminateLater
     }
 
-    /// Lets the app end (`applicationShouldTerminate`), once.
+    /// Lets the app end (`applicationShouldTerminate`), once: the engine has wound down, and AppKit ends the app the usual
+    /// way (`applicationWillTerminate`, then `exit`).
     private func endQuitting() {
         guard !quitAnswered else { return }
         quitAnswered = true
         NSApp.reply(toApplicationShouldTerminate: true)
     }
 
+    /// Ends the process at once: the engine did not wind down in `windDownLimit`, and the GPU may still compute (a chunk
+    /// of the conversations' beginning already queued, which has to finish before the beginning stops; a model's load and
+    /// warm-up, which cannot be interrupted). Letting AppKit end the app would run `exit`, and with it the C++ destructors
+    /// of the objects MLX keeps for the whole process, under that computation: the crash the wind-down is there to avoid
+    /// (a command encoder released while still open, a mutex destroyed under Metal's completion queue, segmentation faults
+    /// in MLX's encoding). `_exit` ends the process without running them, and without AppKit's last steps either: what
+    /// `applicationWillTerminate` does is done here first, so that the agents' runs do not outlive the app.
+    private static func endNow() -> Never {
+        AssistantHost.stopAgentsNow()
+        DebugLog.log("quit: the agents' runs stopped, the app ends at once (_exit: MLX's objects are left as they are)")
+        _exit(0)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         AssistantHost.stopAgentsNow()
+        DebugLog.log("quit: the agents' runs stopped, the app ends")
     }
 
     /// A task's notification shows even when OpenMaé is in front (the user may be reading something else in it); a
