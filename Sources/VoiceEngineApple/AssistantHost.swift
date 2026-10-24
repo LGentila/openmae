@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import VoiceCore
 
 /// The engine as the app sees it: it receives `AssistantCommand`s and sends `AssistantEvent`s
@@ -7,11 +8,16 @@ import VoiceCore
 ///
 /// Its life: microphone permission and hardware check → if models are missing, say what has to be
 /// downloaded and wait for the user's go (first launch) → download → load the models → converse.
-/// Choosing another tier or deleting the models goes through all of it again.
+/// Choosing another tier or deleting the models goes through all of it again. The app quitting winds it down
+/// (`windDown`).
 public actor AssistantHost: AssistantConnection {
     public nonisolated let events: AsyncStream<AssistantEvent>
     private nonisolated let emit: AsyncStream<AssistantEvent>.Continuation
     private nonisolated let commands: AsyncStream<AssistantCommand>.Continuation
+    /// The task that handles the commands, one after the other: `windDown` cancels it, and the command under way with it.
+    private nonisolated let commandLoop = Mutex<Task<Void, Never>?>(nil)
+    /// Set for good by `windDown`: the app is quitting, the engine starts nothing more.
+    private var quitting = false
 
     private enum Stage { case idle, setup, downloading, loading, running }
     private var stage = Stage.idle
@@ -101,9 +107,10 @@ public actor AssistantHost: AssistantConnection {
         let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
         self.commands = commands
         // One command at a time, in order (a push-to-talk release must never overtake its press).
-        Task { [weak self] in
+        let loop = Task { [weak self] in
             for await command in commandStream { await self?.handle(command) }
         }
+        commandLoop.withLock { $0 = loop }
         Task { await self.observeTimers() }
         Task { await self.observeTasks() }
     }
@@ -111,6 +118,38 @@ public actor AssistantHost: AssistantConnection {
     /// The app is quitting: the agents' runs stop with it (synchronous, from the app's last moments).
     public static func stopAgentsNow() {
         ClaudeCodeConnector.stopAll()
+    }
+
+    /// The app is quitting (before it ends: `applicationShouldTerminate`): the engine starts nothing more, and this
+    /// returns once the language model computes nothing. At exit, the objects MLX keeps for the whole process (its
+    /// command encoders, its locks) are destroyed, and a computation still under way on another thread crashed the app:
+    /// a keep-warm pass in `metal::get_command_encoder`, the conversations' beginning (at launch, or after another model
+    /// was chosen) on a command encoder still open ("Command encoder released without endEncoding"); voice-cli crashed
+    /// the same way with the history computed ahead after an answer (see `MLXChatModel.windDown`).
+    ///
+    /// The command under way (a start-up, new tools, a new conversation) stops at its next chunk; the microphone and an
+    /// iPhone's no longer feed the pipeline; the pipeline stops (the answer under way at its next token, its voice at
+    /// once, the history computed ahead at its next chunk, no more keep-warm passes); a timer that rings or received
+    /// information is no longer said; then the models compute nothing more in the background, and the requests already
+    /// sent and the GPU are over (`MLXChatModel.windDownAll`). Nothing is released: the process ends right after. A
+    /// beginning stops once the chunk already queued on the GPU is computed: 1.7 to 1.8 s with Gemma 4 26B.
+    public func windDown() async {
+        guard !quitting else { return }
+        quitting = true
+        let clock = ContinuousClock()
+        let start = clock.now
+        let loop = commandLoop.withLock { $0 }
+        loop?.cancel()  // the command under way stops at its next cancellation point (a beginning: its next chunk)
+        download?.cancel()
+        remoteFeed?.cancel()
+        tasks.forEach { $0.cancel() }  // the Mac's microphone, the events, the levels, the diagnostics
+        await pipeline?.stop()
+        let pipelineStopped = clock.now
+        await loop?.value  // a start-up stopped where it was (`start` makes no pipeline run once quitting)
+        let commandOver = clock.now
+        await MLXChatModel.windDownAll()
+        DebugLog.log("quit: the engine wound down in \(clock.now - start) (the pipeline stopped in "
+            + "\(pipelineStopped - start), the command under way was over \(commandOver - pipelineStopped) later)")
     }
 
     /// The `userInfo` key of the folder a task's notification opens when clicked.
@@ -199,7 +238,7 @@ public actor AssistantHost: AssistantConnection {
     }
 
     private func start() async {
-        guard stage == .idle || stage == .setup else { return }
+        guard !quitting, stage == .idle || stage == .setup else { return }
         stage = .loading
         emit.yield(.loading(.microphone))
         guard await SystemAudio.requestMicrophoneAccess() else {
@@ -289,6 +328,10 @@ public actor AssistantHost: AssistantConnection {
             fail(.engine("\(error)"))
             return
         }
+        guard !quitting else {  // the app quits (`windDown`): the pipeline never runs
+            await pipeline.stop()
+            return
+        }
 
         self.model = model
         self.pipeline = pipeline
@@ -351,6 +394,7 @@ public actor AssistantHost: AssistantConnection {
         stage = .idle
         restartWhenLoaded = false  // the next start reads the settings anyway
         loadedPacks = []  // nothing stays loaded: start-up stops whatever it had started before it fails
+        guard !quitting else { return }  // a start-up stopped because the app quits: the window shows nothing of it
         emit.yield(.problem(problem))
     }
 
@@ -825,6 +869,7 @@ public actor AssistantHost: AssistantConnection {
     private func timerFinished(_ finished: TimerTools.Finished) async {
         DebugLog.log("timer: \(finished.text)")
         Notifier.post(title: AppIdentity.name, body: finished.text)
+        guard !quitting else { return }  // its notification only: the pipeline has stopped
         await pipeline?.announce(finished.text, note: finished.note, language: finished.language)
     }
 
@@ -1014,13 +1059,13 @@ extension AssistantHost: RemoteAudioRouting {
 /// trigger it.
 extension AssistantHost: Announcing {
     public func canAnnounce() async -> Bool {
-        stage == .running && pipeline != nil
+        !quitting && stage == .running && pipeline != nil
     }
 
     public func announce(_ text: String, note: String, language: SpeechLanguage, chime: Bool, urgent: Bool, id: UUID)
         async -> Bool
     {
-        guard stage == .running, let pipeline else { return false }
+        guard !quitting, stage == .running, let pipeline else { return false }
         DebugLog.log("received information: announced\(urgent ? " (urgent)" : "")")
         // Urgent: Maé's own sentence (or her thinking) is cut; the user is never cut, the announcement waits for them.
         if urgent, pipelineState == .thinking || pipelineState == .speaking { await pipeline.interrupt() }

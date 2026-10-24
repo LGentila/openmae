@@ -29,8 +29,10 @@ struct AssistantApp: App {
         let engine: any AssistantConnection = Demo.isOn ? DemoConnection()
             : AssistantHost(actionsTestCollection: ActionsTestCollection.name,
                             agentsTestFolder: ActionsTestCollection.agentsFolder)
+        AppDelegate.engine = engine as? AssistantHost
         #else
         let engine = AssistantHost()
+        AppDelegate.engine = engine
         #endif
         #if DEBUG
         // The still pictures (`-snapshots`) never touch the user's own keys, iPhones, sources or relays.
@@ -164,6 +166,16 @@ private struct SettingsCommand: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// The engine, wound down before the app ends (`applicationShouldTerminate`); nil for the demonstration.
+    @MainActor static var engine: AssistantHost?
+    /// How long quitting waits for the engine at most: quitting never hangs. The conversations' beginning, the longest
+    /// to stop, takes 1.7 to 1.8 s with Gemma 4 26B, more when the Mac is short of memory (`AssistantHost.windDown`).
+    private static let windDownLimit = Duration.seconds(2)
+    /// The engine winds down for the app to end (`applicationShouldTerminate`).
+    private var quitting = false
+    /// The app may end (`endQuitting`).
+    private var quitAnswered = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         #if DEBUG
@@ -180,15 +192,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    /// Quitting stops the task Claude Code is working on: asked first.
+    /// Quitting stops the task Claude Code is working on: asked first. Then the app ends once the engine has wound down
+    /// (`AssistantHost.windDown`): AppKit's `exit` destroys the C++ objects MLX keeps for the whole process, and a
+    /// computation of the language model still under way crashed under them (the app quit as a keep-warm pass started: 2
+    /// crash reports in 11 quits; as the conversations' beginning started at launch: 4 in 5). After `windDownLimit` it
+    /// ends all the same.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard DesktopPresence.current?.hasRunningTask == true else { return .terminateNow }
-        let alert = NSAlert()
-        alert.messageText = String(localized: "A task is still in progress")
-        alert.informativeText = String(localized: "Claude Code is working on a task. Quitting OpenMaé stops it.")
-        alert.addButton(withTitle: String(localized: "Quit"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
-        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        guard !quitting else { return .terminateLater }  // quit again meanwhile: the first quit's answer ends the app
+        if DesktopPresence.current?.hasRunningTask == true {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "A task is still in progress")
+            alert.informativeText = String(localized: "Claude Code is working on a task. Quitting OpenMaé stops it.")
+            alert.addButton(withTitle: String(localized: "Quit"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        }
+        guard let engine = Self.engine else { return .terminateNow }
+        quitting = true
+        DebugLog.log("quit: the engine winds down")
+        Task {
+            await engine.windDown()
+            endQuitting()
+        }
+        Task {
+            try? await Task.sleep(for: Self.windDownLimit)
+            if !quitAnswered { DebugLog.log("quit: the engine did not wind down in \(Self.windDownLimit), quitting anyway") }
+            endQuitting()
+        }
+        return .terminateLater
+    }
+
+    /// Lets the app end (`applicationShouldTerminate`), once.
+    private func endQuitting() {
+        guard !quitAnswered else { return }
+        quitAnswered = true
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

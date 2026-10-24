@@ -51,18 +51,25 @@ enum MemoryResidency {
     /// Reads one byte of every page, from several threads at once: what macOS compressed or wrote to swap comes back
     /// now, and the pages count as used. For the 26B's 14.2 GB of weights: 1.7 s with 4 threads when 87% of them were
     /// out of RAM, 0.15 to 0.3 s when all were in. The memory must stay allocated meanwhile (the caller keeps its arrays).
-    static func touch(_ ranges: [Range<UInt>], threads: Int) {
+    /// `stop`, asked every `stopCheck` pages (64 MB), ends the reads early once it says so.
+    static func touch(_ ranges: [Range<UInt>], threads: Int, stop: (@Sendable () -> Bool)? = nil) {
         let parts = split(ranges, into: threads)
         DispatchQueue.concurrentPerform(iterations: parts.count) { i in
             var sum: UInt64 = 0
-            for range in parts[i] {
+            var pages = 0
+            reading: for range in parts[i] {
                 for address in stride(from: range.lowerBound, to: range.upperBound, by: Int(page)) {
                     sum &+= UInt64(UnsafePointer<UInt8>(bitPattern: address)!.pointee)
+                    pages += 1
+                    if pages % stopCheck == 0, stop?() == true { break reading }
                 }
             }
             sink.add(sum, ordering: .relaxed)  // so that the compiler cannot leave the reads out
         }
     }
+
+    /// How many pages `touch` reads between two questions to its `stop`.
+    private static let stopCheck = 4096
 
     private static let sink = Atomic<UInt64>(0)
 

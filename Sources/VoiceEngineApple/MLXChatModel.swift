@@ -106,8 +106,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var rebuild: (tokens: [Int], cache: [KVCache], done: Int)?
     private var rebuildTask: Task<Void, Never>?
     private var backgroundAllowed = true
-    /// Set for good by `windDown`: the model computes nothing more in the background.
-    private var windingDown = false
+    /// Set for good by `windDown`, as soon as it is called (before it waits for the actor): the model computes nothing more
+    /// in the background, and a keep-warm pass under way gives up (`keepWarm`).
+    private nonisolated let windingDownFlag = Atomic<Bool>(false)
+    private nonisolated var windingDown: Bool { windingDownFlag.load(ordering: .relaxed) }
     /// The `catchUp`s under way, each in its caller's task: `windDown` waits for them.
     private var catchUpsUnderWay = 0
     /// Counts what uses the cache, but the history computed ahead (`catchUp`): requests, conversations computed,
@@ -745,9 +747,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// keeps for the whole process (its command queues, its locks) are destroyed, and a computation still under way on
     /// another thread crashed the process ("[METAL] Command buffer execution failed: Internal Error", "mutex lock failed:
     /// Invalid argument", or a segmentation fault). It did after `voice-cli conversation` runs with Gemma 4 26B whose last
-    /// answer, three actions, left the model computing the history ahead.
-    public func windDown() async {
-        windingDown = true
+    /// answer, three actions, left the model computing the history ahead. The app winds it down too before it ends
+    /// (`AssistantHost.windDown`), where a keep-warm pass crashed it the same way.
+    public nonisolated func windDown() async {
+        windingDownFlag.store(true, ordering: .relaxed)  // at once: a keep-warm pass under way holds the actor
+        await waitUntilIdle()
+    }
+
+    /// `windDown`, once the actor is free.
+    private func waitUntilIdle() async {
         let start = ContinuousClock.now
         while catchUpsUnderWay > 0 || rebuildTask != nil || pendingRequests.load(ordering: .relaxed) > 0 {
             // What it waits for runs on this actor: in a cancelled task, `Task.sleep` alone returns at once and never
@@ -770,14 +778,22 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// and that request read its 47 new tokens in 1.28 s instead of about 0.5 s; once a request had read it on the GPU, it
     /// stayed in RAM. Its 0.25 to 0.75 GB (Gemma 4 26B) cost nothing measurable: the GPU part of a pass stayed at 0.24 to
     /// 0.36 s.
+    ///
+    /// The model winding down (`windDown`: the app quits) stops the reads from the CPU where they are, and nothing is
+    /// computed on the GPU: the app waited for the whole pass, up to 1.4 s with Gemma 4 26B when macOS had compressed a
+    /// quarter of the weights (0.87 s of reads from the CPU, then the GPU).
     public func keepWarm() {
         guard backgroundAllowed, !windingDown else { return }
         logResidency("before keep-warm")
         let clock = ContinuousClock()
         let start = clock.now
         let conversation = conversationMemory
-        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversation), threads: 4)
+        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversation), threads: 4) { [self] in windingDown }
         let touched = clock.now
+        guard !windingDown else {
+            DebugLog.log("LLM: keep-warm given up after \(touched - start), the model winds down")
+            return
+        }
         eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
         releaseFreeBuffers()
