@@ -469,6 +469,14 @@ struct CLIError: Error, CustomStringConvertible {
     init(_ d: String) { description = d }
 }
 
+/// Exits once every language model this process loaded computes nothing (`MLXChatModel.windDownAll`): at exit, MLX's
+/// objects for the whole process are destroyed, and a model still computing then crashed voice-cli, as the history it
+/// computes ahead after a `conversation`'s last answer did.
+func exitOnceIdle(_ status: Int32) async -> Never {
+    await MLXChatModel.windDownAll()
+    exit(status)
+}
+
 // MARK: - Commands
 
 func waitForAnswer(_ e: Engine, mic: SimulatedMicrophone, after count: Int, timeout: Double = 60) async {
@@ -750,6 +758,8 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 // MARK: - Entry point
 
+setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file: a crash keeps the lines printed before it
+
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
     "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
@@ -774,9 +784,9 @@ if let options = Options.parse(CommandLine.arguments),
         }
     } catch {
         print("\nERROR: \(error)")
-        exit(1)
+        await exitOnceIdle(1)
     }
-    exit(0)
+    await exitOnceIdle(0)
 }
 if let options = Options.parse(CommandLine.arguments), options.command == "voice-gaps" {
     do {
@@ -785,9 +795,9 @@ if let options = Options.parse(CommandLine.arguments), options.command == "voice
         try await runVoiceGaps(options, engine, voice: voice)
     } catch {
         print("ERROR: \(error)")
-        exit(1)
+        await exitOnceIdle(1)
     }
-    exit(0)
+    await exitOnceIdle(0)
 }
 if let options = Options.parse(CommandLine.arguments), options.command == "announce-drop" {
     do {
@@ -800,9 +810,9 @@ if let options = Options.parse(CommandLine.arguments), options.command == "annou
         try await runAnnounceDrop(options, engine, voice: measuring!)
     } catch {
         print("ERROR: \(error)")
-        exit(1)
+        await exitOnceIdle(1)
     }
-    exit(0)
+    await exitOnceIdle(0)
 }
 guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty else {
     print("""
@@ -857,5 +867,6 @@ do {
     }
 } catch {
     print("ERROR: \(error)")
-    exit(1)
+    await exitOnceIdle(1)
 }
+await exitOnceIdle(0)

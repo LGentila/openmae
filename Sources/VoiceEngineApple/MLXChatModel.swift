@@ -106,6 +106,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var rebuild: (tokens: [Int], cache: [KVCache], done: Int)?
     private var rebuildTask: Task<Void, Never>?
     private var backgroundAllowed = true
+    /// Set for good by `windDown`: the model computes nothing more in the background.
+    private var windingDown = false
+    /// The `catchUp`s under way, each in its caller's task: `windDown` waits for them.
+    private var catchUpsUnderWay = 0
     /// Counts what uses the cache, but the history computed ahead (`catchUp`): requests, conversations computed,
     /// beginnings, the tools changing. That computation stops as soon as the count moves.
     private var cacheUses = 0
@@ -205,9 +209,27 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let model = try MLXChatModel(context: context, tokenizer: tokenizer,
                                      chatTemplate: template.map { GemmaTemplateFix.patched($0) ?? $0 },
                                      parameters: parameters)
+        loaded.withLock { models in
+            models.removeAll { $0.model == nil }
+            models.append(LoadedModel(model: model))
+        }
         await model.bringWeightsBack()
         try await model.warmUp()
         return model
+    }
+
+    /// Every model this process loaded, and still holds, winds down (`windDown`): before the process exits.
+    public static func windDownAll() async {
+        for model in loaded.withLock({ $0.compactMap(\.model) }) {
+            await model.windDown()
+        }
+    }
+
+    /// The models loaded in this process, held weakly, for `windDownAll`.
+    private static let loaded = Mutex<[LoadedModel]>([])
+
+    private struct LoadedModel: Sendable {
+        weak var model: MLXChatModel?
     }
 
     /// Loading takes the Mac's free memory down for a moment, and macOS compresses the weights loaded first: by the end
@@ -593,7 +615,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `async` like the protocol's default (see `useTools`).
     public func catchUp(with conversation: [ChatMessage]) async {
         lastCatchUp = (0, 0)
-        defer { releaseFreeBuffers() }
+        guard !windingDown else { return }
+        catchUpsUnderWay += 1
+        defer {
+            releaseFreeBuffers()
+            catchUpsUnderWay -= 1
+        }
         guard let tokens = try? render(conversation, generationPrompt: false) else { return }
         let common = commonPrefix(cachedTokens, tokens, answering: false)
         guard common < tokens.count else { return }
@@ -617,8 +644,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// tokens in a request's (about 50 tokens: 0.56 s instead of 0.15 s with Gemma 4 26B, 0.29 s instead of 0.1 s with
     /// E4B), but nobody waits for it: it starts as soon as the announcement is said, and the user's next request comes
     /// later (a pause after their first words, then its transcription). Given up too as soon as anything else uses the
-    /// cache (a new conversation, other tools), and when the task is cancelled. Returns the tokens computed, and the time
-    /// spent computing them.
+    /// cache (a new conversation, other tools), when the task is cancelled, and when the model winds down (`windDown`).
+    /// Returns the tokens computed, and the time spent computing them.
     private func computeAhead(_ tokens: [Int], from start: Int) async -> (computed: Int, ms: Double) {
         let uses = cacheUses
         let clock = ContinuousClock()
@@ -629,8 +656,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             bringCacheBack()
             spent += clock.now - t0
         }
-        while backgroundAllowed, pendingRequests.load(ordering: .relaxed) == 0, cacheUses == uses, !Task.isCancelled,
-              cachedTokens.count < tokens.count
+        while backgroundAllowed, !windingDown, pendingRequests.load(ordering: .relaxed) == 0, cacheUses == uses,
+              !Task.isCancelled, cachedTokens.count < tokens.count
         {
             let done = cachedTokens.count
             let chunk = Array(tokens[..<min(done + Self.aheadChunk, tokens.count)])
@@ -649,7 +676,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let stopped = cacheUses != uses ? "the cache was used meanwhile"
             : cachedTokens.count >= tokens.count ? nil
             : pendingRequests.load(ordering: .relaxed) > 0 ? "a request was sent" : !backgroundAllowed ? "someone speaks"
-            : "stopped"
+            : windingDown ? "the model winds down" : "stopped"
         DebugLog.log("LLM: computed \(computed) of \(tokens.count - start) tokens of the history ahead (reused \(start)) in "
             + "\(spent)" + (stopped.map { ", then gave way: \($0)" } ?? ""))
         return (computed, Double(spent.components.seconds) * 1000 + Double(spent.components.attoseconds) / 1e15)
@@ -711,6 +738,27 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         backgroundAllowed = allowed
     }
 
+    /// Has the model compute nothing more in the background, for good (the history computed ahead, a shortened history,
+    /// the keep-warm passes), and returns once it computes nothing at all: what was under way has stopped at its next
+    /// chunk, the requests already sent have ended, and the GPU has finished what they left it (an answer's last step has
+    /// it compute the token after, `TokenIterator`). Before the process exits (`voice-cli`): at exit, the objects MLX
+    /// keeps for the whole process (its command queues, its locks) are destroyed, and a computation still under way on
+    /// another thread crashed the process ("[METAL] Command buffer execution failed: Internal Error", "mutex lock failed:
+    /// Invalid argument", or a segmentation fault). It did after `voice-cli conversation` runs with Gemma 4 26B whose last
+    /// answer, three actions, left the model computing the history ahead.
+    public func windDown() async {
+        windingDown = true
+        let start = ContinuousClock.now
+        while catchUpsUnderWay > 0 || rebuildTask != nil || pendingRequests.load(ordering: .relaxed) > 0 {
+            // What it waits for runs on this actor: in a cancelled task, `Task.sleep` alone returns at once and never
+            // lets it.
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        Stream.defaultStream.synchronize()
+        DebugLog.log("LLM: wound down in \(ContinuousClock.now - start)")
+    }
+
     /// Reads one byte of every page of the weights and of the conversation's memory from the CPU: what macOS compressed
     /// since the last pass comes back, and the pages count as used again (see `MemoryResidency`). Then reads every
     /// weight once on the GPU (a sum per tensor: ≈ 0.35 s of GPU for 15 GB); running a few tokens through the model
@@ -723,7 +771,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// stayed in RAM. Its 0.25 to 0.75 GB (Gemma 4 26B) cost nothing measurable: the GPU part of a pass stayed at 0.24 to
     /// 0.36 s.
     public func keepWarm() {
-        guard backgroundAllowed else { return }
+        guard backgroundAllowed, !windingDown else { return }
         logResidency("before keep-warm")
         let clock = ContinuousClock()
         let start = clock.now
@@ -824,6 +872,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// (≈ 0.25 s each), only while nobody speaks; the current cache keeps answering meanwhile. The
     /// first request that starts with the shortened history switches to the new cache.
     public func prepareShortenedHistory(_ conversation: [ChatMessage]) async throws {
+        guard !windingDown else { return }
         let tokens = try render(conversation, generationPrompt: false)
         if let r = rebuild, commonPrefix(Array(r.tokens[..<r.done]), tokens) == r.done {
             rebuild = (tokens, r.cache, r.done)  // same shortened history, grown since: keep the progress
@@ -839,7 +888,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     private func runRebuild() async {
-        while let r = rebuild, r.done < r.tokens.count - 1 {
+        while !windingDown, let r = rebuild, r.done < r.tokens.count - 1 {
             if !backgroundAllowed {
                 try? await Task.sleep(for: .milliseconds(50))
                 continue
@@ -848,7 +897,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             await Task.yield()  // let a waiting request through between chunks
         }
         rebuildTask = nil
-        DebugLog.log("LLM: background rebuild complete")
+        DebugLog.log(windingDown ? "LLM: background rebuild given up, the model winds down"
+                                 : "LLM: background rebuild complete")
         releaseFreeBuffers()
     }
 

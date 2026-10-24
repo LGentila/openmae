@@ -43,7 +43,6 @@ private actor PrintingAnnouncer: Announcing {
 }
 
 func runInbound(_ arguments: [String]) async throws {
-    setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file
     func value(_ flag: String) -> String? {
         arguments.firstIndex(of: flag).flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     }
