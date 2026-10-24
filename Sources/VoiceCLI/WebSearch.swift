@@ -38,5 +38,5 @@ func runWebSearch(_ arguments: [String]) async throws {
     print(String(decoding: try encoder.encode(found), as: UTF8.self))
     let summary = "\(found.results.count) results kept of \(found.found)"
         + (found.answer == nil ? "" : ", and a direct answer") + ", in \(elapsed)\n"
-    FileHandle.standardError.write(Data(summary.utf8))
+    DebugLog.writeToStandardError(summary)
 }

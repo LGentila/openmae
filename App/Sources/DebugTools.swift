@@ -46,7 +46,7 @@ enum DebugCommands {
                 guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return }
                 let point = NSPoint(x: numbers[0], y: window.frame.height - numbers[1])
                 let target = window.contentView?.superview?.hitTest(point)
-                FileHandle.standardError.write(Data("click \(point) → \(target.map { String(describing: type(of: $0)) } ?? "nothing")\n".utf8))
+                DebugLog.writeToStandardError("click \(point) → \(target.map { String(describing: type(of: $0)) } ?? "nothing")\n")
                 for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                     if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                                                       timestamp: ProcessInfo.processInfo.systemUptime,
@@ -100,7 +100,7 @@ enum Snapshots {
         let name = defaultsName
         guard name != Bundle.main.bundleIdentifier, let defaults = UserDefaults(suiteName: name) else {
             // Never the user's own instead.
-            FileHandle.standardError.write(Data("snapshots: no defaults domain of their own (\(name))\n".utf8))
+            DebugLog.writeToStandardError("snapshots: no defaults domain of their own (\(name))\n")
             exit(1)
         }
         defaults.removePersistentDomain(forName: name)
