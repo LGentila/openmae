@@ -57,8 +57,16 @@ final class PhoneModel {
         case macTookOver
     }
 
+    /// Another Mac's pairing link, which opened the app while a Mac is paired: it waits for the user's yes (`replace`).
+    struct Replacement {
+        let link: PairingLink
+        /// The paired Mac's name: this device would forget it.
+        let current: String
+    }
+
     private(set) var mac: PairedMac?
     private(set) var pairing = Pairing.scanning
+    private(set) var replacement: Replacement?
     /// The Mac removed this iPhone from its settings.
     private(set) var forgotten = false
     private(set) var link: PhoneLink.Status?
@@ -193,11 +201,43 @@ final class PhoneModel {
 
     // MARK: - Pairing
 
-    /// A QR code was read (by the app's scanner, or the link opened the app).
+    /// A QR code was read by the app's scanner.
     func scanned(_ text: String) {
-        guard pairing == .scanning || pairing == .expired || pairing == .unreachable,
-              let link = PairingLink(string: text)
-        else { return }
+        guard let link = PairingLink(string: text) else { return }
+        pair(link)
+    }
+
+    /// A pairing link opened the app: the iPhone's Camera read the Mac's QR code (a universal link, see
+    /// iPhone/project.yml), or the link was tapped. It pairs as a code read by the scanner does, with the same screens
+    /// (a code expired or already used included), whether the app was running or not. With a Mac already paired, that
+    /// Mac's code pairs again at once (after it removed this device, say); another Mac's waits for the user's yes: this
+    /// device talks to one Mac at a time, and a link tapped elsewhere must not swap Macs behind their back.
+    func opened(_ url: URL) {
+        guard let link = PairingLink(url: url), canPair else { return }
+        // The settings, if the app was left on them, would hide the pairing.
+        showsSettings = false
+        if let mac, link.macKey != mac.publicKey {
+            replacement = Replacement(link: link, current: mac.name)
+        } else {
+            pair(link)
+        }
+    }
+
+    /// The user's answer about `replacement`: pair with that Mac (the paired one is forgotten if it works), or not.
+    func replace(with link: PairingLink?) {
+        replacement = nil
+        if let link { pair(link) }
+    }
+
+    /// No pairing under way, nor a "Done" waiting for "Talk to Maé".
+    private var canPair: Bool {
+        pairing == .scanning || pairing == .expired || pairing == .unreachable
+    }
+
+    private func pair(_ link: PairingLink) {
+        guard canPair else { return }
+        // A conversation in progress (the Camera opened the app over it) gives way to the pairing's screens.
+        closeConversation(nil)
         pairing = .contacting
         Task {
             do {
@@ -313,18 +353,22 @@ final class PhoneModel {
             disconnect()
             mac = nil
             UserDefaults.standard.removeObject(forKey: Keys.mac)
-            pairing = .scanning
+            // Not a pairing under way: the Mac's new code, which opened the app, is what adds this device again.
+            if pairing != .contacting { pairing = .scanning }
         }
     }
 
     /// The app came to the front: the link and the conversation open on their own ("you open the app, the link is
-    /// made, the orb goes to rest"). A station opens the link only: it waits for a tap on the orb.
+    /// made, the orb goes to rest"). A station opens the link only: it waits for a tap on the orb. Not the
+    /// conversation while a code that opened the app is in use or asks first, nor on "Done" before "Talk to Maé".
     func becameActive() {
         isInForeground = true
         updateStation()
         guard mac != nil else { return }
         if phoneLink == nil { connect() } else { retry() }
-        if !isConversationOpen, pause == nil, !isStation { openConversation() }
+        if !isConversationOpen, pause == nil, !isStation, pairing == .scanning, replacement == nil {
+            openConversation()
+        }
     }
 
     /// The app went to the background: without a conversation, the link closes (the battery). Station mode only

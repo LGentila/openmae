@@ -103,8 +103,8 @@ targets:
         com.apple.security.personal-information.calendars: true
         # The Mac's location, for "here" (the built-in sources).
         com.apple.security.personal-information.location: true
-    # Signing: Signing.xcconfig, completed on each Mac by Signing.local.xcconfig (not published, so the
-    # Apple Developer team stays private). Distributed builds need a "Developer ID Application" certificate.
+    # Signing: Signing.xcconfig, completed on each Mac by Signing.local.xcconfig (not published: each Mac signs
+    # with its own Apple Developer team). Distributed builds need a "Developer ID Application" certificate.
     configFiles:
       Debug: Signing.xcconfig
       Release: Signing.xcconfig

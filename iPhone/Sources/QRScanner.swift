@@ -80,6 +80,9 @@ struct QRScanner: UIViewRepresentable {
 
 /// Camera access, asked the first time the scanner shows.
 enum CameraAccess {
+    /// iOS has not asked the user yet: `request` would.
+    static var mustAsk: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined }
+
     static func request() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: return true

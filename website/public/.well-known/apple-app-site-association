@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TLV7FN782N.com.openmae.ios"],
+        "components": [
+          {
+            "/": "/p",
+            "comment": "The pairing link of the Mac's QR code: the iPhone's Camera opens it in the app"
+          }
+        ]
+      }
+    ]
+  }
+}

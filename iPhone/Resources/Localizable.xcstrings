@@ -421,6 +421,16 @@
         }
       }
     },
+    "It will forget “%@”: it talks to one Mac at a time.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il oubliera « %@ » : il parle à un seul Mac à la fois."
+          }
+        }
+      }
+    },
     "Keep your finger down while you talk.": {
       "localizations": {
         "fr": {
@@ -451,12 +461,42 @@
         }
       }
     },
+    "Link": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relier"
+          }
+        }
+      }
+    },
     "Link interrupted": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Liaison interrompue"
+          }
+        }
+      }
+    },
+    "Link this iPad to “%@”?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relier cet iPad à « %@ » ?"
+          }
+        }
+      }
+    },
+    "Link this iPhone to “%@”?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relier cet iPhone à « %@ » ?"
           }
         }
       }
