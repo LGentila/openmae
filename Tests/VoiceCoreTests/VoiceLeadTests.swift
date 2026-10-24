@@ -222,17 +222,26 @@ struct SteadySynthesizer: SpeechSynthesizer {
 struct VoiceLeadPipelineTests {
     let answer = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"]
 
-    func run(_ model: WaitingModel, _ synthesizer: any SpeechSynthesizer, config: PipelineConfig = .init(),
-             until played: Int) async throws -> FakeSpeaker
+    /// Submits "Bonjour", and returns once the pipeline reports the turn finished (20 s at most): by then the voice
+    /// was played to its end, each of its chunks was handled (the model told to wait, or to go on), and the model was
+    /// let go. Not once the speakers have played a number of samples and played them out: they play in real time
+    /// whatever the Mac does, while on a busy Mac the voice's chunks come late, and the last ones of a near-silent
+    /// opening (left out, not played) could still be on their way then, the model not yet let go.
+    func run(_ model: WaitingModel, _ synthesizer: any SpeechSynthesizer, config: PipelineConfig = .init())
+        async throws -> FakeSpeaker
     {
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
                                      synthesizer: synthesizer, output: speaker, config: config)
+        let log = EventRecorder()
+        let events = pipeline.events
+        let recording = Task { for await event in events { await log.record(event) } }
+        defer { recording.cancel() }
         try await pipeline.start()
         await pipeline.submit(text: "Bonjour")
-        for _ in 0..<600 where await speaker.played < played { try await Task.sleep(for: .milliseconds(5)) }
-        for _ in 0..<600 where await speaker.remainingMs > 0 { try await Task.sleep(for: .milliseconds(5)) }
-        try await Task.sleep(for: .milliseconds(100))
+        let deadline = ContinuousClock.now + .seconds(20)
+        while await log.finished.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
+        try #require(await log.finished.count == 1)
         return speaker
     }
 
@@ -244,8 +253,10 @@ struct VoiceLeadPipelineTests {
         config.voiceLeadSeconds = nil
         let model = WaitingModel(answer)
         let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 3000 : 0, false) }])
-        let speaker = try await run(model, synthesizer, config: config, until: 1000)
-        #expect(await speaker.played >= 1000)  // both sentences
+        let speaker = try await run(model, synthesizer, config: config)
+        // Both sentences of 500, and as much of the opening's near-silence between them as a pause may last (its first
+        // five chunks).
+        #expect(await speaker.played == 1000 + Int(try #require(config.maxVoicePauseMs)))
         let held = model.held.map(\.held)
         #expect(runs(held) == [true, false, true, false])  // first piece, first sound; the opening, then heard
         // The opening's 30 chunks of 100 ms (the first five played, the others left out): the pause said at each one.
@@ -268,7 +279,7 @@ struct VoiceLeadPipelineTests {
         let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 2400 : 0, false) }], pace: .milliseconds(50))
         // Three sentences of 500, and as much of the opening's near-silence as a pause may last.
         let played = 1500 + Int(try #require(config.maxVoicePauseMs))
-        let speaker = try await run(model, synthesizer, config: config, until: played)
+        let speaker = try await run(model, synthesizer, config: config)
         #expect(await speaker.played == played)
         let held = model.held
         #expect(runs(held.map(\.held)) == [true, false, true, false])  // first piece, first sound; the opening
@@ -294,8 +305,8 @@ struct VoiceLeadPipelineTests {
         config.modelWaitsDuringOpenings = false
         let model = WaitingModel(answer)
         let synthesizer = SentenceSynthesizer([{ ($0.contains("Comment") ? 3000 : 0, false) }])
-        let speaker = try await run(model, synthesizer, config: config, until: 1000)
-        #expect(await speaker.played >= 1000)
+        let speaker = try await run(model, synthesizer, config: config)
+        #expect(await speaker.played == 1000 + Int(try #require(config.maxVoicePauseMs)))  // as with the rule
         let held = model.held.map(\.held)
         #expect(Array(held.prefix(2)) == [true, false])
         #expect(held.dropFirst(2).allSatisfy { !$0 })
@@ -307,7 +318,7 @@ struct VoiceLeadPipelineTests {
         let model = WaitingModel(["Bonjour, je suis bien là. ", "La mer est très salée, tu sais. ",
                                   "Les rivières y portent du sel. ", "Voilà pour aujourd'hui."])
         // Four chunks of 100 ms a sentence, one every 20 ms: the voice gets ahead 80 ms a chunk.
-        let speaker = try await run(model, SteadySynthesizer(chunks: 4, pace: .milliseconds(20)), until: 1600)
+        let speaker = try await run(model, SteadySynthesizer(chunks: 4, pace: .milliseconds(20)))
         #expect(await speaker.played == 1600)  // the four sentences
         let held = model.held
         // First piece, first sound; then the speakers have under 500 ms while the next sentences are written.
@@ -330,7 +341,7 @@ struct VoiceLeadPipelineTests {
                                   (.milliseconds(1000), "Il fait très beau aujourd'hui.")])
         // The first utterance says the second sentence as near-silence; the one started again says it.
         let synthesizer = SentenceSynthesizer([{ (0, $0.contains("Comment")) }])
-        let speaker = try await run(model, synthesizer, until: 1500)
+        let speaker = try await run(model, synthesizer)
         #expect(await speaker.played >= 1500)  // the three sentences heard
         let held = model.held
         #expect(Array(held.prefix(2).map(\.held)) == [true, false])
