@@ -13,8 +13,8 @@
 //                           [--watch-calls] [--examples app|none|file] [--web] [--no-actions] [--addendum file]
 //                           [--web-addendum file] [--agents-addendum file]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
-//                           [--record file.json] [--sources] [--news] [--compare-beginnings] [--compare-requests]
-//                           [--bfloat16-prompts] [--bfloat16-experts]
+//                           [--record file.json] [--sources] [--news] [--memory [--journal]] [--compare-beginnings]
+//                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
 //
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
@@ -30,6 +30,11 @@
 // The news' tool, lire_nouvelles (a corpus with "news": true, or --news with any corpus, to check that it does not change
 // the choice of the other tools), takes no argument: choosing it is all there is to check. Tests/Fixtures/news-fr.json.
 // --news-addendum <file> replaces its part of the system prompt.
+//
+// The memory's tool, memoire (a corpus with "memory": true, as Tests/Fixtures/memory-actions-fr.json, or --memory with
+// any corpus), with the journal of past exchanges only as the app offers it (`MemorySettings.journalOffered`), or with
+// --journal. Without the journal, the requests that need it (to search past conversations, to erase a period of them)
+// are left out of the score and reported apart: what the model did with them.
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -82,7 +87,8 @@ private struct Corpus: Decodable {
     var sources: Bool?
     /// Where "here" is for them.
     var here: Place?
-    /// The memory's tool is offered too (`memoire`, with the journal), with this sheet in the prompt.
+    /// The memory's tool is offered too (`memoire`; with the journal as the app offers it, or with --journal), with this
+    /// sheet in the prompt.
     var memory: Bool?
     var memorySheet: [String]?
     /// What a source answered for a request (by its phrase), as the model reads it: summed up by the model.
@@ -147,8 +153,13 @@ private struct Corpus: Decodable {
         var here: Bool?
         var instrument: String?
         var mode: String?
-        /// The memory: the action expected (`retenir`, `chercher`, `oublier`).
+        /// The memory: the action expected (`retenir`, `chercher`, `oublier`, `tout_oublier`).
         var action: String?
+
+        /// The memory's journal is needed: a search of past conversations, or a period of them to erase.
+        var needsJournal: Bool {
+            tool == MemoryCatalog.name && (action == "chercher" || (action == "oublier" && when != nil))
+        }
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -222,6 +233,8 @@ private struct CaseResult: Encodable {
     var summedUpAgain: Bool?
     /// Whether the summary names one of the results' sites.
     var namesASite: Bool?
+    /// The request needs the memory's journal, which is not offered: left out of the score.
+    var needsJournal: Bool?
     /// How many tokens the results take in the model's memory.
     var resultTokens: Int?
     /// Results → first words of the summary, and its end; with --searxng, the search itself.
@@ -267,6 +280,7 @@ func runActionsBench(_ o: Options) async throws {
     }
     let news = corpus.news == true || o.news
     let memory = corpus.memory == true || o.memory
+    let journal = MemorySettings.journalOffered || o.journal
     let sheet = corpus.memorySheet ?? []
     // In the app's order: the actions, the agents, the web search, the built-in sources, the news, the memory (last).
     let actionTools: [ToolSpec] = actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
@@ -274,7 +288,7 @@ func runActionsBench(_ o: Options) async throws {
     let agentTools: [ToolSpec] = agents
         ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)], folders: []) : []
     let otherTools: [ToolSpec] = (web ? [WebSearchCatalog.search] : []) + (sources ? BuiltInSources.tools : [])
-        + (news ? [NewsCatalog.read] : []) + (memory ? [MemoryCatalog.tool(journal: true)] : [])
+        + (news ? [NewsCatalog.read] : []) + (memory ? [MemoryCatalog.tool(journal: journal)] : [])
     let tools = actionTools + agentTools + otherTools
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
@@ -331,8 +345,11 @@ func runActionsBench(_ o: Options) async throws {
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
         + (news ? [try o.newsAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) } ?? NewsCatalog.promptAddendum]
             : [])
-        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: true)] : [])
-    if memory { print("memory: on, with the journal, \(sheet.count) entries in the sheet") }
+        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal)] : [])
+    if memory {
+        print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)")
+              + ", \(sheet.count) entries in the sheet")
+    }
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents) ? "app" : "none")
     // Without the actions, the app's are the delegation's (`AgentTools.exampleExchanges`, Claude Code reading back).
     conversation.examples = try !actions && examples == "app"
@@ -412,6 +429,7 @@ func runActionsBench(_ o: Options) async throws {
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead { result.nameReadMs = nameRead - callStart }
         result.peakGB = await model.lastRequestPeakGB
+        if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
         if !earlierSearches.isEmpty { result.earlierSearches = earlierSearches }
@@ -476,7 +494,7 @@ func runActionsBench(_ o: Options) async throws {
             let action = MemoryCatalog.action(call)
             result.resolved = action?.rawValue ?? "no action"
             do {
-                try checkMemory(call, sheet: sheet, context: context)
+                try checkMemory(call, sheet: sheet, journal: journal, context: context)
                 if result.toolOK, let expected = item.expected {
                     result.argumentsOK = (expected.action == nil || expected.action == action?.rawValue)
                         && memoryMentions(call, expected)
@@ -1131,9 +1149,9 @@ private func memoryMentions(_ call: ToolCall, _ expected: Corpus.Expected) -> Bo
     return mentions && when
 }
 
-/// What the app would check of a memory call, without a store: the fact rests on the user's words; a period it can read;
-/// an entry of the sheet to forget.
-private func checkMemory(_ call: ToolCall, sheet: [String], context: ToolContext) throws {
+/// What the app would check of a memory call, without a store: the fact rests on the user's words; a period it can read,
+/// with the journal; an entry of the sheet to forget; something to erase.
+private func checkMemory(_ call: ToolCall, sheet: [String], journal: Bool, context: ToolContext) throws {
     let refusal = { (why: String) in ToolRefusal(forModel: why, spoken: ActionPhrases.notUnderstood(.french)) }
     guard let action = MemoryCatalog.action(call) else { throw refusal("Il manque « action ».") }
     if let words = call.text("quand"), MemoryPeriod.read(words, now: context.now, calendar: context.calendar) == nil {
@@ -1147,12 +1165,21 @@ private func checkMemory(_ call: ToolCall, sheet: [String], context: ToolContext
             throw refusal("Ce texte ne reprend pas les mots de l'utilisateur.")
         }
     case .chercher:
+        guard journal else { throw refusal("L'historique est désactivé : il n'y a rien à chercher.") }
         guard text != nil || call.text("quand") != nil else { throw refusal("Il manque « texte ».") }
     case .oublier:
-        if call.text("quand") != nil, call.text("reference") == nil { return }
+        if call.text("quand") != nil, call.text("reference") == nil {
+            guard journal else { throw refusal("L'historique est désactivé : il n'y a rien à effacer.") }
+            return
+        }
         guard let wanted = call.text("reference") ?? text, MemoryTools.entry(wanted, in: sheet) != nil else {
             throw refusal("Aucune entrée de la mémoire ne correspond.")
         }
+    case .toutOublier:
+        if let said = context.userSaid.first, !MemoryCatalog.asksToEraseEverything(said) {
+            throw refusal("L'utilisateur n'a pas demandé d'effacer toute ta mémoire.")
+        }
+        guard !sheet.isEmpty else { throw refusal("La mémoire est déjà vide : il n'y a rien à effacer.") }
     }
 }
 
@@ -1211,7 +1238,10 @@ private func matches(_ resolved: Resolved, _ expected: Corpus.Expected, _ contex
     return true
 }
 
-private func summarize(_ results: [CaseResult], tier: HardwareTier, model: String, options o: Options) {
+private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, options o: Options) {
+    // Without the memory's journal, the requests that need it are left out of the score, and reported apart.
+    let apart = all.filter { $0.needsJournal == true }
+    let results = all.filter { $0.needsJournal != true }
     let actions = results.filter { $0.expected != "aucun" }
     let others = results.filter { $0.expected == "aucun" }
     let rightTool = actions.filter(\.toolOK).count
@@ -1219,7 +1249,8 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     let falseTriggers = others.filter { !$0.toolOK }
     let missed = actions.filter { $0.chosen == "aucun" }.count
 
-    print("\n=== \(model) — \(results.count) requests ===")
+    print("\n=== \(model) — \(results.count) requests ===" + (apart.isEmpty ? ""
+        : " (\(apart.count) more that need the memory's journal, left out: see below)"))
     print(String(format: "right tool: %d / %d (%.0f %%)", rightTool, actions.count, percent(rightTool, actions.count)))
     print(String(format: "right tool and right date / length / name: %d / %d (%.0f %%)", rightAction, actions.count,
                  percent(rightAction, actions.count)))
@@ -1243,6 +1274,16 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     // In figures or in words ("(jeudi 15 octobre 2026 à 18:42)"): a year in brackets.
     let copied = results.filter { $0.text.range(of: #"[(\[][^()\[\]]*\b20\d{2}"#, options: .regularExpression) != nil }
     print("answers copying the date line (removed before the voice): \(copied.count) / \(results.filter { !$0.text.isEmpty }.count)")
+    if !apart.isEmpty {
+        // What the model did with them: with no search and no period offered, a call to erase everything would be the
+        // worst.
+        print("requests that need the memory's journal, which is not offered (left out of the score): \(apart.count)"
+              + apart.map { result in
+                  "\n    · \(result.phrase) → \(result.chosen)"
+                      + (result.chosen == MemoryCatalog.name ? "/\(result.resolved ?? "?")" : "")
+                      + (result.refusal != nil ? " (refused)" : "")
+              }.joined())
+    }
 
     if results.contains(where: { $0.expected == WebSearchCatalog.searchName || $0.chosen == WebSearchCatalog.searchName }) {
         summarizeSearches(results)
@@ -1306,7 +1347,7 @@ private func summarize(_ results: [CaseResult], tier: HardwareTier, model: Strin
     let url = o.out.appendingPathComponent("actions-bench-\(tier.rawValue)-\(stamp).json")
     do {
         try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
-        try encoder.encode(results).write(to: url)
+        try encoder.encode(all).write(to: url)
         print("report: \(url.path)")
     } catch {
         print("could not write the report: \(error)")

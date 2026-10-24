@@ -143,10 +143,166 @@ struct MemoryTests {
         _ = await runner.tools()
         let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "quand": "hier"])
         let asked = await runner.handle(call, context: context(["Efface ce qu’on s’est dit hier"]))
-        #expect(asked.spoken == MemoryPhrases.confirmErase(count: 2, period: "hier", .french))
+        #expect(asked.spoken == "Je vais effacer de notre historique les 2 échanges d’hier. On y va\u{00A0}?")
         let reply = await runner.resolve(.confirm, context: context(["Oui."]))
         #expect(reply?.spoken == MemoryPhrases.erased(count: 2, .french))
         #expect(try await store.countJournal(from: nil, to: nil) == 1)
+    }
+
+    /// « avant aujourd'hui » ends where today begins: today's exchanges stay, and the question says what goes.
+    @Test func beforeTodayErasesNothingOfToday() async throws {
+        let store = TransientMemoryStore()
+        for (days, text) in [(0.04, "Ce soir"), (1.0, "Hier"), (10.0, "Avant")] {
+            try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-days * 86_400), user: text, answer: "…",
+                                                     language: .french))
+        }
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
+        _ = await runner.tools()
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "quand": "avant aujourd'hui"])
+        let asked = await runner.handle(call, context: context(["Efface tout ce qu’on s’est dit avant aujourd’hui"]))
+        #expect(asked.spoken == "Je vais effacer de notre historique les 2 échanges jusqu’à hier inclus. On y va\u{00A0}?")
+        let reply = await runner.resolve(.confirm, context: context(["Oui."]))
+        #expect(reply?.spoken == MemoryPhrases.erased(count: 2, .french))
+        #expect(await store.journal.map(\.user) == ["Ce soir"])
+    }
+
+    /// The "oui" erases what the question counted: the question's own exchange, written meanwhile, stays.
+    @Test func anEraseConfirmedErasesTheCountItAnnounced() async throws {
+        let store = TransientMemoryStore()
+        for minutes in [50.0, 30, 10] {
+            try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-minutes * 60), user: "\(minutes)",
+                                                     answer: "…", language: .french))
+        }
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
+        _ = await runner.tools()
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "quand": "aujourd'hui"])
+        let asked = await runner.handle(call, context: context(["Efface ce qu’on s’est dit aujourd’hui"]))
+        #expect(asked.spoken == "Je vais effacer de notre historique les 3 échanges d’aujourd’hui. On y va\u{00A0}?")
+        try await store.addExchange(JournalEntry(date: now.addingTimeInterval(5), user: "Efface ce qu’on s’est dit aujourd’hui",
+                                                 answer: asked.spoken, language: .french))
+        let later = ToolContext(now: now.addingTimeInterval(12), timeZone: paris, language: .french, userSaid: ["Oui."])
+        let reply = await runner.resolve(.confirm, context: later)
+        #expect(reply?.spoken == MemoryPhrases.erased(count: 3, .french))
+        #expect(await store.journal.map(\.user) == ["Efface ce qu’on s’est dit aujourd’hui"])
+    }
+
+    /// The period in the question is the one the app erases, in its own words.
+    @Test func theQuestionSaysThePeriodAsRead() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = paris
+        let french = context([])
+        func said(_ words: String) -> String {
+            let period = MemoryPeriod.read(words, now: now, calendar: calendar)!
+            return MemoryPhrases.period(from: period.start, to: min(period.end, now), french)
+        }
+        #expect(said("hier") == "d’hier")
+        #expect(said("avant-hier") == "d’avant-hier")
+        #expect(said("avant hier") == "d’avant-hier")
+        #expect(said("ce soir") == "d’aujourd’hui depuis 18\u{00A0}h")
+        #expect(said("avant aujourd'hui") == "jusqu’à hier inclus")
+        #expect(said("avant cette semaine") == "jusqu’au dimanche 11 octobre inclus")
+        #expect(said("depuis lundi") == "depuis le lundi 12 octobre")
+        #expect(said("la semaine dernière") == "du lundi 5 octobre au dimanche 11 octobre")
+        #expect(said("il y a 3 jours") == "du lundi 12 octobre")
+    }
+
+    // MARK: Erasing everything
+
+    /// « Efface toute ta mémoire »: the sheet and the journal, after one « oui »; nothing after « non ».
+    @Test func erasingEverythingWaitsForOui() async throws {
+        for answer in ["Oui.", "Non."] {
+            let store = TransientMemoryStore(sheet: ["Allergique aux noix de cajou", "Joue au tennis le mardi"])
+            try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-86_400), user: "Bonjour", answer: "…",
+                                                     language: .french))
+            let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
+            _ = await runner.tools()
+            let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+            let asked = await runner.handle(call, context: context(["Efface toute ta mémoire."]))
+            #expect(asked.waitsForYes)
+            #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi, et tout l’historique de nos échanges. "
+                + "On y va\u{00A0}?")
+            #expect(try await store.sheet().count == 2)  // nothing yet
+            let interception = try #require(await runner.interception(for: answer, now: now))
+            let reply = await runner.resolve(interception, context: context([answer]))
+            if answer == "Oui." {
+                #expect(reply?.spoken == MemoryPhrases.erasedAll(.french))
+                #expect(try await store.sheet().isEmpty)
+                #expect(try await store.countJournal(from: nil, to: nil) == 0)
+                // The frozen sheet still shows the entries until the next conversation: the model is told so.
+                if case .object(let fields)? = reply?.forModel {
+                    #expect(fields["note"]?.text == MemoryCatalog.erasedNote)
+                }
+            } else {
+                #expect(reply?.spoken == ActionPhrases.declined(.french))
+                #expect(try await store.sheet().count == 2)
+                #expect(try await store.countJournal(from: nil, to: nil) == 1)
+            }
+        }
+    }
+
+    /// As the app has it (the journal not offered): the tool offers it; the question names the history only when one
+    /// is on disk; an empty memory has nothing to erase.
+    @Test func erasingEverythingWithoutTheJournal() async throws {
+        let tools = MemoryTools(store: TransientMemoryStore(sheet: ["Préfère le thé vert"]), enabled: true)
+        let runner = ToolRunner(providers: [tools])
+        let spec = try #require(await runner.tools().first)
+        #expect(spec.parameters.first?.kind == .oneOf(["retenir", "oublier", "tout_oublier"]))
+        #expect(try #require(await tools.promptAddendum()).contains("action tout_oublier"))
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+        let asked = await runner.handle(call, context: context(["Oublie tout ce que tu sais sur moi."]))
+        #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi. On y va\u{00A0}?")
+        #expect(await runner.resolve(.confirm, context: context(["Oui."]))?.spoken == MemoryPhrases.erasedAll(.french))
+        // Nothing left: said at once, no question.
+        let again = await runner.handle(call, context: context(["Efface toute ta mémoire."]))
+        #expect(!again.waitsForYes && !again.retryable)
+        #expect(again.spoken == MemoryPhrases.alreadyEmpty(.french))
+        // A journal kept on disk from before goes too.
+        let store = TransientMemoryStore()
+        try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-86_400), user: "Bonjour", answer: "…",
+                                                 language: .french))
+        let withJournal = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
+        _ = await withJournal.tools()
+        #expect(await withJournal.handle(call, context: context(["Vide ta mémoire."])).spoken
+            == MemoryPhrases.confirmEraseAll(history: true, .french))
+        _ = await withJournal.resolve(.confirm, context: context(["Oui."]))
+        #expect(try await store.countJournal(from: nil, to: nil) == 0)
+    }
+
+    /// Only the user's own request erases everything: not « j'oublie tout », nor a period of past conversations.
+    @Test func erasingEverythingNeedsTheUserToAskForIt() async throws {
+        for asked in ["Efface toute ta mémoire.", "Oublie tout ce que tu sais sur moi.", "Remets ta mémoire à zéro, "
+            + "s'il te plaît.", "Vide ta mémoire.", "Oublie tout.", "Forget everything you know about me."]
+        {
+            #expect(MemoryCatalog.asksToEraseEverything(asked), "\(asked)")
+        }
+        for said in ["J'oublie tout en ce moment, c'est terrible.", "Efface tout ce qu'on s'est raconté hier soir.",
+                     "Oublie tout ce dont on a parlé la semaine dernière.", "Tu as une bonne mémoire, toi ?",
+                     "Supprime de ta mémoire ce que je t'ai dit avant-hier."]
+        {
+            #expect(!MemoryCatalog.asksToEraseEverything(said), "\(said)")
+        }
+        let store = TransientMemoryStore(sheet: ["Préfère le thé vert"])
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
+        _ = await runner.tools()
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+        let reply = await runner.handle(call, context: context(["J'oublie tout en ce moment, c'est terrible."]))
+        #expect(!reply.waitsForYes && reply.retryable)
+        #expect(try await store.sheet().count == 1)
+    }
+
+    /// The model wrote « oublier » with « tout »: it is pointed to `tout_oublier`, nothing is erased.
+    @Test func forgettingAllIsPointedToEraseEverything() async throws {
+        #expect(MemoryCatalog.action(ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_effacer"]))
+            == .toutOublier)
+        #expect(MemoryCatalog.meansEverything("toute ta mémoire") && MemoryCatalog.meansEverything("tout"))
+        #expect(!MemoryCatalog.meansEverything("tout sur la pénicilline"))
+        let store = TransientMemoryStore(sheet: ["Allergique à la pénicilline"])
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
+        _ = await runner.tools()
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "reference": "tout"])
+        let reply = await runner.handle(call, context: context(["Oublie tout."]))
+        #expect(reply.retryable && reply.refusal?.forModel.contains("tout_oublier") == true)
+        #expect(try await store.sheet().count == 1)
     }
 
     // MARK: Searching
@@ -192,6 +348,33 @@ struct MemoryTests {
         #expect(day("il y a deux semaines") == "2026-10-01T00:00")
         #expect(day("en septembre") == "2026-09-01T00:00")
         #expect(day("samedi") == "2026-10-10T00:00")  // the last one, not the next
+        // Bounded: everything before, up to or since.
+        func period(_ text: String) -> String? {
+            guard let (start, end) = MemoryPeriod.read(text, now: now, calendar: calendar) else { return nil }
+            let from = start == MemoryPeriod.beginning ? "…" : LocalDateTime.format(start, in: paris)
+            return from + " → " + LocalDateTime.format(end, in: paris)
+        }
+        #expect(period("avant aujourd'hui") == "… → 2026-10-15T00:00")
+        #expect(period("avant aujourd’hui") == "… → 2026-10-15T00:00")
+        #expect(period("d'avant cette semaine") == "… → 2026-10-12T00:00")
+        #expect(period("avant le mois dernier") == "… → 2026-09-01T00:00")
+        #expect(period("jusqu'à hier") == "… → 2026-10-15T00:00")
+        #expect(period("jusqu'aujourd'hui") == "… → 2026-10-15T18:42")
+        #expect(period("depuis hier") == "2026-10-14T00:00 → 2026-10-15T18:42")
+        #expect(period("depuis lundi") == "2026-10-12T00:00 → 2026-10-15T18:42")
+        #expect(period("à partir d'hier") == "2026-10-14T00:00 → 2026-10-15T18:42")
+        #expect(period("depuis 3 jours") == "2026-10-12T00:00 → 2026-10-15T18:42")
+        #expect(period("depuis lundi jusqu'à mercredi") == "2026-10-12T00:00 → 2026-10-15T00:00")
+        #expect(period("before today") == "… → 2026-10-15T00:00")
+        // « avant-hier », with or without its hyphen, is a day.
+        #expect(period("avant-hier") == "2026-10-13T00:00 → 2026-10-14T00:00")
+        #expect(period("avant hier") == "2026-10-13T00:00 → 2026-10-14T00:00")
+        #expect(period("the day before yesterday") == "2026-10-13T00:00 → 2026-10-14T00:00")
+        #expect(period("aujourd'hui") == "2026-10-15T00:00 → 2026-10-15T18:42")
+        #expect(period("avant de partir") == nil)
+        // The past's « cette semaine » begins on Monday; « cette nuit » said in the evening is the last one.
+        #expect(period("cette semaine") == "2026-10-12T00:00 → 2026-10-15T18:42")
+        #expect(period("cette nuit") == "2026-10-14T22:00 → 2026-10-15T06:00")
     }
 
     // MARK: The journal
