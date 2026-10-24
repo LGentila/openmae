@@ -18,6 +18,8 @@ public actor AssistantHost: AssistantConnection {
     private nonisolated let commandLoop = Mutex<Task<Void, Never>?>(nil)
     /// Set for good by `windDown`: the app is quitting, the engine starts nothing more.
     private var quitting = false
+    /// What a start-up stopped because the app quits had loaded: never released, the process ends (see `start`).
+    private var keptUntilExit: [AnyObject] = []
 
     private enum Stage { case idle, setup, downloading, loading, running }
     private var stage = Stage.idle
@@ -127,12 +129,14 @@ public actor AssistantHost: AssistantConnection {
     /// was chosen) on a command encoder still open ("Command encoder released without endEncoding"); voice-cli crashed
     /// the same way with the history computed ahead after an answer (see `MLXChatModel.windDown`).
     ///
-    /// The command under way (a start-up, new tools, a new conversation) stops at its next chunk; the microphone and an
-    /// iPhone's no longer feed the pipeline; the pipeline stops (the answer under way at its next token, its voice at
-    /// once, the history computed ahead at its next chunk, no more keep-warm passes); a timer that rings or received
-    /// information is no longer said; then the models compute nothing more in the background, and the requests already
-    /// sent and the GPU are over (`MLXChatModel.windDownAll`). Nothing is released: the process ends right after. A
-    /// beginning stops once the chunk already queued on the GPU is computed: 1.7 to 1.8 s with Gemma 4 26B.
+    /// The command under way stops: new tools or a new conversation at the beginning's next chunk, a start-up at its next
+    /// step (`start`: a quit during the language model's load waits for its weights and its warm-up's prompt, then the
+    /// start-up stops before the conversations' beginning); the microphone and an iPhone's no longer feed the pipeline;
+    /// the pipeline stops (the answer under way at its next token, its voice at once, the history computed ahead at its
+    /// next chunk, no more keep-warm passes); a timer that rings or received information is no longer said; then the
+    /// models compute nothing more in the background, and the requests already sent and the GPU are over
+    /// (`MLXChatModel.windDownAll`). Nothing is released: the process ends right after. A beginning stops once the chunk
+    /// already queued on the GPU is computed: 1.7 to 1.8 s with Gemma 4 26B.
     public func windDown() async {
         guard !quitting else { return }
         quitting = true
@@ -145,11 +149,12 @@ public actor AssistantHost: AssistantConnection {
         tasks.forEach { $0.cancel() }  // the Mac's microphone, the events, the levels, the diagnostics
         await pipeline?.stop()
         let pipelineStopped = clock.now
-        await loop?.value  // a start-up stopped where it was (`start` makes no pipeline run once quitting)
+        await loop?.value  // a start-up stopped at its next step (`start` makes no pipeline run once quitting)
         let commandOver = clock.now
         await MLXChatModel.windDownAll()
         DebugLog.log("quit: the engine wound down in \(clock.now - start) (the pipeline stopped in "
-            + "\(pipelineStopped - start), the command under way was over \(commandOver - pipelineStopped) later)")
+            + "\(pipelineStopped - start), the command under way was over \(commandOver - pipelineStopped) later, the "
+            + "models and the GPU \(clock.now - commandOver) after)")
     }
 
     /// The `userInfo` key of the folder a task's notification opens when clicked.
@@ -286,14 +291,23 @@ public actor AssistantHost: AssistantConnection {
         let model: MLXChatModel
         let pipeline: VoicePipeline
         var started: VoicePipeline?  // stopped if the voice then fails to load: its keep-warm loop would hold the models
+        var loaded: [AnyObject] = []  // the models loaded so far (see the catch)
         do {
+            // The app quitting (`windDown`) stops the start-up at its next step, below. The step under way goes on: the
+            // language model's load reads its weights in full, then its warm-up's prompt (`MLXChatModel.load`); the
+            // conversations' beginning computes its chunk under way.
+            try stopIfQuitting(before: "the speech recognition")
             emit.yield(.loading(.speechRecognition))
             let detector = try SileroSpeechDetector(modelURL: vadURL)
             let transcriber = try await ParakeetTranscriber.load(
                 directory: store.folder(ModelCatalog.speechRecognition))
+            loaded.append(transcriber)
+            try stopIfQuitting(before: "the language model")
             emit.yield(.loading(.languageModel))
             MLXChatModel.releaseCachedMemory()  // what a previous tier's model may have left
             model = try await MLXChatModel.load(directory: store.folder(languageModel))
+            loaded.append(model)
+            try stopIfQuitting(before: "the conversations' beginning")
 
             // The conversations' beginning (`VoicePipeline.start`) is computed before the voice loads, on weights still
             // in memory. Loading the voice makes macOS compress most of them (Gemma 4 26B on the reference Mac: the
@@ -312,24 +326,30 @@ public actor AssistantHost: AssistantConnection {
                                      synthesizer: synthesizer, output: router, tools: await toolRunner(), config: config)
             try await pipeline.start()
             started = pipeline
+            try stopIfQuitting(before: "the voice")
 
             emit.yield(.loading(.voice))
             try await synthesizer.preload([.french, .english])
+            loaded.append(synthesizer)
             if synthesizer.outputSampleRate != playbackSampleRate {
                 playbackSampleRate = synthesizer.outputSampleRate
                 route = try await startReliably(audio)
             }
+            try stopIfQuitting(before: "listening")  // the pipeline never runs
             // What loading the voice pushed out of memory comes back from now on, while Maé already listens.
             model.wakeUp()
         } catch {
             await started?.stop()
-            audio.stop()
-            self.audio = nil
-            fail(.engine("\(error)"))
-            return
-        }
-        guard !quitting else {  // the app quits (`windDown`): the pipeline never runs
-            await pipeline.stop()
+            if quitting {
+                // The process ends right after: as a quit at rest does, the start-up leaves the sound and the models to it.
+                // Stopped and released here, the wind-down waited for them (0.3 s each with Gemma 4 26B, the Mac short of
+                // memory), and a quit whose load ended within its limit went past it.
+                keptUntilExit = loaded
+            } else {
+                audio.stop()
+                self.audio = nil
+            }
+            fail(.engine("\(error)"))  // nothing shown when the start-up stopped because the app quits
             return
         }
 
@@ -388,6 +408,15 @@ public actor AssistantHost: AssistantConnection {
             newsChangedWhileLoading = false
             await newsChanged()
         }
+    }
+
+    /// The app quits (`windDown`): the start-up stops before `step`, through its clean-up (`start`). The actor's flag
+    /// rather than the task's cancellation: a start-up that follows a download runs in the download's task, which the
+    /// wind-down does not cancel.
+    private func stopIfQuitting(before step: String) throws {
+        guard quitting else { return }
+        DebugLog.log("start-up: stopped before \(step), the app quits")
+        throw CancellationError()
     }
 
     private func fail(_ problem: AssistantProblem) {

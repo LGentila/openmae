@@ -215,16 +215,22 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             models.removeAll { $0.model == nil }
             models.append(LoadedModel(model: model))
         }
+        // The weights are read in full, but a load cancelled meanwhile (the app quits: `AssistantHost.windDown`) goes no
+        // further: neither the weights brought back nor the warm-up.
+        try Task.checkCancellation()
         await model.bringWeightsBack()
+        try Task.checkCancellation()
         try await model.warmUp()
         return model
     }
 
-    /// Every model this process loaded, and still holds, winds down (`windDown`): before the process exits.
+    /// Every model this process loaded, and still holds, winds down (`windDown`): before the process exits. Then the GPU
+    /// finishes what it was handed, also by a model no longer held (a load cancelled as the app quits lets its model go).
     public static func windDownAll() async {
         for model in loaded.withLock({ $0.compactMap(\.model) }) {
             await model.windDown()
         }
+        Stream.defaultStream.synchronize()
     }
 
     /// The models loaded in this process, held weakly, for `windDownAll`.
@@ -390,6 +396,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `async` like the protocol's default (see `useTools`): called on the model itself (voice-cli), a synchronous
     /// version lost to that default, which keeps nothing.
     public func prefillBeginning(_ conversation: [ChatMessage]) async throws {
+        try Task.checkCancellation()  // cancelled (the app quits): nothing is computed, nothing changes
         cacheUses += 1
         logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
@@ -1004,6 +1011,14 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
                                 produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
             releaseFreeBuffers()
+        }
+        // Cancelled while the model read the prompt (up to 512 new tokens are read in one pass, which cannot stop): the
+        // answer ends before its first token, which is not fed back into the cache with the next one computed (at load,
+        // the warm-up's first compiles the answer's kernels: the app quitting meanwhile waited 0.16 to 0.62 s for it with
+        // Gemma 4 26B on the reference Mac). The cache holds the prompt.
+        guard !Task.isCancelled else {
+            DebugLog.log("LLM: cancelled before its first token")
+            return
         }
         while let token = iterator.next() {
             produced.append(token)
