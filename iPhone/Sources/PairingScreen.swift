@@ -3,8 +3,8 @@ import SwiftUI
 import UIKit
 import VoiceCore
 
-/// Pairing, once: scan the code shown on the Mac, then "Done: you can talk to Maé from your iPhone" — or "this code
-/// is no longer valid".
+/// Pairing, once: scan the code shown on the Mac (or the iPhone's Camera opened the app with it), then "Done: you can
+/// talk to Maé from your iPhone" — or "this code is no longer valid".
 struct PairingScreen: View {
     let model: PhoneModel
 
@@ -87,7 +87,16 @@ private struct ScanView: View {
         .multilineTextAlignment(.center)
         .padding(.horizontal, 28)
         .padding(.bottom, 48)
-        .task { cameraAllowed = await CameraAccess.request() }
+        // The camera, for the scanner: not while a code is in use. When iOS still has to ask, a moment first: a code
+        // that opened the app (the iPhone's Camera read it) comes just after the first screen, and needs no camera.
+        .task(id: model.pairing == .scanning) {
+            guard model.pairing == .scanning else { return }
+            if CameraAccess.mustAsk {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, model.pairing == .scanning else { return }
+            }
+            cameraAllowed = await CameraAccess.request()
+        }
     }
 
     private var viewfinder: some View {
@@ -246,8 +255,14 @@ private struct ExpiredView: View {
             .frame(maxWidth: 320)
             .padding(.top, 12)
             Spacer(minLength: 12)
-            WideButton(title: "Scan a new code", icon: .camera, iconStroke: nil, glow: Palette.sun,
-                       action: model.scanAgain)
+            if model.mac == nil {
+                WideButton(title: "Scan a new code", icon: .camera, iconStroke: nil, glow: Palette.sun,
+                           action: model.scanAgain)
+            } else {
+                // A code that opened the app over a paired Mac's screens (the iPhone's Camera): back to them, the
+                // Mac still paired. The app's scanner only shows without a Mac.
+                WideButton(title: "Back", icon: .back, iconStroke: nil, glow: Palette.sun, action: model.scanAgain)
+            }
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 28)

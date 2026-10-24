@@ -98,8 +98,10 @@ the screen locked, and whoever speaks last has it (the Mac's window shows "Maé 
 here").
 
 - **Pairing, once.** On the Mac, Settings › iPhone and iPad › "Add a device" shows a QR code, valid five minutes and
-  usable once; scan it with the app. It carries the Mac's public key and a one-time code, after the `#` of a link
-  (a browser never sends that part to a server).
+  usable once; scan it with the app, or with the iPhone's Camera, which opens the app (a universal link: the app
+  declares `applinks:openmae.com`, and openmae.com names it in its `apple-app-site-association`, see `website/`). It
+  carries the Mac's public key and a one-time code, after the `#` of a link (a browser never sends that part to a
+  server).
 - **At home**, the iPhone finds the Mac with Bonjour and talks to it directly over QUIC. The Mac and the iPhone
   each ask once for access to the local network (on the Mac, when you add your first iPhone).
 - **Elsewhere**, both go through an OpenMaé relay (`relay/`, a small open-source server anyone can host): the
@@ -121,6 +123,10 @@ Build it and install it on the iPhone connected to this Mac (with your Apple Dev
 ```bash
 zsh scripts/build-iphone.sh
 ```
+
+The universal link needs the Associated Domains capability, which a paid Apple Developer Program team has: the first
+device build registers it for the App ID `com.openmae.ios` (automatic signing). The Camera opens the app only for the
+team that openmae.com names; the app's own scanner works with any team.
 
 `SIMULATOR=1 zsh scripts/build-iphone.sh` builds it for the simulator instead.
 

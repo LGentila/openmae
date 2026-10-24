@@ -85,6 +85,15 @@ targets:
         # anyway).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+    entitlements:
+      path: Resources/OpenMae.entitlements
+      properties:
+        # The Mac's pairing QR code is a link to openmae.com/p (Sources/OpenMaeLink/PairingLink.swift): with this
+        # associated domain, the iPhone's Camera opens it in the app (a universal link) rather than in Safari, as
+        # openmae.com names this app for /p in its /.well-known/apple-app-site-association (website/). It needs an
+        # explicit App ID with the Associated Domains capability, which automatic signing registers for the team at
+        # the first device build (scripts/build-iphone.sh passes -allowProvisioningUpdates).
+        com.apple.developer.associated-domains: [applinks:openmae.com]
     configFiles:
       Debug: Signing.xcconfig
       Release: Signing.xcconfig

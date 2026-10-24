@@ -10,6 +10,8 @@ public/
   confidentialite/       privacy, in French: what stays on the Mac and what leaves it, feature by feature
   en/privacy/            privacy, in English
   p/index.html           where the Mac's pairing QR code leads (both languages)
+  .well-known/apple-app-site-association
+                         opens that link in the iPhone app instead, when it is installed (universal link)
   404.html               page not found (both languages)
   assets/                site.css, site.js, analytics.js, the app's fonts and their licenses, the share images
 scripts/make-images.py   redraws the share images and the PNG icons (needs Pillow)
@@ -50,14 +52,18 @@ neither.
 ## The pairing page
 
 The Mac's QR code is a link, `https://openmae.com/p#v=1&id=…&pk=…&code=…&name=…`
-(`Sources/OpenMaeLink/PairingLink.swift`). The OpenMaé app reads it with its own scanner; the iPhone's camera opens it
-in the browser, on `p/index.html`. Everything after `#` stays in the browser: keep that page free of anything loaded
-from elsewhere (it does not load `analytics.js`, and its Content-Security-Policy allows no other origin), and never
-read `location.hash` there.
+(`Sources/OpenMaeLink/PairingLink.swift`). The OpenMaé app reads it with its own scanner, and the iPhone's Camera opens
+it in the app too, as a universal link: the app declares the associated domain `applinks:openmae.com`
+(`iPhone/project.yml`), and `public/.well-known/apple-app-site-association` names the app for `/p` (its Apple team id and
+bundle id, which this file makes public). Without the app, the Camera opens the link in the browser, on `p/index.html`.
+Everything after `#` stays in the browser: keep that page free of anything loaded from elsewhere (it does not load
+`analytics.js`, and its Content-Security-Policy allows no other origin), and never read `location.hash` there.
 
-For the camera to open the app instead, the iPhone app has to declare the associated domain `applinks:openmae.com`, and
-the site has to serve `/.well-known/apple-app-site-association` (as JSON, without a redirect) naming the app's team id
-and bundle id for `/p`. `nginx.conf` already serves that path as JSON.
+An iPhone does not fetch `apple-app-site-association` from the site: Apple's CDN does, and keeps it for a while. The
+file must answer over HTTPS as JSON (`nginx.conf` sets `application/json`, as the file has no extension), without a
+redirect, and a firewall or a CDN in front of the site must let Apple's fetcher through. After a change to that file,
+check what Apple's CDN serves, `https://app-site-association.cdn-apple.com/a/v1/openmae.com`: an iPhone reads it there
+when the app is installed or updated.
 
 ## Deploying
 
