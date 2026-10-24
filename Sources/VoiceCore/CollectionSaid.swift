@@ -1,7 +1,7 @@
 import Foundation
 
-// The calendar or the reminder list the user's own words name, for a creation whose call names none, or for a creation
-// refused for one that does not exist, whose answer names another.
+// The calendar or the reminder list the user's own words name, for a creation or a change whose call names none, or for a
+// creation refused for one that does not exist, whose answer names another.
 
 extension ActionCatalog {
     /// A creation (`creer_evenement`, `creer_rappel`) whose call names no calendar or no list, with the one the user's
@@ -40,6 +40,37 @@ extension ActionCatalog {
         var said = call
         said.arguments[key] = .string(all[index])
         DebugLog.log("calendar: \(event ? "calendar" : "list") “\(all[index])” taken from the user's words")
+        return said
+    }
+
+    /// A change (`modifier_element`) of an event (`event`) or of a reminder, whose call names no calendar and no list
+    /// (`collectionNamed`), with the one the user's sentence of this turn names (`collectionSaid`) among `names(event)`,
+    /// the calendars or the lists an item of that kind can go in, as if the call named it: the provider then moves the
+    /// item there, or, when it is the item's own, says it is already there (`changed`). The name put in the call is one
+    /// of them, which the provider then finds as it finds the model's. Any other call, unchanged; a change too when the
+    /// sentence names none of them (a calendar that does not exist: the change gives what it gave), or when there is no
+    /// sentence (`ToolContext.userSaid` empty: one of several actions).
+    ///
+    /// On the tiers whose change offers no calendar and no list (`movesItems(on:)`), asked « Mets la réunion dans mon
+    /// calendrier Maison. », Gemma 4 E4B moved the meeting in 3 runs of 40 of voice-cli dialogue-bench on 2026-10-23
+    /// (when its change named the calendar all the same), Gemma 4 E2B in 0 of 20: their changes gave the meeting as it
+    /// was (`{reference: e1, titre: réunion, quand: vendredi à 10 h}`, `{reference: e1, titre: Réunion}`), which changed
+    /// nothing, and the app answered « Je n'ai rien changé… ». With the calendar of the sentence, every such change moved
+    /// it (E4B 8 runs of 10, its two others wrote two calls at once or the calendar as `quand`; E2B 5 of 10, the others
+    /// wrote the meeting's creation again in « Maison »). On every tier, as for a creation: only this turn's sentence,
+    /// as an earlier one may have named a calendar or a list for another item; and only a calendar for an event, a list
+    /// for a reminder.
+    public static func withCollectionSaid(change call: ToolCall, event: Bool, context: ToolContext,
+                                          names: (_ event: Bool) -> [String]) -> ToolCall
+    {
+        guard call.name == changeItem.name, collectionNamed(in: call, event: event) == nil,
+              let sentence = context.userSaid.first
+        else { return call }
+        let all = names(event)
+        guard let index = collectionSaid(in: sentence, event: event, among: all) else { return call }
+        var said = call
+        said.arguments[event ? "calendrier" : "liste"] = .string(all[index])
+        DebugLog.log("calendar: \(event ? "calendar" : "list") “\(all[index])” of a change taken from the user's words")
         return said
     }
 
@@ -141,6 +172,19 @@ extension ActionCatalog {
         let placedNames = Set(found.filter { $0.placed }.map { $0.index })
         return placedNames.count == 1 ? placedNames.first : nil
     }
+
+    /// Whether a sentence asks for an item in another calendar or list as well, a copy, rather than there instead
+    /// (`moved`): « aussi », « également », « en plus », « copie »… (« Ajoute-la aussi dans mon calendrier Famille. »), in
+    /// English « also », « too », « as well », « copy »…
+    static func asksForACopy(_ sentence: String) -> Bool {
+        let words = placeWords(sentence)
+        if words.contains(where: copyWords.contains) { return true }
+        return zip(words, words.dropFirst()).contains { ($0 == "en" && $1 == "plus") || ($0 == "as" && $1 == "well") }
+    }
+
+    private static let copyWords: Set<String> = [
+        "aussi", "egalement", "copie", "copier", "copies", "duplique", "dupliquer", "also", "too", "copy", "duplicate",
+    ]
 
     /// The words for a calendar or a list, in both languages: what `collectionSaid` looks for a name after (or before).
     private static let collectionWords: Set<String> = [

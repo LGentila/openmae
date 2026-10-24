@@ -18,6 +18,11 @@ public actor CalendarTools: ToolProvider {
     private enum Item: Sendable, Equatable {
         case event(String)  // EventKit identifiers
         case reminder(String)
+
+        var isEvent: Bool {
+            if case .event = self { return true }
+            return false
+        }
     }
     /// Saved values of an item, to put it back as it was ("annule" after a change).
     private struct Snapshot: Sendable {
@@ -64,14 +69,30 @@ public actor CalendarTools: ToolProvider {
 
     /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
     /// (`completed`): the answer then creates it there. Its moment is checked as it is carried out: on the day of the
-    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`).
+    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`). A change
+    /// is checked with the calendar or the list the user's words name, when its call names none (`completedChange`): one
+    /// that gives nothing else is not refused as changing nothing.
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
+            try ActionCatalog.check(refusedCreation.withRefusedDay(completedChange(call, context), said: context.userSaid),
+                                    context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
+        }
+    }
+
+    /// A change whose call names no calendar and no list, with the one the user's sentence of this turn names among the
+    /// writable ones of its item's kind (`ActionCatalog.withCollectionSaid(change:event:context:names:)`): `event`, the
+    /// item's kind; nil, the kind of the item the call names, when it names one created in this conversation. Any other
+    /// call, unchanged.
+    private func completedChange(_ call: ToolCall, event: Bool? = nil, _ context: ToolContext) -> ToolCall {
+        guard call.name == ActionCatalog.changeItem.name,
+              let event = event ?? (try? referenced(call, context))?.item.isEvent
+        else { return call }
+        return ActionCatalog.withCollectionSaid(change: call, event: event, context: context) {
+            writable($0 ? .event : .reminder)
         }
     }
 
@@ -167,6 +188,7 @@ public actor CalendarTools: ToolProvider {
                                             hasTime: !times.allDay, place: call.text("lieu"),
                                             collection: calendar.calendarIdentifier)
         if let already = alreadyThere(asked, context) { return already }
+        if let moved = try await movedInstead(asked, collectionName: calendar.title, context) { return moved }
         let event = EKEvent(eventStore: store)
         event.title = title
         event.startDate = times.start
@@ -203,6 +225,7 @@ public actor CalendarTools: ToolProvider {
         let asked = ActionCatalog.SavedItem(isEvent: false, title: title, date: due?.date, hasTime: due?.hasTime ?? false,
                                             collection: list.calendarIdentifier)
         if let already = alreadyThere(asked, context) { return already }
+        if let moved = try await movedInstead(asked, collectionName: list.title, context) { return moved }
         let reminder = EKReminder(eventStore: store)
         reminder.title = title
         reminder.calendar = list
@@ -232,15 +255,49 @@ public actor CalendarTools: ToolProvider {
     /// item created (`ActionCatalog.alreadyThere`). Only items of the creation's kind are read (access to that kind was
     /// just checked), and only those still there: not deleted, nor done since for a reminder.
     private func alreadyThere(_ asked: ActionCatalog.SavedItem, _ context: ToolContext) -> ToolOutcome? {
+        let (states, found) = createdItems(event: asked.isEvent, context)
+        guard let (reference, item) = ActionCatalog.repeated(asked, among: states, calendar: context.calendar),
+              let existing = found[reference]
+        else { return nil }
+        DebugLog.log("calendar: \(asked.isEvent ? "event" : "reminder") already there, not saved again")
+        lastCreated = reference
+        return ActionCatalog.alreadyThere(item, described: existing.described, collectionName: existing.collectionName,
+                                          context: context)
+    }
+
+    /// The creation of an item created earlier in this conversation, in another calendar or list (`collectionName`, the
+    /// creation's) that the user's sentence of this turn names without asking for a copy (`ActionCatalog.moved`): that
+    /// item is moved there, as a change that names it would, and the model gets it, as the last item created
+    /// (`ActionCatalog.movedNotCreated`). Only items of the creation's kind, as EventKit has them now (`createdItems`).
+    private func movedInstead(_ asked: ActionCatalog.SavedItem, collectionName: String, _ context: ToolContext)
+        async throws -> ToolOutcome?
+    {
+        let states = createdItems(event: asked.isEvent, context).states
+        guard let (reference, _) = ActionCatalog.moved(asked, collectionName: collectionName, among: states,
+                                                       names: writable(asked.isEvent ? .event : .reminder),
+                                                       context: context)
+        else { return nil }
+        DebugLog.log("calendar: \(asked.isEvent ? "event" : "reminder") created again where the user said: moved there")
+        let move = try await change(ActionCatalog.moveCall(reference, event: asked.isEvent, to: collectionName), context)
+        lastCreated = reference
+        return ActionCatalog.movedNotCreated(move)
+    }
+
+    /// The items of a kind (`event`: the events, else the reminders) created in this conversation, as EventKit has them
+    /// now, by their reference: as a change sees them (`states`), and as the model reads them, with the name of their
+    /// calendar or list (`found`). Only those still there: not deleted, nor done since for a reminder.
+    private func createdItems(event asked: Bool, _ context: ToolContext)
+        -> (states: [String: ActionCatalog.SavedItem], found: [String: (described: JSONValue, collectionName: String)])
+    {
         var states: [String: ActionCatalog.SavedItem] = [:]
         var found: [String: (described: JSONValue, collectionName: String)] = [:]
         for (reference, item) in created {
             switch item {
-            case .event(let id) where asked.isEvent:
+            case .event(let id) where asked:
                 guard let event = store.event(withIdentifier: id) else { continue }
                 states[reference] = state(of: event)
                 found[reference] = (describe(event, reference: reference, context), event.calendar?.title ?? "")
-            case .reminder(let id) where !asked.isEvent:
+            case .reminder(let id) where !asked:
                 // Done since (ticked in the Reminders app): no longer there to do.
                 guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder, !reminder.isCompleted
                 else { continue }
@@ -250,13 +307,7 @@ public actor CalendarTools: ToolProvider {
                 continue
             }
         }
-        guard let (reference, item) = ActionCatalog.repeated(asked, among: states, calendar: context.calendar),
-              let existing = found[reference]
-        else { return nil }
-        DebugLog.log("calendar: \(asked.isEvent ? "event" : "reminder") already there, not saved again")
-        lastCreated = reference
-        return ActionCatalog.alreadyThere(item, described: existing.described, collectionName: existing.collectionName,
-                                          context: context)
+        return (states, found)
     }
 
     private func readAgenda(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
@@ -382,7 +433,8 @@ public actor CalendarTools: ToolProvider {
             }
             // Worked out before anything changes: a refused call (a calendar that does not exist, a change that changes
             // nothing, answered by the app at once: « C’est déjà dans ton calendrier « Travail »… ») leaves the event as
-            // it was.
+            // it was. No calendar in the call: the one the user's words name (`completedChange`).
+            let call = completedChange(call, event: true, context)
             let calendar = try ActionCatalog.collectionNamed(in: call, event: true).map {
                 try eventCalendar(named: $0, current: event.calendar, context: context)
             }
@@ -417,6 +469,7 @@ public actor CalendarTools: ToolProvider {
                 throw ToolRefusal(forModel: "Le rappel \(key) n'existe plus.",
                                   spoken: ActionPhrases.nothingToChange(context.language), retryable: false)
             }
+            let call = completedChange(call, event: false, context)
             let list = try ActionCatalog.collectionNamed(in: call, event: false).map {
                 try reminderList(named: $0, current: reminder.calendar, context: context)
             }
