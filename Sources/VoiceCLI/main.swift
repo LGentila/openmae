@@ -39,6 +39,10 @@
 //                                                       answers cut off one after the other: does the model write
 //                                                       the cut-off mark itself? Answers cut by a drop: does it
 //                                                       shorten its own? (text only; see CutOffBench.swift)
+//   voice-cli story-bench [--repeats 20] [--request "…"] [--actions] [--reread]
+//                                                       stories: does the model write words French spelling does
+//                                                       not have (« constru-ée »)? With the chance of every token
+//                                                       (text only; see StoryBench.swift)
 //   voice-cli delegate --instruction "…"               hands a task to Claude Code as the app does (no model;
 //                                                       see Delegate.swift)
 //   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
@@ -208,6 +212,14 @@ struct Options {
     /// this file.
     var news = false
     var newsAddendum: String?
+    /// story-bench: these requests only, instead of the corpus's.
+    var requests: [String] = []
+    /// story-bench: the model held this many seconds after each piece of an answer, as while the voice needs the GPU.
+    var hold: Double?
+    /// story-bench: each answer read again in one pass, in the model's own type and in float32, for comparison.
+    var reread = false
+    /// story-bench: the sampling's min-p instead of the app's (`MLXChatModel.sampleWithMinP`), for comparisons in one build.
+    var minP: Float?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -291,6 +303,10 @@ struct Options {
             case "--news-addendum": o.newsAddendum = it.next()
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
+            case "--request": o.requests.append(it.next() ?? "")
+            case "--hold": o.hold = Double(it.next() ?? "")
+            case "--reread": o.reread = true
+            case "--min-p": o.minP = Float(it.next() ?? "")
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -762,7 +778,8 @@ setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file: a cras
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
-    "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+    "cut-off-bench", "story-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search",
+    "inbound"].contains(options.command)
 {
     do {
         switch options.command {
@@ -773,6 +790,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "dialogue-bench": try await runDialogueBench(options)
         case "cache-check": try await runCacheCheck(options, arguments: CommandLine.arguments)
         case "cut-off-bench": try await runCutOffBench(options, arguments: CommandLine.arguments)
+        case "story-bench": try await runStoryBench(options)
         case "read-sizes": try await runReadSizes(options, arguments: CommandLine.arguments)
         case "memory-bench": try await runMemoryBench(options)
         case "link-client": try await runLinkClient()
@@ -848,6 +866,9 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--cut-off ahead|after-user-words|marker|none] [--note "(…)"]
                                        [--note-role system|user] [--drop written|heard|cut-off|none|whole]
                                        [--dialogue name]
+               voice-cli story-bench [--tier tier] [--llm folder] [--corpus file.json] [--request "…"]… [--repeats 20]
+                                     [--actions] [--agents] [--web] [--sources] [--news] [--memory] [--hold s]
+                                     [--reread] [--min-p 0.05] [--bfloat16-prompts]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]
