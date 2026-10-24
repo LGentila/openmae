@@ -19,13 +19,18 @@ struct PhoneApp: App {
                 // The design has no dark theme yet.
                 .preferredColorScheme(.light)
                 .followsWindowVisibility()
-                // The pairing link, when the camera opened the app with it.
-                .onOpenURL { model.scanned($0.absoluteString) }
+                // The pairing link, when the iPhone's Camera opened the app with it (a universal link): SwiftUI hands
+                // it over here, at launch as when the app was running.
+                .onOpenURL { model.opened($0) }
                 #if DEBUG
-                // `-pair <link>`: pairs without the camera (the simulator has none).
+                // `-pair <link>`: as if the link had opened the app (the simulator has no camera).
                 .task {
                     let arguments = ProcessInfo.processInfo.arguments
-                    if let i = arguments.firstIndex(of: "-pair"), i + 1 < arguments.count { model.scanned(arguments[i + 1]) }
+                    if let i = arguments.firstIndex(of: "-pair"), i + 1 < arguments.count,
+                       let url = URL(string: arguments[i + 1])
+                    {
+                        model.opened(url)
+                    }
                 }
                 #endif
         }
@@ -82,12 +87,26 @@ struct RootView: View {
                 .preferredColorScheme(.light)
                 .followsWindowVisibility()
         }
+        // Another Mac's code opened the app.
+        .alert(replacementTitle, isPresented: replacementAsked, presenting: model.replacement) { replacement in
+            Button("Link") { model.replace(with: replacement.link) }
+            Button("Cancel", role: .cancel) { model.replace(with: nil) }
+        } message: { replacement in
+            Text("It will forget “\(replacement.current)”: it talks to one Mac at a time.")
+        }
     }
 
-    /// The "Done" screen stays until "Talk to Maé".
-    private var isPairing: Bool {
-        if case .done = model.pairing { return true }
-        return false
+    /// A pairing, and its outcome: also over a paired Mac's screens, since the Mac's code can open the app at any time
+    /// (the iPhone's Camera). The "Done" screen stays until "Talk to Maé".
+    private var isPairing: Bool { model.pairing != .scanning }
+
+    private var replacementAsked: Binding<Bool> {
+        Binding(get: { model.replacement != nil }, set: { if !$0 { model.replace(with: nil) } })
+    }
+
+    private var replacementTitle: Text {
+        let name = model.replacement?.link.macName ?? ""
+        return model.isPad ? Text("Link this iPad to “\(name)”?") : Text("Link this iPhone to “\(name)”?")
     }
 
     private var screenKey: String {
