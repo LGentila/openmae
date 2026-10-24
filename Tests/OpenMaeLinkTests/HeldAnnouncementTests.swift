@@ -783,7 +783,9 @@ private final class GatedVoice: SpeechSynthesizer, @unchecked Sendable {
     func open() { door.open() }
 }
 
-/// A `ToneStream` whose text waits behind a door.
+/// A `ToneStream` whose text waits behind a door. It gives the tone its texts and its end under its lock, in the order
+/// it took them: given outside it, a text let through while the pipeline ends the stream could reach the tone after
+/// that end, which drops it.
 private final class GatedStream: SynthesisStream, @unchecked Sendable {
     private let tone = ToneStream()
     private let lock = NSLock()
@@ -801,30 +803,27 @@ private final class GatedStream: SynthesisStream, @unchecked Sendable {
     }
 
     func enqueue(_ text: String) {
-        let passes = lock.withLock {
+        lock.withLock {
+            if held == nil { tone.enqueue(text) }
             held?.append(text)
-            return held == nil
         }
-        if passes { tone.enqueue(text) }
     }
 
     func finish() {
-        let passes = lock.withLock {
+        lock.withLock {
             finishing = true
-            return held == nil
+            if held == nil { tone.finish() }
         }
-        if passes { tone.finish() }
     }
 
     func cancel() async { await tone.cancel() }
 
     private func release() {
-        let (texts, finishing): ([String], Bool) = lock.withLock {
-            defer { held = nil }
-            return (held ?? [], self.finishing)
+        lock.withLock {
+            held?.forEach(tone.enqueue)
+            held = nil
+            if finishing { tone.finish() }
         }
-        texts.forEach(tone.enqueue)
-        if finishing { tone.finish() }
     }
 }
 

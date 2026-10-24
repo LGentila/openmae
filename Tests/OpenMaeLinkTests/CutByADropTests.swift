@@ -272,6 +272,8 @@ private final class StepVoice: SpeechSynthesizer, @unchecked Sendable {
     func release() { lock.withLock { first }?.release() }
 }
 
+/// It gives the tone its texts and its end under its lock, in the order it took them: given outside it, a text released
+/// while the pipeline ends the stream could reach the tone after that end, which drops it.
 private final class StepStream: SynthesisStream, @unchecked Sendable {
     private let tone = ToneStream()
     private let lock = NSLock()
@@ -283,31 +285,26 @@ private final class StepStream: SynthesisStream, @unchecked Sendable {
     var audio: AsyncThrowingStream<VoiceAudio, Error> { tone.audio }
 
     func enqueue(_ text: String) {
-        let passes: Bool = lock.withLock {
+        lock.withLock {
             given += 1
-            guard given > 1, held != nil else { return true }
-            held?.append(text)
-            return false
+            if given > 1, held != nil { held?.append(text) } else { tone.enqueue(text) }
         }
-        if passes { tone.enqueue(text) }
     }
 
     func finish() {
-        let passes: Bool = lock.withLock {
+        lock.withLock {
             finishing = true
-            return held == nil
+            if held == nil { tone.finish() }
         }
-        if passes { tone.finish() }
     }
 
     func cancel() async { await tone.cancel() }
 
     func release() {
-        let (texts, finishing): ([String], Bool) = lock.withLock {
-            defer { held = nil }
-            return (held ?? [], self.finishing)
+        lock.withLock {
+            held?.forEach(tone.enqueue)
+            held = nil
+            if finishing { tone.finish() }
         }
-        texts.forEach(tone.enqueue)
-        if finishing { tone.finish() }
     }
 }

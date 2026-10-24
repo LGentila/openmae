@@ -268,6 +268,11 @@ final class HeldVoice: SpeechSynthesizer, @unchecked Sendable {
     func release() { lock.withLock { first }?.release() }
 }
 
+/// `HeldVoice`'s first utterance. It gives the voice its texts and its end under its lock, in the order it took them.
+/// It used to give the held texts outside it, once it had read them: when the pipeline ended the stream in between
+/// (`finish()`, the model done), the voice was ended first and dropped them, as a voice drops what comes after its end.
+/// The device then never heard the rest of the answer, which the tests waited for in vain, and the turn ended as heard
+/// whole, before the drop came.
 final class HeldStream: SynthesisStream, @unchecked Sendable {
     private let voice = FakeStream()
     private let lock = NSLock()
@@ -279,31 +284,26 @@ final class HeldStream: SynthesisStream, @unchecked Sendable {
     var audio: AsyncThrowingStream<VoiceAudio, Error> { voice.audio }
 
     func enqueue(_ text: String) {
-        let passes: Bool = lock.withLock {
+        lock.withLock {
             given += 1
-            guard given > 1, held != nil else { return true }
-            held?.append(text)
-            return false
+            if given > 1, held != nil { held?.append(text) } else { voice.enqueue(text) }
         }
-        if passes { voice.enqueue(text) }
     }
 
     func finish() {
-        let passes: Bool = lock.withLock {
+        lock.withLock {
             finishing = true
-            return held == nil
+            if held == nil { voice.finish() }
         }
-        if passes { voice.finish() }
     }
 
     func cancel() async { await voice.cancel() }
 
     func release() {
-        let (texts, finishing): ([String], Bool) = lock.withLock {
-            defer { held = nil }
-            return (held ?? [], self.finishing)
+        lock.withLock {
+            held?.forEach(voice.enqueue)
+            held = nil
+            if finishing { voice.finish() }
         }
-        texts.forEach(voice.enqueue)
-        if finishing { voice.finish() }
     }
 }
