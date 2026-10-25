@@ -13,7 +13,10 @@ public enum DebugLog {
 
     /// Writes one line of the log to stderr, enabled or not (the tests call it directly).
     static func emit(_ message: String) {
-        let d = ContinuousClock.now - start
+        // The start is read before the clock: the first line a process logs is what sets it, and read after, the
+        // clock came first and that line's stamp was a hair below zero ("-0.0").
+        let origin = start
+        let d = ContinuousClock.now - origin
         let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
         writeToStandardError(String(format: "[%9.1f] %@\n", ms, message))
     }
