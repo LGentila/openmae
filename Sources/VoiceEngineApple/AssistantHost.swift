@@ -13,13 +13,22 @@ import VoiceCore
 public actor AssistantHost: AssistantConnection {
     public nonisolated let events: AsyncStream<AssistantEvent>
     private nonisolated let emit: AsyncStream<AssistantEvent>.Continuation
-    private nonisolated let commands: AsyncStream<AssistantCommand>.Continuation
-    /// The task that handles the commands, one after the other: `windDown` cancels it, and the command under way with it.
+    private nonisolated let work: AsyncStream<Work>.Continuation
+    /// The task that handles the commands, and the news coming or going, one after the other: `windDown` cancels it, and
+    /// what it does with it.
     private nonisolated let commandLoop = Mutex<Task<Void, Never>?>(nil)
     /// Set for good by `windDown`: the app is quitting, the engine starts nothing more.
     private var quitting = false
     /// What a start-up stopped because the app quits had loaded: never released, the process ends (see `start`).
     private var keptUntilExit: [AnyObject] = []
+
+    /// What the command loop handles: the app's commands, and the news coming or going (`useNews`), which sets the tools
+    /// again and computes a new beginning as a change of the settings does. The app quitting stops both the same way
+    /// (`windDown`).
+    private enum Work: Sendable {
+        case command(AssistantCommand)
+        case newsChanged
+    }
 
     private enum Stage { case idle, setup, downloading, loading, running }
     private var stage = Stage.idle
@@ -35,6 +44,9 @@ public actor AssistantHost: AssistantConnection {
     /// own, even once another tier is chosen.
     private var loadedPacks: Set<String> = []
     private var download: Task<Void, Never>?
+    /// The start-up that follows a download (`downloadEnded`): it runs outside the command loop, which goes on with the
+    /// commands meanwhile, so the app quitting stops and awaits it apart (`windDown`).
+    private var startUpAfterDownload: Task<Void, Never>?
     private var pipeline: VoicePipeline?
     private var model: MLXChatModel?
     private var audio: SystemAudio?
@@ -106,11 +118,11 @@ public actor AssistantHost: AssistantConnection {
             AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
         } ?? AgentTools()
         (events, emit) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
-        let (commandStream, commands) = AsyncStream<AssistantCommand>.makeStream(bufferingPolicy: .unbounded)
-        self.commands = commands
+        let (workStream, work) = AsyncStream<Work>.makeStream(bufferingPolicy: .unbounded)
+        self.work = work
         // One command at a time, in order (a push-to-talk release must never overtake its press).
         let loop = Task { [weak self] in
-            for await command in commandStream { await self?.handle(command) }
+            for await item in workStream { await self?.handle(item) }
         }
         commandLoop.withLock { $0 = loop }
         Task { await self.observeTimers() }
@@ -129,14 +141,15 @@ public actor AssistantHost: AssistantConnection {
     /// was chosen) on a command encoder still open ("Command encoder released without endEncoding"); voice-cli crashed
     /// the same way with the history computed ahead after an answer (see `MLXChatModel.windDown`).
     ///
-    /// The command under way stops: new tools or a new conversation at the beginning's next chunk, a start-up at its next
-    /// step (`start`: a quit during the language model's load waits for its weights and its warm-up's prompt, then the
-    /// start-up stops before the conversations' beginning); the microphone and an iPhone's no longer feed the pipeline;
-    /// the pipeline stops (the answer under way at its next token, its voice at once, the history computed ahead at its
-    /// next chunk, no more keep-warm passes); a timer that rings or received information is no longer said; then the
-    /// models compute nothing more in the background, and the requests already sent and the GPU are over
-    /// (`MLXChatModel.windDownAll`). Nothing is released: the process ends right after. A beginning stops once the chunk
-    /// already queued on the GPU is computed: 1.7 to 1.8 s with Gemma 4 26B.
+    /// The command under way stops: new tools (also the news coming or going) or a new conversation at the beginning's
+    /// next chunk, a start-up at its next step (`start`: a quit during the language model's load waits for its weights and
+    /// its warm-up's prompt, then the start-up stops before the conversations' beginning), and so does the start-up that
+    /// follows a download, outside the command loop; the microphone and an iPhone's no longer feed the pipeline; the
+    /// pipeline stops (the answer under way at its next token, its voice at once, the history computed ahead at its next
+    /// chunk, no more keep-warm passes); a timer that rings, received information, the news coming or going and an
+    /// iPhone taking the conversation or letting it go change nothing more; then the models compute nothing more, and the
+    /// requests already sent and the GPU are over (`MLXChatModel.windDownAll`). Nothing is released: the process ends
+    /// right after. A beginning stops once the chunk already queued on the GPU is computed: 1.7 to 1.8 s with Gemma 4 26B.
     public func windDown() async {
         guard !quitting else { return }
         quitting = true
@@ -144,17 +157,20 @@ public actor AssistantHost: AssistantConnection {
         let start = clock.now
         let loop = commandLoop.withLock { $0 }
         loop?.cancel()  // the command under way stops at its next cancellation point (a beginning: its next chunk)
+        let startUp = startUpAfterDownload
+        startUp?.cancel()  // the same, for the start-up that follows a download
         download?.cancel()
         remoteFeed?.cancel()
         tasks.forEach { $0.cancel() }  // the Mac's microphone, the events, the levels, the diagnostics
         await pipeline?.stop()
         let pipelineStopped = clock.now
         await loop?.value  // a start-up stopped at its next step (`start` makes no pipeline run once quitting)
+        await startUp?.value  // its language model's load and warm-up use the GPU until then
         let commandOver = clock.now
         await MLXChatModel.windDownAll()
         DebugLog.log("quit: the engine wound down in \(clock.now - start) (the pipeline stopped in "
-            + "\(pipelineStopped - start), the command under way was over \(commandOver - pipelineStopped) later, the "
-            + "models and the GPU \(clock.now - commandOver) after)")
+            + "\(pipelineStopped - start), the command or start-up under way was over \(commandOver - pipelineStopped) "
+            + "later, the models and the GPU \(clock.now - commandOver) after)")
     }
 
     /// The `userInfo` key of the folder a task's notification opens when clicked.
@@ -194,7 +210,14 @@ public actor AssistantHost: AssistantConnection {
     }
 
     public nonisolated func send(_ command: AssistantCommand) {
-        commands.yield(command)
+        work.yield(.command(command))
+    }
+
+    private func handle(_ item: Work) async {
+        switch item {
+        case .command(let command): await handle(command)
+        case .newsChanged: await newsChanged()
+        }
     }
 
     private func handle(_ command: AssistantCommand) async {
@@ -350,6 +373,11 @@ public actor AssistantHost: AssistantConnection {
         } catch {
             await started?.stop()
             if quitting {
+                // `stopIfQuitting` says where it stops the start-up; a step that saw the wind-down's cancellation (the
+                // language model's load, once its weights are read) ended it in the middle.
+                if !(error is StoppedBecauseQuitting) {
+                    DebugLog.log("start-up: stopped in the step under way (\(error)), the app quits")
+                }
                 // The process ends right after: as a quit at rest does, the start-up leaves the sound and the models to it.
                 // Stopped and released here, the wind-down waited for them (0.3 s each with Gemma 4 26B, the Mac short of
                 // memory), and a quit whose load ended within its limit went past it.
@@ -365,6 +393,11 @@ public actor AssistantHost: AssistantConnection {
         self.model = model
         self.pipeline = pipeline
         await configureMemory()  // the journal, when it is on
+        guard !quitting else {
+            // The app quit meanwhile, and `windDown` stopped the pipeline: nothing feeds it, as in `stopIfQuitting`.
+            DebugLog.log("start-up: stopped before listening, the app quits")
+            return
+        }
         stage = .running
         let emit = emit
         tasks = [
@@ -420,13 +453,17 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// The app quits (`windDown`): the start-up stops before `step`, through its clean-up (`start`). The actor's flag
-    /// rather than the task's cancellation: a start-up that follows a download runs in the download's task, which the
-    /// wind-down does not cancel.
+    /// rather than the task's cancellation, which the wind-down sets too (the command loop's, or that of the start-up that
+    /// follows a download): a step cancelled can still end the usual way (the language model's warm-up gives up and its
+    /// load returns the model), and most steps never look at the cancellation.
     private func stopIfQuitting(before step: String) throws {
         guard quitting else { return }
         DebugLog.log("start-up: stopped before \(step), the app quits")
-        throw CancellationError()
+        throw StoppedBecauseQuitting()
     }
+
+    /// What `stopIfQuitting` throws: it has said where the start-up stops.
+    private struct StoppedBecauseQuitting: Error {}
 
     private func fail(_ problem: AssistantProblem) {
         stage = .idle
@@ -517,7 +554,12 @@ public actor AssistantHost: AssistantConnection {
         switch outcome {
         case .finished:
             DebugLog.log("download: complete")
-            await start()
+            // In a task of its own, which the app quitting cancels and awaits as it does the command loop (`windDown`): its
+            // language model's load and warm-up use the GPU, and the process must not end under them.
+            let startUp = Task { await self.start() }
+            startUpAfterDownload = startUp
+            await startUp.value
+            if startUpAfterDownload == startUp { startUpAfterDownload = nil }
         case .paused:
             DebugLog.log("download: paused")
             emit.yield(.downloadStopped(nil))
@@ -913,8 +955,8 @@ public actor AssistantHost: AssistantConnection {
 
     private func restartAudio() async {
         // While an iPhone has the conversation the Mac's microphone and speakers stay released; they restart with
-        // the current settings when it lets go.
-        guard remote == nil, let pipeline, let audio else { return }
+        // the current settings when it lets go. Once the app quits, the pipeline stays stopped (`windDown`).
+        guard !quitting, remote == nil, let pipeline, let audio else { return }
         await pipeline.interrupt()
         do {
             route = try await startReliably(audio)
@@ -974,7 +1016,8 @@ public actor AssistantHost: AssistantConnection {
     // MARK: - An iPhone's microphone and voice
 
     private func attachRemote() async {
-        guard stage == .running, let remote, let pipeline, let router else { return }  // applied once running
+        // Applied once running; never once the app quits (`windDown`): its microphone would feed the pipeline again.
+        guard !quitting, stage == .running, let remote, let pipeline, let router else { return }
         await router.use(remote.output)  // what the speakers were playing stops; the rest goes to the iPhone
         audio?.stop()  // the Mac's microphone and speakers are free again
         await pipeline.setBargeIn(remote.bargeIn)  // its echo is not the Mac's
@@ -1061,7 +1104,8 @@ extension AssistantHost: RemoteAudioRouting {
     public func setRemoteAudioReachable(_ reachable: Bool, reachedUntil: ContinuousClock.Instant?) async {
         guard remote != nil, reachable != remoteReachable else { return }
         remoteReachable = reachable
-        guard stage == .running else { return }  // a pipeline still loading gets it from `attachRemote`
+        // A pipeline still loading gets it from `attachRemote`; one the app quitting stopped says nothing more.
+        guard !quitting, stage == .running else { return }
         await pipeline?.setOutputReachable(reachable, reachedUntil: reachedUntil)
     }
 
@@ -1071,7 +1115,7 @@ extension AssistantHost: RemoteAudioRouting {
         remoteReachable = true
         remoteFeed?.cancel()
         remoteFeed = nil
-        guard stage == .running, let audio, let router else { return }
+        guard !quitting, stage == .running, let audio, let router else { return }
         await router.use(audio)
         if remote == nil { await pipeline?.setBargeIn(.mac) }  // unless another iPhone took the conversation meanwhile
         await restartAudio()  // the Mac's microphone and speakers again, with the current settings
@@ -1087,7 +1131,7 @@ extension AssistantHost: RemoteAudioRouting {
 
     public func announceThrough(_ output: (any AudioOutput)?, reachable: Bool) async {
         announcements = (output, reachable)
-        guard stage == .running else { return }  // a pipeline still loading gets it once running
+        guard !quitting, stage == .running else { return }  // a pipeline still loading gets it once running
         await pipeline?.announceThrough(output, reachable: reachable)
     }
 }
@@ -1121,14 +1165,16 @@ extension AssistantHost: Announcing {
 
     /// The tool lire_nouvelles comes or goes with the first source added, or the last one removed. With the actions,
     /// the system prompt is computed again and the conversation goes on; without them, the tools are set again and a
-    /// new conversation starts, as for the web search on its own.
+    /// new conversation starts, as for the web search on its own. In the command loop, after the command under way, like
+    /// a change of the settings: the app quitting stops it there (`windDown`).
     public func useNews(_ news: NewsStore?) async {
         guard await newsTools.configure(news) else { return }
         DebugLog.log("news: lire_nouvelles \(news == nil ? "taken away" : "offered")")
-        await newsChanged()
+        work.yield(.newsChanged)
     }
 
     private func newsChanged() async {
+        guard !quitting else { return }  // the app quits: nothing more is computed (`windDown`)
         guard stage == .running, let pipeline else {
             if stage == .loading { newsChangedWhileLoading = true }  // its tools may have been read before
             return
@@ -1140,6 +1186,7 @@ extension AssistantHost: Announcing {
                 try await pipeline.setTools(await toolRunner())
             }
         } catch {
+            guard !quitting else { return }  // stopped by the wind-down
             emit.yield(.warning("\(error)"))
         }
     }

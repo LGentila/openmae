@@ -413,6 +413,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     public func prefill(_ conversation: [ChatMessage]) throws {
+        try refuseOnceWindingDown("the conversation")
         try prefill(tokens: try render(conversation, generationPrompt: false))
     }
 
@@ -423,6 +424,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// version lost to that default, which keeps nothing.
     public func prefillBeginning(_ conversation: [ChatMessage]) async throws {
         try Task.checkCancellation()  // cancelled (the app quits): nothing is computed, nothing changes
+        try refuseOnceWindingDown("the conversations' beginning")
         cacheUses += 1
         logResidency("before the conversations' beginning")
         let tokens = try render(conversation, generationPrompt: false)
@@ -782,6 +784,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Invalid argument", or a segmentation fault). It did after `voice-cli conversation` runs with Gemma 4 26B whose last
     /// answer, three actions, left the model computing the history ahead. The app winds it down too before it ends
     /// (`AssistantHost.windDown`), where a keep-warm pass crashed it the same way.
+    ///
+    /// From then on the model computes nothing more at all, even when asked (`refuseOnceWindingDown`): a request, a
+    /// conversation or a beginning asked once this has returned would compute while the process exits. Setting the tools
+    /// again computes the beginning, then the conversation, in two calls (`VoicePipeline.toolsChanged`), and the second
+    /// could come after this returned.
     public nonisolated func windDown() async {
         windingDownFlag.store(true, ordering: .relaxed)  // at once: a keep-warm pass under way holds the actor
         await waitUntilIdle()
@@ -798,6 +805,14 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
         Stream.defaultStream.synchronize()
         DebugLog.log("LLM: wound down in \(ContinuousClock.now - start)")
+    }
+
+    /// Once the model winds down (`windDown`), `what` is not computed: throws `CancellationError`, as when the caller is
+    /// cancelled.
+    private func refuseOnceWindingDown(_ what: String) throws {
+        guard windingDown else { return }
+        DebugLog.log("LLM: \(what) not computed, the model winds down")
+        throw CancellationError()
     }
 
     /// Reads one byte of every page of the weights and of the conversation's memory from the CPU: what macOS compressed
@@ -835,9 +850,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Someone started to speak (see `KeepsWarm`): the weights macOS compressed or wrote to swap since the last keep-warm
     /// pass come back while they speak, several pages at a time, rather than during the request. Off the actor, so that
     /// a request that comes meanwhile does not wait for it; at most once every 5 s. The conversation's memory comes back
-    /// meanwhile too (`wakeConversationUp`).
+    /// meanwhile too (`wakeConversationUp`). Not once the model winds down (`windDown`).
     public nonisolated func wakeUp() {
-        guard lastWakeUp.claim(spacing: .seconds(5)) else { return }
+        guard !windingDown, lastWakeUp.claim(spacing: .seconds(5)) else { return }
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let start = ContinuousClock.now
             MemoryResidency.touch(weightPages, threads: 4)
@@ -976,6 +991,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     {
         let waited = requested.map { ContinuousClock.now - $0 } ?? .zero
         if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
+        try refuseOnceWindingDown("the request")
         hold.set(false)  // a new answer never starts paused
         logResidency("before the request")
         GPU.resetPeakMemory()
