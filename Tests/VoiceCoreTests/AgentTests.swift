@@ -812,7 +812,7 @@ struct PipelineAgentTests {
         #expect(request[1].content.hasPrefix(AgentCatalog.example.request + "\n(Nous sommes le "))
         #expect(request.flatMap(\.toolCalls).map(\.name) == Array(repeating: AgentCatalog.delegateName, count: 3))
         let system = request[0].content
-        #expect(system.hasSuffix(ActionCatalog.dateLineRule + " "
+        #expect(system.hasSuffix(ActionCatalog.partWithoutActions + " "
                                  + AgentCatalog.promptAddendumWithoutActions(exampleCall: "[deleguer_tache]")))
         #expect(!system.contains("rappels, calendrier, minuteurs"))
         #expect(request[19].content.contains("\n(Nous sommes le "))

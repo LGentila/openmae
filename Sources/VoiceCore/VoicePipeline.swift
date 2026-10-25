@@ -544,11 +544,11 @@ public actor VoicePipeline {
     }
 
     /// The extensions' sentences, then the actions' part when they are on (its example call is written by the
-    /// model itself, hence `async`) or, for the tools offered on their own, what it says of the date line; then what the
-    /// tools' providers add (handing tasks to an agent, with an example call of its own without the actions; searching the
-    /// web); and, when the config asks for them, the actions' example exchanges, or without the actions the tools' own
-    /// (handing tasks over). Set with the tools, and kept for the conversations that follow, so the model's memory of
-    /// them stays valid.
+    /// model itself, hence `async`) or, for the tools offered on their own, that the actions are off and what the date line
+    /// is (`ActionCatalog.partWithoutActions`); then what the tools' providers add (handing tasks to an agent, with an
+    /// example call of its own without the actions; searching the web); and, when the config asks for them, the actions'
+    /// example exchanges, or without the actions the tools' own (handing tasks over). Set with the tools, and kept for the
+    /// conversations that follow, so the model's memory of them stays valid.
     private func updatePrompt() async {
         conversation.systemAddenda = await promptAddenda()
         if let tools, config.actionExamples {
@@ -559,15 +559,15 @@ public actor VoicePipeline {
         }
     }
 
-    /// What follows the system prompt: the extensions' sentences, the actions' part (or the date line's rule), then what
-    /// the tools' providers add, the memory's sheet last.
+    /// What follows the system prompt: the extensions' sentences, the actions' part (or, without them, that they are off
+    /// and the date line's rule), then what the tools' providers add, the memory's sheet last.
     private func promptAddenda() async -> [String] {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         if let tools {
             if tools.offersActions {
                 addenda.append(ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call)))
             } else {
-                addenda.append(ActionCatalog.dateLineRule)
+                addenda.append(ActionCatalog.partWithoutActions)
             }
             addenda += await tools.promptAddenda(writeCall: { [model] in await model.toolCallText($0) })
         }

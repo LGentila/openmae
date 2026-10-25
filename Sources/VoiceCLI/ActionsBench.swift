@@ -48,15 +48,19 @@
 // actions, AgentCatalog.examples), or with those --examples says: "app" (the app's, on any tier), "none", or a file of
 // exchanges (the shape of a case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between
 // them).
-// --addendum <file> replaces the actions part of the system prompt, --web-addendum <file> the web search's,
-// --agents-addendum <file> the delegation's (experiments without rebuilding).
+// --addendum <file> replaces the actions part of the system prompt (with --no-actions, what the prompt says in its place:
+// that the actions are off, and what the date line is), --web-addendum <file> the web search's, --agents-addendum <file>
+// the delegation's (experiments without rebuilding).
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
 // has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
-// what the date line is, the delegation's part is the one for the tools on their own (with its own example call, and
-// on the smallest tier its example exchanges), a request whose tool is not offered expects no call, and a delegation
-// call written after words of the model's own counts as none when the app leaves it out (`AgentCatalog.ignoredAfterWords`:
-// the model gave a call little chance at its first token, which the report gives for every call written after words;
-// --watch-calls gives it for every request).
+// that the actions are off and what the model therefore does not have (`ActionCatalog.offRule`), and what the date
+// line is, the delegation's part is the one for the tools on their own (with its own example call, and on the
+// smallest tier its example exchanges), a request whose tool is not offered expects no call (its answer is listed in
+// full), and a delegation call written after words of the model's own counts as none when the app leaves it out
+// (`AgentCatalog.ignoredAfterWords`: the model gave a call little chance at its first token, which the report gives for
+// every call written after words; --watch-calls gives it for every request). With no tool at all (--no-actions with a
+// corpus that offers none, as Tests/Fixtures/actions-fr.json), the prompt and the messages are the app's with everything
+// off: nothing in place of the actions' part (unless --addendum gives one), and no date line.
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -228,6 +232,8 @@ private struct CaseResult: Encodable {
     /// answer's first token, as the app reads it (`LanguageModel.callChanceAtStart`), what `AgentCatalog.ignoredAfterWords`
     /// weighs.
     var callChanceAtStart: Double?
+    /// Without the actions: the action the request asks for, which no tool offered does (`expected` is then "aucun").
+    var actionNotOffered: String?
     var text: String
     var toolOK: Bool
     var argumentsOK: Bool?
@@ -302,10 +308,7 @@ func runActionsBench(_ o: Options) async throws {
     let agents = corpus.agents == true
     let web = corpus.web == true || o.web
     let sources = corpus.sources == true || o.sources
-    if !actions {
-        guard o.addendum == nil else { throw CLIError("--addendum replaces the actions part: not with --no-actions") }
-        print("the actions left out, as in the app when they are off")
-    }
+    if !actions { print("the actions left out, as in the app when they are off") }
     let news = corpus.news == true || o.news
     let memory = corpus.memory == true || o.memory
     let journal = MemorySettings.journalOffered || o.journal
@@ -350,21 +353,22 @@ func runActionsBench(_ o: Options) async throws {
     print("calls carried out in one request: \(maxCalls) at most")
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
-    // As `VoicePipeline` puts it together: the actions' part, or without them what the date line is; then the tools'.
+    // As `VoicePipeline` puts it together: the actions' part, or without them that they are off and what the date line
+    // is; then the tools'. --addendum replaces either. With no tool at all (the actions off, and no corpus or option that
+    // offers one), as the app has it with everything off: none of it, and no date line in the messages, unless --addendum
+    // gives a part.
     let actionsPart: String
-    if !actions {
-        actionsPart = ActionCatalog.dateLineRule
-    } else if let file = o.addendum {
+    if let file = o.addendum {
         actionsPart = try String(contentsOfFile: file, encoding: .utf8)
     } else {
-        actionsPart = ActionCatalog.promptAddendum(exampleCall: exampleCall)
+        actionsPart = actions ? ActionCatalog.promptAddendum(exampleCall: exampleCall) : ActionCatalog.partWithoutActions
     }
     // The delegation's part as `AgentTools` gives it: without the actions, with an example call of its own.
     let delegationCall = await model.toolCallText(AgentCatalog.example.call)
     let agentsPart = try o.agentsAddendum.map {
         try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
     } ?? (actions ? AgentCatalog.promptAddendum : AgentCatalog.promptAddendumWithoutActions(exampleCall: delegationCall))
-    conversation.systemAddenda = [actionsPart] + (agents ? [agentsPart] : [])
+    conversation.systemAddenda = (tools.isEmpty && o.addendum == nil ? [] : [actionsPart]) + (agents ? [agentsPart] : [])
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
@@ -381,7 +385,8 @@ func runActionsBench(_ o: Options) async throws {
         ? (agents ? AgentCatalog.examples(now: now, timeZone: timeZone, agent: ClaudeCode.displayName, review: true) : [])
         : exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
-    let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
+    let dateLine = tools.isEmpty ? nil : ActionCatalog.dateLine(now, timeZone: timeZone)
+    if tools.isEmpty { print("no tool at all: no date line in the messages, as in the app") }
     let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
     let prefixStart = clock.now
     try await model.prefillBeginning(conversation.beginning)
@@ -480,7 +485,11 @@ func runActionsBench(_ o: Options) async throws {
 
         var expectedTool = item.expected?.tool ?? "aucun"
         // Without the actions, a request for one of them expects no call: no tool does it.
-        if !actions, !tools.contains(where: { $0.name == expectedTool }) { expectedTool = "aucun" }
+        var notOffered: String?
+        if !actions, expectedTool != "aucun", !tools.contains(where: { $0.name == expectedTool }) {
+            notOffered = expectedTool
+            expectedTool = "aucun"
+        }
         let chosen = call?.name ?? (unreadable != nil ? "illisible" : "aucun")
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
@@ -488,6 +497,7 @@ func runActionsBench(_ o: Options) async throws {
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead, call != nil { result.nameReadMs = nameRead - callStart }
         result.leftOutAfterWords = leftOut
+        result.actionNotOffered = notOffered
         if afterWords, call != nil { result.keptAfterWords = true }
         result.callChanceAtStart = startChance
         result.peakGB = await model.lastRequestPeakGB
@@ -729,7 +739,7 @@ func exampleExchanges(_ examples: String, now: Date, timeZone: TimeZone) throws 
 }
 
 /// A case's request as the app would send it: the conversation, the case's earlier exchanges, then its phrase.
-private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String,
+private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, corpus: Corpus, dateLine: String?,
                          context: ToolContext) -> [ChatMessage]
 {
     var history = conversation
@@ -744,7 +754,7 @@ private func caseRequest(_ item: Corpus.Case, in conversation: Conversation, cor
 /// other ways of computing it and a float32 reference (see `MLXChatModel.compareBeginnings`): every pair of caches, then
 /// each request's chance of a call at its first token from each, and the requests whose first-token decision (a call or
 /// not, the more likely of the two) changes.
-private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
+private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String?,
                                context: ToolContext, model: MLXChatModel, options o: Options) async throws
 {
     guard let atLoad = await model.beginningState(named: "at load") else { throw CLIError("no beginning kept") }
@@ -883,7 +893,7 @@ private func compareBeginnings(_ corpus: Corpus, conversation: Conversation, too
 /// `MLXChatModel.compareRequests`), against the float32 reference: how far each way's chances of a call are from the
 /// reference's, over all requests and over those with earlier exchanges (where the ways differ), and from the app's own
 /// way (one pass in float32) there.
-private func compareRequests(_ corpus: Corpus, conversation: Conversation, dateLine: String, context: ToolContext,
+private func compareRequests(_ corpus: Corpus, conversation: Conversation, dateLine: String?, context: ToolContext,
                              model: MLXChatModel, folder: URL, options o: Options) async throws
 {
     let requests = corpus.cases.map {
@@ -1358,6 +1368,18 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     let kept = results.filter { $0.keptAfterWords == true }
     print("calls written after the model's own words, not left out: \(kept.count)"
           + kept.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected); \(atStart($0)))" }.joined())
+    // Without the actions, what the model made of a request for one of them: it is to say, in words, that it cannot
+    // (`ActionCatalog.offRule`), never that it did it, will or can do it.
+    let notOffered = results.filter { $0.actionNotOffered != nil }
+    if !notOffered.isEmpty {
+        print("requests for an action that is off (no tool does it), and the answers in full: \(notOffered.count)"
+              + notOffered.map { result in
+                  "\n    · \(result.phrase) (\(result.actionNotOffered ?? "")) → "
+                      + (result.chosen == "aucun" ? "" : "\(result.chosen) ")
+                      + "“\(result.text.replacingOccurrences(of: "\n", with: " "))”"
+                      + (result.leftOutAfterWords.map { "  [then \($0), left out]" } ?? "")
+              }.joined())
+    }
     let more = results.filter { $0.moreCalls == true }
     print("requests with another call after the first (an action more than asked when one is expected): \(more.count)"
           + more.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined())
@@ -1610,7 +1632,7 @@ private struct SeveralResult: Encodable {
 /// created by the call before it in the same request. Nothing is carried out, and no second pass is asked for (no
 /// second try, no summary). With `maxCalls` lower than the actions asked for, the request is right when the first ones are
 /// and the model went on to another call (the app then says how many it does at a time).
-private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String,
+private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String?,
                                now: Date, timeZone: TimeZone, model: MLXChatModel, maxCalls: Int, tier: HardwareTier,
                                modelName: String, options o: Options) async throws
 {

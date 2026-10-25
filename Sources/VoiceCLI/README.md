@@ -125,12 +125,17 @@ delegation tools, which know the tasks handed over earlier in the case and a fin
 ```
 
 With `--no-actions`, the actions are left out (their tools, their part of the prompt, their example exchanges), as the
-app has Claude Code, the web search or the built-in sources when the actions are off: the delegation's part of the
-prompt is then the one that says on its own how to call its tool, with an example call. A request for an action then
-expects no call, and a call to the delegation tools written after words of the model's own counts as none when the
-model gave a call little chance at its first token: the app leaves it out, saying nothing of it (the report lists
-them, with that chance; `--watch-calls` gives it for every request). `--agents-addendum <file>` replaces the
-delegation's part, to try another wording without rebuilding:
+app has Claude Code, the web search or the built-in sources when the actions are off: in place of the actions' part,
+the prompt says that they are off, what the model therefore does not have (timers, reminders, the agenda, shortcuts),
+and what the date line is, and the delegation's part of the prompt is the one that says on its own how to call its
+tool, with an example call. A request for an action then expects no call, and a call to the delegation tools written
+after words of the model's own counts as none when the model gave a call little chance at its first token: the app
+leaves it out, saying nothing of it (the report lists them, with that chance; `--watch-calls` gives it for every
+request). The answers to the requests for an action are listed in full, to check that none says it was done or will be.
+`--addendum <file>` replaces the part said in place of the actions, and `--agents-addendum <file>` the delegation's, to
+try another wording without rebuilding. With a corpus that offers no tool at all (`Tests/Fixtures/actions-fr.json`),
+`--no-actions` gives the prompt and the messages of the app with everything off: nothing in place of the actions' part
+(unless `--addendum` gives one), and no date line:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions

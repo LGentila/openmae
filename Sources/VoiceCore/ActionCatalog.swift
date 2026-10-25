@@ -131,9 +131,32 @@ public enum ActionCatalog {
     /// The moment of the examples' event request, which the app cannot place in time (`FrenchDates`).
     static let vagueMoment = "après la piscine"
 
-    /// What the model is told of `dateLine`: part of the actions' prompt, and on its own when only the web search is on.
+    /// What the model is told of `dateLine`: part of the actions' prompt, and of `partWithoutActions`.
     public static let dateLineRule = "Chaque message de l'utilisateur se termine par la date et l'heure actuelles, entre "
         + "parenthèses, ajoutées par l'app : ne les recopie jamais, ni dans un outil ni dans tes réponses."
+
+    /// What the system prompt says in place of the actions' part when other tools are offered without them (Claude Code,
+    /// the web search, the built-in sources, the news or the memory, with the actions off): `offRule`, then
+    /// `dateLineRule`. With no tool at all, the prompt has neither.
+    public static let partWithoutActions = offRule + " " + dateLineRule
+
+    /// What the model is told when the actions are off and other tools are on: that they are off in the settings, what it
+    /// therefore does not have (timers, reminders, the agenda, shortcuts), that it cannot remind the user of anything
+    /// later, and that it does not know what the user has planned. Facts only, without telling it what to answer.
+    ///
+    /// Without it, asked for an action, the three models answered as if it were done or would be (voice-cli actions-bench
+    /// with Tests/Fixtures/agents-fr.json and --no-actions, its four requests for an action): Gemma 4 E4B « Je mets ton
+    /// minuteur pour cinq minutes. », « Je peux programmer ce rappel pour toi. », « Tu as une réunion importante demain. »
+    /// (made up); Gemma 4 26B « D'accord, je lance le minuteur. »; E2B « Je peux mettre un minuteur. Combien de temps
+    /// veux-tu ? ». Told also what to answer (in one short sentence, that the actions are off in the settings, without a
+    /// call or an agent), they said so, but E4B handed fewer tasks over: 20 to 21 of the corpus's 26 in three runs of three
+    /// such wordings, against 23 or 24 without (it asked about details again, or promised the work), and E2B answered
+    /// « J'ai besoin d'un programme qui convertit mes fichiers Word en PDF… » with that sentence. The same rule after the
+    /// delegation's part: E4B handed 25 of 26 over, but still made up the agenda (« Tu n'as rien de prévu. »). The facts
+    /// without what it cannot remind: E2B still answered « Je peux te rappeler demain. ».
+    public static let offRule = "Les actions sont désactivées dans les réglages : tu n'as ni minuteur, ni rappels, ni "
+        + "agenda, ni raccourcis, tu ne pourras rien rappeler à l'utilisateur plus tard, et tu ne sais pas ce qu'il a de "
+        + "prévu."
 
     /// The line that ends every user message when tools are on (actions or the web search), e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.

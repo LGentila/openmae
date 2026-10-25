@@ -111,7 +111,7 @@ func runStoryBench(_ o: Options) async throws {
 
     // As the app puts the system prompt together (`VoicePipeline.promptAddenda`), its tools in its order (the actions,
     // Claude Code, the web search, the built-in sources, the news, the memory last): with tools, the actions' part, or
-    // without them what the date line is; then the tools' parts; the actions' example exchanges.
+    // without them that they are off and what the date line is; then the tools' parts; the actions' example exchanges.
     var conversation = Conversation()
     let tools: [ToolSpec] = (o.actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer] : [])
         + (o.agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)],
@@ -123,7 +123,7 @@ func runStoryBench(_ o: Options) async throws {
     if !tools.isEmpty {
         let actionsPart = o.actions
             ? ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))
-            : ActionCatalog.dateLineRule
+            : ActionCatalog.partWithoutActions
         let agentsPart = o.actions ? AgentCatalog.promptAddendum
             : AgentCatalog.promptAddendumWithoutActions(exampleCall: await model.toolCallText(AgentCatalog.example.call))
         conversation.systemAddenda = [actionsPart] + (o.agents ? [agentsPart] : [])

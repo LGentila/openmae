@@ -453,8 +453,8 @@ struct PipelineWebSearchTests {
         #expect(await tools.performed.count == 1)
     }
 
-    /// The web search with the actions off: the date line ends each message and the prompt says what it is, but nothing
-    /// of the actions, not even their example exchanges.
+    /// The web search with the actions off: the date line ends each message and the prompt says what it is, and that the
+    /// actions are off, but nothing else of them, not even their example exchanges.
     @Test func onItsOwnItHasTheDateLineButNotTheActions() async throws {
         let model = ScriptedModel()
         var config = PipelineConfig()
@@ -470,13 +470,14 @@ struct PipelineWebSearchTests {
         let request = try #require(await model.requests.first)
         #expect(request.count == 2)
         let system = request[0].content
+        #expect(system == Conversation.defaultSystemPrompt + " " + ActionCatalog.partWithoutActions + " "
+                + WebSearchCatalog.promptAddendum)
         #expect(system.contains(ActionCatalog.dateLineRule))
-        #expect(system.hasSuffix(WebSearchCatalog.promptAddendum))
         #expect(!system.contains("rappels, calendrier, minuteurs"))
         #expect(request[1].content.hasPrefix("Bonjour\n(Nous sommes le "))
     }
 
-    /// With the actions: their part, then the search's.
+    /// With the actions: their part, then the search's, and nothing of what is said when they are off.
     @Test func withTheActionsItComesAfterThem() async throws {
         let model = ScriptedModel()
         let pipeline = VoicePipeline(
@@ -486,7 +487,9 @@ struct PipelineWebSearchTests {
         await pipeline.submit(text: "Bonjour")
         await waitFor { await model.requests.count == 1 }
         let system = try #require(await model.requests.first?.first?.content)
-        #expect(system.hasSuffix(ActionCatalog.promptAddendum(exampleCall: "[minuteur]") + " " + WebSearchCatalog.promptAddendum))
+        #expect(system == Conversation.defaultSystemPrompt + " " + ActionCatalog.promptAddendum(exampleCall: "[minuteur]")
+                + " " + WebSearchCatalog.promptAddendum)
+        #expect(!system.contains(ActionCatalog.offRule))
         #expect(await model.tools.map(\.name) == ["noter", "lancer", WebSearchCatalog.searchName])
     }
 }
