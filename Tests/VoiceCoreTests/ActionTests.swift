@@ -199,12 +199,23 @@ struct ActionPhraseTests {
         let atEleven: [String: JSONValue] = ["titre": "Réunion", "quand": "demain à 11 h", "calendrier": "Maison"]
         #expect(madeForHome == ToolCall(name: "creer_evenement", arguments: atEleven))
 
+        // A missing title, or one that only names a reminder (« Rappelle-moi demain à 9 h. », then « D'appeler le
+        // plombier. »): the change's title, at the refused moment.
+        for title in [nil, "Rappel"] as [JSONValue?] {
+            var reminder = ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h"])
+            reminder.arguments["titre"] = title
+            let untitled = try #require(checkRefusal(reminder))
+            #expect(made(reminder, untitled, then: ["reference": "dernier", "titre": "appeler le plombier"])
+                    == ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h", "titre": "appeler le plombier"]),
+                    "\(String(describing: title))")
+        }
+
         // Not kept when the answer only completes the refused words (an hour that may be the morning, a weekday that
-        // does not match the date), nor for a missing title.
+        // does not match the date).
         let kine = ToolCall(name: "creer_evenement",
                             arguments: ["titre": "Kiné", "quand": "dimanche 22 octobre à 10 h"])
         for creation in [ToolCall(name: "creer_rappel", arguments: ["titre": "Appeler Paul", "quand": "lundi à 3 h"]),
-                         kine, ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h"])] {
+                         kine] {
             let refusal = try #require(checkRefusal(creation))
             #expect(made(creation, refusal, then: ["reference": "dernier", "quand": "demain à 15 h"]) == nil,
                     "\(creation.arguments)")
@@ -591,6 +602,39 @@ struct ActionCallTests {
         }
     }
 
+    /// « Rappelle-moi demain à 9 h. » does not say what to remind. A reminder's title that only names a reminder, with or
+    /// without the moment's words, whatever the case and accents, is refused as an empty one, and its creation kept for
+    /// the user's answer (`ToolRefusal.detailGivenAgain`); the model reads which title said nothing, and a question to ask
+    /// rather than say it is noted. The words of the call's own moment count as the moment's. A real title with the word is
+    /// kept; an event's title is never refused so.
+    @Test func aReminderTitleThatOnlyNamesAReminderIsMissing() throws {
+        func reminder(_ title: String, _ arguments: [String: JSONValue] = ["quand": "demain à 9 h"]) -> ToolCall {
+            var call = ToolCall(name: "creer_rappel", arguments: arguments)
+            call.arguments["titre"] = .string(title)
+            return call
+        }
+        for title in ["Rappel", "le rappel", "un rappel", "Rappelle-moi", "Rappel demain", "RAPPEL DEMAIN À 9 H",
+                      "Rappel de demain 9h", "Nouveau rappel", "le faire", "Quelque chose", "ça", "Reminder", "Remind me"] {
+            let refusal = try #require(checkRefusal(reminder(title)), "\(title)")
+            #expect(refusal.forModel == "Il manque « titre » : « \(title) » ne dit pas quoi rappeler. Demande-le simplement "
+                        + "(« Qu'est-ce que je dois te rappeler ? »), sans dire que c'est noté.", "\(title)")
+            #expect(refusal.retryable && refusal.detailGivenAgain && refusal.spoken == ActionPhrases.missingTitle(.french),
+                    "\(title)")
+        }
+        let empty = try #require(checkRefusal(ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h"])))
+        #expect(empty.forModel == "Il manque « titre »." && empty.detailGivenAgain)
+        #expect(checkRefusal(reminder("Rappel après le travail", ["quand": "jeudi après le travail"])) != nil)
+        #expect(checkRefusal(reminder("Rappel après le travail", [:])) == nil)
+        for title in ["rappeler Paul", "Rappel de vaccin", "rappel du vaccin demain", "Appeler le plombier",
+                      "Rappeler l’école", "faire les courses", "Do the laundry"] {
+            #expect(checkRefusal(reminder(title)) == nil, "\(title)")
+        }
+        for title in ["Rendez-vous", "Rappel"] {
+            let event = ToolCall(name: "creer_evenement", arguments: ["titre": .string(title), "quand": "demain à 10 h"])
+            #expect(checkRefusal(event) == nil, "\(title)")
+        }
+    }
+
     @Test func recognizesShortAnswers() {
         #expect(ReplyMatcher.confirmation("Oui, vas-y !") == .yes)
         #expect(ReplyMatcher.confirmation("Euh… d’accord.") == .yes)
@@ -743,7 +787,7 @@ actor RecordingTools: ToolProvider {
 /// of each call, as in the app's providers). A creation whose call names no calendar gets the one the user's words
 /// name, or the one of the same creation refused just before, or, when that one does not exist, the one the user's
 /// answer names (`ActionCatalog.withCollectionSaid`), and an hour alone that refused creation's day when its words left
-/// the hour open (`RefusedCreation.withRefusedDay`), as in the app.
+/// the hour open (`RefusedCreation.withRefusedMoment`), as in the app.
 actor CheckedCalendar: ToolProvider {
     nonisolated let identifier = "calendar"
     static let calendars = ["Maison", "Perso"]
@@ -758,7 +802,7 @@ actor CheckedCalendar: ToolProvider {
     func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context)
+            try ActionCatalog.check(refusedCreation.withRefusedMoment(call, said: context.userSaid), context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
@@ -766,7 +810,7 @@ actor CheckedCalendar: ToolProvider {
     }
 
     private func completed(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
-        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context,
+        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedMoment(call, said: context.userSaid), context: context,
                                          again: refusedCreation.collection(before: call),
                                          answer: refusedCreation.answer(before: call, said: context.userSaid)) {
             $0 ? Self.calendars : ["Rappels"]
@@ -1359,7 +1403,7 @@ struct CollectionSaidTests {
             refused.refused(thursday, refusal)
             refused.checking(next)
             if next.name == "modifier_element" { return refused.creation(insteadOf: next, exists: nothingCreated) }
-            return refused.withRefusedDay(next, said: [])
+            return refused.withRefusedMoment(next, said: [])
         }
         func start(_ call: ToolCall?) throws -> Date {
             try ActionCatalog.eventTimes(try #require(call), context: context()).start
@@ -1396,11 +1440,11 @@ struct CollectionSaidTests {
         let own = ToolCall(name: "creer_evenement",
                            arguments: ["titre": "Coiffeur", "quand": "jeudi 15 octobre 2026 à 18 h"])
         refusedThursday.checking(own)
-        #expect(refusedThursday.withRefusedDay(own, said: ["À 18 h.", request]).text("quand")
+        #expect(refusedThursday.withRefusedMoment(own, said: ["À 18 h.", request]).text("quand")
                 == "jeudi après le travail À 18 h.")
-        #expect(refusedThursday.withRefusedDay(own, said: ["Demain à 18 h.", request]) == own)
-        #expect(refusedThursday.withRefusedDay(own, said: []) == own)
-        #expect(refusedThursday.withRefusedDay(thursdayAgain, said: ["À 18 h.", request]) == thursdayAgain)
+        #expect(refusedThursday.withRefusedMoment(own, said: ["Demain à 18 h.", request]) == own)
+        #expect(refusedThursday.withRefusedMoment(own, said: []) == own)
+        #expect(refusedThursday.withRefusedMoment(thursdayAgain, said: ["À 18 h.", request]) == thursdayAgain)
         // Another creation, or words refused for another reason: not kept.
         let reminder = ToolCall(name: "creer_rappel", arguments: ["titre": "Coiffeur", "quand": "à 18 h"])
         #expect(kept(reminder) == reminder)
@@ -1410,7 +1454,7 @@ struct CollectionSaidTests {
         refused.checking(past)
         refused.refused(past, gone)
         refused.checking(again)
-        #expect(refused.withRefusedDay(again, said: []) == again)
+        #expect(refused.withRefusedMoment(again, said: []) == again)
         // A reminder's due date, as an event's start.
         let paul = ToolCall(name: "creer_rappel", arguments: ["titre": "Appeler Paul", "quand": "jeudi après le travail"])
         let paulRefused = try #require(checkRefusal(paul))
@@ -1419,7 +1463,7 @@ struct CollectionSaidTests {
         refusedPaul.refused(paul, paulRefused)
         let paulAgain = ToolCall(name: "creer_rappel", arguments: ["titre": "Appeler Paul", "quand": "à 18 h"])
         refusedPaul.checking(paulAgain)
-        let due = try ActionCatalog.reminderDue(refusedPaul.withRefusedDay(paulAgain, said: []), context: context())
+        let due = try ActionCatalog.reminderDue(refusedPaul.withRefusedMoment(paulAgain, said: []), context: context())
         #expect(due?.date == date("2026-10-22T18:00"))
     }
 
@@ -2327,6 +2371,41 @@ struct ChangeTests {
                     "\(next.name)")
             #expect(made.spoken.hasPrefix("C’est dans ton calendrier «\(nb)Maison\(nb)»\(nb): réunion"), "\(next.name)")
             #expect(await calendar.creations == ["e1"], "\(next.name)")
+        }
+    }
+
+    /// voice-cli's calendar in memory, as dialogue-bench's « reminder without what »: « Rappelle-moi demain à 9 h. », the
+    /// reminder refused for its title « Rappel » (as the three models wrote it), then « D'appeler le plombier. » and the
+    /// reminder written again with its title alone, or a change of the last item, or of an id that names none, with the
+    /// title alone: one reminder, « appeler le plombier », due tomorrow at 9:00, the refused request's moment, not
+    /// undated. The same after the model's second try wrote the reminder again with « Rappel » and no moment.
+    @Test func memoryCalendarSavesTheReminderRefusedForItsTitleAtItsMoment() async throws {
+        let request = "Rappelle-moi demain à 9 h."
+        let first = ToolContext(now: now, timeZone: paris, language: .french, userSaid: [request])
+        let answer = ToolContext(now: now, timeZone: paris, language: .french,
+                                 userSaid: ["D'appeler le plombier.", request])
+        let placeholder = ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h", "titre": "Rappel"])
+        let saved = ActionPhrases.reminderCreated(title: "appeler le plombier", due: date("2026-10-16T09:00"),
+                                                  hasTime: true, listName: nil, context())
+        for secondTry in [false, true] {
+            for next in [ToolCall(name: "creer_rappel", arguments: ["titre": "appeler le plombier"]),
+                         ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "titre": "appeler le plombier"]),
+                         ToolCall(name: "modifier_element", arguments: ["reference": "r1", "titre": "appeler le plombier"])] {
+                let calendar = MemoryCalendar(movingItems: false)
+                let runner = ToolRunner(providers: [calendar])
+                _ = await runner.tools()
+                let refused = await runner.handle(placeholder, context: first)
+                #expect(refused.retryable && refused.spoken == ActionPhrases.missingTitle(.french))
+                if secondTry {
+                    let again = ToolCall(name: "creer_rappel", arguments: ["titre": "Rappel"])
+                    #expect(await runner.handle(again, context: first, sameRequest: true).refusal != nil)
+                }
+                let made = await runner.handle(next, context: answer)
+                #expect(made.refusal == nil && made.spoken == saved, "\(secondTry) \(next.arguments)")
+                #expect(made.forModel["titre"] == "appeler le plombier" && made.forModel["echeance"] == "2026-10-16T09:00",
+                        "\(secondTry) \(next.arguments)")
+                #expect(await calendar.creations == ["r1"], "\(secondTry) \(next.arguments)")
+            }
         }
     }
 

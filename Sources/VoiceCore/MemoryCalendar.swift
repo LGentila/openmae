@@ -26,7 +26,7 @@ public actor MemoryCalendar: ToolProvider {
     /// The calendar is named once per conversation, as in the app.
     private var calendarNamed = false
     /// As in the app: a creation just refused for a detail the user gives again (its moment, its calendar or its
-    /// list), which a change of the last item, or of an item never created, makes instead.
+    /// list, its title), which a change of the last item, or of an item never created, makes instead.
     private var refusedCreation = RefusedCreation()
     /// Every item created, by reference, in order: what the bench checks a dialogue's goal against.
     public private(set) var creations: [String] = []
@@ -54,8 +54,8 @@ public actor MemoryCalendar: ToolProvider {
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(completedChange(call, context), said: context.userSaid),
-                                    context: context)
+            let checked = refusedCreation.withRefusedMoment(completedChange(call, context), said: context.userSaid)
+            try ActionCatalog.check(checked, context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
@@ -75,9 +75,9 @@ public actor MemoryCalendar: ToolProvider {
     /// As in the app: a creation whose call names no calendar or no list, with the one the user's words name, or the one
     /// of the same creation refused just before, or, when that one does not exist, the one the user's answer names
     /// (`ActionCatalog.withCollectionSaid`); with an hour alone, that refused creation's day when its words left the
-    /// hour open (`RefusedCreation.withRefusedDay`).
+    /// hour open; with no moment, that creation's when it was refused for its title (`RefusedCreation.withRefusedMoment`).
     private func completed(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
-        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context,
+        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedMoment(call, said: context.userSaid), context: context,
                                          again: refusedCreation.collection(before: call),
                                          answer: refusedCreation.answer(before: call, said: context.userSaid)) {
             $0 ? calendars : lists

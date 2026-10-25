@@ -96,6 +96,17 @@ public enum FrenchDates {
         return tokens(text).compactMap(meaning).allSatisfy(theirs.contains)
     }
 
+    /// The words of `text` that do not say when, in lower case and without accents, elisions and hyphens apart
+    /// (« rappelle-moi » is « rappelle », « moi »; « d'appeler » is « d' », « appeler »): every word but the numbers,
+    /// dates, days, months, parts of the day, units and words like « demain » that `wordsAreTheUser` compares.
+    /// « Rappel demain à 9 h » gives « rappel », « a ».
+    public static func wordsBesidesWhen(_ text: String) -> [String] {
+        tokens(text).compactMap { token in
+            guard case .word(let word) = token, meaning(token) == nil else { return nil }
+            return word
+        }
+    }
+
     /// Whether a sentence says when by itself — a day, a time, a date, "dans 20 minutes" — and not only a part of
     /// it ("de l'après-midi", the answer to a question).
     public static func saysWhen(_ text: String) -> Bool {

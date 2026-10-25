@@ -555,13 +555,58 @@ public enum ActionCatalog {
 
     // MARK: - Checks shared by the app and the benchmark
 
-    /// A non-empty title, or a refusal.
+    /// A title that says what (`saysWhat`), or a refusal: the user is asked what to note (by the model's second try, or by
+    /// the app when it says nothing), and the creation is kept for their answer (`ToolRefusal.detailGivenAgain`,
+    /// `RefusedCreation`), which saves it with its moment.
     public static func title(_ call: ToolCall, _ key: String = "titre", context: ToolContext) throws -> String {
-        guard let title = call.text(key) else {
-            throw ToolRefusal(forModel: "Il manque « \(key) ».", spoken: ActionPhrases.missingTitle(context.language))
+        guard let title = call.text(key), saysWhat(call, key) else {
+            let placeholder = call.text(key).map {
+                " : « \($0) » ne dit pas quoi rappeler. Demande-le simplement (« \(placeholderQuestion) »), sans dire "
+                    + "que c'est noté"
+            } ?? ""
+            var refusal = ToolRefusal(forModel: "Il manque « \(key) »\(placeholder).",
+                                      spoken: ActionPhrases.missingTitle(context.language))
+            refusal.detailGivenAgain = true
+            throw refusal
         }
         return title
     }
+
+    /// Whether a creation's call gives a title (`key`) that says what: a title, and for a reminder one with words left
+    /// once those that only name a reminder or something to do (`placeholderWords`: « rappel », « rappelle-moi »,
+    /// « reminder », « le faire », « quelque chose », with « le », « un », « pour »…), the words of a moment
+    /// (`FrenchDates.wordsBesidesWhen`) and those of the call's own moment are taken away, whatever the case and accents.
+    /// « Rappel », « le rappel », « Rappelle-moi », « Rappel demain à 9 h » say nothing; « rappeler Paul », « rappel de
+    /// vaccin », « faire les courses » do. An event's title is never refused so: « Rendez-vous » is one.
+    ///
+    /// Asked « Rappelle-moi demain à 9 h. », which does not say what to remind, Gemma 4 E4B, E2B and 26B wrote such a
+    /// title in every run of voice-cli dialogue-bench (« Rappel », « Rappelle-moi », « le rappel », « Rappel demain »),
+    /// and the app saved it: the user heard « C’est noté : vendredi 16 octobre à 9 h, Rappel. ». At their answer (« D'appeler
+    /// le plombier. »), E4B saved a second reminder without a date, E2B said the sentence again without a call, and the
+    /// 26B renamed the first one in 5 runs of 10: the reminder the user wanted was saved in 0 runs of 10 on each model.
+    static func saysWhat(_ call: ToolCall, _ key: String = "titre") -> Bool {
+        guard let title = call.text(key) else { return false }
+        guard call.name == createReminder.name else { return true }
+        let moment = Set(["quand", "echeance", "debut"].compactMap { call.text($0) }.flatMap(FrenchDates.wordsBesidesWhen))
+        return FrenchDates.wordsBesidesWhen(title).contains { word in
+            word.contains(where: \.isLetter) && !placeholderWords.contains(word) && !moment.contains(word)
+        }
+    }
+
+    /// The question the model is shown for a reminder's title that says nothing (`title`).
+    static let placeholderQuestion = "Qu'est-ce que je dois te rappeler ?"
+
+    /// The words that only name a reminder, or something to do without saying what (« le faire », « quelque chose »), in
+    /// both languages, and the small words that go with them or with a moment: a reminder's title made only of these and
+    /// of a moment's words says nothing of what to remind (`saysWhat`). With the refusal for « Rappel », Gemma 4 E4B wrote
+    /// « le faire » once in 10 runs of voice-cli dialogue-bench.
+    private static let placeholderWords: Set<String> = [
+        "rappel", "rappels", "rappelle", "rappelles", "reminder", "reminders", "remind", "faire", "ca", "cela", "chose",
+        "choses", "quelque", "truc", "trucs", "something", "thing", "it", "do", "le", "la", "les", "l'", "un", "une", "des",
+        "du", "de", "d'", "a", "au", "aux", "pour", "mon", "ma", "mes", "ton", "ta", "tes", "ce", "cet", "cette", "me", "m'",
+        "moi", "et", "en", "dans", "sur", "vers", "nouveau", "nouvel", "nouvelle", "the", "my", "for", "to", "at", "on",
+        "in", "new",
+    ]
 
     /// The moment a call gives in the first of `keys` it has (the user's words, or a date the model wrote): not
     /// past, less than a year ahead. nil when absent and not required. `base`: the item a change starts from.

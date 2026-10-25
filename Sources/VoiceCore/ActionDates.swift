@@ -110,14 +110,14 @@ public enum DateCheck {
 }
 
 /// A creation refused for a detail the user then gives again (`ToolRefusal.detailGivenAgain`: a moment already gone,
-/// words about time the app cannot place or none at all, a calendar or a list that does not exist), kept for the call
-/// right after it. When the user answers ("Demain à 16h.", "Mets-la dans Maison alors."), Gemma 4 26B often takes the
-/// refused item for saved and writes a change of the "last" item (`modifier_element`), which was never created: that
-/// change then creates the item, with what the change gives. In voice-cli dialogue-bench the 26B answered so 9 times in
-/// 10 after a calendar that does not exist, 2 to 5 after words about time the app cannot place: the item was saved at
-/// that answer in 5 and 8 runs of 10, when its second try wrote the creation again, and in 10 of 10 since. Used by the
-/// calendar providers (`CalendarTools`, and voice-cli's calendar in memory), around their check and their carrying out
-/// of each call.
+/// words about time the app cannot place or none at all, a calendar or a list that does not exist, a title that does not
+/// say what: `ActionCatalog.title`), kept for the call right after it. When the user answers ("Demain à 16h.", "Mets-la
+/// dans Maison alors."), Gemma 4 26B often takes the refused item for saved and writes a change of the "last" item
+/// (`modifier_element`), which was never created: that change then creates the item, with what the change gives. In
+/// voice-cli dialogue-bench the 26B answered so 9 times in 10 after a calendar that does not exist, 2 to 5 after words
+/// about time the app cannot place: the item was saved at that answer in 5 and 8 runs of 10, when its second try wrote
+/// the creation again, and in 10 of 10 since. Used by the calendar providers (`CalendarTools`, and voice-cli's calendar
+/// in memory), around their check and their carrying out of each call.
 ///
 /// The last item is then the refused one, even when the conversation created another before it: a change of the last
 /// item (« dernier ») is the refused creation. That earlier item used to be changed instead (« Demain à 18 h. » moved
@@ -145,9 +145,13 @@ public enum DateCheck {
 /// Refused for words that gave the day but left the hour open (« jeudi après le travail »:
 /// `FrenchDates.leavesTheHourOpen`), the creation keeps that day when the answer gives an hour alone (« À 18 h. »:
 /// `FrenchDates.saysOnlyTheHour`), in a change (`creation(insteadOf:said:names:exists:)`) or in the creation written
-/// again (`withRefusedDay`): « à 18 h » alone is the next 18:00, the next day at the bench's 18:42, not the Thursday
+/// again (`withRefusedMoment`): « à 18 h » alone is the next 18:00, the next day at the bench's 18:42, not the Thursday
 /// the user said. To that answer, the models wrote « jeudi à 18 h » in 59 of 60 calls of voice-cli dialogue-bench,
 /// and Gemma 4 E4B once a change of the last item with « à 18 h ».
+///
+/// Refused for its title (« Rappelle-moi demain à 9 h. », which does not say what), the creation keeps its moment for the
+/// answer (« D'appeler le plombier. »): a change of the last item gives the title (`creation(insteadOf:said:names:exists:)`),
+/// and the creation written again with its title alone gets the refused one's moment (`withRefusedMoment`).
 public struct RefusedCreation: Sendable {
     private var refused: ToolCall?
     /// The creation refused just before the call being checked and carried out, when that call is the same tool's.
@@ -163,7 +167,7 @@ public struct RefusedCreation: Sendable {
 
     /// Before a call is checked: a creation refused only stays for the call right after it, if that call is a change
     /// (`creation(insteadOf:said:names:exists:)`), or the same creation written again (`collection(before:)`,
-    /// `answer(before:said:)`, `withRefusedDay`).
+    /// `answer(before:said:)`, `withRefusedMoment`).
     public mutating func checking(_ call: ToolCall) {
         before = refused?.name == call.name ? refused : nil
         if call.name != ActionCatalog.changeItem.name { refused = nil }
@@ -188,17 +192,35 @@ public struct RefusedCreation: Sendable {
         return said.first
     }
 
-    /// `call`, the call being checked and carried out, when it is the same creation refused just before written again
-    /// with an hour alone (« à 18 h ») after words that gave the day and left the hour open (« jeudi après le
-    /// travail »): with both, « jeudi après le travail à 18 h », Thursday at 18:00. Unchanged otherwise: a moment
-    /// with a day of its own (« demain à 18 h ») replaces the refused one. `said`: the user's messages, the latest
-    /// first (`ToolContext.userSaid`), for words of the model's own (`words(_:said:keepingTheDayOf:)`).
-    public func withRefusedDay(_ call: ToolCall, said: [String]) -> ToolCall {
-        guard let before, before.name == call.name, let key = Self.starts.first(where: { call.text($0) != nil }),
-              let words = call.text(key), let kept = Self.words(words, said: said, keepingTheDayOf: before)
-        else { return call }
+    /// `call`, the call being checked and carried out, when it is the same creation refused just before written again:
+    /// - with an hour alone (« à 18 h ») after words that gave the day and left the hour open (« jeudi après le
+    ///   travail »): with both, « jeudi après le travail à 18 h », Thursday at 18:00;
+    /// - without a moment, after a refusal for its title (`ActionCatalog.saysWhat`): with the refused one's moment
+    ///   (`moment(of:in:)`). « Rappelle-moi demain à 9 h. » does not say what to remind; to the answer, « D'appeler le
+    ///   plombier. », the model may write the reminder with its title alone, which would be saved without a date.
+    /// Unchanged otherwise: a moment with a day of its own (« demain à 18 h ») replaces the refused one. `said`: the
+    /// user's messages, the latest first (`ToolContext.userSaid`), for words of the model's own
+    /// (`words(_:said:keepingTheDayOf:)`).
+    public func withRefusedMoment(_ call: ToolCall, said: [String]) -> ToolCall {
+        guard let before, before.name == call.name else { return call }
+        guard let key = Self.starts.first(where: { call.text($0) != nil }) else {
+            return ActionCatalog.saysWhat(before) ? call : Self.moment(of: before, in: call)
+        }
+        guard let words = call.text(key), let kept = Self.words(words, said: said, keepingTheDayOf: before) else {
+            return call
+        }
         var call = call
         call.arguments[key] = .string(kept)
+        return call
+    }
+
+    /// `call`, a creation that gives no moment, with the moment of `refused`, the same creation refused just before:
+    /// its start, its end and its length, under the words it gave them, each one `call` does not give.
+    private static func moment(of refused: ToolCall, in call: ToolCall) -> ToolCall {
+        var call = call
+        for key in starts + ["fin", "journee_entiere", "duree", "duree_minutes"] where call.text(key) == nil {
+            if let value = refused.arguments[key] { call.arguments[key] = value }
+        }
         return call
     }
 
@@ -241,7 +263,7 @@ public struct RefusedCreation: Sendable {
     /// lists of a reminder: the one the user's answer names, `ActionCatalog.collectionAnswered`), a title, a length, a
     /// place. nil when no creation was refused just before, or when the change names by its id an item created in this
     /// conversation (`exists`: whether a reference names one), which it changes. `said`: the user's messages, the
-    /// latest first, as for `withRefusedDay`; the first is their answer when they said it after the refusal
+    /// latest first, as for `withRefusedMoment`; the first is their answer when they said it after the refusal
     /// (`refused(_:_:said:)`). Forgets the refused creation.
     public mutating func creation(insteadOf change: ToolCall, said: [String] = [],
                                   names: (_ event: Bool) -> [String] = { _ in [] },

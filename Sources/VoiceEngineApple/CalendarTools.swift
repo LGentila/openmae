@@ -51,8 +51,8 @@ public actor CalendarTools: ToolProvider {
     private var undoCount = 0
     /// The default calendar is named once per conversation, so the user knows where events go.
     private var calendarNamed = false
-    /// A creation just refused for a detail the user gives again (its moment, its calendar or its list), which a change
-    /// of the last item, or of an item never created, makes instead.
+    /// A creation just refused for a detail the user gives again (its moment, its calendar or its list, its title), which a
+    /// change of the last item, or of an item never created, makes instead.
     private var refusedCreation = RefusedCreation()
 
     public init(testCollection: String? = nil) {
@@ -69,14 +69,15 @@ public actor CalendarTools: ToolProvider {
 
     /// A creation refused is kept with the calendar or the list the user's words name, when its call names none
     /// (`completed`): the answer then creates it there. Its moment is checked as it is carried out: on the day of the
-    /// same creation refused just before, when the call gives an hour alone (`RefusedCreation.withRefusedDay`). A change
-    /// is checked with the calendar or the list the user's words name, when its call names none (`completedChange`): one
-    /// that gives nothing else is not refused as changing nothing.
+    /// same creation refused just before, when the call gives an hour alone, or that creation's whole moment, when the
+    /// call gives none after a refusal for its title (`RefusedCreation.withRefusedMoment`). A change is checked with the
+    /// calendar or the list the user's words name, when its call names none (`completedChange`): one that gives nothing
+    /// else is not refused as changing nothing.
     public func check(_ call: ToolCall, context: ToolContext) throws {
         refusedCreation.checking(call)
         do {
-            try ActionCatalog.check(refusedCreation.withRefusedDay(completedChange(call, context), said: context.userSaid),
-                                    context: context)
+            let checked = refusedCreation.withRefusedMoment(completedChange(call, context), said: context.userSaid)
+            try ActionCatalog.check(checked, context: context)
         } catch let refusal as ToolRefusal {
             refusedCreation.refused(completed(call, context), refusal, said: context.userSaid)
             throw refusal
@@ -100,9 +101,10 @@ public actor CalendarTools: ToolProvider {
     /// user's words name among the writable ones, or the one of the same creation refused just before, or, when that
     /// one does not exist, the one the user's answer names (`ActionCatalog.withCollectionSaid`), found then as one the
     /// model names. An hour alone (« à 18 h ») after that refused creation's words gave the day and left the hour open
-    /// (« jeudi après le travail »): that day (`RefusedCreation.withRefusedDay`).
+    /// (« jeudi après le travail »): that day; no moment after it was refused for its title (« Rappel »): its moment
+    /// (`RefusedCreation.withRefusedMoment`).
     private func completed(_ call: ToolCall, _ context: ToolContext) -> ToolCall {
-        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedDay(call, said: context.userSaid), context: context,
+        ActionCatalog.withCollectionSaid(refusedCreation.withRefusedMoment(call, said: context.userSaid), context: context,
                                          again: refusedCreation.collection(before: call),
                                          answer: refusedCreation.answer(before: call, said: context.userSaid)) {
             writable($0 ? .event : .reminder)
