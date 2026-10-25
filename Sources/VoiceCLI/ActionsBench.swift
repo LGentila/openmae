@@ -336,12 +336,9 @@ func runActionsBench(_ o: Options) async throws {
         print("searches made on \(address.absoluteString)")
     }
     var found: [String: WebSearchResults] = [:]  // the live searches, for --record
-    // As in the app (`ToolRunner.named`): a misspelled tool name is read as the tool's.
-    func named(_ call: ToolCall) -> ToolCall {
-        var named = call
-        named.name = ToolNames.match(call.name, among: tools.map(\.name)) ?? call.name
-        return named
-    }
+    // As in the app (`ToolRunner.named`): a misspelled tool name is read as the tool's, a memory action written as one
+    // as the memory's call.
+    func named(_ call: ToolCall) -> ToolCall { ToolNames.read(call, among: tools.map(\.name)) }
     await model.useTools(tools)
     await model.watchToolCalls(o.watchCalls)
     await model.computePromptsInFloat32(!o.bfloat16Prompts)
@@ -1366,7 +1363,7 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
           + more.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined())
     print("calls the app would refuse: \(results.filter { $0.refusal != nil }.count)")
     let misspelled = results.filter { $0.writtenName != nil }
-    print("misspelled tool names read as the tool's: \(misspelled.count)"
+    print("tool names read as another tool's (misspelled, or a memory action): \(misspelled.count)"
           + misspelled.map { "\n    · \($0.writtenName ?? "") → \($0.chosen)" }.joined())
     // In figures or in words ("(jeudi 15 octobre 2026 à 18:42)"): a year in brackets.
     let copied = results.filter { $0.text.range(of: #"[(\[][^()\[\]]*\b20\d{2}"#, options: .regularExpression) != nil }
@@ -1618,11 +1615,7 @@ private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, too
                                modelName: String, options o: Options) async throws
 {
     let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
-    func named(_ call: ToolCall) -> ToolCall {
-        var named = call
-        named.name = ToolNames.match(call.name, among: tools.map(\.name)) ?? call.name
-        return named
-    }
+    func named(_ call: ToolCall) -> ToolCall { ToolNames.read(call, among: tools.map(\.name)) }
     let clock = ContinuousClock()
     var results: [SeveralResult] = []
     for (index, item) in corpus.cases.enumerated() {

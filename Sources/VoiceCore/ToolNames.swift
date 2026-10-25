@@ -8,6 +8,9 @@ import Foundation
 /// is not a slip, and only the model knows what it meant ("lire_rappels" is three letters from "lister_rappels",
 /// "cocher_rappel" three from "creer_rappel"). Two tools are at least five letters apart, so a slip of two can only
 /// stand for one of them.
+///
+/// The smallest model also writes one of the memory's actions as a tool's name (`tout_oublier {}`): that is the
+/// memory's call with that action (`read`).
 public enum ToolNames {
     /// The name among `names` that `written` stands for: itself, or the only one at most two letters away (one for
     /// a name of fewer than eight letters, none under four). nil when there is none, or more than one.
@@ -19,6 +22,29 @@ public enum ToolNames {
             return distance(key, target) <= min(2, target.count / 4)
         }
         return near.count == 1 ? near[0] : nil
+    }
+
+    /// The tool among `names` that a call named `written` is for: the one its name stands for (`match`), or the memory,
+    /// when it is among them and the name is one of its actions (`MemoryCatalog.actionWrittenAsTool`). nil when none.
+    public static func tool(for written: String, among names: [String]) -> String? {
+        if let name = match(written, among: names) { return name }
+        guard names.contains(MemoryCatalog.name), MemoryCatalog.actionWrittenAsTool(written) != nil else { return nil }
+        return MemoryCatalog.name
+    }
+
+    /// The call as the model meant it: under the name of its tool (`tool(for:among:)`), unchanged when it stands for
+    /// none. A memory action written as a tool's name (`tout_oublier {}`) becomes the memory's call with that action,
+    /// its arguments as written (an `action` of their own kept).
+    public static func read(_ call: ToolCall, among names: [String]) -> ToolCall {
+        guard let name = tool(for: call.name, among: names), name != call.name else { return call }
+        var read = call
+        read.name = name
+        if name == MemoryCatalog.name, read.arguments["action"] == nil,
+           let action = MemoryCatalog.actionWrittenAsTool(call.name)
+        {
+            read.arguments["action"] = .string(action.rawValue)
+        }
+        return read
     }
 
     /// What the model is told when the name it wrote stands for no tool.

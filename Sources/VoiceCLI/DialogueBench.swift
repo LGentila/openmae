@@ -101,7 +101,8 @@ private struct DialogueCorpus: Decodable {
 /// One pass of the model in a turn: the first, the second try after a refused call, or the summing up of a result.
 private struct Pass: Encodable {
     var text: String
-    /// The call it wrote, read as the app reads it (a misspelled name as the tool's).
+    /// The call it wrote, read as the app reads it (a misspelled name as the tool's, a memory action written as a
+    /// tool's name as the memory's call).
     var call: ToolCall?
     var writtenName: String?
     /// What the app gave the model for it, and whether the app refused it.

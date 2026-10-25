@@ -93,7 +93,7 @@ public actor ToolRunner {
     /// not read yet: then nil when some tool has a phrase of its own (better wait for the name, a few tokens later).
     public func waitingPhrase(for tool: String?, language: SpeechLanguage) async -> String? {
         guard let tool else { return ownPhrases.isEmpty ? ActionPhrases.oneMoment(language) : nil }
-        let name = ToolNames.match(tool, among: names) ?? tool
+        let name = ToolNames.tool(for: tool, among: names) ?? tool
         if ownPhrases.contains(name), let provider = byName[name],
            let phrase = await provider.waitingPhrase(for: name, language: language)
         {
@@ -105,20 +105,23 @@ public actor ToolRunner {
     /// Whether a call to `tool` that the model writes after words of its own is left out: not carried out, kept out of the
     /// history, and nothing said of it, the words being the answer (`ToolProvider.ignoresAfterWords`, with or without the
     /// actions). `callChanceAtStart`: the chance the model gave to a call at the answer's first token
-    /// (`LanguageModel.callChanceAtStart`). A misspelled name is read as its tool's.
+    /// (`LanguageModel.callChanceAtStart`). A misspelled name, or a memory action written as one, is read as its
+    /// tool's.
     public func ignoresAfterWords(_ tool: String, callChanceAtStart: Double?) async -> Bool {
-        let name = ToolNames.match(tool, among: names) ?? tool
+        let name = ToolNames.tool(for: tool, among: names) ?? tool
         guard let provider = byName[name] else { return false }
         return await provider.ignoresAfterWords(name, actions: offersActions, callChanceAtStart: callChanceAtStart)
     }
 
-    /// The call with the name of the tool it stands for, when the model misspelled it ("crer_rappel"); unchanged
-    /// otherwise (`ToolNames`). It is what goes into the history, so the model does not see its slip again.
+    /// The call as the model meant it (`ToolNames.read`): with the name of its tool when the model misspelled it
+    /// ("crer_rappel"), or the memory's call with that action when it wrote one of the memory's actions as a tool's
+    /// name (`tout_oublier {}`); unchanged otherwise. It is what goes into the history, so the model does not see its
+    /// slip again.
     public func named(_ call: ToolCall) -> ToolCall {
-        guard let name = ToolNames.match(call.name, among: names), name != call.name else { return call }
-        DebugLog.log("tool name \(call.name) read as \(name)")
-        var named = call
-        named.name = name
+        let named = ToolNames.read(call, among: names)
+        guard named != call else { return call }
+        DebugLog.log("tool name \(call.name) read as \(named.name)"
+                     + (named.arguments == call.arguments ? "" : ", action \(named.arguments["action"]?.text ?? "")"))
         return named
     }
 
@@ -253,8 +256,9 @@ public actor ToolRunner {
         pending.isEmpty ? nil : ActionPhrases.pendingQuestion(pending.map(\.summary), language)
     }
 
-    /// Checks a call and carries it out, or asks for confirmation first. A misspelled tool name is read as the
-    /// tool's; a name that stands for none is refused with the real ones, for the model's second try.
+    /// Checks a call and carries it out, or asks for confirmation first. A misspelled tool name, or a memory action
+    /// written as one, is read as the tool's (`named`); a name that stands for none is refused with the real ones, for
+    /// the model's second try.
     /// `sameRequest`: the call is one more of the request begun before (`beginRequest`, or the call before); otherwise it
     /// begins one.
     public func handle(_ call: ToolCall, context: ToolContext, sameRequest: Bool = false) async -> Reply {

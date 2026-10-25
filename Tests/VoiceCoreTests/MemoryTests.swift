@@ -290,6 +290,32 @@ struct MemoryTests {
         #expect(try await store.sheet().count == 1)
     }
 
+    /// Gemma 4 E2B writes the action as a tool's name (`tout_oublier {}`): the app reads it as the memory's call, which
+    /// the history then holds, and asks the user as for the memory's own. Without the memory, no tool has that name.
+    @Test func erasingEverythingWrittenAsAToolIsTheMemorysCall() async throws {
+        let store = TransientMemoryStore(sheet: ["Préfère le thé vert"])
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
+        _ = await runner.tools()
+        let written = ToolCall(name: "tout_oublier")
+        #expect(await runner.named(written) == ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"]))
+        let asked = await runner.handle(written, context: context(["Efface toute ta mémoire."]))
+        #expect(asked.waitsForYes)
+        #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi. On y va\u{00A0}?")
+        #expect(try await store.sheet().count == 1)  // nothing yet
+        #expect(await runner.resolve(.confirm, context: context(["Oui."]))?.spoken == MemoryPhrases.erasedAll(.french))
+        #expect(try await store.sheet().isEmpty)
+        // Still only when the user asked for it.
+        let kept = TransientMemoryStore(sheet: ["Préfère le thé vert"])
+        let another = ToolRunner(providers: [MemoryTools(store: kept, enabled: true)])
+        _ = await another.tools()
+        let refused = await another.handle(written, context: context(["J'oublie tout en ce moment, c'est terrible."]))
+        #expect(!refused.waitsForYes && refused.retryable)
+        #expect(try await kept.sheet().count == 1)
+        let off = ToolRunner(providers: [MemoryTools(store: kept, enabled: false)])
+        _ = await off.tools()
+        #expect(await off.named(written) == written)
+    }
+
     /// The model wrote « oublier » with « tout »: it is pointed to `tout_oublier`, nothing is erased.
     @Test func forgettingAllIsPointedToEraseEverything() async throws {
         #expect(MemoryCatalog.action(ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_effacer"]))

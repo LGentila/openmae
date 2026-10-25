@@ -89,6 +89,19 @@ public enum MemoryCatalog {
         }
     }
 
+    /// The actions the model may write as a tool's name, which the app reads as the memory's call with that action
+    /// (`ToolNames.read`): Gemma 4 E2B writes `tout_oublier {}` for `memoire {action: tout_oublier}`, the action having
+    /// a tool's shape (`creer_rappel`, `lister_rappels`). Not `chercher`, which begins the web search's name
+    /// (`chercher_web`): a call `chercher` may mean either, and only the model knows which.
+    static let actionsWrittenAsTools: [Action] = [.retenir, .oublier, .toutOublier]
+
+    /// The action a name written as a tool's stands for (`actionsWrittenAsTools`), read as a tool's name is
+    /// (`ToolNames.match`): capitals, accents, dashes and spaces aside, a slip of a letter or two. nil for any other
+    /// name.
+    public static func actionWrittenAsTool(_ name: String) -> Action? {
+        ToolNames.match(name, among: actionsWrittenAsTools.map(\.rawValue)).flatMap(Action.init(rawValue:))
+    }
+
     /// Whether the user's sentence asks to erase the whole memory: a word that erases, then the memory itself (« efface
     /// toute ta mémoire », « remets ta mémoire à zéro »), everything Maé knows or keeps of them (« oublie tout ce que tu
     /// sais sur moi »), or « tout » alone (« oublie tout ») — and no period (« efface tout ce qu'on s'est dit hier
