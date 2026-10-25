@@ -173,6 +173,56 @@ extension ActionCatalog {
         return placedNames.count == 1 ? placedNames.first : nil
     }
 
+    /// The title a change gives an item it puts in the calendar or the list `collectionName` (its name as the user knows
+    /// it; nil: the change puts the item in none): `title`, the call's, unless that is the item's own (`current`)
+    /// followed only by words that name that calendar or that list, then `current`. Those words: « liste », « calendrier »
+    /// or « agenda » and the name, with « de », « du »… or nothing between them, and « à », « dans », « pour », « sur »…,
+    /// « ma », « la »… or nothing before them, whatever the case, accents and brackets (« acheter du pain pour la liste de
+    /// courses », « acheter du pain (liste courses) », « réunion dans mon calendrier Maison »); in English, the name before
+    /// « list » or « calendar » too (« buy bread (shopping list) »). The name may be a part of the calendar's or the list's
+    /// (« course » for « Courses », « courses » for « Courses du week-end », as `collectionSaid` finds it in the user's
+    /// words). Any other title is the item's new one: a real new title (« acheter du pain complet »), the words of another
+    /// calendar or list, a name without « liste » or « calendrier » (« acheter du pain (Courses) »), and any title of a
+    /// change that puts the item in no calendar and no list.
+    ///
+    /// Asked « Mets-le dans ma liste de courses. » of a reminder « acheter du pain » in « Rappels », Gemma 4 E4B, whose
+    /// change offers no list (`movesItems(on:)`), wrote the list's words into the reminder's new title in 3 or 4 runs of
+    /// 10 of voice-cli dialogue-bench on 2026-10-23 (`{reference: r1, titre: acheter du pain pour la liste de courses}`,
+    /// `{reference: r1, titre: acheter du pain (liste courses)}`, `{reference: r1, titre: acheter du pain dans ma liste de
+    /// courses}`): moved to « Courses » (`withCollectionSaid(change:event:context:names:)`), the reminder was found there
+    /// as « acheter du pain pour la liste de courses ». With the title kept so, it ended in « Courses » as « acheter du
+    /// pain » in 19 runs of 20 on 2026-10-25, against 12 of 20 before (6 renamed so); E4B still wrote the list's words in
+    /// 10 of its 19 changes, and in the run left it asked when, without a call, as it did in 2 of the 20 before.
+    static func changedTitle(_ title: String, current: String, collectionName: String?) -> String {
+        guard let collectionName else { return title }
+        let words = placeWords(title).filter { $0 != "|" }
+        let own = placeWords(current).filter { $0 != "|" }
+        guard !own.isEmpty, words.count > own.count, words.starts(with: own),
+              onlyName(collectionName, words.dropFirst(own.count))
+        else { return title }
+        DebugLog.log("calendar: a change's title that adds only the words of its calendar or its list, left as it was")
+        return current
+    }
+
+    /// Whether `words` (`placeWords`, without its cuts) are only words that name the calendar or the list `name`, as
+    /// `changedTitle` reads them: « pour la liste de courses », « liste courses », « dans mon calendrier Maison », « to my
+    /// shopping list ».
+    private static func onlyName(_ name: String, _ words: ArraySlice<String>) -> Bool {
+        let nameText = " " + placeWords(name).filter { $0 != "|" }.joined(separator: " ")
+        /// Whether these words are the name, or a part of it from the start of one of its words.
+        func names(_ named: ArraySlice<String>) -> Bool {
+            let text = named.joined(separator: " ")
+            return text.count >= 2 && nameText.contains(" " + text)
+        }
+        // « pour la », « dans ma », « à l' », « to my »… before them.
+        let rest = words.drop { placeBefore.contains($0) || determiners.contains($0) }
+        guard let first = rest.first, let last = rest.last else { return false }
+        // « liste de courses », « calendrier Maison », « liste courses »; of a list called « Liste de courses », its name.
+        if collectionWords.contains(first), names(rest.dropFirst().drop { linking.contains($0) }) { return true }
+        // In English, « shopping list », « Work calendar ».
+        return collectionWords.contains(last) && names(rest.dropLast())
+    }
+
     /// Whether a sentence asks for an item in another calendar or list as well, a copy, rather than there instead
     /// (`moved`): « aussi », « également », « en plus », « copie »… (« Ajoute-la aussi dans mon calendrier Famille. »), in
     /// English « also », « too », « as well », « copy »…

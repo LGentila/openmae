@@ -2350,6 +2350,137 @@ struct ChangeTests {
         #expect(await calendar.touched == ["Réunion", "Réunion", "Réunion", "acheter du pain"])
         #expect(await calendar.creations == ["e1", "r1"])
     }
+
+    /// A change that puts an item in a calendar or a list (named in the call, or in the user's words) and gives as its
+    /// new title the item's own followed only by words that name that calendar or that list, as Gemma 4 E4B wrote it
+    /// (« acheter du pain pour la liste de courses »): the item keeps its title, whatever the case, accents and brackets,
+    /// with the calendar or the list as `CalendarTools` gives it (its identifier and its name) or as voice-cli's calendar
+    /// in memory does (its name). Any other title is applied: a real new one, another list's words, a name without
+    /// « liste », and any title of a change that moves nothing, as before.
+    @Test func aTitleThatOnlyAddsTheNewListOrCalendarKeepsTheItemsOwn() throws {
+        let bread = ActionCatalog.SavedItem(isEvent: false, title: "acheter du pain", date: nil, hasTime: false,
+                                            collection: "Rappels")
+        func title(_ item: ActionCatalog.SavedItem, _ title: String, to collection: String?,
+                   named collectionName: String? = nil, quand: String? = nil) throws -> String
+        {
+            var arguments: [String: JSONValue] = ["titre": .string(title)]
+            if let quand { arguments["quand"] = .string(quand) }
+            let changed = try ActionCatalog.changed(item, by: change(arguments), collection: collection,
+                                                    collectionName: collectionName, reference: "r1", context: context())
+            #expect(changed.collection == collection ?? item.collection, "\(title)")
+            return changed.title
+        }
+        let groceries = ["acheter du pain pour la liste de courses", "acheter du pain (liste de courses)",
+                         "acheter du pain dans ma liste de courses", "Acheter du pain (liste courses)",
+                         "acheter du pain à ma liste de course", "acheter du pain, sur la liste de courses.",
+                         "ACHETER DU PAIN – Liste de Courses", "acheter du pain pour ma liste appelée Courses"]
+        for written in groceries {
+            #expect(try title(bread, written, to: "Courses") == "acheter du pain", "\(written)")
+            // As `CalendarTools` gives it: EventKit's identifier, and the list's name.
+            #expect(try title(bread, written, to: "5E1C9A0B-list", named: "Courses") == "acheter du pain", "\(written)")
+        }
+        // A list whose name has « liste » in it, or more words than the title says: the user's words found it so.
+        #expect(try title(bread, "acheter du pain pour la liste de courses", to: "Liste de courses") == "acheter du pain")
+        #expect(try title(bread, "acheter du pain (liste de courses)", to: "Courses du week-end") == "acheter du pain")
+        // In English: the name before « list » too.
+        let english = ActionCatalog.SavedItem(isEvent: false, title: "Buy bread", date: nil, hasTime: false,
+                                              collection: "Reminders")
+        for written in ["Buy bread (shopping list)", "buy bread to my Shopping list", "Buy bread in the list Shopping"] {
+            #expect(try title(english, written, to: "Shopping") == "Buy bread", "\(written)")
+        }
+        // An event moved to another calendar, with its moment changed too.
+        for written in ["Réunion (calendrier Maison)", "réunion dans mon calendrier Maison", "Réunion à l'agenda maison",
+                        "Réunion pour le calendrier Maison"] {
+            #expect(try title(meeting, written, to: "Maison") == "Réunion", "\(written)")
+        }
+        #expect(try title(meeting, "Réunion (calendrier Maison)", to: "Maison", quand: "à 11 h") == "Réunion")
+        let moment = try ActionCatalog.changed(meeting, by: change(["titre": "Réunion (calendrier Maison)", "quand": "à 11 h"]),
+                                               collection: "Maison", reference: "e1", context: context())
+        #expect(moment.date == date("2026-10-16T11:00") && moment.collection == "Maison")
+        let homeMeeting = ActionCatalog.SavedItem(isEvent: true, title: "Meeting", date: date("2026-10-16T10:00"),
+                                                  end: date("2026-10-16T11:00"), hasTime: true, collection: "Work")
+        #expect(try title(homeMeeting, "Meeting in my Home calendar", to: "Home") == "Meeting")
+
+        // Any other title: the item's new one.
+        for written in ["acheter du pain complet", "acheter du pain et du lait", "acheter du pain pour la liste de Noël",
+                        "acheter du pain (Courses)", "acheter du pain pour la liste", "liste de courses : acheter du pain",
+                        "acheter des croissants pour la liste de courses",
+                        "acheter du pain pour la liste de courses et du lait"] {
+            #expect(try title(bread, written, to: "Courses") == written, "\(written)")
+        }
+        #expect(try title(meeting, "Réunion (calendrier Travail)", to: "Maison") == "Réunion (calendrier Travail)")
+        // A change that moves nothing: as before.
+        #expect(try title(bread, "acheter du pain pour la liste de courses", to: nil)
+                == "acheter du pain pour la liste de courses")
+        #expect(try title(meeting, "Réunion (calendrier Maison)", to: nil) == "Réunion (calendrier Maison)")
+
+        // In the list it is already in: nothing changed, and the user hears where it is.
+        var inGroceries = bread
+        inGroceries.collection = "Courses"
+        let already = try #require(refusal(inGroceries, ["titre": "acheter du pain (liste de courses)"],
+                                           collection: "Courses"))
+        #expect(!already.retryable && already.spoken == "C’est déjà dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain.")
+    }
+
+    /// voice-cli's calendar in memory, through the runner as dialogue-bench uses it, without the move in the tool (Gemma 4
+    /// E4B's tier) or with it, as `CalendarTools` (`ActionCatalog.changed`): « Rappelle-moi d'acheter du pain. », then
+    /// « Mets-le dans ma liste de courses. » and a change whose title adds the list's words, with the list or without it:
+    /// the reminder in « Courses », as « acheter du pain », and « annule » puts it back. A real new title is applied, with
+    /// the move or without it; a meeting put in another calendar keeps its title the same way; and the reminder put again
+    /// in its own list is answered by the app, where it is.
+    @Test(arguments: [false, true])
+    func memoryCalendarKeepsTheTitleOfAnItemMovedWhereTheUserSays(movingItems: Bool) async throws {
+        let calendar = MemoryCalendar(movingItems: movingItems)
+        await calendar.use(calendars: ["Travail", "Maison"], lists: ["Rappels", "Courses"])
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        func said(_ sentences: String...) -> ToolContext {
+            ToolContext(now: now, timeZone: paris, language: .french, userSaid: sentences)
+        }
+        let request = "Rappelle-moi d'acheter du pain."
+        let bread = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du pain"])
+        #expect(await runner.handle(bread, context: said(request)).forModel["liste"] == "Rappels")
+        let toGroceries = said("Mets-le dans ma liste de courses.", request)
+        let at = now.addingTimeInterval(30)
+        for arguments: [String: JSONValue] in [["reference": "r1", "titre": "acheter du pain pour la liste de courses"],
+                                               ["reference": "r1", "titre": "acheter du pain (liste courses)"],
+                                               ["reference": "r1", "titre": "acheter du pain dans ma liste de courses",
+                                                "liste": "Courses"]] {
+            let moved = await runner.handle(change(arguments), context: toGroceries)
+            #expect(moved.refusal == nil, "\(arguments)")
+            #expect(moved.spoken == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain.", "\(arguments)")
+            #expect(moved.forModel["titre"] == "acheter du pain" && moved.forModel["liste"] == "Courses", "\(arguments)")
+            #expect(await runner.interception(for: "Annule", now: at) == .undo)
+            _ = await runner.resolve(.undo, context: context(at: at))
+        }
+        let renamed = await runner.handle(change(["reference": "r1", "titre": "acheter du pain complet"]),
+                                          context: said("Mets-le dans ma liste de courses, et c'est du pain complet.", request))
+        #expect(renamed.spoken == "C’est déplacé dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain complet.")
+        _ = await runner.resolve(.undo, context: context(at: at))
+        let titled = await runner.handle(change(["reference": "r1", "titre": "acheter du pain pour la liste de courses"]),
+                                         context: said("Change son nom.", request))
+        #expect(titled.spoken == "C’est modifié\(nb): acheter du pain pour la liste de courses.")
+        #expect(titled.forModel["liste"] == "Rappels")
+        _ = await runner.resolve(.undo, context: context(at: at))
+
+        let meetingRequest = "Ajoute une réunion demain à 10 h."
+        let meeting = ToolCall(name: "creer_evenement", arguments: ["titre": "Réunion", "quand": "demain à 10 h"])
+        #expect(await runner.handle(meeting, context: said(meetingRequest)).forModel["calendrier"] == "Travail")
+        let home = await runner.handle(change(["reference": "e1", "titre": "réunion (calendrier Maison)"]),
+                                       context: said("Mets la réunion dans mon calendrier Maison.", meetingRequest))
+        #expect(home.spoken
+                == "C’est déplacé dans ton calendrier «\(nb)Maison\(nb)»\(nb): Réunion, vendredi 16 octobre de 10\(nb)h à 11\(nb)h.")
+        #expect(home.forModel["titre"] == "Réunion")
+
+        let inGroceries = await runner.handle(change(["reference": "r1", "liste": "Courses"]), context: toGroceries)
+        #expect(inGroceries.forModel["liste"] == "Courses")
+        let touched = await calendar.touched
+        let already = await runner.handle(change(["reference": "r1", "titre": "acheter du pain dans ma liste de courses"]),
+                                          context: toGroceries)
+        #expect(!already.retryable && already.spoken == "C’est déjà dans ta liste «\(nb)Courses\(nb)»\(nb): acheter du pain.")
+        #expect(await calendar.touched == touched)  // left as it was
+        #expect(await calendar.creations == ["r1", "e1"])
+    }
 }
 
 // MARK: - A creation of an item already there

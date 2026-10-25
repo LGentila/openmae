@@ -343,17 +343,20 @@ public enum ActionCatalog {
         return refusal
     }
 
-    /// What a `modifier_element` call makes of `item`: a new title; a new moment, length or place for an event, a new
-    /// due date for a reminder (the dates as `changedEvent` and `changedDue` read them); `collection`, the calendar or
-    /// the list it names (as the provider found it), `collectionName` its name as the user knows it (nil: `collection` is
-    /// its name). Refused when that changes nothing: what the call gives is already the item's, or does not apply to it
-    /// (a place for a reminder), so that the app never says « C'est modifié » of an item it left as it was (`unchanged`).
+    /// What a `modifier_element` call makes of `item`: a new title, unless it only adds to the item's own the words of the
+    /// calendar or the list the call names (`changedTitle`); a new moment, length or place for an event, a new due date
+    /// for a reminder (the dates as `changedEvent` and `changedDue` read them); `collection`, the calendar or the list it
+    /// names (as the provider found it), `collectionName` its name as the user knows it (nil: `collection` is its name).
+    /// Refused when that changes nothing: what the call gives is already the item's, or does not apply to it (a place for
+    /// a reminder), so that the app never says « C'est modifié » of an item it left as it was (`unchanged`).
     /// `reference`: the item's, for the model.
     public static func changed(_ item: SavedItem, by call: ToolCall, collection: String?, collectionName: String? = nil,
                                reference: String, context: ToolContext) throws -> SavedItem
     {
         var changed = item
-        if let title = call.text("titre") { changed.title = title }
+        if let title = call.text("titre") {
+            changed.title = changedTitle(title, current: item.title, collectionName: collection.map { collectionName ?? $0 })
+        }
         if let collection { changed.collection = collection }
         if item.isEvent {
             if let place = call.text("lieu") { changed.place = place }
