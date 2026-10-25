@@ -713,3 +713,34 @@ extension Array where Element == String {
         return filter { seen.insert($0).inserted }
     }
 }
+
+// MARK: - A turn as the app has it, for the other benches
+
+/// `Talk` for the other benches (journal-bench): one turn as the app has it, each call of its passes as the app read it
+/// with what the app gave the model for it, and what the user heard.
+struct AppTalk {
+    struct Step {
+        var call: ToolCall?
+        /// What the app gave the model for the call, and whether it refused it.
+        var result: JSONValue?
+        var refused: Bool
+        /// What the model wrote in this pass, besides its calls.
+        var text: String
+    }
+
+    private var talk: Talk
+
+    init(model: MLXChatModel, runner: ToolRunner, calendar: MemoryCalendar, conversation: Conversation, now: Date,
+         timeZone: TimeZone, maxCalls: Int)
+    {
+        talk = Talk(model: model, runner: runner, calendar: calendar, conversation: conversation, now: now,
+                    timeZone: timeZone, watchCalls: false, maxCalls: maxCalls)
+    }
+
+    /// The turn's steps in order, and its answer as the history keeps it (the model's words, then the app's sentences).
+    mutating func turn(_ text: String) async throws -> (steps: [Step], answer: String) {
+        let turn = try await talk.turn(text)
+        return (turn.passes.map { Step(call: $0.call, result: $0.result, refused: $0.refused == true, text: $0.text) },
+                turn.answer)
+    }
+}

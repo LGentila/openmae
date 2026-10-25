@@ -34,6 +34,10 @@
 //                                                       how well the memory's journal finds past exchanges: recall@4
 //                                                       and MRR per kind of query, speed and size on 20,000 exchanges
 //                                                       (no model; see MemoryBench.swift)
+//   voice-cli journal-bench [--repeats 3] [--corpus Tests/Fixtures/journal-fr.json]
+//                                                       the journal switched on for the run: does the model search it
+//                                                       when asked about a past conversation, find the exchange and
+//                                                       use it? (text only; see JournalBench.swift)
 //   voice-cli cut-off-bench [--repeats 10] [--cut-off ahead|after-user-words|marker|none]
 //                           [--drop written|heard|cut-off|none|whole]
 //                                                       answers cut off one after the other: does the model write
@@ -124,7 +128,7 @@ struct Options {
     var bargeIn = BargeInProfile.mac
     var voices = ["estelle"]
     var temperatures: [Float] = [0.7]
-    /// voice-onset: 3 by default; dialogue-bench: 10; voice-gaps: 1 (each question once).
+    /// voice-onset: 3 by default; dialogue-bench: 10; journal-bench: 3; voice-gaps: 1 (each question once).
     var repeats: Int?
     /// voice-onset: voices speaking each sentence at once (the first audible one counts).
     var parallel = 1
@@ -762,7 +766,8 @@ setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file: a cras
 
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
-    "cut-off-bench", "read-sizes", "memory-bench", "link-client", "delegate", "web-search", "inbound"].contains(options.command)
+    "cut-off-bench", "read-sizes", "memory-bench", "journal-bench", "link-client", "delegate", "web-search", "inbound"]
+    .contains(options.command)
 {
     do {
         switch options.command {
@@ -775,6 +780,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "cut-off-bench": try await runCutOffBench(options, arguments: CommandLine.arguments)
         case "read-sizes": try await runReadSizes(options, arguments: CommandLine.arguments)
         case "memory-bench": try await runMemoryBench(options)
+        case "journal-bench": try await runJournalBench(options)
         case "link-client": try await runLinkClient()
         case "delegate": try await runDelegate(CommandLine.arguments)
         case "web-search": try await runWebSearch(CommandLine.arguments)

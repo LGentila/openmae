@@ -211,6 +211,16 @@ already has (to decide on searching by meaning), then the search's speed and the
 .build/xcode/Build/Products/Release/voice-cli memory-bench
 ```
 
+The same journal with the model, switched on for the run only (in a temporary folder, never the user's): spoken
+questions about a past conversation — about what the user said or what Maé said (a recipe, an address, a
+recommendation), with a period or without, with the exchange's words or other words — and requests that must not
+search. Per kind of request: how often the model searched the journal, how often the search found the exchange, and how
+often the answer used it; and how often it searched when nothing asked for it:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli journal-bench --tier standard --repeats 3
+```
+
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the
 model computes in the background once said, and a request sent meanwhile), a refused call and its second try, a long
