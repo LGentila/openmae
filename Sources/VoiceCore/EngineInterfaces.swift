@@ -132,9 +132,15 @@ public protocol LanguageModel: Sendable {
     /// Background work may use the GPU only while this is true (the pipeline turns it off while someone
     /// speaks or the assistant is thinking or speaking, so the voice never stutters).
     func allowBackgroundWork(_ allowed: Bool) async
+    /// The chance the model gave to opening a tool call at the first token of the answer it is writing (or of the last
+    /// one it wrote), whatever it then wrote: whether it meant to call a tool from the start. Known once that answer
+    /// opens a call after text of its own (from that `ModelOutput.toolCallStarted` on), readable while it is written;
+    /// nil otherwise, or when the model does not tell.
+    var callChanceAtStart: Double? { get }
 }
 
 extension LanguageModel {
+    public var callChanceAtStart: Double? { nil }
     public func useTools(_ tools: [ToolSpec]) async {}
     public func limitToolCalls(_ count: Int) async {}
     public func toolCallText(_ call: ToolCall) async -> String? { nil }

@@ -104,11 +104,12 @@ public actor ToolRunner {
 
     /// Whether a call to `tool` that the model writes after words of its own is left out: not carried out, kept out of the
     /// history, and nothing said of it, the words being the answer (`ToolProvider.ignoresAfterWords`, with or without the
-    /// actions). A misspelled name is read as its tool's.
-    public func ignoresAfterWords(_ tool: String) async -> Bool {
+    /// actions). `callChanceAtStart`: the chance the model gave to a call at the answer's first token
+    /// (`LanguageModel.callChanceAtStart`). A misspelled name is read as its tool's.
+    public func ignoresAfterWords(_ tool: String, callChanceAtStart: Double?) async -> Bool {
         let name = ToolNames.match(tool, among: names) ?? tool
         guard let provider = byName[name] else { return false }
-        return await provider.ignoresAfterWords(name, actions: offersActions)
+        return await provider.ignoresAfterWords(name, actions: offersActions, callChanceAtStart: callChanceAtStart)
     }
 
     /// The call with the name of the tool it stands for, when the model misspelled it ("crer_rappel"); unchanged

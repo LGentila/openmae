@@ -164,6 +164,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public private(set) var lastToolCallChances: (first: Double, best: Double, bestAt: Int)?
     /// With `watchToolCalls(true)`: the last answer exactly as the model wrote it, special tokens included.
     public private(set) var lastRawAnswer = ""
+    /// `callChanceAtStart`: the logits of the first token of the answer under way, kept when tools are offered, the
+    /// chance computed when the answer opens a call after text of its own; read from any thread.
+    private nonisolated let callChance = SharedChance()
     /// Benchmark diagnostics, off in the app (as `watchingToolCalls`).
     private var watchingTokens = false
     /// With `watchTokens(true)`: the last answer's tokens, each with the chance the model gave it and its likeliest ones.
@@ -305,6 +308,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     public func watchToolCalls(_ on: Bool) {
         watchingToolCalls = on
     }
+
+    public nonisolated var callChanceAtStart: Double? { callChance.value }
 
     /// Benchmark diagnostics (`voice-cli story-bench`): every token of the answers, with the chance the model gave it
     /// and the tokens it found likeliest there (`lastTokens`).
@@ -1002,8 +1007,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if watchingToolCalls, let toolCallStart, !tools.isEmpty {
             components = components.appendingLogitProcessor { ToolCallWatch(token: toolCallStart, chances: chances) }
         }
+        callChance.reset()
         if !tools.isEmpty {
             components = components.appendingLogitProcessor { UpcomingToken(box: upcoming) }
+            components = components.appendingLogitProcessor { [callChance] in FirstLogits(chance: callChance) }
         }
         let draws = TokenWatch.Draws()
         if watchingTokens {
@@ -1028,9 +1035,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var callNamed = false
         /// The calls written so far that could be read.
         var callsWritten = 0
+        /// The answer has written text of its own (more than white space).
+        var wroteText = false
         /// An answer that goes round in circles ends there, rather than at the token limit after the voice read it all.
         var repetition = RepetitionGuard()
         defer {
+            callChance.firstLogits = nil  // not needed: never computed, the logits let go
             // The iterator feeds each token back into the cache *before* returning it, so the cache
             // holds the prompt plus every token returned. Its offset is the ground truth.
             let all = prompt + produced
@@ -1058,6 +1068,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if token == toolCallStart, !tools.isEmpty {
                 callTokens = []
                 callNamed = false
+                // A call after text of the answer's own: before it is reported, the chance the pipeline weighs
+                // (`callChanceAtStart`).
+                if wroteText { callChance.resolve(token: token) }
                 onOutput(.toolCallStarted)
                 continue
             }
@@ -1103,6 +1116,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             }
             detokenizer.append(token: token)
             if let text = detokenizer.next(), !text.isEmpty {
+                if !wroteText, text.contains(where: { !$0.isWhitespace }) { wroteText = true }
                 onOutput(.text(text))
                 if watchingTokens { texts[produced.count - 1] = text }
             }
@@ -1576,6 +1590,54 @@ private struct UpcomingToken: LogitProcessor {
     func process(logits: MLXArray) -> MLXArray { logits }
 
     mutating func didSample(token: MLXArray) { box.sampled = token }
+}
+
+/// The chance of opening a tool call at the first token of the answer under way (`MLXChatModel.callChanceAtStart`),
+/// computed from that token's logits only when the answer opens a call after text of its own (`resolve`), the one case
+/// that needs it. Read at every first token, it made the GPU finish before the token was drawn, and the first word came
+/// later (voice-cli actions-bench, median: Gemma 4 E4B 312 → 322 ms, 26B 508 → 544 ms). Written on the model's thread,
+/// read from any thread.
+final class SharedChance: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Double?  // guarded by `lock`
+    /// The logits of the answer's first token, kept as they are (the model's thread only).
+    var firstLogits: MLXArray?
+
+    var value: Double? { lock.withLock { stored } }
+
+    /// A new answer: nothing known yet.
+    func reset() {
+        firstLogits = nil
+        lock.withLock { stored = nil }
+    }
+
+    /// Computes the chance of `token` at the answer's first token, once (the model's thread).
+    func resolve(token: Int) {
+        guard let logits = firstLogits else { return }
+        firstLogits = nil
+        let chance = Double(softmax(logits.asType(.float32), axis: -1)[0, token].item(Float.self))
+        lock.withLock { stored = chance }
+    }
+}
+
+/// Keeps the logits of the answer's first token, without computing anything (`SharedChance`,
+/// `MLXChatModel.callChanceAtStart`).
+private struct FirstLogits: LogitProcessor {
+    let chance: SharedChance
+    private var drawn = false
+
+    init(chance: SharedChance) {
+        self.chance = chance
+    }
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray {
+        if !drawn { chance.firstLogits = logits }
+        return logits
+    }
+
+    mutating func didSample(token: MLXArray) { drawn = true }
 }
 
 /// When `MLXChatModel.wakeUp` last ran, from any thread.

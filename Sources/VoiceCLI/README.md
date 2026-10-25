@@ -127,9 +127,10 @@ delegation tools, which know the tasks handed over earlier in the case and a fin
 With `--no-actions`, the actions are left out (their tools, their part of the prompt, their example exchanges), as the
 app has Claude Code, the web search or the built-in sources when the actions are off: the delegation's part of the
 prompt is then the one that says on its own how to call its tool, with an example call. A request for an action then
-expects no call, and a hand-over written after words of the model's own counts as none: the app leaves it out, saying
-nothing of it (the report lists them). `--agents-addendum <file>` replaces the delegation's part, to try another wording
-without rebuilding:
+expects no call, and a call to the delegation tools written after words of the model's own counts as none when the
+model gave a call little chance at its first token: the app leaves it out, saying nothing of it (the report lists
+them, with that chance; `--watch-calls` gives it for every request). `--agents-addendum <file>` replaces the
+delegation's part, to try another wording without rebuilding:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions

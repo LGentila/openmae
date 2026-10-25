@@ -32,17 +32,21 @@ actor ScriptedModel: LanguageModel {
     private let pauseAfter: Int?
     /// How long computing a beginning to keep takes (`prefillBeginning`): a new prompt, after the tools changed.
     private let beginningTakes: Duration
+    /// The chance of a call it tells for the first token of every answer (nil: it does not tell).
+    nonisolated let callChanceAtStart: Double?
     init(answer: [String] = ["Bonjour, ", "je suis bien là. ", "Comment vas-tu ce matin ?"], pauseAfter: Int? = nil,
          beginningTakes: Duration = .zero)
     {
         scripts = [answer.map { .text($0) }]
         self.pauseAfter = pauseAfter
         self.beginningTakes = beginningTakes
+        callChanceAtStart = nil
     }
-    init(scripts: [[ModelOutput]]) {
+    init(scripts: [[ModelOutput]], callChanceAtStart: Double? = nil) {
         self.scripts = scripts
         pauseAfter = nil
         beginningTakes = .zero
+        self.callChanceAtStart = callChanceAtStart
     }
 
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {

@@ -53,8 +53,10 @@
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
 // has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
 // what the date line is, the delegation's part is the one for the tools on their own (with its own example call, and
-// on the smallest tier its example exchanges), a request whose tool is not offered expects no call, and a hand-over
-// written after words of the model's own counts as none, the app leaving it out (`AgentCatalog.ignoredAfterWords`).
+// on the smallest tier its example exchanges), a request whose tool is not offered expects no call, and a delegation
+// call written after words of the model's own counts as none when the app leaves it out (`AgentCatalog.ignoredAfterWords`:
+// the model gave a call little chance at its first token, which the report gives for every call written after words;
+// --watch-calls gives it for every request).
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -217,8 +219,15 @@ private struct CaseResult: Encodable {
     /// The model went on to another call after this one (the app carries out one action per request).
     var moreCalls: Bool?
     /// A call written after words of the model's own that the app leaves out, saying nothing of it
-    /// (`AgentCatalog.ignoredAfterWords`: a hand-over without the actions), as written: `chosen` is then "aucun".
+    /// (`AgentCatalog.ignoredAfterWords`: a delegation call without the actions), as written: `chosen` is then "aucun".
     var leftOutAfterWords: String?
+    /// The call (`chosen`) came after words of the model's own, and the app does not leave it out (it carries it out, or
+    /// refuses it as it would any call).
+    var keptAfterWords: Bool?
+    /// For a call written after words of the model's own: the chance the model gave to opening a tool call at the
+    /// answer's first token, as the app reads it (`LanguageModel.callChanceAtStart`), what `AgentCatalog.ignoredAfterWords`
+    /// weighs.
+    var callChanceAtStart: Double?
     var text: String
     var toolOK: Bool
     var argumentsOK: Bool?
@@ -456,11 +465,15 @@ func runActionsBench(_ o: Options) async throws {
         var written = call?.name
         call = call.map(named)
         // As in the app (`ToolRunner.ignoresAfterWords`): a call to some tools written after words of the model's own is
-        // left out, and the app says nothing of it (without the actions, a hand-over after an answer).
+        // left out, and the app says nothing of it (without the actions, a hand-over after an answer, unless the model
+        // meant a call from the start).
+        let startChance = model.callChanceAtStart
         var leftOut: String?
-        if let made = call, AgentCatalog.ignoredAfterWords(made.name, actions: actions) {
-            var before = ReasoningFilter()
-            if !SpeakableText.clean(before.push(textBeforeCall ?? "") + before.flush()).isEmpty {
+        var afterWords = false
+        if let made = call {
+            var words = ReasoningFilter()
+            afterWords = !SpeakableText.clean(words.push(textBeforeCall ?? "") + words.flush()).isEmpty
+            if afterWords, AgentCatalog.ignoredAfterWords(made.name, actions: actions, callChanceAtStart: startChance) {
                 leftOut = describe(made, written: written)
                 call = nil
                 written = nil
@@ -478,6 +491,8 @@ func runActionsBench(_ o: Options) async throws {
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead, call != nil { result.nameReadMs = nameRead - callStart }
         result.leftOutAfterWords = leftOut
+        if afterWords, call != nil { result.keptAfterWords = true }
+        result.callChanceAtStart = startChance
         result.peakGB = await model.lastRequestPeakGB
         if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
@@ -656,8 +671,12 @@ func runActionsBench(_ o: Options) async throws {
             String(format: "  call chance %.0f %% first, %.0f %% at token %d", (result.firstCallChance ?? 0) * 100,
                    $0 * 100, result.bestCallAt ?? 0)
         } ?? ""
+        let atStart = startChance.map { String(format: "%.1f %% chance of a call at its first token", $0 * 100) }
+            ?? "no chance read at its first token"
+        let wordsBefore = (textBeforeCall ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(70)
         print("      → \(detail)" + (result.resolved.map { " = \($0)" } ?? "") + (result.refusal.map { "  [refused: \($0)]" } ?? "")
-              + (leftOut.map { "  [then \($0), left out: after the model's own words]" } ?? "")
+              + (leftOut.map { "  [then \($0), left out: after the model's own words, \(atStart)]" } ?? "")
+              + (result.keptAfterWords == true ? "  [after the model's own words “\(wordsBefore)”, kept: \(atStart)]" : "")
               + (moreCalls ? "  [then another call, not carried out]" : "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
         if let second = result.secondTry {
@@ -1332,9 +1351,16 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     print("requests without an action that triggered one: \(falseTriggers.count) / \(others.count)"
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
+    func atStart(_ result: CaseResult) -> String {
+        result.callChanceAtStart.map { String(format: "%.1f %% at the first token", $0 * 100) } ?? "first token not read"
+    }
     let leftOut = results.filter { $0.leftOutAfterWords != nil }
-    print("calls written after the model's own words, left out as in the app (a hand-over without the actions): "
-          + "\(leftOut.count)" + leftOut.map { "\n    · \($0.phrase) (expected: \($0.expected))" }.joined())
+    print("calls written after the model's own words, left out as in the app (a call to the delegation tools without "
+          + "the actions, not meant from the start): \(leftOut.count)"
+          + leftOut.map { "\n    · \($0.phrase) (expected: \($0.expected); \(atStart($0)))" }.joined())
+    let kept = results.filter { $0.keptAfterWords == true }
+    print("calls written after the model's own words, not left out: \(kept.count)"
+          + kept.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected); \(atStart($0)))" }.joined())
     let more = results.filter { $0.moreCalls == true }
     print("requests with another call after the first (an action more than asked when one is expected): \(more.count)"
           + more.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected))" }.joined())

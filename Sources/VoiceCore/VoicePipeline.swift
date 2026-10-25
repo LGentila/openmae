@@ -1573,13 +1573,13 @@ public actor VoicePipeline {
     /// `PipelineConfig.actionsPerRequest` of them, each as soon as it is written (once the user's turn is really over),
     /// while the model writes the next one, so that its sentence can be said meanwhile; the last of several such sentences
     /// is linked to the one before (« Et c’est noté : … », see `confirm`). A call to some tools written after words of the
-    /// model's own is left out, with nothing said of it (`ToolRunner.ignoresAfterWords`: a hand-over without the actions,
-    /// after an answer to a question). Then, in this order: the model's
-    /// second try for the calls refused for their arguments (one for the request, holding every result already
-    /// obtained, and only those calls carried out from it); one pass where it sums up every result that came from outside
-    /// (no call carried out then); the app's questions about the refused calls; the one question for the sensitive calls,
-    /// which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out at
-    /// once, how many it does (`ActionPhrases.atMost`), once.
+    /// model's own is left out, with nothing said of it (`ToolRunner.ignoresAfterWords`: without the actions, a call to the
+    /// delegation tools after an answer to something else, that the model did not mean from the start). Then, in this
+    /// order: the model's second try for the calls refused for their arguments (one for the request, holding every result
+    /// already obtained, and only those calls carried out from it); one pass where it sums up every result that came from
+    /// outside (no call carried out then); the app's questions about the refused calls; the one question for the sensitive
+    /// calls, which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out
+    /// at once, how many it does (`ActionPhrases.atMost`), once.
     ///
     /// The history keeps each pass's calls as the model wrote them, one assistant message with all of them, then their
     /// results in the same order, as Gemma 4's template renders them: the next request goes on from the model's memory.
@@ -1650,9 +1650,12 @@ public actor VoicePipeline {
                     case .text?, nil: false
                     }
                     carryingOut: do {
-                        if afterWords, await tools.ignoresAfterWords(call.name) {
+                        if afterWords,
+                           await tools.ignoresAfterWords(call.name, callChanceAtStart: model.callChanceAtStart)
+                        {
                             // Not carried out, not in the history, nothing said of it: the model's words are the answer.
-                            DebugLog.log("turn \(turn.id): \(call.name) written after the model's own words, left out")
+                            DebugLog.log("turn \(turn.id): \(call.name) written after the model's own words, left out "
+                                         + "(chance of a call at its first token: \(model.callChanceAtStart ?? 0))")
                             break carryingOut
                         }
                         guard calls.count < maxCalls else {
@@ -1727,7 +1730,9 @@ public actor VoicePipeline {
                         deliver(phrase, to: turn, inHistory: false)
                     }
                 case .toolCallNamed(let name) where pass != .summing:
-                    if afterWords, await tools?.ignoresAfterWords(name) == true {
+                    if afterWords,
+                       await tools?.ignoresAfterWords(name, callChanceAtStart: model.callChanceAtStart) == true
+                    {
                         // A call left out: the answer is over, its end is said without waiting for the call's end.
                         chunker.remainingPieces().forEach(send)
                     } else if !fillerSaid, let phrase = await waitingPhrase(for: name, turn) {

@@ -181,6 +181,31 @@ struct DelegationTests {
         return (tools, agent, log, runner)
     }
 
+    /// Without the actions, a call to any of the delegation tools written after the model's own words is left out unless
+    /// the model gave a call a fair chance at its first token (`AgentCatalog.ignoredAfterWords`); a misspelled name is
+    /// read as its tool's. With the actions, and for the other tools, never.
+    @Test func callsAfterWordsLeftOutWithoutTheActions() async {
+        let folder = scratchFolder()
+        let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
+                               workspace: folder.appending(path: "OpenMae"))
+        await tools.configure(agents: [AgentTools.Agent(connector: FakeAgent())], folders: [])
+        let meant = AgentCatalog.handOverMeantFrom
+        for actions in [false, true] {
+            let runner = ToolRunner(providers: [tools, TimerTools()], actions: actions)
+            _ = await runner.tools()
+            for name in AgentCatalog.names.sorted() + ["deleger_tache"] {
+                for chance in [nil, 0, meant / 2] as [Double?] {
+                    let ignored = await runner.ignoresAfterWords(name, callChanceAtStart: chance)
+                    #expect(ignored == !actions, "\(name) \(chance ?? -1)")
+                }
+                #expect(await !runner.ignoresAfterWords(name, callChanceAtStart: meant))
+                #expect(await !runner.ignoresAfterWords(name, callChanceAtStart: 0.9))
+            }
+            #expect(await !runner.ignoresAfterWords("minuteur", callChanceAtStart: 0))
+            #expect(await !runner.ignoresAfterWords("outil_inconnu", callChanceAtStart: 0))
+        }
+    }
+
     @Test func taskIsReadBackAndWaitsForYes() async throws {
         let (tools, agent, log, runner) = await make()
         let asked = await runner.handle(delegation, context: context())
@@ -804,17 +829,21 @@ struct PipelineAgentTests {
         #expect(await tools.hasRunningTask)
     }
 
-    /// With the actions off, a hand-over the model writes after an answer of its own is left out: the user hears the
-    /// answer alone, without the waiting phrase or the read-back, nothing waits for a "oui" (the next sentence goes to the
-    /// model), and the history keeps the answer without the call. Written first, as the prompt asks, the call is read
-    /// back (above). With the actions, it is carried out after words too: read back, waiting for the "oui".
+    /// With the actions off, a hand-over the model writes after an answer of its own, having given a call little chance
+    /// at its first token, is left out: the user hears the answer alone, without the waiting phrase or the read-back,
+    /// nothing waits for a "oui" (the next sentence goes to the model), and the history keeps the answer without the call.
+    /// Written first, as the prompt asks, the call is read back (above); after words too when the model gave a call a
+    /// fair chance at its first token (it hesitated: « Je vais confier la tâche à un agent. », then the call), and with
+    /// the actions: read back, waiting for the "oui".
     @Test func withoutTheActionsAHandOverAfterAnAnswerIsLeftOut() async throws {
         let answer = "Non, Claude Code est gratuit pour toi."
         let delegation = ToolCall(name: AgentCatalog.delegateName, arguments: [
             "titre": "rôle de Claude Code", "consigne": "Explique ce qu'est Claude Code.",
         ])
         let review = AgentPhrases.review(agent: "Claude Code", title: "rôle de Claude Code", folder: nil, .french)
-        for actions in [false, true] {
+        let meant = AgentCatalog.handOverMeantFrom
+        let cases: [(actions: Bool, chance: Double?)] = [(false, nil), (false, meant / 10), (false, meant), (true, nil)]
+        for (actions, chance) in cases {
             let folder = scratchFolder()
             let tools = AgentTools(store: TaskStore(folder: folder.appending(path: "Tasks")),
                                    workspace: folder.appending(path: "OpenMae"))
@@ -823,7 +852,7 @@ struct PipelineAgentTests {
             let model = ScriptedModel(scripts: [
                 [.text(answer), .toolCallStarted, .toolCallNamed(AgentCatalog.delegateName), .toolCall(delegation)],
                 [.text("Avec plaisir, n'hésite pas.")],
-            ])
+            ], callChanceAtStart: chance)
             // The waiting phrase on, as in the app.
             let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
                                          synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
@@ -832,7 +861,7 @@ struct PipelineAgentTests {
             Task { for await event in pipeline.events { await log.record(event) } }
             try await pipeline.start()
             await pipeline.submit(text: "Est-ce que Claude Code est payant ?")
-            guard !actions else {
+            guard !actions, (chance ?? 0) < meant else {
                 await waitFor { await log.pieces.joined(separator: " ").hasSuffix(review) }
                 #expect(await log.pieces.joined(separator: " ").hasSuffix(review))
                 #expect(await log.pieces.contains(answer))

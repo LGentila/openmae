@@ -85,19 +85,39 @@ public enum AgentCatalog {
                                  ]))
 
     /// Whether a call to `tool` that the model writes after words of its own is left out: not carried out, kept out of
-    /// the history, and nothing said of it (`ToolRunner.ignoresAfterWords`). Only a hand-over without the actions: the
-    /// delegation's part of the prompt then has the model write the call first, its whole answer
-    /// (`promptAddendumWithoutActions`), so a hand-over after an answer is a task nobody asked for.
+    /// the history, and nothing said of it (`ToolRunner.ignoresAfterWords`). Only a call to these tools without the
+    /// actions that the model did not mean from the start: the delegation's part of the prompt then has the model write
+    /// deleguer_tache first, its whole answer (`promptAddendumWithoutActions`), so a hand-over after an answer is a task
+    /// nobody asked for, unless the model gave a call a fair chance at its first token (`callChanceAtStart`, at least
+    /// `handOverMeantFrom`; unknown counts as none): it then hesitated between the call and the words it wrote first,
+    /// and the call is carried out as usual (a hand-over read back). The same for the other three tools, called after
+    /// an answer to something else (« Qu'est-ce que j'ai demain ? » : « Demain c'est vendredi, le 16 octobre. », then
+    /// etat_taches, E4B).
     ///
     /// In two runs of voice-cli actions-bench with that part (Tests/Fixtures/agents-fr.json, --no-actions), Gemma 4 E4B
     /// handed over three tasks nobody asked for, each after an answer of its own to a question (« Est-ce que Claude Code
     /// est payant ? » : « Non, Claude Code est gratuit pour toi. », then a task « Rôle de Claude Code »), and the user
-    /// heard « Je confie … à Claude Code, on y va ? » after the answer. Of the 109 tasks Gemma 4 26B, E4B and E2B rightly
-    /// handed over in two runs each, one came after words (E4B: « Je peux confier ça à un agent. »). With the actions,
-    /// the rule does not apply: nothing changes for them.
-    public static func ignoredAfterWords(_ tool: String, actions: Bool) -> Bool {
-        !actions && tool == delegateName
+    /// heard « Je confie … à Claude Code, on y va ? » after the answer. Rightly handed tasks came after words too (E4B:
+    /// « Je peux certainement le faire pour toi. Je vais confier la tâche à un agent. », to « J'ai besoin d'un programme
+    /// qui convertit mes fichiers Word en PDF, tu peux le faire faire ? »): every hand-over after words left out, the
+    /// user heard such a promise and nothing was done in two of three runs. With the actions, the rule does not apply:
+    /// nothing changes for them.
+    public static func ignoredAfterWords(_ tool: String, actions: Bool, callChanceAtStart: Double?) -> Bool {
+        !actions && names.contains(tool) && (callChanceAtStart ?? 0) < handOverMeantFrom
     }
+
+    /// The chance of a call at the first token of the answer from which a hand-over written after words is kept
+    /// (`ignoredAfterWords`). In the same benchmark, Gemma 4 E4B gave a call 21 to 99 % there for each of its 26 requests
+    /// to hand over or ask about a task (39 % for the programme above, 21 % for « Monte un tableau de bord… », both
+    /// handed over after « Je peux… »), under 0.01 % for each of its 22 questions and remarks, the ones it answered then
+    /// handed over among them (« Tu connais un bon outil pour faire un site soi-même ? »: 0.00 %, then 54 % after 22
+    /// tokens of its answer), and 0 to 19 % for the four actions it does not have without them: « Mets un minuteur de 5
+    /// minutes », 5 %, it handed over after « Je mets ton minuteur pour cinq minutes. » in two of three runs. Gemma 4 26B
+    /// gave over 99 % to its tasks and under 0.01 % to everything else (it once handed over « Ajoute un rendez-vous
+    /// demain à 15 h chez le médecin » after « Je vais m'en occuper immédiatement. »: 0.00 %); Gemma 4 E2B 2 % to « Crée
+    /// un petit jeu de morpion… », which it answers in words, 41 to 100 % to its other tasks, and wrote no call after
+    /// words in six runs.
+    public static let handOverMeantFrom = 0.1
 
     /// The exchanges conversations start with when the delegation is offered without the actions, on the tier whose
     /// model needs the actions' (`ActionCatalog.showsExamples`): three tasks of different kinds (an application, files,
