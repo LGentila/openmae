@@ -635,6 +635,39 @@ struct ActionCallTests {
         }
     }
 
+    /// « D'appeler le plombier. », the user's answer to what to remind, copied as the title: a leading « de » or « d' »
+    /// (any case, any apostrophe) before an infinitive is dropped, maybe after « ne pas » and pronouns that are never an
+    /// article; the rest is kept as written. A « de » before anything else stays: a name, an article, a noun, a word in
+    /// « -re » that is not a verb, a word in « -oir » that is a noun, an infinitive after « le » alone (an article).
+    @Test func aReminderTitleLosesTheDeBeforeItsVerb() {
+        let dropped = [
+            "D'appeler le plombier": "appeler le plombier", "d’appeler le plombier": "appeler le plombier",
+            "dʼappeler le plombier": "appeler le plombier", "De racheter du café": "racheter du café",
+            "de racheter du café": "racheter du café", "DE racheter du café": "racheter du café",
+            "D'appeler Paul.": "appeler Paul.", "De prendre mes médicaments": "prendre mes médicaments",
+            "De faire les courses": "faire les courses", "D'écrire à Léa": "écrire à Léa", "D'être à l'heure": "être à l'heure",
+            "De sortir le chien": "sortir le chien", "D'aller chercher les enfants": "aller chercher les enfants",
+            "De voir le médecin": "voir le médecin", "De répondre à Marc": "répondre à Marc",
+            "D'attendre le facteur": "attendre le facteur", "De lire le contrat": "lire le contrat",
+            "De connaître la date": "connaître la date", "De conduire Léa à l'école": "conduire Léa à l'école",
+            "De ne pas oublier les clés": "ne pas oublier les clés", "De n'oublier personne": "n'oublier personne",
+            "De ne plus en acheter": "ne plus en acheter", "De m'inscrire au club": "m'inscrire au club",
+            "De s’inscrire au club": "s’inscrire au club", "D'y aller": "y aller", "D'en racheter": "en racheter",
+            "De lui écrire": "lui écrire", "De me le rappeler": "me le rappeler", "De ne pas le perdre": "ne pas le perdre",
+            "De vous appeler": "vous appeler", "De  payer le loyer": "payer le loyer",
+        ]
+        for (title, saved) in dropped {
+            #expect(ActionCatalog.withoutLeadingDe(title) == saved, "\(title)")
+        }
+        for title in ["De Gaulle", "Des œufs", "De l'eau", "De la bière", "De leur dîner", "De le rappeler", "De Pierre",
+                      "D'Olivier", "De bonne heure", "De plus en plus", "De père en fils", "De mémoire", "De notre côté",
+                      "D'autre part", "D'hier", "D'hiver", "Des courses", "Dentiste", "D'accord", "De", "D'", "De rien",
+                      "De soir", "De couloir", "De nous deux", "D'affaire", "De maître", "De rendez-vous", "appeler le plombier",
+                      "Rappeler Paul", "De Appeler"] {
+            #expect(ActionCatalog.withoutLeadingDe(title) == title, "\(title)")
+        }
+    }
+
     @Test func recognizesShortAnswers() {
         #expect(ReplyMatcher.confirmation("Oui, vas-y !") == .yes)
         #expect(ReplyMatcher.confirmation("Euh… d’accord.") == .yes)
@@ -2387,9 +2420,12 @@ struct ChangeTests {
         let placeholder = ToolCall(name: "creer_rappel", arguments: ["quand": "demain à 9 h", "titre": "Rappel"])
         let saved = ActionPhrases.reminderCreated(title: "appeler le plombier", due: date("2026-10-16T09:00"),
                                                   hasTime: true, listName: nil, context())
+        // As E2B and E4B also wrote it: the answer's words, « D' » included (saved without it).
         for secondTry in [false, true] {
             for next in [ToolCall(name: "creer_rappel", arguments: ["titre": "appeler le plombier"]),
+                         ToolCall(name: "creer_rappel", arguments: ["titre": "D'appeler le plombier"]),
                          ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "titre": "appeler le plombier"]),
+                         ToolCall(name: "modifier_element", arguments: ["reference": "dernier", "titre": "d’appeler le plombier"]),
                          ToolCall(name: "modifier_element", arguments: ["reference": "r1", "titre": "appeler le plombier"])] {
                 let calendar = MemoryCalendar(movingItems: false)
                 let runner = ToolRunner(providers: [calendar])
@@ -2407,6 +2443,38 @@ struct ChangeTests {
                 #expect(await calendar.creations == ["r1"], "\(secondTry) \(next.arguments)")
             }
         }
+    }
+
+    /// voice-cli's calendar in memory, as the app's (both take the title from `ActionCatalog.title`): a reminder whose
+    /// title starts with « D' » or « de » before its verb is saved and said without it (`withoutLeadingDe`); « De
+    /// Gaulle », « Des œufs », « De l'eau » are saved as they are, and an event's title is never changed so. A change's
+    /// new title for a reminder loses it too.
+    @Test func memoryCalendarSavesAReminderWithoutTheDeBeforeItsVerb() async throws {
+        let request = ToolContext(now: now, timeZone: paris, language: .french, userSaid: ["Rappelle-moi demain à 9 h."])
+        let saved = [
+            "D'appeler le plombier": "appeler le plombier", "d’appeler le plombier": "appeler le plombier",
+            "De Gaulle": "De Gaulle", "Des œufs": "Des œufs", "De l'eau": "De l'eau",
+        ]
+        for (title, kept) in saved {
+            let calendar = MemoryCalendar(movingItems: false)
+            let runner = ToolRunner(providers: [calendar])
+            _ = await runner.tools()
+            let call = ToolCall(name: "creer_rappel", arguments: ["titre": .string(title), "quand": "demain à 9 h"])
+            let made = await runner.handle(call, context: request)
+            #expect(made.refusal == nil && made.forModel["titre"] == .string(kept), "\(title)")
+            #expect(made.spoken == ActionPhrases.reminderCreated(title: kept, due: date("2026-10-16T09:00"), hasTime: true,
+                                                                 listName: nil, context()), "\(title)")
+        }
+        let calendar = MemoryCalendar(movingItems: false)
+        let runner = ToolRunner(providers: [calendar])
+        _ = await runner.tools()
+        let event = ToolCall(name: "creer_evenement", arguments: ["titre": "D'appeler le plombier", "quand": "demain à 10 h"])
+        #expect(await runner.handle(event, context: context()).forModel["titre"] == "D'appeler le plombier")
+        let reminder = ToolCall(name: "creer_rappel", arguments: ["titre": "acheter du café", "quand": "demain à 9 h"])
+        #expect(await runner.handle(reminder, context: request).forModel["titre"] == "acheter du café")
+        let change = ToolCall(name: "modifier_element", arguments: ["reference": "r1", "titre": "De racheter du café"])
+        let changed = await runner.handle(change, context: request)
+        #expect(changed.refusal == nil && changed.forModel["titre"] == "racheter du café")
     }
 
     /// voice-cli's calendar in memory, through the runner as dialogue-bench uses it, without the move in the tool (Gemma 4

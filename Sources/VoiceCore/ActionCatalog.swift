@@ -344,7 +344,8 @@ public enum ActionCatalog {
     }
 
     /// What a `modifier_element` call makes of `item`: a new title, unless it only adds to the item's own the words of the
-    /// calendar or the list the call names (`changedTitle`); a new moment, length or place for an event, a new due date
+    /// calendar or the list the call names (`changedTitle`), a reminder's without the « de » of the user's words before
+    /// the thing to do (`withoutLeadingDe`); a new moment, length or place for an event, a new due date
     /// for a reminder (the dates as `changedEvent` and `changedDue` read them); `collection`, the calendar or the list it
     /// names (as the provider found it), `collectionName` its name as the user knows it (nil: `collection` is its name).
     /// Refused when that changes nothing: what the call gives is already the item's, or does not apply to it (a place for
@@ -355,7 +356,8 @@ public enum ActionCatalog {
     {
         var changed = item
         if let title = call.text("titre") {
-            changed.title = changedTitle(title, current: item.title, collectionName: collection.map { collectionName ?? $0 })
+            changed.title = changedTitle(item.isEvent ? title : withoutLeadingDe(title), current: item.title,
+                                         collectionName: collection.map { collectionName ?? $0 })
         }
         if let collection { changed.collection = collection }
         if item.isEvent {
@@ -557,7 +559,8 @@ public enum ActionCatalog {
 
     /// A title that says what (`saysWhat`), or a refusal: the user is asked what to note (by the model's second try, or by
     /// the app when it says nothing), and the creation is kept for their answer (`ToolRefusal.detailGivenAgain`,
-    /// `RefusedCreation`), which saves it with its moment.
+    /// `RefusedCreation`), which saves it with its moment. A reminder's, without the « de » of the user's words before
+    /// the thing to do (`withoutLeadingDe`: « D'appeler le plombier » is « appeler le plombier »).
     public static func title(_ call: ToolCall, _ key: String = "titre", context: ToolContext) throws -> String {
         guard let title = call.text(key), saysWhat(call, key) else {
             let placeholder = call.text(key).map {
@@ -569,7 +572,7 @@ public enum ActionCatalog {
             refusal.detailGivenAgain = true
             throw refusal
         }
-        return title
+        return call.name == createReminder.name ? withoutLeadingDe(title) : title
     }
 
     /// Whether a creation's call gives a title (`key`) that says what: a title, and for a reminder one with words left
