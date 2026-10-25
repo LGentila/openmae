@@ -73,8 +73,19 @@ public enum MemoryCatalog {
             + sheet.map { "- \($0)" }.joined(separator: "\n")
     }
 
-    /// The action of a call, as the model may write it.
+    /// The action of a call, as the model may write it. « oublier » with an entry that stands for the whole memory
+    /// (`meansEverything`: « tout », « tout ce que tu sais sur moi »), and no period, is `tout_oublier`, which the model
+    /// meant: Gemma 4 E2B writes it so for « Oublie tout ce que tu sais sur moi. ». The user's own words must still ask
+    /// for it, and the app's question says that everything goes.
     public static func action(_ call: ToolCall) -> Action? {
+        let action = writtenAction(call)
+        guard action == .oublier, call.text("quand") == nil, let wanted = call.text("reference") ?? text(call),
+              meansEverything(wanted) else { return action }
+        return .toutOublier
+    }
+
+    /// The action as the model wrote it, a synonym read as its action.
+    private static func writtenAction(_ call: ToolCall) -> Action? {
         guard let raw = call.text("action") else { return nil }
         let word = MemoryText.folded(raw)  // "tout_oublier" → "tout oublier"
         if let action = Action.allCases.first(where: { MemoryText.folded($0.rawValue) == word }) { return action }
@@ -625,7 +636,8 @@ public actor MemoryTools: ToolProvider {
             let sheet = (try? await store.loadSheet()) ?? []
             guard let entry = Self.entry(wanted, in: sheet) else {
                 if MemoryCatalog.meansEverything(wanted) {
-                    // « oublier » with « tout »: the model meant the whole memory.
+                    // « oublier » with « tout », and a period (without one, `MemoryCatalog.action` reads it as
+                    // `tout_oublier`): the model meant the whole memory.
                     throw ToolRefusal(forModel: "Pour effacer toute la mémoire, action tout_oublier.",
                                       spoken: ActionPhrases.notUnderstood(language))
                 }
