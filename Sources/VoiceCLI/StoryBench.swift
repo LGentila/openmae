@@ -18,9 +18,15 @@
 // as a prompt is read (`MLXChatModel.rereadChances`), in the model's own type and in float32, and each such word's tokens
 // show the chances the model gives them then.
 //
+// With --speed, the tokens are not watched (reading every token's chances slows the writing), and each answer's speed is
+// measured instead, as the app has it write: the time from the request to its first word (`MLXChatModel.lastPrefill`: the
+// request's new tokens read), its writing speed from its first token to its last (`MLXChatModel.lastWriting`), and the GPU
+// memory peak meanwhile; the memory after loading is printed first. Run it with the GPU kept to itself, as any timing.
+//
 //   voice-cli story-bench [--tier tier] [--llm folder] [--corpus Tests/Fixtures/stories-fr.json] [--request "…"]…
 //                         [--repeats 20] [--actions] [--agents] [--web] [--sources] [--news] [--memory] [--hold 1]
-//                         [--reread] [--now 2026-10-15T18:42] [--min-p 0.05] [--bfloat16-prompts] [--out measurements]
+//                         [--reread | --speed] [--now 2026-10-15T18:42] [--min-p 0.05] [--bfloat16-prompts]
+//                         [--out measurements]
 //
 // --request sends that request instead of the corpus's (several times for several). --min-p draws the tokens with that
 // min-p instead of the app's; --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the
@@ -61,6 +67,24 @@ private struct StoryAnswer: Encodable {
     /// The model wrote a tool call (then the answer ends: nothing is carried out).
     var call: String?
     var tokens: [WatchedToken]
+    /// With --speed.
+    var speed: StorySpeed?
+}
+
+/// How fast an answer was written (--speed).
+private struct StorySpeed: Encodable {
+    /// From the request to the answer's first word.
+    var firstWordMs: Double
+    /// The request's new tokens, read before the first token (`MLXChatModel.lastPrefill`), and the time it took.
+    var readTokens: Int
+    var readMs: Double
+    /// The answer's tokens (its last, which ends it, included), and the time from the first to the last.
+    var tokens: Int
+    var writingMs: Double
+    /// Tokens written per second after the first one.
+    var tokensPerSecond: Double?
+    /// The GPU memory peak during the request (GB, the weights included).
+    var peakGB: Double
 }
 
 func runStoryBench(_ o: Options) async throws {
@@ -78,8 +102,9 @@ func runStoryBench(_ o: Options) async throws {
     guard o.llm != nil || store.isComplete([pack]) else {
         throw CLIError("\(pack.displayName) is not on this Mac: run “voice-cli download --tier \(tier.rawValue)” first")
     }
+    if o.speed, o.reread { throw CLIError("--reread needs the tokens watched, which --speed leaves out") }
     let model = try await MLXChatModel.load(directory: folder)
-    await model.watchTokens(true)
+    await model.watchTokens(!o.speed)
     await model.computePromptsInFloat32(!o.bfloat16Prompts)
     if let minP = o.minP { await model.sampleWithMinP(minP) }
     let sampling = await model.sampling
@@ -118,7 +143,12 @@ func runStoryBench(_ o: Options) async throws {
           + (o.hold.map { " · generation held \($0) s after each piece" } ?? "")
           + String(format: " · sampling: temperature %.2f, top-p %.2f, min-p %.2f", sampling.temperature, sampling.topP,
                    sampling.minP)
-          + (o.bfloat16Prompts ? " · requests and history computed in bfloat16 (--bfloat16-prompts)" : ""))
+          + (o.bfloat16Prompts ? " · requests and history computed in bfloat16 (--bfloat16-prompts)" : "")
+          + (o.speed ? " · speed measured, tokens not watched" : ""))
+    if o.speed {
+        print(String(format: "memory after loading: %.2f GB (MLX: %.2f GB in use)", ProcessMemory.footprintGB,
+                     MLXChatModel.activeMemoryGB))
+    }
 
     let repeats = max(o.repeats ?? 20, 1)
     var answers: [StoryAnswer] = []
@@ -131,9 +161,13 @@ func runStoryBench(_ o: Options) async throws {
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
             var pieces: [SentenceChunker.Piece] = []
+            let clock = ContinuousClock()
+            let requested = clock.now
+            var firstWord: Duration?
             for try await output in model.reply(to: conversation.messages(adding: message)) {
                 switch output {
                 case .text(let piece):
+                    if firstWord == nil, piece.contains(where: { !$0.isWhitespace }) { firstWord = clock.now - requested }
                     written += piece
                     let new = chunker.pieces(adding: filter.push(piece))
                     pieces += new
@@ -156,6 +190,16 @@ func runStoryBench(_ o: Options) async throws {
             let voice = pieces.map { SpeakableText.clean($0.text) }.filter { !$0.isEmpty }
                 .map { SpeakableText.forVoice($0, language: .french) }
             let tokens = await model.lastTokens
+            var speed: StorySpeed?
+            if o.speed {
+                let read = await model.lastPrefill
+                let writing = await model.lastWriting
+                speed = StorySpeed(firstWordMs: firstWord.map(milliseconds) ?? 0, readTokens: read.computed,
+                                   readMs: read.ms, tokens: writing.tokens, writingMs: writing.ms,
+                                   tokensPerSecond: writing.tokens > 1 && writing.ms > 0
+                                       ? Double(writing.tokens - 1) / (writing.ms / 1000) : nil,
+                                   peakGB: await model.lastRequestPeakGB)
+            }
             var reread: [MLXChatModel.RereadChance]?
             var rereadFloat32: [MLXChatModel.RereadChance]?
             if o.reread {
@@ -173,10 +217,17 @@ func runStoryBench(_ o: Options) async throws {
             let unknownWords = await wordsUnknown(in: written).map { word($0.word, at: $0.range) }
             let splitVoice = await voice.asyncFlatMap { await splitWords(in: $0).map(\.word) }
             let answer = StoryAnswer(request: request, run: run, written: written, voice: voice, splitWritten: splitWritten,
-                                     splitVoice: splitVoice, unknownWords: unknownWords, call: call, tokens: tokens)
+                                     splitVoice: splitVoice, unknownWords: unknownWords, call: call, tokens: tokens,
+                                     speed: speed)
             answers.append(answer)
             print("■ \(request) — \(run)/\(repeats)")
             print("    🔊 \(voice.joined(separator: " | "))" + (call.map { "  [call: \($0)]" } ?? ""))
+            if let speed {
+                print(String(format: "    ⏱ first word %.0f ms (%d new tokens read in %.0f ms) · %d tokens in %.0f ms: %@ "
+                             + "tokens/s · GPU peak %.2f GB", speed.firstWordMs, speed.readTokens, speed.readMs,
+                             speed.tokens, speed.writingMs,
+                             speed.tokensPerSecond.map { String(format: "%.1f", $0) } ?? "—", speed.peakGB))
+            }
             for split in splitWritten {
                 print("    ⚠️ the model wrote « \(split.word) »: " + describe(split))
             }
@@ -189,6 +240,7 @@ func runStoryBench(_ o: Options) async throws {
         }
     }
     summarizeStories(answers, requests: requests)
+    if o.speed { summarizeSpeed(answers.compactMap(\.speed)) }
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -313,6 +365,27 @@ private func summarizeStories(_ answers: [StoryAnswer], requests: [String]) {
     print("\nall requests: answers with a split word in what the model wrote "
           + "\(answers.filter { !$0.splitWritten.isEmpty }.count) / \(all), in what the voice is given "
           + "\(answers.filter { !$0.splitVoice.isEmpty }.count) / \(all)")
+}
+
+/// The answers' speed (--speed): medians, with the range.
+private func summarizeSpeed(_ speeds: [StorySpeed]) {
+    func line(_ label: String, _ values: [Double], _ format: String) -> String {
+        let sorted = values.sorted()
+        guard let middle = median(sorted), let low = sorted.first, let high = sorted.last else { return "\(label): —" }
+        return "\(label): median " + String(format: format, middle) + " (" + String(format: format, low) + " to "
+            + String(format: format, high) + ")"
+    }
+    print("\nspeed of \(speeds.count) answers:")
+    print("  " + line("from the request to the first word", speeds.map(\.firstWordMs), "%.0f ms"))
+    print("  " + line("new tokens of the request read", speeds.map(\.readMs), "%.0f ms")
+          + line(", tokens read", speeds.map { Double($0.readTokens) }, "%.0f"))
+    print("  " + line("writing speed", speeds.compactMap(\.tokensPerSecond), "%.1f tokens/s")
+          + line(", tokens per answer", speeds.map { Double($0.tokens) }, "%.0f"))
+    print("  " + line("GPU memory peak during a request", speeds.map(\.peakGB), "%.2f GB"))
+}
+
+private func milliseconds(_ duration: Duration) -> Double {
+    Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
 }
 
 extension Array {

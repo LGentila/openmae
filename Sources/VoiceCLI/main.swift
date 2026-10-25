@@ -43,7 +43,7 @@
 //                                                       answers cut off one after the other: does the model write
 //                                                       the cut-off mark itself? Answers cut by a drop: does it
 //                                                       shorten its own? (text only; see CutOffBench.swift)
-//   voice-cli story-bench [--repeats 20] [--request "…"] [--actions] [--reread]
+//   voice-cli story-bench [--repeats 20] [--request "…"] [--actions] [--reread] [--speed]
 //                                                       stories: does the model write words French spelling does
 //                                                       not have (« constru-ée »)? With the chance of every token
 //                                                       (text only; see StoryBench.swift)
@@ -227,6 +227,9 @@ struct Options {
     var reread = false
     /// story-bench: the sampling's min-p instead of the app's (`MLXChatModel.sampleWithMinP`), for comparisons in one build.
     var minP: Float?
+    /// story-bench: the tokens are not watched (it slows the writing), and each answer's time to its first word and
+    /// writing speed are measured.
+    var speed = false
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -315,6 +318,7 @@ struct Options {
             case "--hold": o.hold = Double(it.next() ?? "")
             case "--reread": o.reread = true
             case "--min-p": o.minP = Float(it.next() ?? "")
+            case "--speed": o.speed = true
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -877,7 +881,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--dialogue name]
                voice-cli story-bench [--tier tier] [--llm folder] [--corpus file.json] [--request "…"]… [--repeats 20]
                                      [--actions] [--agents] [--web] [--sources] [--news] [--memory] [--hold s]
-                                     [--reread] [--min-p 0.05] [--bfloat16-prompts]
+                                     [--reread] [--min-p 0.05] [--bfloat16-prompts] [--speed]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
                voice-cli delegate --check | --instruction "…" [--title "…"] [--folder dir] [--mode acceptEdits|auto]

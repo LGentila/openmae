@@ -308,7 +308,10 @@ it, and counts per request the answers holding one, in what the model wrote and 
 put those tools in the prompt as in the app; `--hold 1` holds the model a second after each piece, as while the voice
 needs the GPU; `--reread` reads each answer again in one pass, as a prompt is read, in the model's own type and in
 float32, and shows the chances the model gives each such word's tokens then; `--min-p` draws the tokens with another
-min-p than the app's, and `--bfloat16-prompts` computes the requests in bfloat16, to compare in one build:
+min-p than the app's, and `--bfloat16-prompts` computes the requests in bfloat16, to compare in one build. `--speed`
+leaves the tokens' chances out (reading them slows the writing) and measures each answer instead: the time from the
+request to its first word, its writing speed in tokens per second and the GPU memory peak, with the memory after loading
+(to compare two models, run it with the GPU kept to itself):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli story-bench --actions --agents --web --sources --memory --reread

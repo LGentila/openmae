@@ -149,6 +149,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Diagnostics: the GPU memory peak during the last request, from its start to its answer's last token (GB, the
     /// weights included).
     public private(set) var lastRequestPeakGB = 0.0
+    /// Diagnostics of the last answer: the tokens it drew (its last, which ends it, included), and the time from its
+    /// first token to its last, everything done meanwhile included (its writing speed: `voice-cli story-bench --speed`).
+    public private(set) var lastWriting = (tokens: 0, ms: 0.0)
     /// Diagnostics of the last `catchUp`: tokens computed (0: nothing to do), and time to compute them.
     public private(set) var lastCatchUp = (computed: 0, ms: 0.0)
     /// Diagnostics: the tokens the model counts in its cache (what the next request trusts), and the tokens the cache
@@ -1045,6 +1048,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         }
         var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
         var produced: [Int] = []
+        /// When the answer's first token came (`lastWriting`).
+        var firstToken: ContinuousClock.Instant?
         /// With `watchingTokens`: what each token of the answer added to its text, by its index in `produced`.
         var texts: [Int: String] = [:]
         var callTokens: [Int]?  // inside a tool call
@@ -1061,6 +1066,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             // holds the prompt plus every token returned. Its offset is the ground truth.
             let all = prompt + produced
             cachedTokens = Array(all.prefix(cachedTokenCount(upTo: all.count)))
+            let writing = firstToken.map { clock.now - $0 } ?? .zero
+            lastWriting = (produced.count,
+                           Double(writing.components.seconds) * 1000 + Double(writing.components.attoseconds) / 1e15)
             DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
                                 produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
             releaseFreeBuffers()
@@ -1074,6 +1082,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return
         }
         while let token = iterator.next() {
+            if firstToken == nil { firstToken = clock.now }
             produced.append(token)
             if stopTokens.contains(token) || token == context.tokenizer.unknownTokenId { break }
             if Task.isCancelled {
