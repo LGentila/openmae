@@ -34,7 +34,7 @@
 //                                                       how well the memory's journal finds past exchanges: recall@4
 //                                                       and MRR per kind of query, speed and size on 20,000 exchanges
 //                                                       (no model; see MemoryBench.swift)
-//   voice-cli journal-bench [--repeats 3] [--corpus Tests/Fixtures/journal-fr.json]
+//   voice-cli journal-bench [--repeats 3] [--corpus Tests/Fixtures/journal-fr.json] [--request "…"]… [--watch-calls]
 //                                                       the journal switched on for the run: does the model search it
 //                                                       when asked about a past conversation, find the exchange and
 //                                                       use it? (text only; see JournalBench.swift)
@@ -218,7 +218,8 @@ struct Options {
     /// this file.
     var news = false
     var newsAddendum: String?
-    /// story-bench: these requests only, instead of the corpus's.
+    /// story-bench: these requests only, instead of the corpus's; journal-bench: only the corpus's requests that hold one
+    /// of these texts.
     var requests: [String] = []
     /// story-bench: the model held this many seconds after each piece of an answer, as while the voice needs the GPU.
     var hold: Double?

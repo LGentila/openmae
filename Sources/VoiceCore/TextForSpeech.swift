@@ -4,13 +4,29 @@ import Foundation
 /// control tags (`<think>…</think>` for Qwen, `<|channel>thought…<channel|>` for Gemma 4,
 /// any other `<|…|>`-style tag). Works on a stream: text arrives in small pieces and a tag may be
 /// split across two pieces, so a possible tag start is held back until it can be decided.
+///
+/// Gemma 4 26B also writes ` much` where it means one of its own marks, right after a thought block it closed (it often
+/// writes empty ones, `<|channel>thought\n<channel|>`, after the one its template gives it), and goes on with whatever
+/// that mark would have opened: ` much_thought\n` for a thought block, ` mucher_web{requete:…}<tool_call|>` for a call
+/// written as text, garbage (` muchjeke__`). The user heard « much_thought » and calls read out: in 19 of 20 runs of a
+/// request in voice-cli journal-bench, with the system prompt of the time. So `much` right after a block, or at the start
+/// of the text (the template's block just before it), opens a thought block too, until `<channel|>`.
+///
+/// The end of the text (`flush`, at the end of each of the model's answers) also ends a block left open: Gemma 4 26B may
+/// open one of its own, write its answer in it and end there, or write a call after it; left open, the block swallowed
+/// the request's next answer whole, the summary of the call's result.
 public struct ReasoningFilter: Sendable {
     private static let blocks: [(start: String, end: String)] = [
         ("<think>", "</think>"),
         ("<|channel>", "<channel|>"),
     ]
+    /// What Gemma 4 26B writes in place of one of its marks (see above), and the end of the block it opens.
+    private static let markInWords = "much"
+    private static let thoughtEnd = "<channel|>"
     private var buffer = ""
     private var insideBlockEnd: String?
+    /// At the start of the text, or right after a block's end: `markInWords` there opens a block.
+    private var afterBlock = true
 
     public init() {}
 
@@ -19,9 +35,12 @@ public struct ReasoningFilter: Sendable {
         return drain(final: false)
     }
 
+    /// The rest of the text, at its end: a block still open ends with it, and the next text starts afresh.
     public mutating func flush() -> String {
         let out = drain(final: true)
         buffer = ""
+        insideBlockEnd = nil
+        afterBlock = true
         return out
     }
 
@@ -32,12 +51,25 @@ public struct ReasoningFilter: Sendable {
                 if let r = buffer.range(of: end) {
                     buffer = String(buffer[r.upperBound...])
                     insideBlockEnd = nil
+                    afterBlock = true
                     continue
                 }
                 // Keep only what could be the start of the end marker.
                 buffer = String(buffer.suffix(end.count - 1))
                 if final { buffer = "" }
                 return out
+            }
+            if afterBlock {
+                let word = buffer.drop { $0.isWhitespace }
+                if word.hasPrefix(Self.markInWords) {
+                    buffer = String(word.dropFirst(Self.markInWords.count))
+                    insideBlockEnd = Self.thoughtEnd
+                    afterBlock = false
+                    continue
+                }
+                // Nothing but white space yet, or « m », « mu », « muc »: wait for the rest.
+                if Self.markInWords.hasPrefix(word), !final { return out }
+                afterBlock = false
             }
             guard let lt = buffer.firstIndex(of: "<") else {
                 out += buffer
@@ -54,7 +86,9 @@ public struct ReasoningFilter: Sendable {
             if let tag = buffer.range(of: #"^</?\|?[A-Za-z_][A-Za-z0-9_]*\|?>"#, options: .regularExpression),
                 buffer[tag].contains("|") || buffer[tag].hasPrefix("</")
             {
-                buffer = String(buffer[tag.upperBound...])  // stray control tag: drop it
+                // A stray control tag: dropped. The end of a thought block whose start went unseen is a block's end.
+                if buffer[tag] == Self.thoughtEnd { afterBlock = true }
+                buffer = String(buffer[tag.upperBound...])
                 continue
             }
             let couldStillBeATag = !buffer.contains(">") && buffer.count < 24

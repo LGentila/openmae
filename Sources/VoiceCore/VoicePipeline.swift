@@ -1579,7 +1579,8 @@ public actor VoicePipeline {
     /// already obtained, and only those calls carried out from it); one pass where it sums up every result that came from
     /// outside (no call carried out then); the app's questions about the refused calls; the one question for the sensitive
     /// calls, which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out
-    /// at once, how many it does (`ActionPhrases.atMost`), once.
+    /// at once, how many it does (`ActionPhrases.atMost`), once. A first answer with neither a word nor a call is asked for
+    /// once more; with nothing again, the app says it did not understand (`ActionPhrases.notUnderstood`).
     ///
     /// The history keeps each pass's calls as the model wrote them, one assistant message with all of them, then their
     /// results in the same order, as Gemma 4's template renders them: the next request goes on from the model's memory.
@@ -1614,6 +1615,8 @@ public actor VoicePipeline {
         var toSum: [String] = []
         /// The model, summing up, wrote calls and nothing else, and was told to sum up once more.
         var summedUpAgain = false
+        /// The model's first answer wrote neither a word nor a call, and it was asked once more.
+        var askedAgain = false
         /// The user asked for several actions at once (the model's first answer wrote more than one call, or went on to
         /// another): their sentence holds the other actions' moments and lengths too, so the app reads only each call's
         /// own words (`ToolContext.userSaid` empty), never a moment or a length of the sentence it would give the wrong
@@ -1795,6 +1798,24 @@ public actor VoicePipeline {
                 toCorrect = []
             }
             if calls.isEmpty, unreadable, tools != nil {
+                try await waitForCommit(turn)
+                chunker.remainingPieces().forEach(send)
+                say(ActionPhrases.notUnderstood(turn.language), to: turn)
+                break
+            }
+            if pass == .first, calls.isEmpty, !unreadable, !askedForMore, !modelSpoke {
+                // Neither a word nor a call: the user would hear nothing at all. Gemma 4 26B ends some answers so (a request
+                // in 108 in each round of voice-cli journal-bench, 4 runs in 20 of one request): it opens a thought block of
+                // its own, which the voice never says, writes its answer in it and ends there, or writes only what stands for
+                // its marks (`ReasoningFilter`). The model is asked once more, the same request; writing nothing again, the
+                // user hears that the app did not understand, rather than silence.
+                try Task.checkCancellation()  // an answer stopped (the user spoke again) also ends with nothing written
+                if !askedAgain {
+                    askedAgain = true
+                    DebugLog.log("turn \(turn.id): the model wrote neither a word nor a call, asked once more")
+                    continue
+                }
+                DebugLog.log("turn \(turn.id): the model wrote nothing again, the app says it did not understand")
                 try await waitForCommit(turn)
                 chunker.remainingPieces().forEach(send)
                 say(ActionPhrases.notUnderstood(turn.language), to: turn)

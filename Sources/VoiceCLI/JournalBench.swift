@@ -3,7 +3,11 @@
 //
 //   voice-cli journal-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/journal-fr.json] [--repeats 3] [--examples app|none|file]
-//                           [--web] [--out measurements]
+//                           [--web] [--request "cookies"] [--watch-calls] [--out measurements]
+//
+// --request: only the corpus's requests whose phrase holds this text (repeatable), to run a rare case many times.
+// --watch-calls: each pass exactly as the model wrote it, special tokens included, under its run; the report keeps it with
+// its tokens, each with its chance and the likeliest ones there.
 //
 // Text only, and nothing is carried out for real. The journal is switched on for this run only, whatever the app's
 // settings say (`MemorySettings.journalOffered`): the app's store (`SQLiteMemoryStore`) in a folder of the system's
@@ -99,6 +103,11 @@ private struct JournalRun: Encodable {
     /// What the user heard.
     var answer: String
     var seconds: Double
+    /// The model's first answer wrote neither a word nor a call: it was asked once more, as the app does.
+    var askedAgain: Bool?
+    /// With --watch-calls: each pass of the model as it wrote it, and its tokens.
+    var raw: [String]?
+    var tokens: [[WatchedToken]]?
 
     struct Search: Encodable {
         var texte: String?
@@ -177,6 +186,9 @@ func runJournalBench(_ o: Options) async throws {
         }
     }
     checkWords(corpus.requests, byID: byID)
+    let requests = o.requests.isEmpty ? corpus.requests
+        : corpus.requests.filter { request in o.requests.contains { request.phrase.contains($0) } }
+    guard !requests.isEmpty else { throw CLIError("--request: no request of the corpus holds these words") }
 
     let scratch = FileManager.default.temporaryDirectory.appending(path: "openmae-journal-bench-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: scratch) }
@@ -203,11 +215,16 @@ func runJournalBench(_ o: Options) async throws {
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · reference time "
           + LocalDateTime.format(now, in: timeZone))
     print("journal: \(exchanges.count) exchanges (switched on for this run only, in a temporary folder) · sheet: "
-          + "\(sheet.count) entries · \(corpus.requests.count) requests")
+          + "\(sheet.count) entries · \(requests.count) requests"
+          + (requests.count < corpus.requests.count ? " of \(corpus.requests.count)" : ""))
     let clock = ContinuousClock()
     let loadStart = clock.now
     let model = try await MLXChatModel.load(directory: folder)
     print("loaded in \(clock.now - loadStart)")
+    if o.watchCalls {
+        await model.watchToolCalls(true)
+        await model.watchTokens(true)
+    }
     let web = corpus.web == true || o.web
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
     let memory = MemoryTools(store: store, enabled: true, journal: true)
@@ -233,15 +250,15 @@ func runJournalBench(_ o: Options) async throws {
     let repeats = max(o.repeats ?? 3, 1)
     var runs: [JournalRun] = []
     let benchStart = clock.now
-    for (index, request) in corpus.requests.enumerated() {
+    for (index, request) in requests.enumerated() {
         print("\(index + 1) [\(request.label)] \(request.phrase)")
         let expected = Set(request.expected ?? [])
         for run in 1...repeats {
             await store.forget()
             var talk = AppTalk(model: model, runner: runner, calendar: calendar, conversation: base, now: now,
-                               timeZone: timeZone, maxCalls: maxCalls)
+                               timeZone: timeZone, maxCalls: maxCalls, watchCalls: o.watchCalls)
             let start = clock.now
-            let (steps, answer) = try await talk.turn(request.phrase)
+            let (steps, answer, askedAgain) = try await talk.turn(request.phrase)
             let seconds = Double((clock.now - start).components.seconds)
                 + Double((clock.now - start).components.attoseconds) / 1e18
             let calls = steps.compactMap { step in step.call.map { (call: $0, refused: step.refused) } }
@@ -262,6 +279,12 @@ func runJournalBench(_ o: Options) async throws {
             var result = JournalRun(phrase: request.phrase, label: request.label, run: run,
                                     first: calls.first.map { describeChoice($0.call) } ?? "no call", searches: searches,
                                     excerpts: excerpts, searched: !searches.isEmpty, answer: answer, seconds: seconds)
+            if askedAgain { result.askedAgain = true }
+            if o.watchCalls {
+                let passes = steps.filter { $0.raw != nil }
+                result.raw = passes.compactMap(\.raw)
+                result.tokens = passes.map { $0.tokens ?? [] }
+            }
             if request.mustSearch {
                 let found = excerpts.contains(where: expected.contains)
                 result.found = found
@@ -275,8 +298,10 @@ func runJournalBench(_ o: Options) async throws {
                 : searches.map { "chercher {texte: \($0.texte ?? "—")" + ($0.quand.map { ", quand: \($0)" } ?? "") + "}"
                     + ($0.refused ? " [refused]" : "") }.joined(separator: " then ")
             print("   \(run)/\(repeats) \(marks)  \(wrote)" + (excerpts.isEmpty ? "" : " → \(excerpts.joined(separator: ", "))")
-                  + String(format: "  (%.1f s)", seconds))
+                  + String(format: "  (%.1f s)", seconds)
+                  + (askedAgain ? "  [the first answer said nothing: asked again]" : ""))
             print("        🔊 \(answer.prefix(220))")
+            for (pass, raw) in (result.raw ?? []).enumerated() { print("        pass \(pass + 1): \(raw.debugDescription)") }
 
             // Back to the corpus's sheet (a fact remembered on the way is taken out), and to a new conversation.
             if try await store.loadSheet() != sheet { try await store.saveSheet(sheet) }
@@ -285,7 +310,7 @@ func runJournalBench(_ o: Options) async throws {
         }
     }
     print("\n\(runs.count) runs in \(clock.now - benchStart)")
-    summarize(runs, requests: corpus.requests, repeats: repeats, tier: tier, model: folder.lastPathComponent)
+    summarize(runs, requests: requests, repeats: repeats, tier: tier, model: folder.lastPathComponent)
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -420,4 +445,11 @@ private func summarize(_ runs: [JournalRun], requests: [JournalCorpus.Request], 
             : "searched \(some.filter(\.searched).count)/\(some.count)"
         print("\(numbers)  \(request.phrase)" + (keywords.isEmpty ? "" : "\n      keywords: " + counts(keywords)))
     }
+
+    // What the user would hear of the answers themselves: nothing at all, or « much », the word Gemma 4 26B writes for one
+    // of its marks (`ReasoningFilter`; the corpus is French). And the first answers that said nothing, asked again.
+    print("\n=== what is heard, all requests ===")
+    print("nothing heard " + share(runs.filter { SpeakableText.clean($0.answer).isEmpty }.count, runs.count)
+          + " · « much » heard " + share(runs.filter { $0.answer.lowercased().contains("much") }.count, runs.count)
+          + " · first answer with nothing said, asked again " + share(runs.filter { $0.askedAgain == true }.count, runs.count))
 }

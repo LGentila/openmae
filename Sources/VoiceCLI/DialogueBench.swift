@@ -114,6 +114,11 @@ private struct Pass: Encodable {
     var touched: String?
     var moreCalls: Bool?
     var unreadable: String?
+    /// With --watch-calls: the pass exactly as the model wrote it, special tokens included (`MLXChatModel.lastRawAnswer`).
+    var raw: String?
+    /// With journal-bench's --watch-calls: the pass's tokens, each with its chance and the likeliest ones there
+    /// (`MLXChatModel.lastTokens`).
+    var tokens: [WatchedToken]?
 }
 
 private struct TurnResult: Encodable {
@@ -126,6 +131,8 @@ private struct TurnResult: Encodable {
     var goalReached: Bool
     var firstCallChance: Double?
     var bestCallChance: Double?
+    /// The model's first answer wrote neither a word nor a call: it was asked once more (`VoicePipeline.answerWithTools`).
+    var askedAgain: Bool?
 }
 
 private struct RunResult: Encodable {
@@ -388,10 +395,11 @@ private struct Talk {
             // As the app (`VoicePipeline.answerWithTools`): the calls carried out in order, at most `maxCalls`; one second
             // try for the refused ones, only they carried out from it, none twice; one summing up of what came from outside,
             // no call carried out then; the app's questions, the one for the sensitive calls, and how many things it does
-            // at a time when the model asked for more.
+            // at a time when the model asked for more; a first answer with neither a word nor a call asked for once more.
             enum Kind { case first, secondTry, summing }
             var kind = Kind.first
             var askedForMore = false
+            var askedAgain = false
             var begun = false
             var carriedOut: [ToolCall] = []
             var toCorrect: [(tool: String, question: String)] = []
@@ -495,12 +503,19 @@ private struct Talk {
                     result.firstCallChance = chances.first
                     result.bestCallChance = chances.best
                 }
+                if watchCalls {
+                    pass.raw = await model.lastRawAnswer
+                    let tokens = await model.lastTokens  // empty unless the model watches its tokens
+                    pass.tokens = tokens.isEmpty ? nil : tokens
+                }
                 if askedForMore { pass.moreCalls = true }
                 // The pass's text on its first call (or alone), each call after it.
                 if var first = passes.first {
                     first.text = pass.text
                     first.moreCalls = pass.moreCalls
                     first.unreadable = pass.unreadable
+                    first.raw = pass.raw
+                    first.tokens = pass.tokens
                     passes[0] = first
                     result.passes += passes
                 } else {
@@ -532,6 +547,16 @@ private struct Talk {
                     toCorrect = []
                 }
                 if calls.isEmpty, pass.unreadable != nil {
+                    chunker.remainingPieces().forEach(send)
+                    say(ActionPhrases.notUnderstood(.french))
+                    break
+                }
+                if kind == .first, calls.isEmpty, !askedForMore, !modelSpoke {
+                    if !askedAgain {
+                        askedAgain = true
+                        result.askedAgain = true
+                        continue
+                    }
                     chunker.remainingPieces().forEach(send)
                     say(ActionPhrases.notUnderstood(.french))
                     break
@@ -877,21 +902,28 @@ struct AppTalk {
         var refused: Bool
         /// What the model wrote in this pass, besides its calls.
         var text: String
+        /// With `watchCalls`: the pass as the model wrote it, and its tokens (see `Pass`); nil on a pass's later calls.
+        var raw: String?
+        var tokens: [WatchedToken]?
     }
 
     private var talk: Talk
 
+    /// `watchCalls`: each pass's raw answer kept (`MLXChatModel.watchToolCalls`, and `watchTokens` for its tokens).
     init(model: MLXChatModel, runner: ToolRunner, calendar: MemoryCalendar, conversation: Conversation, now: Date,
-         timeZone: TimeZone, maxCalls: Int)
+         timeZone: TimeZone, maxCalls: Int, watchCalls: Bool = false)
     {
         talk = Talk(model: model, runner: runner, calendar: calendar, conversation: conversation, now: now,
-                    timeZone: timeZone, watchCalls: false, maxCalls: maxCalls)
+                    timeZone: timeZone, watchCalls: watchCalls, maxCalls: maxCalls)
     }
 
-    /// The turn's steps in order, and its answer as the history keeps it (the model's words, then the app's sentences).
-    mutating func turn(_ text: String) async throws -> (steps: [Step], answer: String) {
+    /// The turn's steps in order, its answer as the history keeps it (the model's words, then the app's sentences), and
+    /// whether the model's first answer wrote nothing and it was asked once more.
+    mutating func turn(_ text: String) async throws -> (steps: [Step], answer: String, askedAgain: Bool) {
         let turn = try await talk.turn(text)
-        return (turn.passes.map { Step(call: $0.call, result: $0.result, refused: $0.refused == true, text: $0.text) },
-                turn.answer)
+        return (turn.passes.map {
+            Step(call: $0.call, result: $0.result, refused: $0.refused == true, text: $0.text, raw: $0.raw,
+                 tokens: $0.tokens)
+        }, turn.answer, turn.askedAgain == true)
     }
 }

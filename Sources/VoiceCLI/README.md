@@ -236,6 +236,15 @@ often the answer used it; and how often it searched when nothing asked for it:
 .build/xcode/Build/Products/Release/voice-cli journal-bench --tier standard --repeats 3
 ```
 
+It also counts the answers the user would hear nothing of, those saying « much » (the word Gemma 4 26B writes for one of
+its marks, see `ReasoningFilter`) and the first answers that said nothing, asked again as in the app. A rare case runs
+many times on its own with `--request` (the corpus's requests holding these words); `--watch-calls` prints each pass as
+the model wrote it, special tokens included, and the report keeps it with its tokens, each with its chance:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli journal-bench --tier comfort --repeats 20 --request "recette de cookies" --watch-calls
+```
+
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the
 model computes in the background once said, and a request sent meanwhile), a refused call and its second try, a long

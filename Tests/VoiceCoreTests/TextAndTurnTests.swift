@@ -59,6 +59,82 @@ struct TextForSpeechTests {
         #expect(out == "3 < 5 et 2 <")
     }
 
+    /// What the voice gets of a text the model writes in small pieces, as `MLXChatModel` streams it.
+    private func said(_ raw: String, pieceLength: Int = 3) -> String {
+        var filter = ReasoningFilter()
+        var out = ""
+        var rest = raw[...]
+        while !rest.isEmpty {
+            out += filter.push(String(rest.prefix(pieceLength)))
+            rest = rest.dropFirst(pieceLength)
+        }
+        return out + filter.flush()
+    }
+
+    /// Gemma 4 26B's first answers to « Samedi dernier tu m'as donné une recette de cookies, tu peux me la redonner ? »
+    /// (voice-cli journal-bench --watch-calls, with the system prompt of the time), exactly as it wrote them up to its
+    /// call or its turn's end: ` much` where it meant one of its marks, right after a thought block.
+    static let gemma26BFirstPasses: [String] = [
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much_thought\n<|channel>thought\n<channel|> much_thought\n"
+            + "<|channel>thought\n<channel|> much_thought\n",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much_thought\n<|channel>thought\n<channel|>"
+            + "<|channel>thought\n<channel|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much les cookies de samedi dernier. Je vais chercher cela "
+            + "pour toi.<|channel>thought\n<channel|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> muchjeke__<turn|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much\n<|channel>thought\n<channel|><|channel>thought\n"
+            + "<channel|><|channel>thought\n<channel|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> muchée: Je ne trouve pas de recette de cookies dans notre "
+            + "discussion. Est-ce que tu veux que j'en cherche une nouvelle pour toi ?<turn|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much too many results for your request. Je n'ai pas de "
+            + "trace de cette recette dans notre historique. Est-ce que tu veux que j'en cherche une nouvelle sur internet ?"
+            + "<turn|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> mucher_web{requete:<|\"|>recette cookies samedi dernier"
+            + "<|\"|>}<tool_call|><|tool_response>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> much_memory_check: Je vais chercher cela.\n\n"
+            + "<|channel>thought\n<channel|>",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> muchot_thought\n<|channel>thought\n<channel|> "
+            + "muchot_thought\n<|channel>thought\n<channel|> muchot_thought\n",
+        "<|channel>thought\n<channel|><|channel>thought\n<channel|> muchot_memoire{action: 'chercher', quand: 'samedi "
+            + "dernier', texte: 'recette de cookies'}<tool_call|><|tool_response>",
+        // Right at the start: the template's own block is just before it.
+        " much_thought\n<channel|> much_thought\n",
+    ]
+
+    /// The user heard « much_thought », « muchjeke », a call read out (`gemma26BFirstPasses`). None of it is said, whatever
+    /// pieces it comes in.
+    @Test(arguments: Self.gemma26BFirstPasses)
+    func gemma26BMarksWrittenInWordsAreNotSaid(raw: String) {
+        for length in [1, 3, 7, raw.count] { #expect(said(raw, pieceLength: length) == "", "\(length)") }
+    }
+
+    /// Gemma 4 26B opens a thought block of its own and leaves it open: before a call, or with its answer in it (the same
+    /// request, with today's prompt). The block ends with the answer: the request's next one (the summary of the call's
+    /// result) is said whole.
+    @Test func thoughtBlockLeftOpenEndsWithTheAnswer() {
+        var filter = ReasoningFilter()
+        let beforeCall = filter.push("<|channel>thought\nce que je cherche dans ma mémoire. Je vais regarder cela.")
+            + filter.flush()
+        #expect(beforeCall.isEmpty)
+        let summary = "D'après tes souvenirs, voici la recette : mélange 125 grammes de beurre mou avec 100 grammes de sucre "
+            + "roux et un œuf."
+        #expect(filter.push(summary + "<turn|>") + filter.flush() == summary)
+        #expect(said("<|channel>thought\nce que je cherche est impossible car je n'ai pas accès à l'historique de nos "
+                     + "conversations passées. Je peux cependant te proposer une nouvelle recette de cookies.<turn|>") == "")
+        // A block of its own, closed: what follows it is said.
+        #expect(said("<|channel>thought\nce que je peux faire pour toi ?<|channel>thought\n<channel|><|channel>thought\n"
+                     + "<channel|>Je vais chercher cela pour toi.\n\n") == "Je vais chercher cela pour toi.\n\n")
+    }
+
+    /// The word itself stays everywhere else, also at a piece's end or at the start of an answer that only begins with it.
+    @Test func muchIsSaidElsewhere() {
+        for text in ["Thank you very much.", "How much is it?", "Much better, thanks!", "Merci beaucoup, very much.",
+                     "C'est pas mal du tout.", "musique"] {
+            for length in [1, 2, 4, text.count] { #expect(said(text, pieceLength: length) == text, "\(text) \(length)") }
+        }
+        #expect(said("<|channel>thought\n<channel|>Very much so.") == "Very much so.")
+    }
+
     @Test func firstPieceMayEndAtACommaThenSentencesOnly() {
         var chunker = SentenceChunker()
         var pieces = chunker.push("Bien sûr, pour ce soir tu peux faire des pâtes, ")

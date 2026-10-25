@@ -1591,6 +1591,53 @@ struct PipelineActionTests {
         #expect(await tools.performed.isEmpty)
     }
 
+    /// Gemma 4 26B's first answer may hold neither a word nor a call: a thought block of its own with its answer in it, or
+    /// ` much` for one of its marks (`ReasoningFilter`). The model is asked once more, the same request, and the user hears
+    /// its second answer; with nothing again, the user hears that the app did not understand. Never silence.
+    @Test(arguments: [false, true])
+    func firstAnswerWithNothingSaidIsAskedAgain(nothingAgain: Bool) async throws {
+        let nothing: [ModelOutput] = [.text("<|channel>thought\nce que je cherche est impossible car je n'ai pas accès à "),
+                                      .text("l'historique de nos conversations passées.")]
+        let glitch: [ModelOutput] = [.text("<|channel>thought\n<channel|>"), .text(" much"), .text("_thought\n")]
+        let answer: [ModelOutput] = [.text("Bonjour, je suis bien là. Comment vas-tu ?")]
+        let (model, speaker, tools) = (ScriptedModel(scripts: [nothing, nothingAgain ? glitch : answer, answer]),
+                                       FakeSpeaker(), RecordingTools())
+        let pipeline = make(model, ScriptedTranscriber(["Tu peux me redonner la recette ?"]), speaker, tools)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        let heard = nothingAgain ? ActionPhrases.notUnderstood(.french) : "Bonjour, je suis bien là. Comment vas-tu ?"
+        #expect(await log.pieces.joined(separator: " ") == heard)
+        #expect(await log.finished.first?.assistantText == heard)
+        let requests = await model.requests
+        #expect(requests.count == 2)
+        #expect(requests.first == requests.last)  // the same request, asked again
+        #expect(await tools.performed.isEmpty)
+    }
+
+    /// Gemma 4 26B may open a thought block of its own before its call and leave it open: the summary of the call's result
+    /// is said whole all the same, not swallowed with the block.
+    @Test func summaryAfterAThoughtBlockLeftOpenIsSaid() async throws {
+        let ask: [ModelOutput] = [.text("<|channel>thought\nce que je cherche dans ma mémoire. Je vais regarder cela."),
+                                  .toolCallStarted,
+                                  .toolCall(ToolCall(name: "chercher", arguments: ["requete": "météo demain Paris"]))]
+        let summary: [ModelOutput] = [.text("Demain, il fera beau à Paris.")]
+        let (model, speaker, tools, search) = (ScriptedModel(scripts: [ask, summary]), FakeSpeaker(), RecordingTools(),
+                                               SummedSearch())
+        let pipeline = make(model, ScriptedTranscriber(["Cherche la météo de demain à Paris"]), speaker, tools,
+                            others: [search])
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        await waitFor { await log.finished.count == 1 }
+        #expect(await search.queries == ["météo demain Paris"])
+        #expect(await log.pieces.joined(separator: " ") == "Demain, il fera beau à Paris.")
+        #expect(await model.requests.count == 2)
+    }
+
     /// Two actions asked at once, the first one refused for its arguments: the model's second try writes the corrected
     /// call alone. It is carried out, and the app still says, once, that it does one thing at a time.
     @Test func oneActionPerTurnAfterASecondTry() async throws {
