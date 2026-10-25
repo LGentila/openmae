@@ -369,6 +369,101 @@ struct DelegationTests {
         #expect(AgentTools.slug("Tri des œuvres d’art") == "tri-des-uvres-d-art" || AgentTools.slug("Tri des œuvres d’art") == "tri-des-oeuvres-d-art")
     }
 
+    /// A reference names a task by most of its words, or by one for a task of this conversation: not by one ordinary
+    /// word it shares with an unrelated task.
+    @Test func oneSharedOrdinaryWordIsNotEnough() {
+        func task(_ number: Int, _ title: String, _ instruction: String, _ minutes: Double) -> AgentTask {
+            AgentTask(number: number, agentID: "a", agentName: "A", title: title, instruction: instruction,
+                      status: .finished, createdAt: Date(timeIntervalSince1970: minutes * 60))
+        }
+        let crepes = task(1, "Poème et recette de crêpes", "Écris un petit poème sur les crêpes, puis une recette de crêpes.", 0)
+        let bakery = task(2, "site de la boulangerie", "Crée un site vitrine pour la boulangerie de ma sœur.", 1)
+        let club = task(3, "nouveau site pour le club", "Crée un site pour le club de randonnée.", 2)
+        let tasks = [crepes, bakery, club]
+        #expect(AgentTools.match("application de recette", in: tasks) == nil)  // one word of two: another task
+        #expect(AgentTools.match("tests de l'application de recettes", in: tasks) == nil)
+        #expect(AgentTools.match("la page des tarifs de la boulangerie", in: tasks) == nil)
+        #expect(AgentTools.match("recette de crêpes", in: tasks)?.number == 1)  // a clear reference
+        #expect(AgentTools.match("le poème", in: tasks)?.number == 1)
+        #expect(AgentTools.match("site de la boulangerie de ma sœur", in: tasks)?.number == 2)  // « sœur »: the instruction
+        #expect(AgentTools.match("le site du club de randonnée", in: tasks)?.number == 3)
+        #expect(AgentTools.match("d3", in: tasks)?.number == 3)
+        #expect(AgentTools.match("la tâche d1", in: tasks)?.number == 1)
+        // A task of this conversation: one word of the reference is enough, and it is preferred when others fit as well.
+        #expect(AgentTools.match("application de recette", in: tasks, current: [crepes.id])?.number == 1)
+        #expect(AgentTools.match("la page des tarifs de la boulangerie", in: tasks, current: [bakery.id])?.number == 2)
+        #expect(AgentTools.match("le site", in: tasks, current: [bakery.id])?.number == 2)  // not the most recent
+        #expect(AgentTools.match("le site", in: tasks)?.number == 3)
+        #expect(AgentTools.match("la compta", in: tasks, current: [crepes.id]) == nil)
+    }
+
+    /// A new request the model took for a follow-up, sharing one ordinary word with a finished task of an earlier
+    /// launch (« Poème et recette de crêpes »): refused, with the tasks and a word about deleguer_tache, whose call may
+    /// stand for it on the second try. A task this conversation handed over is named by one word; after a new
+    /// conversation, no longer.
+    @Test func followUpNamesATaskOfAnEarlierLaunchByMostOfItsWords() async throws {
+        let folder = scratchFolder()
+        let store = TaskStore(folder: folder.appending(path: "Tasks"))
+        var crepes = AgentTask(number: 1, agentID: "claude-code", agentName: "Claude Code",
+                               title: "Poème et recette de crêpes",
+                               instruction: "Écris un petit poème sur les crêpes, puis une recette de crêpes.",
+                               status: .finished, createdAt: Date().addingTimeInterval(-3600))
+        crepes.endedAt = Date().addingTimeInterval(-3000)
+        store.save(crepes)
+        let tools = AgentTools(store: store, workspace: folder.appending(path: "OpenMae"))
+        let agent = FakeAgent()
+        await tools.configure(agents: [AgentTools.Agent(connector: agent, review: false)], folders: [])
+        let runner = ToolRunner(providers: [tools])
+        _ = await runner.tools()
+
+        let tests = ToolCall(name: AgentCatalog.followUpName, arguments: [
+            "reference": "application de recette", "message": "Ajoute des tests automatiques à l'application de recette.",
+        ])
+        let refused = await runner.handle(tests, context: context())
+        #expect(refused.retryable)
+        #expect(refused.refusal?.correctedBy == [AgentCatalog.delegateName])
+        #expect(refused.forModel == ["erreur": .string(
+            "Aucune tâche ne correspond à « application de recette ». Tâches : d1 « Poème et recette de crêpes ». Si "
+                + "l'utilisateur demande un nouveau travail pour l'agent (code, site, application, recherche, fichiers, "
+                + "document), confie-le avec deleguer_tache, sans poser de question ; sinon, réponds-lui sans appel. "
+                + ToolRefusal.secondTry(AgentCatalog.followUpName))])
+        #expect(refused.spoken == AgentPhrases.unknownTask(.french))
+
+        // Named well, the old task gets it (read back first).
+        let glutenFree = ToolCall(name: AgentCatalog.followUpName, arguments: [
+            "reference": "recette de crêpes", "message": "Ajoute une version sans gluten.",
+        ])
+        let asked = await runner.handle(glutenFree, context: context())
+        #expect(asked.spoken == AgentPhrases.followUpReview(agent: "Claude Code", title: "Poème et recette de crêpes", .french))
+        _ = await runner.resolve(.decline, context: context())
+
+        // A task handed over in this conversation: one shared word names it.
+        let book = ToolCall(name: AgentCatalog.delegateName, arguments: [
+            "titre": "carnet de recettes", "consigne": "Crée un carnet de recettes en HTML, une page par recette.",
+        ])
+        _ = await runner.handle(book, context: context())  // no read-back: sent at once
+        await waitFor { await agent.started.count == 1 }
+        let added = await runner.handle(tests, context: context())
+        #expect(added.spoken == AgentPhrases.followUpReview(agent: "Claude Code", title: "carnet de recettes", .french))
+        _ = await runner.resolve(.decline, context: context())
+
+        // A new conversation: it is an earlier conversation's task now.
+        await runner.resetConversation()
+        let again = await runner.handle(tests, context: context())
+        #expect(again.refusal != nil && again.retryable)
+        #expect(await agent.followUps.isEmpty)
+    }
+
+    /// No task at all: a follow-up is answered at once, as before (no second try that would hand it over).
+    @Test func followUpWithoutAnyTaskIsAnsweredAtOnce() async {
+        let (_, _, _, runner) = await make()
+        let more = ToolCall(name: AgentCatalog.followUpName, arguments: ["reference": "le site",
+                                                                         "message": "Ajoute une page des tarifs."])
+        let reply = await runner.handle(more, context: context())
+        #expect(!reply.retryable && reply.refusal?.correctedBy.isEmpty == true)
+        #expect(reply.spoken == AgentPhrases.noTask(.french))
+    }
+
     @Test func runningTaskIsInterruptedWhenTheAppComesBack() {
         let folder = scratchFolder()
         let store = TaskStore(folder: folder)
@@ -491,6 +586,54 @@ struct PipelineAgentTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(await agent.started.isEmpty)  // the call written while summing up was never carried out
         #expect(await tools.visibleTasks.count == 1)
+    }
+
+    /// A new request the model took for a follow-up of an unrelated finished task (one word in common): refused, and
+    /// the second try's deleguer_tache, which stands for it, is read back as a new task. Nothing is added to the old one.
+    @Test func newRequestTakenForAFollowUpIsHandedOverOnTheSecondTry() async throws {
+        let folder = scratchFolder()
+        let store = TaskStore(folder: folder.appending(path: "Tasks"))
+        var crepes = AgentTask(number: 1, agentID: "claude-code", agentName: "Claude Code",
+                               title: "Poème et recette de crêpes", instruction: "Écris un poème et une recette de crêpes.",
+                               status: .finished, createdAt: Date().addingTimeInterval(-3600))
+        crepes.endedAt = Date().addingTimeInterval(-3000)
+        store.save(crepes)
+        let tools = AgentTools(store: store, workspace: folder.appending(path: "OpenMae"))
+        let agent = FakeAgent()
+        await tools.configure(agents: [AgentTools.Agent(connector: agent)], folders: [])
+
+        let followUp: [ModelOutput] = [.toolCallStarted, .toolCall(ToolCall(name: AgentCatalog.followUpName, arguments: [
+            "reference": "application de recette", "message": "Ajoute des tests automatiques à l'application de recette.",
+        ]))]
+        let handOver: [ModelOutput] = [.toolCallStarted, .toolCall(ToolCall(name: AgentCatalog.delegateName, arguments: [
+            "titre": "tests de l'application de recettes",
+            "consigne": "Ajoute des tests automatiques à l'application de recettes de l'utilisateur.",
+        ]))]
+        let model = ScriptedModel(scripts: [followUp, handOver, [.text("Très bien.")]])
+        var config = PipelineConfig()
+        config.toolCallFiller = false
+        let pipeline = VoicePipeline(detector: LoudnessDetector(),
+                                     transcriber: ScriptedTranscriber(["Ajoute des tests automatiques à mon application de recette.",
+                                                                       "Oui"]),
+                                     model: model, synthesizer: FakeSynthesizer(), output: FakeSpeaker(),
+                                     tools: ToolRunner(providers: [tools]), config: config)
+        let log = EventRecorder()
+        Task { for await event in pipeline.events { await log.record(event) } }
+        try await pipeline.start()
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))
+        let readBack = AgentPhrases.review(agent: "Claude Code", title: "tests de l'application de recettes", folder: nil,
+                                           .french)
+        await waitFor { await log.pieces.joined(separator: " ").contains("on y va") }
+        #expect(await log.pieces.joined(separator: " ") == readBack)
+        #expect(await model.requests.count == 2)  // the second try
+        #expect(await model.requests.last?.last?.toolResult?["erreur"]?.text?.contains("deleguer_tache") == true)
+
+        await waitFor { await log.states.last == .listening }
+        await push(pipeline, "1111111111" + String(repeating: "0", count: 20))  // « Oui »
+        await waitFor { await agent.started.count == 1 }
+        #expect(await agent.started.first?.title == "tests de l'application de recettes")
+        #expect(await agent.followUps.isEmpty)
+        #expect(await tools.visibleTasks.map(\.title) == ["Poème et recette de crêpes", "tests de l'application de recettes"])
     }
 
     /// The delegation instructions go into the system prompt only when an agent is set up; with the actions, the ones

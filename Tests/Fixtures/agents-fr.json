@@ -1,8 +1,11 @@
 {
-  "_comment": "Delegation benchmark (voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json). The model gets every action tool plus the delegation tools (Claude Code), as in the app with Claude Code switched on. Expected: the tool, and for a delegation or a follow-up the words its instruction must contain (any accents and case). Reference time: Thursday 15 October 2026, 18:42.",
+  "_comment": "Delegation benchmark (voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json). The model gets every action tool plus the delegation tools (Claude Code), as in the app with Claude Code switched on. Expected: the tool, and for a delegation or a follow-up the words its instruction must contain (any accents and case). Reference time: Thursday 15 October 2026, 18:42. The app also knows a finished task of an earlier launch (earlierTasks), which the model does not: a follow-up that names no task it knows is refused, and the second try counts.",
   "now": "2026-10-15T18:42",
   "shortcuts": [],
   "agents": true,
+  "earlierTasks": [
+    {"title": "Poème et recette de crêpes", "instruction": "Écris un petit poème sur les crêpes, puis une recette de crêpes simple pour quatre personnes, dans un fichier texte."}
+  ],
   "cases": [
     {"phrase": "Lance le développement d'un site pour la boulangerie de ma sœur", "expected": {"tool": "deleguer_tache", "mentions": ["site", "boulangerie"]}},
     {"phrase": "Développe-moi une petite application pour suivre mes dépenses du mois", "expected": {"tool": "deleguer_tache", "mentions": ["dépenses"]}},

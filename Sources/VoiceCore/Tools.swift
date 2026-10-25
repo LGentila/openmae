@@ -228,6 +228,10 @@ public struct ToolRefusal: Error, Sendable {
     /// refused so, a change of the last item, or of one never created, is that creation with what the change gives
     /// (`RefusedCreation`).
     public var detailGivenAgain = false
+    /// Other tools whose call, on the model's second try, stands for this one: carried out in its place, as a
+    /// correction (otherwise only a call to the refused tool is). deleguer_tache for a completer_tache that names no
+    /// task handed over: a new request the model took for a follow-up.
+    public var correctedBy: Set<String> = []
 
     public init(forModel: String, spoken: String, retryable: Bool = true) {
         self.forModel = forModel

@@ -1554,7 +1554,8 @@ public actor VoicePipeline {
     private enum Pass {
         /// The request's first answer: its calls are carried out.
         case first
-        /// The request's second try, after calls refused for their arguments: only those calls are carried out from it.
+        /// The request's second try, after calls refused for their arguments: only those calls (or calls standing for
+        /// them, `ToolRefusal.correctedBy`) are carried out from it.
         case secondTry
         /// Summing up the results that came from outside: no call is carried out.
         case summing
@@ -1589,9 +1590,10 @@ public actor VoicePipeline {
         var begun = false
         /// The calls carried out in this request: one that the second try writes again is not carried out twice.
         var carriedOut: [ToolCall] = []
-        /// The calls refused for their arguments that the second try may correct: their tools (one each), and the app's
-        /// questions about them (`ToolRefusal.spoken`), said if that try does not correct them and says nothing.
-        var toCorrect: [(tool: String, question: String)] = []
+        /// The calls refused for their arguments that the second try may correct: the tools whose call corrects each one
+        /// (its own, and those of `ToolRefusal.correctedBy`), and the app's questions about them (`ToolRefusal.spoken`),
+        /// said if that try does not correct them and says nothing.
+        var toCorrect: [(tools: Set<String>, question: String)] = []
         /// The app's questions about refused calls the model gets no (more) try for, said after the confirmations.
         var questions: [String] = []
         /// Some sensitive call waits for the user's "oui": the question for all of them ends the turn.
@@ -1654,7 +1656,7 @@ public actor VoicePipeline {
                                 results.append(["statut": .string(ToolOutcome.alreadyDone)])
                                 break carryingOut
                             }
-                            guard let index = toCorrect.firstIndex(where: { $0.tool == named.name }) else {
+                            guard let index = toCorrect.firstIndex(where: { $0.tools.contains(named.name) }) else {
                                 DebugLog.log("turn \(turn.id): not a refused call, not carried out: \(named.name)")
                                 results.append(["erreur": .string(ToolOutcome.onlyRefusedCalls)])
                                 break carryingOut
@@ -1772,7 +1774,7 @@ public actor VoicePipeline {
                 // The arguments were refused: the model sees why, with every result already obtained, and gets one more
                 // try, for the request.
                 DebugLog.log("turn \(turn.id): \(refused.count) call(s) refused, second try")
-                toCorrect = refused.map { (calls[$0.index].name, $0.question) }
+                toCorrect = refused.map { ($0.refusal.correctedBy.union([calls[$0.index].name]), $0.question) }
                 pass = .secondTry
                 request = conversation.messages(adding: turn.userMessage!) + turn.steps
                 continue

@@ -44,6 +44,9 @@ public actor AgentTools: ToolProvider {
     private let store: TaskStore
     private let now: @Sendable () -> Date
     private var tasks: [AgentTask]
+    /// The tasks this conversation handed over, followed up or asked about: a reference that shares a single word with
+    /// one of them names it (`match`). Forgotten at a new conversation; none at the app's start.
+    private var inConversation: Set<UUID> = []
     private var runs: [UUID: Task<Void, Never>] = [:]
     /// Tasks being stopped at the user's request.
     private var stopping: Set<UUID> = []
@@ -159,9 +162,11 @@ public actor AgentTools: ToolProvider {
                                   spoken: AgentPhrases.notLoggedIn(name, language), retryable: false)
             }
         case AgentCatalog.statusName:
-            if let reference = call.text("reference"), !Self.meansLatest(reference) { _ = try find(reference, language) }
+            if let reference = call.text("reference"), !Self.meansLatest(reference) {
+                _ = try find(reference, for: call.name, language)
+            }
         default:
-            _ = try find(call.text("reference"), language)
+            _ = try find(call.text("reference"), for: call.name, language)
         }
     }
 
@@ -180,10 +185,14 @@ public actor AgentTools: ToolProvider {
             publish()
             return AgentPhrases.review(agent: task.agentName, title: task.title, folder: call.text("dossier"), language)
         case AgentCatalog.followUpName:
-            guard let task = try? find(call.text("reference"), language) else { return AgentPhrases.unknownTask(language) }
+            guard let task = try? find(call.text("reference"), for: call.name, language) else {
+                return AgentPhrases.unknownTask(language)
+            }
             return AgentPhrases.followUpReview(agent: task.agentName, title: task.title, language)
         default:
-            guard let task = try? find(call.text("reference"), language) else { return AgentPhrases.unknownTask(language) }
+            guard let task = try? find(call.text("reference"), for: call.name, language) else {
+                return AgentPhrases.unknownTask(language)
+            }
             return AgentPhrases.cancelReview(agent: task.agentName, title: task.title, language)
         }
     }
@@ -214,6 +223,11 @@ public actor AgentTools: ToolProvider {
         guard task.status == .running else { return AgentPhrases.alreadyOver(context.language) }
         await stop(id)
         return AgentPhrases.undone(agent: task.agentName, context.language)
+    }
+
+    /// A new conversation: the tasks the last one dealt with are an earlier conversation's now (`inConversation`).
+    public func resetConversation() async {
+        inConversation = []
     }
 
     // MARK: - The four tools
@@ -248,6 +262,7 @@ public actor AgentTools: ToolProvider {
         task.startedAt = date
         task.updatedAt = date
         update(task)
+        inConversation.insert(task.id)
         if !startedOne {
             startedOne = true
             let first = onFirstTask
@@ -270,7 +285,7 @@ public actor AgentTools: ToolProvider {
         }
         let task: AgentTask
         if let reference = call.text("reference"), !Self.meansLatest(reference) {
-            task = try find(reference, language)
+            task = try find(reference, for: call.name, language)
         } else {
             let running = handed.filter { $0.status == .running }
             if running.count > 1, let agent = running.first?.agentName {
@@ -279,6 +294,7 @@ public actor AgentTools: ToolProvider {
             }
             task = running.first ?? handed.last!
         }
+        inConversation.insert(task.id)
         return answer(about: task, language)
     }
 
@@ -319,7 +335,8 @@ public actor AgentTools: ToolProvider {
 
     private func followUp(_ call: ToolCall, _ context: ToolContext) throws -> ToolOutcome {
         let language = context.language
-        var task = try find(call.text("reference"), language)
+        var task = try find(call.text("reference"), for: call.name, language)
+        inConversation.insert(task.id)
         let message = call.text("message") ?? ""
         task.followUps.append(message)
         if task.status == .running {
@@ -348,7 +365,7 @@ public actor AgentTools: ToolProvider {
 
     private func cancel(_ call: ToolCall, _ context: ToolContext) async throws -> ToolOutcome {
         let language = context.language
-        let task = try find(call.text("reference"), language)
+        let task = try find(call.text("reference"), for: call.name, language)
         guard task.status == .running else {
             return ToolOutcome(spoken: AgentPhrases.alreadyOver(language), forModel: .object(describeForModel(task)))
         }
@@ -579,33 +596,64 @@ public actor AgentTools: ToolProvider {
 
     // MARK: - Finding a task
 
-    /// The task a reference names: its identifier ("d3"), words of its title or instruction ("le site", "la
-    /// boulangerie"), or "dernière"; the most recent one when several fit equally.
-    private func find(_ reference: String?, _ language: SpeechLanguage) throws -> AgentTask {
+    /// The task a reference names (`match`), for a call to `tool`. None: the model gets the list of tasks and one more
+    /// try; for completer_tache, the new request it may have taken for a follow-up is handed over then, by a call to
+    /// deleguer_tache (`ToolRefusal.correctedBy`).
+    ///
+    /// In voice-cli actions-bench, actions off, with « Poème et recette de crêpes » on disk, « Ajoute des tests
+    /// automatiques à mon application de recettes » taken for a follow-up of « application de recettes »: with this
+    /// sentence about deleguer_tache, Gemma 4 26B handed it over on its second try each time (it took it for a follow-up
+    /// in 1 run of 10); Gemma 4 E4B, which takes it for one in every run, asked which application the user meant or said
+    /// nothing, with this sentence or two others (0 of 10 each). With no task at all, the refusal stays as it was, without
+    /// a second try: the 26B, actions off, takes « Ajoute un rendez-vous à la gare de Lyon vendredi à 10 h » for a
+    /// follow-up in each of 10 runs, and with such a sentence it handed the appointment to Claude Code in each.
+    private func find(_ reference: String?, for tool: String, _ language: SpeechLanguage) throws -> AgentTask {
         let handed = tasks.filter { $0.status != .awaitingConfirmation }
         guard !handed.isEmpty else {
             throw ToolRefusal(forModel: "Aucune tâche n'a été confiée.", spoken: AgentPhrases.noTask(language),
                               retryable: false)
         }
-        if let task = Self.match(reference, in: handed) { return task }
+        if let task = Self.match(reference, in: handed, current: inConversation) { return task }
         let known = handed.suffix(8).map { "\($0.reference) « \($0.title) »" }.joined(separator: ", ")
-        throw ToolRefusal(forModel: "Aucune tâche ne correspond à « \(reference ?? "") ». Tâches : \(known).",
-                          spoken: AgentPhrases.unknownTask(language))
+        var refusal = ToolRefusal(forModel: "Aucune tâche ne correspond à « \(reference ?? "") ». Tâches : \(known).",
+                                  spoken: AgentPhrases.unknownTask(language))
+        if tool == AgentCatalog.followUpName {
+            refusal.forModel += " Si l'utilisateur demande un nouveau travail pour l'agent (code, site, application, "
+                + "recherche, fichiers, document), confie-le avec \(AgentCatalog.delegateName), sans poser de question ; "
+                + "sinon, réponds-lui sans appel."
+            refusal.correctedBy = [AgentCatalog.delegateName]
+        }
+        throw refusal
     }
 
-    static func match(_ reference: String?, in tasks: [AgentTask]) -> AgentTask? {
+    /// The task a reference names: its identifier ("d3"); "dernière" (the most recent one); or words of its title or
+    /// instruction ("le site", "la boulangerie"): most of the reference's words, or at least one for a task of this
+    /// conversation (`current`). Not a task that shares one ordinary word with it, as « Poème et recette de crêpes », a
+    /// task of an earlier launch, did with « application de recette », a new request the model took for a follow-up.
+    /// The best fit (a word of the title counts twice); when several fit equally, one of this conversation, then the
+    /// most recent one.
+    static func match(_ reference: String?, in tasks: [AgentTask], current: Set<UUID> = []) -> AgentTask? {
         let latest = tasks.max { $0.createdAt < $1.createdAt }
         guard let reference, !meansLatest(reference) else { return latest }
-        let words = keywords(reference)
+        let words = keywords(reference).uniqued()
         if words.count == 1, let word = words.first, word.hasPrefix("d"), let number = Int(word.dropFirst()) {
             return tasks.first { $0.number == number }
         }
-        var best: (task: AgentTask, score: Int)?
-        for task in tasks {
+        var best: (task: AgentTask, score: Int, current: Bool)?
+        for task in tasks {  // the oldest first
             let title = Set(keywords(task.title))
             let instruction = Set(keywords(task.instruction))
+            let found = words.filter { title.contains($0) || instruction.contains($0) }.count
+            let isCurrent = current.contains(task.id)
+            guard found * 2 > words.count || (found > 0 && isCurrent) else { continue }
             let score = words.reduce(0) { $0 + (title.contains($1) ? 2 : instruction.contains($1) ? 1 : 0) }
-            if score > 0, score >= best?.score ?? 0 { best = (task, score) }  // ties: the later one (the most recent)
+            guard let previous = best else {
+                best = (task, score, isCurrent)
+                continue
+            }
+            if score > previous.score || (score == previous.score && (isCurrent || !previous.current)) {
+                best = (task, score, isCurrent)
+            }
         }
         return best?.task
     }

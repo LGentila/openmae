@@ -16,6 +16,11 @@
 //                           [--record file.json] [--sources] [--news] [--compare-beginnings] [--compare-requests]
 //                           [--bfloat16-prompts] [--bfloat16-experts]
 //
+// With Claude Code's tools (a corpus with "agents": true), a call to them is checked by the app's own delegation tools
+// (`AgentTools`, with an agent that does nothing), which know the tasks the case's earlier exchanges handed over and the
+// corpus's "earlierTasks" (handed over in an earlier launch of the app, on disk, unknown to the model): a call that names
+// no task they know gets the app's second try, from which only a call to the same tool, or one standing for it, counts.
+//
 // A search the model asks for is not made: the model sums up the results the corpus recorded for that request, as
 // the app would have it do (nothing it writes then is carried out; the calls it writes are counted). With --searxng
 // the searches are made on that SearXNG, with the model's own words (the password, if any, in the SEARXNG_PASSWORD
@@ -71,6 +76,9 @@ private struct Corpus: Decodable {
     var shortcuts: [String]
     /// The delegation tools are offered too (Claude Code switched on).
     var agents: Bool?
+    /// Tasks handed over in an earlier launch of the app, kept on disk: the app's delegation tools know them, the model
+    /// does not (a call that names a task is checked against them and the case's own).
+    var earlierTasks: [EarlierTask]?
     /// The web search tool is offered too.
     var web: Bool?
     var cases: [Case]
@@ -89,6 +97,13 @@ private struct Corpus: Decodable {
     var recordedSources: [String: JSONValue]?
     /// The news' tool is offered too (a source of received information exists).
     var news: Bool?
+
+    struct EarlierTask: Decodable {
+        var title: String
+        var instruction: String
+        /// "finished" (the default), "failed", "cancelled" or "interrupted".
+        var status: AgentTask.Status?
+    }
 
     struct Case: Decodable {
         var phrase: String
@@ -365,9 +380,23 @@ func runActionsBench(_ o: Options) async throws {
         return
     }
 
+    // The delegation's tasks and their folders, a folder for each case, all removed at the end.
+    let agentsFolder = FileManager.default.temporaryDirectory
+        .appending(path: "openmae-actions-bench-\(UUID().uuidString)", directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: agentsFolder) }
+    if agents, let earlier = corpus.earlierTasks, !earlier.isEmpty {
+        print("tasks of an earlier launch on disk: " + earlier.map { "« \($0.title) »" }.joined(separator: ", "))
+    }
     var results: [CaseResult] = []
     for (index, item) in corpus.cases.enumerated() {
         let before = corpus.exchanges(before: item)
+        // As in the app: its delegation tools, with the tasks of an earlier launch and those the case's earlier exchanges
+        // handed over.
+        let delegation = agents
+            ? await BenchDelegation(earlier: corpus.earlierTasks ?? [], before: before, now: now, context: reference,
+                                    folder: agentsFolder.appending(path: "\(index + 1)", directoryHint: .isDirectory))
+            : nil
+        defer { delegation?.end() }
         let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine, context: reference)
         var text = ""
         var call: ToolCall?
@@ -431,11 +460,17 @@ func runActionsBench(_ o: Options) async throws {
                                   spoken: ActionPhrases.notUnderstood(.french))
             result.refusal = refusal?.forModel
         } else if let call, AgentCatalog.names.contains(call.name) {
-            // Handing a task over: what the app checks, and whether the instruction keeps the user's words.
+            // Handing a task over: what the app checks (with the tasks it knows, for a call that names one), and whether
+            // the instruction keeps the user's words.
             do {
-                try AgentCatalog.check(call, context: context, agents: [ClaudeCode.displayName], folders: [])
+                if let delegation {
+                    try await delegation.tools.check(call, context: context)
+                } else {
+                    try AgentCatalog.check(call, context: context, agents: [ClaudeCode.displayName], folders: [])
+                }
                 if result.toolOK, let expected = item.expected { result.argumentsOK = mentions(call, expected) }
             } catch let refused as ToolRefusal {
+                refusal = refused
                 result.refusal = refused.forModel
                 if result.toolOK, item.expected != nil { result.argumentsOK = false }
             }
@@ -549,6 +584,17 @@ func runActionsBench(_ o: Options) async throws {
                     (try? resolve(again, created: created, context: context, shortcuts: corpus.shortcuts)) == nil
                 } ?? true
                 result.rightAfterSecondTry = refusedAgain
+            } else if let retried, let expected = item.expected, let delegation,
+                      AgentCatalog.names.contains(retried.name)
+            {
+                // As in the app: from the second try, only a call to the refused tool, or one standing for it
+                // (`ToolRefusal.correctedBy`: deleguer_tache for a completer_tache that named no task), is carried out.
+                let carriedOut = retried.name == call.name || refusal.correctedBy.contains(retried.name)
+                if !carriedOut { result.secondTry! += "  [not a correction of the refused call: not carried out]" }
+                let accepted = (try? await delegation.tools.check(retried, context: context)) != nil
+                if carriedOut, !accepted { result.secondTry! += "  [refused again]" }
+                result.rightAfterSecondTry = carriedOut && accepted && retried.name == expectedTool
+                    && mentions(retried, expected)
             } else if let retried, let expected = item.expected, retried.name == expectedTool,
                retried.name == WebSearchCatalog.searchName
             {
@@ -1627,4 +1673,69 @@ private func createdExchange(_ call: ToolCall, _ resolved: Resolved, number: Int
         fields["fin"] = .string(LocalDateTime.format(end, in: timeZone, withTime: resolved.hasTime))
     }
     return Corpus.Exchange(user: "", call: call, result: .object(fields), found: nil, answer: "", dateLine: nil)
+}
+
+/// The app's delegation tools for a case (`AgentTools`, Claude Code reading tasks back, as by default), with an agent that
+/// does nothing: on disk, the corpus's tasks of an earlier launch; in the conversation, the tasks the case's earlier
+/// exchanges handed over (or followed up, or asked about). A call that names a task is checked against them, as the app
+/// checks it.
+private struct BenchDelegation {
+    let tools: AgentTools
+    private let agent = IdleAgent()
+
+    init(earlier: [Corpus.EarlierTask], before: [Corpus.Exchange], now: Date, context: ToolContext, folder: URL) async {
+        let store = TaskStore(folder: folder.appending(path: "Tasks", directoryHint: .isDirectory))
+        for (index, saved) in earlier.enumerated() {
+            // A day before the reference time, an hour apart, in order.
+            let created = now.addingTimeInterval(Double(index - earlier.count) * 3600 - 86_400)
+            var task = AgentTask(number: index + 1, agentID: ClaudeCode.agentID, agentName: ClaudeCode.displayName,
+                                 title: saved.title, instruction: saved.instruction, status: saved.status ?? .finished,
+                                 createdAt: created)
+            task.startedAt = created
+            task.endedAt = created.addingTimeInterval(600)
+            task.updatedAt = created.addingTimeInterval(600)
+            store.save(task)
+        }
+        tools = AgentTools(store: store, workspace: folder.appending(path: "OpenMae", directoryHint: .isDirectory),
+                           now: { now })
+        await tools.configure(agents: [AgentTools.Agent(connector: agent)], folders: [])
+        for call in before.compactMap(\.call) where AgentCatalog.names.contains(call.name) {
+            // The user said "oui": carried out as the app does.
+            if (try? await tools.check(call, context: context)) != nil {
+                _ = try? await tools.perform(call, context: context)
+            }
+        }
+    }
+
+    /// Ends the runs the case started.
+    func end() { agent.endAll() }
+}
+
+/// An agent that does nothing: a run goes on until `endAll`, which ends it without a result.
+private final class IdleAgent: AgentConnector, @unchecked Sendable {
+    let agentID = ClaudeCode.agentID
+    let displayName = ClaudeCode.displayName
+    private let lock = NSLock()
+    private var runs: [AsyncThrowingStream<AgentUpdate, Error>.Continuation] = []
+
+    func availability() async -> AgentAvailability { .ready(version: nil) }
+
+    func start(_ task: AgentTask) -> AsyncThrowingStream<AgentUpdate, Error> {
+        let (stream, run) = AsyncThrowingStream<AgentUpdate, Error>.makeStream()
+        run.yield(.session(task.id.uuidString))
+        lock.withLock { runs.append(run) }
+        return stream
+    }
+
+    func followUp(_ task: AgentTask, message: String) -> AsyncThrowingStream<AgentUpdate, Error> { start(task) }
+
+    func cancel(_ task: AgentTask) async {}
+
+    func endAll() {
+        let ending = lock.withLock {
+            defer { runs = [] }
+            return runs
+        }
+        for run in ending { run.finish() }
+    }
 }

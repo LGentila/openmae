@@ -116,7 +116,9 @@ complete call:
 ```
 
 The same with the tools that hand tasks to Claude Code (requests to hand over, questions about programming
-that must not be, and questions about a task already handed over):
+that must not be, and questions about a task already handed over). Their calls are checked by the app's own
+delegation tools, which know the tasks handed over earlier in the case and a finished task of an earlier launch
+(`earlierTasks`): a follow-up that names no known task is refused, and the model's second try counts, as in the app:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json
