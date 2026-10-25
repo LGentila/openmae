@@ -78,9 +78,20 @@ public enum ModelCatalog {
     static let gemmaE4B = pack(
         "gemma-4-e4b-it-4bit", .languageModel, "Gemma 4 E4B", "mlx-community/gemma-4-e4b-it-4bit",
         "475b9088d29754a3379866cf5aeb6b41acd313c2", "Apache-2.0")
+    /// The comfort tier's model until it moved to the QAT one (below): still listed, so that Settings shows it on a Mac
+    /// that has it, where it can be deleted.
     static let gemma26B = pack(
         "gemma-4-26b-a4b-it-4bit", .languageModel, "Gemma 4 26B-A4B", "mlx-community/gemma-4-26b-a4b-it-4bit",
         "0d77464eeb233a2da68ebf9d7dc4edaac7db956d", "Apache-2.0")
+    /// Google's quantization-aware-trained Gemma 4 26B-A4B (trained to be quantized to 4 bits), converted by
+    /// mlx-community: its experts in 4 bits as the conversion above, its shared MLP and router in 8 bits (0.27 GB more).
+    /// The conversion above writes malformed words the voice then reads (« constru-ite » or « construles » for
+    /// « construite », « d'Avrons » for « d'Avranches », « Aujourd'elle »): in 37 of 100 stories with the app's tools
+    /// (`voice-cli story-bench`, 2026-10-25), against 4 of 100 with this one, which writes « construite » every time.
+    /// Its model card names no license; Google's QAT weights are Apache-2.0, as the others.
+    static let gemma26BQAT = pack(
+        "gemma-4-26b-a4b-it-qat-4bit", .languageModel, "Gemma 4 26B-A4B (QAT)",
+        "mlx-community/gemma-4-26B-A4B-it-qat-4bit", "0e3cbab38ce568cf6e23543010d08d03b731910c", "Apache-2.0")
     static let gemma26B8bit = pack(
         "gemma-4-26b-a4b-it-8bit", .languageModel, "Gemma 4 26B-A4B (8 bits)",
         "mlx-community/gemma-4-26b-a4b-it-8bit", "33c6d23798a0af159529890f79329206dbfbd73c", "Apache-2.0")
@@ -91,7 +102,7 @@ public enum ModelCatalog {
         case .unsupported: nil
         case .minimum: gemmaE2B
         case .standard: gemmaE4B
-        case .comfort: gemma26B
+        case .comfort: gemma26BQAT
         case .max: gemma26B8bit
         }
     }
@@ -102,7 +113,7 @@ public enum ModelCatalog {
         return [speechRecognition, voice, languageModel]
     }
 
-    public static let all = [speechRecognition, voice, gemmaE2B, gemmaE4B, gemma26B, gemma26B8bit]
+    public static let all = [speechRecognition, voice, gemmaE2B, gemmaE4B, gemma26B, gemma26BQAT, gemma26B8bit]
 
     private static func pack(
         _ id: String, _ role: ModelRole, _ displayName: String, _ repository: String, _ revision: String,

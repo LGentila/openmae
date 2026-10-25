@@ -314,7 +314,7 @@ struct CatalogTests {
         for tier in HardwareTier.selectable {
             #expect(ModelCatalog.packs(for: tier).map(\.role) == [.speechRecognition, .voice, .languageModel])
         }
-        // The reference Mac's tier: about 17.5 GB, 15.4 GB of it for the language model.
+        // The reference Mac's tier: about 17.8 GB, 15.6 GB of it for the language model.
         let total = ModelCatalog.packs(for: .comfort).reduce(0) { $0 + $1.totalBytes }
         #expect(total > 17_000_000_000 && total < 18_000_000_000)
     }

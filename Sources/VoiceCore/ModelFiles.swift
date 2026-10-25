@@ -107,6 +107,18 @@ extension ModelCatalog {
             ModelFile("tokenizer.json", 32169626, "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"),
             ModelFile("tokenizer_config.json", 2740, "080d9e1aff284e2f6043889cd05367966f7c7b80e025fbc0b06745e218158656"),
         ],
+        "gemma-4-26b-a4b-it-qat-4bit": [  // mlx-community/gemma-4-26B-A4B-it-qat-4bit @ 0e3cbab3
+            ModelFile("chat_template.jinja", 16934, "94899c0f917d93f6fe81c95744d1e8ddab2d21d39228d2e4aec1fb2a25bff413"),
+            ModelFile("config.json", 33376, "29910322dd085f45c8f95c6c0f1611b20f722d6f6c8394321b34817e98a972fa"),
+            ModelFile("generation_config.json", 203, "b69207f9be617e982d13cc273cce6fd88c98dda99a4bdc5e2d52ffe0a0d9f0a9"),
+            ModelFile("model-00001-of-00003.safetensors", 5275612587, "898863f0d5eba7153a9c9b9443aac1969809f2149e88481c725b6da40783f129"),
+            ModelFile("model-00002-of-00003.safetensors", 5296718232, "2abdca76ed4a647cfe8af680908894e2709b4e1221ddbbbef1b1edb14f60e303"),
+            ModelFile("model-00003-of-00003.safetensors", 5036507755, "a554f0fdb61bc9e510a5318e723a780c31434fd3e3dcdd3c16c700f835ade7b7"),
+            ModelFile("model.safetensors.index.json", 176940, "5455e83705bbdd4e3702c7d4f9d49d4900e84533036628f74500538075dd5c80"),
+            ModelFile("processor_config.json", 902, "1bd0d00776284f369c1eff5fb631e865dfcdca861e0b7d60dbef27fcf37436a8"),
+            ModelFile("tokenizer.json", 32169626, "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"),
+            ModelFile("tokenizer_config.json", 2740, "080d9e1aff284e2f6043889cd05367966f7c7b80e025fbc0b06745e218158656"),
+        ],
         "gemma-4-26b-a4b-it-8bit": [  // mlx-community/gemma-4-26b-a4b-it-8bit @ 33c6d237
             ModelFile("chat_template.jinja", 17466, "36e3a42e5cf14cd0020e72d92e1fdd9970f59b82170e421f0cbe1bb42bead3f0"),
             ModelFile("config.json", 12180, "ea476b39447dca4e9361f8f449c2941c2cacd7c80f072b940695407cc54306ad"),

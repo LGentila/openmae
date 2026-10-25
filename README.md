@@ -45,7 +45,7 @@ own devices.
 |---|---|---|---|---|
 | Minimum | 8 GB | Gemma 4 E2B, 4-bit | 5.7 GB | untested, estimated |
 | Standard | 16 to 24 GB | Gemma 4 E4B, 4-bit | 7.3 GB | untested, estimated |
-| Comfort | 32 to 36 GB | Gemma 4 26B-A4B, 4-bit | 17.5 GB | tested (M1 Pro, 32 GB) |
+| Comfort | 32 to 36 GB | Gemma 4 26B-A4B (QAT), 4-bit | 17.8 GB | tested (M1 Pro, 32 GB) |
 | Maximum | 48 GB and more | Gemma 4 26B-A4B, 8-bit | 30.1 GB | untested, estimated |
 
 Only the comfort tier could be measured so far. The app says so when it runs on another one.
