@@ -115,8 +115,8 @@ public actor ToolRunner {
 
     /// The call as the model meant it (`ToolNames.read`): with the name of its tool when the model misspelled it
     /// ("crer_rappel"), or the memory's call with that action when it wrote one of the memory's actions as a tool's
-    /// name (`tout_oublier {}`); unchanged otherwise. It is what goes into the history, so the model does not see its
-    /// slip again.
+    /// name (`effacer_memoire {}`); unchanged otherwise. It is what goes into the history, so the model does not see
+    /// its slip again.
     public func named(_ call: ToolCall) -> ToolCall {
         let named = ToolNames.read(call, among: names)
         guard named != call else { return call }

@@ -175,7 +175,7 @@ private struct Corpus: Decodable {
         var here: Bool?
         var instrument: String?
         var mode: String?
-        /// The memory: the action expected (`retenir`, `chercher`, `oublier`, `tout_oublier`).
+        /// The memory: the action expected (`retenir`, `chercher`, `oublier`, `effacer_memoire`).
         var action: String?
 
         /// The memory's journal is needed: a search of past conversations, or a period of them to erase.
@@ -1269,7 +1269,7 @@ private func checkMemory(_ call: ToolCall, sheet: [String], journal: Bool, conte
         guard let wanted = call.text("reference") ?? text, MemoryTools.entry(wanted, in: sheet) != nil else {
             throw refusal("Aucune entrée de la mémoire ne correspond.")
         }
-    case .toutOublier:
+    case .effacerMemoire:
         if let said = context.userSaid.first, !MemoryCatalog.asksToEraseEverything(said) {
             throw refusal("L'utilisateur n'a pas demandé d'effacer toute ta mémoire.")
         }

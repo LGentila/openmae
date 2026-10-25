@@ -9,7 +9,7 @@ import Foundation
 /// "cocher_rappel" three from "creer_rappel"). Two tools are at least five letters apart, so a slip of two can only
 /// stand for one of them.
 ///
-/// The smallest model also writes one of the memory's actions as a tool's name (`tout_oublier {}`): that is the
+/// The smallest model also writes one of the memory's actions as a tool's name (`effacer_memoire {}`): that is the
 /// memory's call with that action (`read`).
 public enum ToolNames {
     /// The name among `names` that `written` stands for: itself, or the only one at most two letters away (one for
@@ -33,8 +33,8 @@ public enum ToolNames {
     }
 
     /// The call as the model meant it: under the name of its tool (`tool(for:among:)`), unchanged when it stands for
-    /// none. A memory action written as a tool's name (`tout_oublier {}`) becomes the memory's call with that action,
-    /// its arguments as written (an `action` of their own kept).
+    /// none. A memory action written as a tool's name (`effacer_memoire {}`) becomes the memory's call with that
+    /// action, its arguments as written (an `action` of their own kept).
     public static func read(_ call: ToolCall, among names: [String]) -> ToolCall {
         guard let name = tool(for: call.name, among: names), name != call.name else { return call }
         var read = call

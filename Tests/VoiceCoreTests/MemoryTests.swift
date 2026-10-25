@@ -216,7 +216,7 @@ struct MemoryTests {
                                                      language: .french))
             let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
             _ = await runner.tools()
-            let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+            let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
             let asked = await runner.handle(call, context: context(["Efface toute ta mémoire."]))
             #expect(asked.waitsForYes)
             #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi, et tout l’historique de nos échanges. "
@@ -246,9 +246,10 @@ struct MemoryTests {
         let tools = MemoryTools(store: TransientMemoryStore(sheet: ["Préfère le thé vert"]), enabled: true)
         let runner = ToolRunner(providers: [tools])
         let spec = try #require(await runner.tools().first)
-        #expect(spec.parameters.first?.kind == .oneOf(["retenir", "oublier", "tout_oublier"]))
-        #expect(try #require(await tools.promptAddendum()).contains("action tout_oublier"))
-        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+        #expect(spec.parameters.first?.kind == .oneOf(["retenir", "oublier", "effacer_memoire"]))
+        #expect(try #require(await tools.promptAddendum()).contains("action effacer_memoire"))
+        #expect(spec.description.contains("effacer toute ta mémoire"))
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
         let asked = await runner.handle(call, context: context(["Oublie tout ce que tu sais sur moi."]))
         #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi. On y va\u{00A0}?")
         #expect(await runner.resolve(.confirm, context: context(["Oui."]))?.spoken == MemoryPhrases.erasedAll(.french))
@@ -284,20 +285,24 @@ struct MemoryTests {
         let store = TransientMemoryStore(sheet: ["Préfère le thé vert"])
         let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
         _ = await runner.tools()
-        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
         let reply = await runner.handle(call, context: context(["J'oublie tout en ce moment, c'est terrible."]))
         #expect(!reply.waitsForYes && reply.retryable)
         #expect(try await store.sheet().count == 1)
     }
 
-    /// Gemma 4 E2B writes the action as a tool's name (`tout_oublier {}`): the app reads it as the memory's call, which
-    /// the history then holds, and asks the user as for the memory's own. Without the memory, no tool has that name.
+    /// Gemma 4 E2B writes the action as a tool's name (`effacer_memoire {}`, as it wrote `tout_oublier {}`, the
+    /// action's former name, still read): the app reads it as the memory's call, which the history then holds, and asks
+    /// the user as for the memory's own. Without the memory, no tool has that name.
     @Test func erasingEverythingWrittenAsAToolIsTheMemorysCall() async throws {
         let store = TransientMemoryStore(sheet: ["Préfère le thé vert"])
         let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
         _ = await runner.tools()
-        let written = ToolCall(name: "tout_oublier")
-        #expect(await runner.named(written) == ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"]))
+        let erase = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
+        #expect(await runner.named(ToolCall(name: "tout_oublier")) == erase)
+        #expect(await runner.named(ToolCall(name: "Effacer-mémoire")) == erase)
+        let written = ToolCall(name: "effacer_memoire")
+        #expect(await runner.named(written) == erase)
         let asked = await runner.handle(written, context: context(["Efface toute ta mémoire."]))
         #expect(asked.waitsForYes)
         #expect(asked.spoken == "Je vais effacer tout ce que je retiens de toi. On y va\u{00A0}?")
@@ -317,19 +322,21 @@ struct MemoryTests {
     }
 
     /// The model wrote « oublier » with « tout » (Gemma 4 E2B, for « Oublie tout ce que tu sais sur moi. »): it meant
-    /// `tout_oublier`, which the app reads, the user's « oui » first; still only when the user asked for it. With a
-    /// period, it is pointed to `tout_oublier`.
+    /// `effacer_memoire`, which the app reads, the user's « oui » first; still only when the user asked for it. With a
+    /// period, it is pointed to `effacer_memoire`.
     @Test func forgettingAllIsErasingEverything() async throws {
-        #expect(MemoryCatalog.action(ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_effacer"]))
-            == .toutOublier)
+        for written in ["tout_effacer", "tout_oublier", "effacer_memoire", "effacer la mémoire"] {
+            #expect(MemoryCatalog.action(ToolCall(name: MemoryCatalog.name, arguments: ["action": .string(written)]))
+                == .effacerMemoire, "\(written)")
+        }
         #expect(MemoryCatalog.meansEverything("toute ta mémoire") && MemoryCatalog.meansEverything("tout"))
         #expect(!MemoryCatalog.meansEverything("tout sur la pénicilline"))
         func forget(_ arguments: [String: JSONValue]) -> ToolCall {
             ToolCall(name: MemoryCatalog.name, arguments: arguments.merging(["action": "oublier"]) { $1 })
         }
-        #expect(MemoryCatalog.action(forget(["reference": "tout"])) == .toutOublier)
-        #expect(MemoryCatalog.action(forget(["reference": "tout ce que tu sais sur moi"])) == .toutOublier)
-        #expect(MemoryCatalog.action(forget(["texte": "tout"])) == .toutOublier)
+        #expect(MemoryCatalog.action(forget(["reference": "tout"])) == .effacerMemoire)
+        #expect(MemoryCatalog.action(forget(["reference": "tout ce que tu sais sur moi"])) == .effacerMemoire)
+        #expect(MemoryCatalog.action(forget(["texte": "tout"])) == .effacerMemoire)
         #expect(MemoryCatalog.action(forget(["reference": "tout sur la pénicilline"])) == .oublier)
         #expect(MemoryCatalog.action(forget(["reference": "tout", "quand": "hier"])) == .oublier)
         let store = TransientMemoryStore(sheet: ["Allergique à la pénicilline"])
@@ -349,10 +356,10 @@ struct MemoryTests {
         let refused = await another.handle(call, context: context(["J'oublie tout en ce moment, c'est terrible."]))
         #expect(!refused.waitsForYes && refused.retryable)
         #expect(try await kept.sheet().count == 1)
-        // With a period: pointed to `tout_oublier`, nothing erased.
+        // With a period: pointed to `effacer_memoire`, nothing erased.
         let period = await another.handle(forget(["reference": "tout", "quand": "hier"]),
                                           context: context(["Oublie tout."]))
-        #expect(period.retryable && period.refusal?.forModel.contains("tout_oublier") == true)
+        #expect(period.retryable && period.refusal?.forModel.contains("effacer_memoire") == true)
         #expect(try await kept.sheet().count == 1)
     }
 

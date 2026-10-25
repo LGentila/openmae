@@ -1182,12 +1182,14 @@ struct ToolNameTests {
         }
     }
 
-    /// The smallest model writes one of the memory's actions as a tool's name (`tout_oublier {}`): the memory's call
-    /// with that action, its arguments as written. Only with the memory offered, and never `chercher`, which may be the
-    /// web search (`chercher_web`) as well.
+    /// The smallest model writes one of the memory's actions as a tool's name (`effacer_memoire {}`; `tout_oublier {}`,
+    /// the erasing's former name, is still read): the memory's call with that action, its arguments as written. Only
+    /// with the memory offered, and never `chercher`, which may be the web search (`chercher_web`) as well.
     @Test func memoryActionsWrittenAsToolsAreTheMemorysCalls() {
         let offered = names + [WebSearchCatalog.searchName, MemoryCatalog.name]
-        let erase = ToolCall(name: MemoryCatalog.name, arguments: ["action": "tout_oublier"])
+        let erase = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
+        #expect(ToolNames.read(ToolCall(name: "effacer_memoire"), among: offered) == erase)
+        #expect(ToolNames.read(ToolCall(name: "Effacer-mémoire"), among: offered) == erase)
         #expect(ToolNames.read(ToolCall(name: "tout_oublier"), among: offered) == erase)
         #expect(ToolNames.read(ToolCall(name: "Tout-oublier"), among: offered) == erase)
         #expect(ToolNames.read(ToolCall(name: "retenir", arguments: ["texte": "Préfère le thé"]), among: offered)
@@ -1195,17 +1197,20 @@ struct ToolNameTests {
         #expect(ToolNames.read(ToolCall(name: "oublier", arguments: ["reference": "Joue au tennis"]), among: offered)
             == ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "reference": "Joue au tennis"]))
         // An action of their own is kept.
-        #expect(ToolNames.read(ToolCall(name: "oublier", arguments: ["action": "tout_oublier"]), among: offered) == erase)
+        #expect(ToolNames.read(ToolCall(name: "oublier", arguments: ["action": "effacer_memoire"]), among: offered)
+            == erase)
+        #expect(ToolNames.tool(for: "effacer_memoire", among: offered) == MemoryCatalog.name)
         #expect(ToolNames.tool(for: "tout_oublier", among: offered) == MemoryCatalog.name)
         #expect(ToolNames.read(ToolCall(name: "chercher", arguments: ["texte": "garage"]), among: offered)
             == ToolCall(name: "chercher", arguments: ["texte": "garage"]))
-        #expect(ToolNames.read(ToolCall(name: "tout_oublier"), among: names) == ToolCall(name: "tout_oublier"))
+        #expect(ToolNames.read(ToolCall(name: "effacer_memoire"), among: names) == ToolCall(name: "effacer_memoire"))
+        #expect(ToolNames.tool(for: "effacer_memoire", among: names) == nil)
         #expect(ToolNames.tool(for: "tout_oublier", among: names) == nil)
         // A tool's own name, or a slip of it, is still read first; no action is near a tool's name.
         #expect(ToolNames.read(ToolCall(name: "crer_rappel"), among: offered) == ToolCall(name: "creer_rappel"))
         #expect(ToolNames.read(erase, among: offered) == erase)
-        for action in MemoryCatalog.actionsWrittenAsTools {
-            #expect(ToolNames.match(action.rawValue, among: offered) == nil, "\(action.rawValue)")
+        for name in MemoryCatalog.actionsWrittenAsTools.map(\.rawValue) + MemoryCatalog.formerNames.keys {
+            #expect(ToolNames.match(name, among: offered) == nil, "\(name)")
         }
     }
 }

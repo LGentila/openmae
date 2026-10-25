@@ -802,7 +802,7 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
         }
         let creation = [ActionCatalog.createEvent.name, ActionCatalog.createReminder.name].contains(call.name)
         if creation, pass.refused != true, pass.touched != nil { return call.name + " (moved)" }
-        // The memory's action too: « memoire/tout_oublier ».
+        // The memory's action too: « memoire/effacer_memoire ».
         let action = call.name == MemoryCatalog.name ? "/" + (MemoryCatalog.action(call)?.rawValue ?? "?") : ""
         return call.name + action
             + (pass.refused == true ? " (refused)" : pass.created == true && !creation ? " (created)" : "")
