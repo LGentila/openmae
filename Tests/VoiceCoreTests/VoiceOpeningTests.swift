@@ -3,11 +3,49 @@ import Testing
 
 @testable import VoiceCore
 
-/// Waits until `condition` holds, for `limit` at most. A busy Mac makes every sleep and every task hop slower: the
-/// tests wait for what they check, not for a set time, and the slow paths they rule out take 10 s or more.
-private func waitFor(within limit: Duration = .seconds(5), _ condition: () async -> Bool) async {
+/// Waits until `condition` holds, for `limit` at most. A busy Mac makes every sleep and every task hop slower, and so
+/// does the start of a run with every test repeated (`-test-iterations`), every suite at once: there, a test's voice
+/// started up to 4.4 s after it was asked for, and a sleep of 1 ms lasted about 0.1 s. The tests wait for what they
+/// check, not for a set time, and count the slow paths they rule out in samples of the voice, not in seconds.
+private func waitFor(within limit: Duration = .seconds(30), _ condition: () async -> Bool) async {
     let deadline = ContinuousClock.now + limit
     while !(await condition()), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(2)) }
+}
+
+/// The pipeline's answer to "Bonjour" (`ask`), until the pipeline reports the turn finished.
+private struct Answer {
+    let log: EventRecorder
+    let recording: Task<Void, Never>
+
+    /// Waits until the pipeline reports the turn finished (by then the voice was played to its end), 30 s at most, or
+    /// until `overdue` holds (the slow path a test rules out, counted in samples): whether the turn finished. Then
+    /// stops recording what the pipeline reports.
+    func finished(unless overdue: () async -> Bool = { false }) async -> Bool {
+        await waitFor {
+            if await !log.finished.isEmpty { return true }
+            return await overdue()
+        }
+        recording.cancel()
+        return await !log.finished.isEmpty
+    }
+}
+
+/// Starts `pipeline` and has it answer "Bonjour".
+private func ask(_ pipeline: VoicePipeline) async throws -> Answer {
+    let log = EventRecorder()
+    let events = pipeline.events
+    let recording = Task { for await event in events { await log.record(event) } }
+    try await pipeline.start()
+    await pipeline.submit(text: "Bonjour")
+    return Answer(log: log, recording: recording)
+}
+
+/// Samples counted from any thread.
+final class SampleCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func add(_ samples: Int) { lock.withLock { count += samples } }
+    var value: Int { lock.withLock { count } }
 }
 
 /// A voice that takes its time, as Pocket TTS does: `opening` near-silent samples before its first text (100 samples a
@@ -19,12 +57,15 @@ final class PacedStream: SynthesisStream, @unchecked Sendable {
     private let lock = NSLock()
     private var given: [String] = []
     private var stopped = false
+    private let openingMade: SampleCount
 
     init(opening: Int) {
         let (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
         let (textStream, texts) = AsyncStream.makeStream(of: String.self)
         self.audio = audio
         self.texts = texts
+        let made = SampleCount()
+        openingMade = made
         producer = Task {
             var first = true
             var text = 0
@@ -33,6 +74,7 @@ final class PacedStream: SynthesisStream, @unchecked Sendable {
                     first = false
                     for _ in 0..<(opening / 100) where !Task.isCancelled {
                         output.yield(VoiceAudio([Float](repeating: 0.0001, count: 100), text: text))
+                        made.add(100)
                         try? await Task.sleep(for: .milliseconds(1))
                     }
                 }
@@ -47,6 +89,8 @@ final class PacedStream: SynthesisStream, @unchecked Sendable {
     /// The texts this voice was given.
     var received: [String] { lock.withLock { given } }
     var cancelled: Bool { lock.withLock { stopped } }
+    /// The near-silent samples of its opening it has made so far.
+    var opened: Int { openingMade.value }
 
     func enqueue(_ text: String) {
         lock.withLock { given.append(text) }
@@ -75,6 +119,9 @@ actor PacedSynthesizer: SpeechSynthesizer {
         streams.append(stream)
         return stream
     }
+
+    /// The near-silent samples the first voice has made of its opening so far.
+    var firstOpened: Int { streams.first?.opened ?? 0 }
 }
 
 @Suite("Voices racing for the first sound")
@@ -123,8 +170,8 @@ struct VoiceRaceTests {
         #expect(one.cancelled && two.cancelled)
     }
 
-    /// The first voice would say its opening sentence as near-silence for seconds; the second one speaks at once: the
-    /// answer is heard from the second one, whole and once, and the first one stops.
+    /// The first voice would open with 1,000,000 samples of near-silence (10 s or more); the second one speaks after
+    /// 300: the answer is heard from the second one, whole and once, and the first one stops early in its opening.
     @Test func thePipelineSpeaksWithTheSoonerOfTwoVoices() async throws {
         var config = PipelineConfig()
         config.racingVoices = 2
@@ -132,12 +179,11 @@ struct VoiceRaceTests {
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                      model: ScriptedModel(), synthesizer: synthesizer, output: speaker, config: config)
-        try await pipeline.start()
-        let start = ContinuousClock.now
-        await pipeline.submit(text: "Bonjour")
-        await waitFor { await speaker.played >= 1000 }
-        #expect(ContinuousClock.now - start < .seconds(5))  // the silent voice would have taken 10 s or more
-        try await Task.sleep(for: .milliseconds(100))
+        let answer = try await ask(pipeline)
+        // Counted in samples, not seconds: the answer heard before the first voice made a hundredth of its opening.
+        let finished = await answer.finished { await synthesizer.firstOpened >= 10_000 }
+        #expect(await synthesizer.firstOpened < 10_000)  // it made about 400 (the race decided after 300)
+        #expect(finished)
         #expect(await speaker.played == 1000)  // "Bonjour, je suis bien là." and "Comment vas-tu ce matin ?"
         let streams = await synthesizer.streams
         try #require(streams.count == 2)
@@ -229,19 +275,18 @@ struct VoiceRestartTests {
         #expect(streams.count <= 3)
     }
 
-    /// In the pipeline (1.2 s of near-silence at most, the default): an answer whose voice would open with seconds of
-    /// near-silence is heard whole, from the voice started again.
+    /// In the pipeline (1.2 s of near-silence at most, the default: 1200 samples here): an answer whose voice would open
+    /// with 1,000,000 samples of near-silence (10 s or more) is heard whole, from the voice started again.
     @Test func thePipelineStartsASilentVoiceAgain() async throws {
         let synthesizer = PacedSynthesizer(openings: [1_000_000, 300])
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                      model: ScriptedModel(), synthesizer: synthesizer, output: speaker)
-        try await pipeline.start()
-        let start = ContinuousClock.now
-        await pipeline.submit(text: "Bonjour")
-        await waitFor { await speaker.played >= 1000 }
-        #expect(ContinuousClock.now - start < .seconds(5))  // the silent voice would have taken 10 s or more
-        try await Task.sleep(for: .milliseconds(100))
+        let answer = try await ask(pipeline)
+        // Counted in samples, not seconds: the first voice stopped before it made a hundredth of its opening.
+        let finished = await answer.finished { await synthesizer.firstOpened >= 10_000 }
+        #expect(await synthesizer.firstOpened < 10_000)  // it made 1200, the patience
+        #expect(finished)
         #expect(await speaker.played == 1000)
         let streams = await synthesizer.streams
         try #require(streams.count == 2)
@@ -260,18 +305,22 @@ final class SentenceStream: SynthesisStream, @unchecked Sendable {
     private let lock = NSLock()
     private var given: [String] = []
     private var stopped = false
+    private let openingMade: SampleCount
 
     init(script: @escaping Script, pace: Duration = .milliseconds(1)) {
         let (audio, output) = AsyncThrowingStream.makeStream(of: VoiceAudio.self)
         let (textStream, texts) = AsyncStream.makeStream(of: String.self)
         self.audio = audio
         self.texts = texts
+        let made = SampleCount()
+        openingMade = made
         producer = Task {
             var number = 0
             for await text in textStream {
                 let (opening, silent) = script(text)
                 for _ in 0..<(opening / 100) where !Task.isCancelled {
                     output.yield(VoiceAudio([Float](repeating: 0.0001, count: 100), text: number))
+                    made.add(100)
                     try? await Task.sleep(for: pace)
                 }
                 if Task.isCancelled { break }
@@ -285,6 +334,8 @@ final class SentenceStream: SynthesisStream, @unchecked Sendable {
     /// The texts this voice was given.
     var received: [String] { lock.withLock { given } }
     var cancelled: Bool { lock.withLock { stopped } }
+    /// The near-silent samples of its texts' openings it has made so far.
+    var opened: Int { openingMade.value }
 
     func enqueue(_ text: String) {
         lock.withLock { given.append(text) }
@@ -320,6 +371,9 @@ actor SentenceSynthesizer: SpeechSynthesizer {
         streams.append(stream)
         return stream
     }
+
+    /// The near-silent samples the first voice has made of its texts' openings so far.
+    var firstOpened: Int { streams.first?.opened ?? 0 }
 }
 
 @Suite("Later sentences started again after a long near-silence")
@@ -327,10 +381,17 @@ struct LaterSentenceRestartTests {
     let audible: @Sendable ([Float]) -> Bool = { VoicePipeline.loudnessDB($0) >= -45 }
     let sentences = ["Bonjour, je suis bien là.", "La mer est salée.", "Les rivières y portent du sel."]
 
-    /// What a voice says that can be heard: the numbers of its texts, in order.
-    func heard(_ voice: VoiceRestart) async throws -> [Int?] {
+    /// What a voice says that can be heard: the numbers of its texts, in order. Once `overdue` holds (the slow path a
+    /// test rules out, counted in samples), the voice is stopped there.
+    func heard(_ voice: VoiceRestart, unless overdue: () async -> Bool = { false }) async throws -> [Int?] {
         var texts: [Int?] = []
-        for try await chunk in voice.audio where audible(chunk.samples) { texts.append(chunk.text) }
+        for try await chunk in voice.audio {
+            if audible(chunk.samples) { texts.append(chunk.text) }
+            if await overdue() {
+                await voice.cancel()
+                break
+            }
+        }
         return texts
     }
 
@@ -344,9 +405,9 @@ struct LaterSentenceRestartTests {
         }
     }
 
-    /// The second sentence would open with ten seconds of near-silence; once 1000 samples of it went by, a new voice
-    /// says it, and the one after it: each sentence is heard once, in order, with its number, and the first one is not
-    /// said again.
+    /// The second sentence would open with 1,000,000 samples of near-silence (10 s or more); once 1000 samples of it
+    /// went by, a new voice says it, and the one after it: each sentence is heard once, in order, with its number, and
+    /// the first one is not said again.
     @Test func aLongOpeningStartsAgainFromThatSentence() async throws {
         let middle = sentences[1]
         let synthesizer = SentenceSynthesizer([{ ($0 == middle ? 1_000_000 : 0, false) }])
@@ -354,9 +415,10 @@ struct LaterSentenceRestartTests {
         let voice = try await restart(synthesizer) { resumed.set() }
         sentences.forEach(voice.enqueue)
         voice.finish()
-        let start = ContinuousClock.now
-        #expect(try await heard(voice) == [0, 1, 2])
-        #expect(ContinuousClock.now - start < .seconds(5))  // the first voice would have taken 10 s or more
+        // Counted in samples, not seconds: the first voice stopped before it made a hundredth of that opening.
+        let texts = try await heard(voice) { await synthesizer.firstOpened >= 10_000 }
+        #expect(texts == [0, 1, 2])
+        #expect(await synthesizer.firstOpened < 10_000)  // it made 1000, the patience
         let streams = await synthesizer.streams
         try #require(streams.count == 2)
         #expect(streams[0].cancelled)
@@ -473,8 +535,9 @@ struct LaterSentenceRestartTests {
         #expect(streams[1].received == [last])
     }
 
-    /// In the pipeline, with `sentenceRestartAfterSeconds`: the answer's second sentence would open with seconds of
-    /// near-silence; it is heard soon after the first one, from a voice started again with it alone.
+    /// In the pipeline, with `sentenceRestartAfterSeconds` (600 samples here): the answer's second sentence would open
+    /// with 1,000,000 samples of near-silence (10 s or more); it is heard after the first one, from a voice started
+    /// again with it alone.
     @Test func thePipelineStartsALaterSentenceAgain() async throws {
         var config = PipelineConfig()
         config.sentenceRestartAfterSeconds = 0.6
@@ -482,15 +545,15 @@ struct LaterSentenceRestartTests {
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                      model: ScriptedModel(), synthesizer: synthesizer, output: speaker, config: config)
-        try await pipeline.start()
-        let start = ContinuousClock.now
-        await pipeline.submit(text: "Bonjour")
+        let answer = try await ask(pipeline)
+        // Counted in samples, not seconds: the first voice stopped before it made a hundredth of that opening.
+        let finished = await answer.finished { await synthesizer.firstOpened >= 10_000 }
+        #expect(await synthesizer.firstOpened < 10_000)  // it made 600, the patience
+        #expect(finished)
         // The first sentence (500 samples), the second one's opening until the voice starts again (500: after the first
-        // sound the near-silence is played), then the second sentence from the new voice (500). Waiting for 1000 alone
-        // could end before the new voice is there.
-        await waitFor { await speaker.played >= 1500 }
+        // sound the near-silence is played, as long as a pause may last), then the second sentence from the new voice
+        // (500).
         #expect(await speaker.played >= 1500)  // both sentences
-        #expect(ContinuousClock.now - start < .seconds(5))  // the silent opening would have taken 10 s or more
         let streams = await synthesizer.streams
         try #require(streams.count == 2)
         #expect(streams[0].cancelled)
@@ -505,11 +568,9 @@ struct LaterSentenceRestartTests {
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                      model: ScriptedModel(), synthesizer: synthesizer, output: speaker)
-        try await pipeline.start()
-        await pipeline.submit(text: "Bonjour")
-        // The first sentence, the second one said as near-silence (played: it comes after the first sound), then said
-        // again: 500 samples each. Waiting for 1000 alone could end before the new voice has the sentence.
-        await waitFor { await speaker.played >= 1500 }
+        // Until the end of the turn: the first sentence, the second one said as near-silence (played: it comes after
+        // the first sound), then said again, 500 samples each.
+        #expect(try await ask(pipeline).finished())
         #expect(await speaker.played >= 1500)  // both sentences heard
         let streams = await synthesizer.streams
         try #require(streams.count == 2)
@@ -519,10 +580,8 @@ struct LaterSentenceRestartTests {
         let slow = SentenceSynthesizer([{ ($0.contains("Comment") ? 2000 : 0, false) }])
         let other = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                   model: ScriptedModel(), synthesizer: slow, output: FakeSpeaker())
-        try await other.start()
-        await other.submit(text: "Bonjour")
-        await waitFor { await slow.streams.first?.received.count == 2 }
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await ask(other).finished())  // the whole answer said, its long opening included
+        #expect(await slow.streams.first?.received.count == 2)
         #expect(await slow.streams.count == 1)
     }
 
@@ -535,10 +594,8 @@ struct LaterSentenceRestartTests {
         let speaker = FakeSpeaker()
         let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(),
                                      model: ScriptedModel(), synthesizer: synthesizer, output: speaker, config: config)
-        try await pipeline.start()
-        await pipeline.submit(text: "Bonjour")
-        await waitFor { await synthesizer.streams.first?.received.count == 2 }
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await ask(pipeline).finished())  // the whole answer said
+        #expect(await synthesizer.streams.first?.received.count == 2)
         #expect(await synthesizer.streams.count == 1)
     }
 }
