@@ -19,8 +19,12 @@ struct PhoneApp: App {
                 // The design has no dark theme yet.
                 .preferredColorScheme(.light)
                 .followsWindowVisibility()
-                // The pairing link, when the iPhone's Camera opened the app with it (a universal link): SwiftUI hands
-                // it over here, at launch as when the app was running.
+                // The pairing link, when the iPhone's Camera opened the app with it (a universal link). iOS hands it
+                // over as a web activity when the app was running (in the background), not to `onOpenURL`: on the
+                // user's iPhone, three scans that brought the running app to the front never reached `onOpenURL`.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { model.opened(url) }
+                }
                 .onOpenURL { model.opened($0) }
                 #if DEBUG
                 // `-pair <link>`: as if the link had opened the app (the simulator has no camera).

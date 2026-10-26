@@ -213,7 +213,16 @@ final class PhoneModel {
     /// Mac's code pairs again at once (after it removed this device, say); another Mac's waits for the user's yes: this
     /// device talks to one Mac at a time, and a link tapped elsewhere must not swap Macs behind their back.
     func opened(_ url: URL) {
-        guard let link = PairingLink(url: url), canPair else { return }
+        guard let link = PairingLink(url: url) else {
+            DebugLog.log("pairing: the app was opened with a link that is not a pairing link")
+            return
+        }
+        guard canPair else {
+            DebugLog.log("pairing: a pairing link left aside, the pairing is \(pairing)")
+            return
+        }
+        DebugLog.log("pairing: a pairing link opened the app (a Mac paired: \(mac != nil), same Mac: "
+            + "\(mac?.publicKey == link.macKey))")
         // The settings, if the app was left on them, would hide the pairing.
         showsSettings = false
         if let mac, link.macKey != mac.publicKey {
@@ -235,7 +244,11 @@ final class PhoneModel {
     }
 
     private func pair(_ link: PairingLink) {
-        guard canPair else { return }
+        guard canPair else {
+            DebugLog.log("pairing: a code left aside, the pairing is \(pairing)")
+            return
+        }
+        DebugLog.log("pairing: contacting the Mac")
         // A conversation in progress (the Camera opened the app over it) gives way to the pairing's screens.
         closeConversation(nil)
         pairing = .contacting
@@ -244,13 +257,16 @@ final class PhoneModel {
                 let identity = try identityStore.loadOrCreate()
                 let phone = HandshakePayload.Phone(name: UIDevice.current.name, model: Self.modelIdentifier)
                 let mac = try await PhonePairing.pair(link: link, identity: identity, phone: phone)
+                DebugLog.log("pairing: paired")
                 save(mac)
                 forgotten = false
                 pairing = .done(macName: mac.name)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch HandshakeFailure.refused(let code) where code == "expired" {
+                DebugLog.log("pairing: the Mac refused the code (used or expired)")
                 pairing = .expired
             } catch HandshakeFailure.wrongMac {
+                DebugLog.log("pairing: the code is another Mac's")
                 pairing = .expired
             } catch {
                 DebugLog.log("pairing failed: \(error)")
@@ -363,6 +379,7 @@ final class PhoneModel {
     /// conversation while a code that opened the app is in use or asks first, nor on "Done" before "Talk to Maé".
     func becameActive() {
         isInForeground = true
+        DebugLog.log("app: in the foreground (a Mac paired: \(mac != nil), pairing: \(pairing))")
         updateStation()
         guard mac != nil else { return }
         if phoneLink == nil { connect() } else { retry() }
