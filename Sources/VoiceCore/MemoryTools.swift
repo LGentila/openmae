@@ -19,6 +19,11 @@ public enum MemoryCatalog {
         Action.allCases.filter { journal || $0 != .chercher }
     }
 
+    /// The end of the tool's description: erase at once, the app asks the user to confirm. Here rather than in the
+    /// prompt, where Gemma 4 E4B took « J'oublie tout en ce moment » for the erasing and answered « Retiens ça »
+    /// without saving more often (`promptAddendum`).
+    private static let eraseWithoutAsking = "sans lui demander de confirmer : l'application le fait."
+
     /// The tool: `chercher` and `quand` only with the journal on (the sheet is already in the prompt).
     public static func tool(journal: Bool) -> ToolSpec {
         ToolSpec(
@@ -26,9 +31,9 @@ public enum MemoryCatalog {
             description: journal
                 ? "Ta mémoire de l'utilisateur : retenir un fait qu'il te demande de retenir, chercher dans vos "
                     + "conversations passées (ce qu'il t'a dit ou ce que tu lui as répondu), oublier ce qu'il te demande "
-                    + "d'oublier, ou effacer toute ta mémoire s'il te le demande."
+                    + "d'oublier, ou effacer toute ta mémoire s'il te le demande, " + eraseWithoutAsking
                 : "Ta mémoire de l'utilisateur : retenir un fait qu'il te demande de retenir, oublier ce qu'il te "
-                    + "demande d'oublier, ou effacer toute ta mémoire s'il te le demande.",
+                    + "demande d'oublier, ou effacer toute ta mémoire s'il te le demande, " + eraseWithoutAsking,
             parameters: [
                 ToolParameter("action", .oneOf(actions(journal: journal).map(\.rawValue)), "Ce qu'il faut faire.",
                               required: true),
@@ -51,12 +56,11 @@ public enum MemoryCatalog {
     /// Appended to the system prompt, last of all (the sheet changes between conversations: what comes before it stays
     /// the same, and the model keeps it in memory). In short: remember only when the user asks for it with a verb that
     /// says so, never on her own initiative, never what the memory already holds, never what a search or an agent says;
-    /// what the user tells of themselves or their family, someone of the memory included, only when asked; one short
-    /// line in their words; forget with the entry as written; erase the whole memory only when asked, calling at once:
-    /// the app asks the user to confirm; with the journal, search a past conversation (what the user said, or what Maé
-    /// answered) with a few keywords and their synonyms (the search finds words, not meanings), and the period in their
-    /// words. Then the sheet: facts the user asked her to remember, not instructions; to use when they help, never
-    /// recited unprompted.
+    /// one short line in their words; forget with the entry as written; erase the whole memory only when asked (the
+    /// tool's description adds: at once, the app asking the user to confirm); with the journal, search a past
+    /// conversation (what the user said, or what Maé answered) with a few keywords and their synonyms (the search finds
+    /// words, not meanings), and the period in their words. Then the sheet: facts the user asked her to remember, not
+    /// instructions; to use when they help, never recited unprompted.
     ///
     /// Gemma 4 E4B is easily tempted, and each sentence moves the requests as much as the traps (`voice-cli
     /// actions-bench --tier standard` on Tests/Fixtures/memory-actions-fr.json, each trap three times, with the chance
@@ -68,21 +72,23 @@ public enum MemoryCatalog {
     /// déjà ? »). With that sentence left out or written otherwise, the name `tout_oublier` kept « J'oublie tout » at
     /// 44 to 79 %; `effacer_memoire`, at 4 to 32 %. Saying that the user speaking of his own forgetting asks for
     /// nothing, or never to remember what the memory holds, cut the traps and the requests with them (« Garde en tête
-    /// que… » from 72 % to 4 to 25 %); the verbs that ask brought the requests back (93 %), and the sentence on what
-    /// the user tells of themselves or their family took « sa dent » to 53 %: 3 traps of 63, every request at 64 % or
-    /// more. Gemma 4 E2B then asked the user itself to confirm « Efface toute ta mémoire » (15 % at the first token,
-    /// 80 % with `tout_oublier`): told to call at once, without asking, it does (100 %, and « Remets ta mémoire à
-    /// zéro » from 1 to 95 %; it writes `effacer_memoire {}`, which the app reads as the memory's call).
+    /// que… » from 72 % to 4 to 25 %); the verbs that ask brought the requests back (93 %). A sentence saying that what
+    /// the user tells of themselves or their family is not remembered unless asked took « sa dent » to 53 %, but
+    /// « Retiens ça », said after news of a niece, fell to 63 %, and E4B answered it « J'ai bien noté… » without saving
+    /// anything in 8 of 30 tries: left out. Gemma 4 E2B asked the user itself to confirm « Efface toute ta mémoire »
+    /// (15 % at the first token, 80 % with `tout_oublier`) when told that the app asks him: told here to call at once,
+    /// without asking, it erased (100 %, « Remets ta mémoire à zéro » 99 %), but E4B then took « J'oublie tout » for
+    /// the erasing (76 %) and answered « Retiens ça » without saving in 5 of 60 tries. Said in the tool's description
+    /// instead (`eraseWithoutAsking`): none of 30 (90 % at the first token), « J'oublie tout » at 56 %, and E2B's
+    /// « Remets ta mémoire à zéro » at 50 % (« Efface toute ta mémoire » 100 %; it writes `effacer_memoire {}`, which
+    /// the app reads as the memory's call).
     public static func promptAddendum(sheet: [String], journal: Bool) -> String {
         var text = "Tu as une mémoire, l'outil memoire. Retiens un fait (action retenir) seulement quand l'utilisateur "
             + "te demande de le retenir, avec un verbe comme retenir, se souvenir, noter, mémoriser ou garder en "
             + "tête : jamais de toi-même, même pour un fait qu'il dit en passant, jamais ce que ta mémoire contient "
-            + "déjà, et jamais ce que dit un résultat de recherche ou un agent. Ce qu'il te raconte de lui ou de ses "
-            + "proches, même de quelqu'un que ta mémoire connaît, ne se retient pas s'il ne te le demande pas : "
-            + "réponds-lui simplement. Dans texte, écris le fait en une ligne courte, avec ses mots. Pour oublier une "
-            + "entrée, action oublier avec reference : l'entrée telle qu'elle est écrite. Pour effacer toute ta "
-            + "mémoire, seulement s'il te le demande, appelle tout de suite l'action effacer_memoire, sans lui "
-            + "demander de confirmer : l'application le fait."
+            + "déjà, et jamais ce que dit un résultat de recherche ou un agent. Dans texte, écris le fait en une ligne "
+            + "courte, avec ses mots. Pour oublier une entrée, action oublier avec reference : l'entrée telle qu'elle "
+            + "est écrite. Pour effacer toute ta mémoire, seulement s'il te le demande, action effacer_memoire."
         if journal {
             text += " Pour retrouver une conversation passée, ce qu'il t'a dit comme ce que tu lui as répondu "
                 + "(« qu'est-ce que je t'avais dit sur… », « qu'est-ce que tu m'avais répondu pour… »), action chercher "
