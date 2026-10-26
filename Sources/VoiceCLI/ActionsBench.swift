@@ -204,6 +204,9 @@ private struct Corpus: Decodable {
         /// A connected tool's call: arguments that must have these values (a number, or a text whatever its accents and
         /// case; for a list, one of its items).
         var values: [String: JSONValue]?
+        /// A connected tool's call: arguments it must not have (« Éteins toutes les lumières » names no device: Home
+        /// Assistant refuses a `name` that is none).
+        var absent: [String]?
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -795,8 +798,10 @@ private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], 
 }
 
 /// A connected tool's call holds the words and the values the corpus expects, and Home Assistant would take it: the words
-/// in its targets (`name`, `area`, `floor`), a `domain` that is one, a `device_class` among those it knows.
+/// in its targets (`name`, `area`, `floor`), a `domain` that is one, a `device_class` among those it knows, none of the
+/// arguments the corpus says it must not have (a `name` for « toutes les lumières »).
 private func homeArguments(_ call: ToolCall, _ expected: Corpus.Expected) -> Bool {
+    guard !(expected.absent ?? []).contains(where: { call.arguments[$0] != nil }) else { return false }
     func folded(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
     }
