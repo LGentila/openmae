@@ -579,14 +579,19 @@ public enum ActionCatalog {
     /// once those that only name a reminder or something to do (`placeholderWords`: « rappel », « rappelle-moi »,
     /// « reminder », « le faire », « quelque chose », with « le », « un », « pour »…), the words of a moment
     /// (`FrenchDates.wordsBesidesWhen`) and those of the call's own moment are taken away, whatever the case and accents.
-    /// « Rappel », « le rappel », « Rappelle-moi », « Rappel demain à 9 h » say nothing; « rappeler Paul », « rappel de
-    /// vaccin », « faire les courses » do. An event's title is never refused so: « Rendez-vous » is one.
+    /// « Rappel », « le rappel », « Rappelle-moi », « Rappel demain à 9 h », « rappeler », « me rappeler » say nothing;
+    /// « rappeler Paul », « Rappeler l’école », « rappel de vaccin », « faire les courses » do. An event's title is
+    /// never refused so: « Rendez-vous » is one.
     ///
     /// Asked « Rappelle-moi demain à 9 h. », which does not say what to remind, Gemma 4 E4B, E2B and 26B wrote such a
     /// title in every run of voice-cli dialogue-bench (« Rappel », « Rappelle-moi », « le rappel », « Rappel demain »),
     /// and the app saved it: the user heard « C’est noté : vendredi 16 octobre à 9 h, Rappel. ». At their answer (« D'appeler
     /// le plombier. »), E4B saved a second reminder without a date, E2B said the sentence again without a call, and the
     /// 26B renamed the first one in 5 runs of 10: the reminder the user wanted was saved in 0 runs of 10 on each model.
+    /// With those refused, E4B still wrote « rappeler » in 1 or 2 runs of 40, saved as is (« C’est noté : vendredi 16
+    /// octobre à 9 h, rappeler. »), and the answer then saved the plumber's reminder without a date: that dialogue alone
+    /// reached its goal in 38 runs of 40. « rappeler » refused too, E4B wrote it in 3 runs of 50 and each answer saved
+    /// the reminder at 9:00: 40 runs of 40.
     static func saysWhat(_ call: ToolCall, _ key: String = "titre") -> Bool {
         guard let title = call.text(key) else { return false }
         guard call.name == createReminder.name else { return true }
@@ -602,13 +607,14 @@ public enum ActionCatalog {
     /// The words that only name a reminder, or something to do without saying what (« le faire », « quelque chose »), in
     /// both languages, and the small words that go with them or with a moment: a reminder's title made only of these and
     /// of a moment's words says nothing of what to remind (`saysWhat`). With the refusal for « Rappel », Gemma 4 E4B wrote
-    /// « le faire » once in 10 runs of voice-cli dialogue-bench.
+    /// « le faire » once in 10 runs of voice-cli dialogue-bench, and « rappeler » once in 40. « rappeler » is also the
+    /// verb to call back: only with nothing else does it say nothing; whom or what (« rappeler Paul ») is a title.
     private static let placeholderWords: Set<String> = [
-        "rappel", "rappels", "rappelle", "rappelles", "reminder", "reminders", "remind", "faire", "ca", "cela", "chose",
-        "choses", "quelque", "truc", "trucs", "something", "thing", "it", "do", "le", "la", "les", "l'", "un", "une", "des",
-        "du", "de", "d'", "a", "au", "aux", "pour", "mon", "ma", "mes", "ton", "ta", "tes", "ce", "cet", "cette", "me", "m'",
-        "moi", "et", "en", "dans", "sur", "vers", "nouveau", "nouvel", "nouvelle", "the", "my", "for", "to", "at", "on",
-        "in", "new",
+        "rappel", "rappels", "rappelle", "rappelles", "rappeler", "reminder", "reminders", "remind", "faire", "ca",
+        "cela", "chose", "choses", "quelque", "truc", "trucs", "something", "thing", "it", "do", "le", "la", "les",
+        "l'", "un", "une", "des", "du", "de", "d'", "a", "au", "aux", "pour", "mon", "ma", "mes", "ton", "ta", "tes",
+        "ce", "cet", "cette", "me", "m'", "moi", "et", "en", "dans", "sur", "vers", "nouveau", "nouvel", "nouvelle",
+        "the", "my", "for", "to", "at", "on", "in", "new",
     ]
 
     /// The moment a call gives in the first of `keys` it has (the user's words, or a date the model wrote): not
