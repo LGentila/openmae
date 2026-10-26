@@ -241,5 +241,16 @@ The settings live in `~/Library/Preferences/io.github.lgentilla.openmae.plist`.
 
 ## License
 
-No license has been chosen yet: until a license file is added, all rights are reserved. The models and
-libraries keep their own licenses (table above).
+OpenMaé is free software: the Mac app, the iPhone app and the command-line tool are released under the
+[GNU General Public License v3.0](LICENSE), and the relay (`relay/`) under the
+[GNU Affero General Public License v3.0](relay/LICENSE).
+
+The website (`website/`) is not covered by these licenses: all rights reserved, except its typefaces, which keep their
+own license.
+
+The OpenMaé name and logo are not covered by these licenses either. A modified version you distribute or host must
+use another name and logo.
+
+The models and libraries keep their own licenses (table above).
+
+Contributions are welcome under the [Contributor License Agreement](CLA.md): see [CONTRIBUTING.md](CONTRIBUTING.md).

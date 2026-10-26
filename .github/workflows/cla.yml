@@ -1,0 +1,36 @@
+# Checks that a pull request accepts the Contributor License Agreement (CLA.md): its description must hold the
+# ticked checkbox from .github/PULL_REQUEST_TEMPLATE.md. The check runs again whenever the description is edited.
+#
+# It runs on pull_request_target, so it also runs at once on a first-time contributor's pull request from a fork.
+# It never checks out or runs the pull request's code, reads the description only through an environment variable,
+# and gets no token permission.
+
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Look for the ticked CLA checkbox
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          case "$AUTHOR" in
+            LGentila|lgentilla|dependabot\[bot\])
+              echo "$AUTHOR does not need to accept the CLA."
+              exit 0
+              ;;
+          esac
+          if printf '%s\n' "$BODY" | grep -Eiq '^[[:space:]]*[-*][[:space:]]+\[x\][[:space:]]+I have read and agree to the Contributor License Agreement'; then
+            echo "The CLA is accepted."
+          else
+            echo "::error::Tick the box \"I have read and agree to the Contributor License Agreement\" in the pull request's description (see CLA.md). If it is missing, add this line: - [x] I have read and agree to the Contributor License Agreement (CLA.md)"
+            exit 1
+          fi

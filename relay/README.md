@@ -429,7 +429,8 @@ Code layout: `main.go` reads the environment; `internal/relay` holds the relay. 
 
 ## Licences
 
-The relay's own licence is the repository's (see the main README).
+The relay is released under the [GNU Affero General Public License v3.0](LICENSE): if you run a modified relay as a
+service, you must offer its source to the people who use it. The OpenMaé name and logo are not covered by it.
 
 It is built with:
 
