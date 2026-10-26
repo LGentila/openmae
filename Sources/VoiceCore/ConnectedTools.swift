@@ -154,7 +154,19 @@ public actor ConnectedTools: ToolProvider {
     private var addendum: String?
     /// The name the model sees → the connection and the service's tool.
     private var offered: [String: (connection: Int, tool: MCPTool)] = [:]
+    /// The first Home Assistant that is on, for the examples a runner without the actions shows (`exampleExchanges`).
+    private var homeExample: HomeExample?
     private var report: @Sendable (ConnectedToolReport) -> Void = { _ in }
+
+    /// A Home Assistant that is on: the examples' turning on (with the service's tool, for its question), turning off and
+    /// reading as the model calls them, the tool's name, and whether it asks first.
+    private struct HomeExample {
+        var turnOn: (call: ToolCall, tool: MCPTool)
+        var turnOff: ToolCall?
+        var read: ToolCall?
+        var name: String
+        var asksFirst: Bool
+    }
 
     public init() {}
 
@@ -193,6 +205,19 @@ public actor ConnectedTools: ToolProvider {
         addendum = specs.isEmpty ? nil : Self.promptAddendum(self.connections.filter { c in
             c.settings.actions.contains(where: \.enabled)
         }.map(\.settings.name))
+        homeExample = nil
+        for (index, connection) in self.connections.enumerated() {
+            let names = offered.filter { $0.value.connection == index }
+            guard let turnOn = names.first(where: { $0.value.tool.name == "HassTurnOn" }) else { continue }
+            let turnOff = names.first { $0.value.tool.name == "HassTurnOff" }
+            let read = names.first { $0.value.tool.name == "GetLiveContext" }?.key
+            homeExample = HomeExample(
+                turnOn: (ToolCall(name: turnOn.key, arguments: Self.examples[0].arguments), turnOn.value.tool),
+                turnOff: turnOff.map { ToolCall(name: $0.key, arguments: Self.examples[1].arguments) },
+                read: read.map { ToolCall(name: $0) }, name: connection.settings.name,
+                asksFirst: connection.settings.whenActing == .askFirst)
+            break
+        }
         return before.0 != specs || before.1 != addendum
     }
 
@@ -200,6 +225,73 @@ public actor ConnectedTools: ToolProvider {
     public func tools() async -> [ToolSpec] { specs }
 
     public func promptAddendum() async -> String? { addendum }
+
+    /// Without the actions, whose part of the prompt is the one that shows how to call a tool, the same with example calls
+    /// of a Home Assistant that is on, written the model's way (as the delegation's part has one of its own): a room, then
+    /// all the devices of a kind (Gemma 4 E2B and E4B answered « J'éteins toutes les lumières. » without a call).
+    public func promptAddendum(actions: Bool, writeCall: @Sendable (ToolCall) async -> String?) async -> String? {
+        guard let addendum, !actions, let example = homeExample, let first = await writeCall(example.turnOn.call) else {
+            return addendum
+        }
+        var text = addendum + " Exemples : à « \(Self.examples[0].request) », ta réponse entière est \(first)"
+        if let turnOff = example.turnOff, let second = await writeCall(turnOff) {
+            text += " ; à « \(Self.examples[1].request) », \(second)"
+        }
+        return text
+    }
+
+    /// On the smallest tier without the actions (`PipelineConfig.actionExamples`), conversations start with these
+    /// exchanges, as if they had happened, when a Home Assistant is on: « Allume le couloir » (its question, then the
+    /// user's « Oui », or done at once with "Do it directly"), then a question that only reads. None for another service:
+    /// there is no telling what its actions do. Gemma 4 E2B called no connected tool without them (`voice-cli
+    /// connected-tools --tier minimum`: « Je peux allumer le salon. », « J'éteins toutes les lumières. », nothing done).
+    /// The second example of the prompt's part as an exchange too (« Ferme tous les volets », refused) made it worse: E2B
+    /// then wrote `domain` for a room's lights or a room's shutter, as the example does for all the shutters.
+    public func exampleExchanges(now: Date) async -> [ChatMessage] {
+        exampleExchanges(now: now, timeZone: .current)
+    }
+
+    /// `exampleExchanges(now:)`, their date lines in `timeZone` (voice-cli actions-bench's reference time).
+    public func exampleExchanges(now: Date, timeZone: TimeZone) -> [ChatMessage] {
+        guard let example = homeExample else { return [] }
+        let dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
+        func said(_ text: String) -> ChatMessage { Conversation.userMessage(text, language: .french, dateLine: dateLine) }
+        let call = example.turnOn.call
+        var messages: [ChatMessage] = [said(Self.examples[0].request), .call(call)]
+        if example.asksFirst {
+            messages += [.result(of: call, ["statut": "en attente du oui de l'utilisateur"]),
+                         ChatMessage(.assistant, ConnectedToolPhrases.confirm(example.turnOn.tool, call.arguments,
+                                                                              toolName: example.name)),
+                         said("Oui"), ChatMessage(.assistant, ConnectedToolPhrases.done)]
+        } else {
+            messages += [.result(of: call, ["résultat": Self.exampleDone]),
+                         ChatMessage(.assistant, "C’est fait, le couloir est allumé.")]
+        }
+        if let read = example.read {
+            messages += [said("Est-ce que la lumière du garage est allumée ?"), .call(read),
+                         .result(of: read, ["résultat": Self.exampleHouse]),
+                         ChatMessage(.assistant, "Non, la lumière du garage est éteinte.")]
+        }
+        return messages
+    }
+
+    /// The requests of the examples and their calls' arguments. Not requests of the benchmarks' corpora: a model that
+    /// copied one instead of the user's words must not be counted right.
+    static let examples: [(request: String, arguments: [String: JSONValue])] = [
+        ("Allume le couloir", ["area": "couloir"]),
+        ("Ferme tous les volets", ["domain": ["cover"]]),
+    ]
+    /// What Home Assistant answers, as the model reads it: the turning on done, and the house for the question.
+    static let exampleDone: JSONValue = [
+        "speech": [:], "response_type": "action_done",
+        "data": ["targets": [], "success": [["name": "Couloir", "type": "area", "id": "couloir"]], "failed": []],
+    ]
+    static let exampleHouse: JSONValue = [
+        "success": true,
+        "result": .string("Live Context: An overview of the areas and the devices in this smart home:\n"
+            + "- names: Plafonnier du couloir\n  domain: light\n  state: 'on'\n  areas: Couloir\n"
+            + "- names: Lumière du garage\n  domain: light\n  state: 'off'\n  areas: Garage"),
+    ]
 
     public func risk(of call: ToolCall) async -> ToolRisk {
         specs.first { $0.name == call.name }?.risk ?? .sensitive
@@ -225,7 +317,7 @@ public actor ConnectedTools: ToolProvider {
         let title = ConnectedToolPhrases.title(tool, call.arguments)
         let cannotUndo = ConnectedToolPhrases.cannotUndo(name)
         do {
-            let result = try await connection.client.call(tool.name, arguments: call.arguments)
+            let result = try await connection.client.call(tool.name, arguments: Self.declared(call.arguments, tool.inputSchema))
             report(.state(id, .connected))
             report(.log(id, ConnectedToolLogEntry(
                 date: Date(), title: title,
@@ -408,6 +500,17 @@ public actor ConnectedTools: ToolProvider {
             cut = String(cut[..<line])
         }
         return cut + "\n[… coupé : la suite n'est pas montrée]"
+    }
+
+    /// The arguments the service's tool takes: those its schema lists, when it lists them and takes no others
+    /// (`additionalProperties`). Home Assistant refuses any other one ("extra keys not allowed"), and a model may add one:
+    /// Gemma 4 E4B wrote `GetLiveContext {entity: cuisine}` (`voice-cli connected-tools --tier standard`).
+    static func declared(_ arguments: [String: JSONValue], _ schema: JSONValue) -> [String: JSONValue] {
+        guard case .object(let object) = schema, case .object(let properties)? = object["properties"] else { return arguments }
+        switch object["additionalProperties"] {
+        case .bool(true)?, .object?: return arguments
+        default: return arguments.filter { properties[$0.key] != nil }
+        }
     }
 
     static func firstLine(_ text: String) -> String {

@@ -338,6 +338,53 @@ struct ConnectedToolsTests {
         #expect(reply.spoken == ConnectedToolPhrases.done)
     }
 
+    @Test func showsHowToCallAHomeAssistantWithoutTheActions() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client)
+        let written: @Sendable (ToolCall) async -> String? = { call in
+            let shown = call.arguments.keys.sorted().map { key in
+                let value: String = if case .array(let items)? = call.arguments[key] {
+                    "[" + items.compactMap(\.text).joined(separator: ",") + "]"
+                } else {
+                    call.arguments[key]?.text ?? ""
+                }
+                return "\(key)=\(value)"
+            }
+            return "<\(call.name) \(shown.joined(separator: " "))>"
+        }
+        let without = try #require(await tools.promptAddendum(actions: false, writeCall: written))
+        #expect(without.hasSuffix(" Exemples : à « Allume le couloir », ta réponse entière est <HassTurnOn area=couloir> ; "
+            + "à « Ferme tous les volets », <HassTurnOff domain=[cover]>"))
+        let alone = await tools.promptAddendum()
+        #expect(await tools.promptAddendum(actions: true, writeCall: written) == alone)
+        // The examples of the smallest tier: the turning on asked first and the user's « Oui », then a question.
+        let examples = await tools.exampleExchanges(now: Date())
+        #expect(examples.filter { $0.role == .user }.map { $0.content.components(separatedBy: "\n").first ?? "" }
+            == ["Allume le couloir", "Oui", "Est-ce que la lumière du garage est allumée ?"])
+        #expect(examples.contains { $0.role == .assistant && $0.content == "J’allume le couloir avec Home Assistant. On y va\(nb)?" })
+        // Another service: no example, there is no telling what its actions do.
+        var other = ConnectedToolSettings(name: "Notes", address: server.address.absoluteString, access: .none)
+        other.actions = [.init(tool: MCPTool(name: "create_note", description: "Creates a note."), enabled: true)]
+        let notes = ConnectedTools()
+        await notes.configure([.init(settings: other, client: client)])
+        #expect(await notes.exampleExchanges(now: Date()).isEmpty)
+        #expect(await notes.promptAddendum(actions: false, writeCall: written) == (await notes.promptAddendum()))
+    }
+
+    @Test func sendsOnlyTheArgumentsTheToolTakes() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client, whenActing: .doDirectly)
+        // Home Assistant refuses an argument its tool does not list ("extra keys not allowed").
+        _ = try await tools.perform(ToolCall(name: "GetLiveContext", arguments: ["entity": "cuisine"]), context: context)
+        _ = try await tools.perform(ToolCall(name: "HassTurnOn", arguments: ["area": "salon", "pièce": "salon"]), context: context)
+        #expect(server.calls.map(\.arguments) == [[:], ["area": "salon"]])
+        let open: JSONValue = ["type": "object", "properties": ["a": ["type": "string"]], "additionalProperties": true]
+        #expect(ConnectedTools.declared(["a": "1", "b": "2"], open) == ["a": "1", "b": "2"])
+        #expect(ConnectedTools.declared(["b": "2"], ["type": "object"]) == ["b": "2"])
+    }
+
     @Test func doesItDirectlyWhenToldTo() async throws {
         let (server, client) = try await home()
         defer { server.stop() }

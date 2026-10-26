@@ -411,7 +411,8 @@ func runActionsBench(_ o: Options) async throws {
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
         + (news ? [try o.newsAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) } ?? NewsCatalog.promptAddendum]
             : [])
-        + [home.addendum].compactMap { $0 }
+        + [await home.provider?.promptAddendum(actions: actions, writeCall: { await model.toolCallText($0) })]
+            .compactMap { $0 }
         + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, rules: try o.memoryAddendum.map {
             try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         }, journalRules: try o.journalAddendum.map {
@@ -422,10 +423,13 @@ func runActionsBench(_ o: Options) async throws {
         print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")
             : "without the journal, as the app on this tier (--journal to offer it)") + ", \(sheet.count) entries in the sheet")
     }
-    let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents) ? "app" : "none")
-    // Without the actions, the app's are the delegation's (`AgentTools.exampleExchanges`, Claude Code reading back).
+    let examples = o.examples
+        ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents || home.provider != nil) ? "app" : "none")
+    // Without the actions, the app's are the tools' own: the delegation's (`AgentTools.exampleExchanges`, Claude Code
+    // reading back), then a Home Assistant's (`ConnectedTools.exampleExchanges`).
     conversation.examples = try !actions && examples == "app"
         ? (agents ? AgentCatalog.examples(now: now, timeZone: timeZone, agent: ClaudeCode.displayName, review: true) : [])
+            + (await home.provider?.exampleExchanges(now: now, timeZone: timeZone) ?? [])
         : exampleExchanges(examples, now: now, timeZone: timeZone)
     print("example exchanges: \(examples) (\(conversation.examples.filter { $0.role == .user }.count))")
     let dateLine = tools.isEmpty ? nil : ActionCatalog.dateLine(now, timeZone: timeZone)
@@ -780,8 +784,8 @@ func runActionsBench(_ o: Options) async throws {
 }
 
 /// --home-assistant: the tools a pretend Home Assistant offers once added as a connected tool (the switches a new tool
-/// starts with), and their part of the system prompt.
-private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], addendum: String?) {
+/// starts with), and their provider, for their part of the system prompt and their example exchanges.
+private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], provider: ConnectedTools?) {
     guard on else { return ([], nil) }
     let server = FakeHomeAssistant()
     try await server.start()
@@ -794,7 +798,7 @@ private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], 
     let tools = await provider.tools()
     print("Home Assistant (pretend): \(tools.count) of \(settings.actions.count) actions on: "
           + tools.map(\.name).joined(separator: ", "))
-    return (tools, await provider.promptAddendum())
+    return (tools, provider)
 }
 
 /// A connected tool's call holds the words and the values the corpus expects, and Home Assistant would take it: the words

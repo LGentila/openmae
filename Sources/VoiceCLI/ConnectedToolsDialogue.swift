@@ -127,7 +127,8 @@ func measureLongResult(_ o: Options) async throws {
         await model.useTools(await provider.tools())
         var conversation = Conversation()
         // As the app has it with the actions off: that they are off and what the date line is, then the tool's part.
-        conversation.systemAddenda = [ActionCatalog.partWithoutActions] + [await provider.promptAddendum()].compactMap { $0 }
+        conversation.systemAddenda = [ActionCatalog.partWithoutActions]
+            + [await provider.promptAddendum(actions: false, writeCall: { await model.toolCallText($0) })].compactMap { $0 }
         try await model.prefillBeginning(conversation.beginning)
         let now = Date()
         let request = conversation.messages(adding: Conversation.userMessage(
