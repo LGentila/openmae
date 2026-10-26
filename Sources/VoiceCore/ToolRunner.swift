@@ -181,7 +181,13 @@ public actor ToolRunner {
             if let last = replies.lastIndex(where: \.confirms), last > 0, replies[last - 1].confirms {
                 spoken[last] = ActionPhrases.linked(spoken[last], context.language)
             }
-            return Reply(spoken: spoken.joined(separator: " "), forModel: .array(replies.map(\.forModel)),
+            // What stands for a result the model would have said (`modelSpeaks`: a connected tool's « C’est fait. »), once
+            // however many actions gave it.
+            var sentences: [String] = []
+            for (reply, sentence) in zip(replies, spoken) where !(reply.modelSpeaks && sentences.contains(sentence)) {
+                sentences.append(sentence)
+            }
+            return Reply(spoken: sentences.joined(separator: " "), forModel: .array(replies.map(\.forModel)),
                          retryable: false)
         case .decline:
             await dropPending(declined: true)

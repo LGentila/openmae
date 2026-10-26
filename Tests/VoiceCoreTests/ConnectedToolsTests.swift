@@ -321,6 +321,23 @@ struct ConnectedToolsTests {
         #expect(await collected.log == [.refusedByUser, .done, .done, .failed(.said("Error calling tool: No area named Garage"))])
     }
 
+    @Test func severalActionsOfOneRequestAskOnceAndSayItOnce() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client)
+        let runner = ToolRunner(providers: [tools], actions: false)
+        _ = await runner.tools()
+        // « Allume le salon et la cuisine », as the model may write it: two calls in one request, one question.
+        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "salon"]), context: context)
+        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "cuisine"]), context: context,
+                                sameRequest: true)
+        #expect(await runner.pendingQuestion(.french)
+            == "J’allume le salon avec Home Assistant et j’allume la cuisine avec Home Assistant\(nb): on y va\(nb)?")
+        let reply = try #require(await runner.resolve(.confirm, context: context))
+        #expect(server.calls.map(\.name) == ["HassTurnOn", "HassTurnOn"])
+        #expect(reply.spoken == ConnectedToolPhrases.done)
+    }
+
     @Test func doesItDirectlyWhenToldTo() async throws {
         let (server, client) = try await home()
         defer { server.stop() }
