@@ -154,15 +154,22 @@ enum MemoryResidency {
 
     /// Diagnostics: the memory pressure macOS reports for the whole Mac (`kern.memorystatus_vm_pressure_level`).
     static var pressure: String {
-        var level: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else { return "unknown" }
-        switch level {
+        switch pressureLevel {
+        case nil: return "unknown"
         case 1: return "normal"
         case 2: return "warning"
         case 4: return "critical"
-        default: return "level \(level)"
+        case let level?: return "level \(level)"
         }
+    }
+
+    /// macOS reports the Mac short of memory to the point of stopping apps (see `pressure`).
+    static var pressureIsCritical: Bool { pressureLevel == 4 }
+
+    private static var pressureLevel: Int32? {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 ? level : nil
     }
 
     /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): from the first call on, looks at the Mac's wired memory and memory pressure

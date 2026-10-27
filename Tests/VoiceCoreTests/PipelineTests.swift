@@ -576,13 +576,34 @@ struct PipelineTests {
         #expect(await model.requests == 0)  // still speaking: no request yet
         await pipeline.stop()
     }
+
+    /// The models hear when the user's turn starts and ends (`KeepsWarm.userSpeaks`): the language model keeps its
+    /// memory ready for the request from the first sound of the user's speech.
+    @Test func modelsHearTheUsersTurn() async throws {
+        let model = WarmCountingModel()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: FakeSpeaker())
+        try await pipeline.start()
+        await push(pipeline, "1111111111")
+        await waitFor { await model.turns == [true] }
+        #expect(await model.turns == [true])
+        #expect(await model.requests == 0)  // still speaking: no request yet
+        await push(pipeline, String(repeating: "0", count: 20))
+        await waitFor { await model.turns == [true, false] }
+        #expect(await model.turns == [true, false])
+        await waitFor { await model.requests >= 1 }
+        #expect(await model.requests >= 1)  // a speculative one at the pause, then again: this model answers nothing
+        await pipeline.stop()
+    }
 }
 
-/// A model that only counts the pipeline's keep-warm passes, wake-ups and requests.
+/// A model that only counts the pipeline's keep-warm passes, wake-ups and requests, and notes the user's turns.
 actor WarmCountingModel: LanguageModel, KeepsWarm {
     private(set) var warmPasses = 0
     private(set) var wakeUps = 0
     private(set) var requests = 0
+    /// `userSpeaks`, in order.
+    private(set) var turns: [Bool] = []
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
         Task { await self.countRequest() }
         return AsyncThrowingStream { $0.finish() }
@@ -591,7 +612,9 @@ actor WarmCountingModel: LanguageModel, KeepsWarm {
     func tokenCount(_ conversation: [ChatMessage]) async throws -> Int { 0 }
     func keepWarm() async { warmPasses += 1 }
     nonisolated func wakeUp() { Task { await self.countWakeUp() } }
+    nonisolated func userSpeaks(_ speaking: Bool) { Task { await self.noteTurn(speaking) } }
     private func countWakeUp() { wakeUps += 1 }
+    private func noteTurn(_ speaking: Bool) { turns.append(speaking) }
     private func countRequest() { requests += 1 }
 }
 

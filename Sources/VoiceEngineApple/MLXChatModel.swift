@@ -138,6 +138,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private nonisolated let userSpeaking = Atomic<Bool>(false)
     /// `holdOnGPU` runs.
     private var holding = false
+    /// The weights and the conversation's memory locked wired for the user's request (`lockWired`).
+    private nonisolated let wiredLock = WiredLock()
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
@@ -823,6 +825,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// could come after this returned.
     public nonisolated func windDown() async {
         windingDownFlag.store(true, ordering: .relaxed)  // at once: a keep-warm pass under way holds the actor
+        wiredLock.release("the model winds down")
         await waitUntilIdle()
     }
 
@@ -897,11 +900,13 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     /// The user's turn starts or ends (see `KeepsWarm`): while it lasts, the GPU's driver keeps the weights wired
-    /// (`holdOnGPU`).
+    /// (`holdOnGPU`), locked so until the request's first token when the Mac has room for it (`lockWired`).
     public nonisolated func userSpeaks(_ speaking: Bool) {
         userSpeaking.store(speaking, ordering: .relaxed)
-        guard speaking, !windingDown else { return }
-        Task(priority: .userInitiated) { await self.holdOnGPU() }
+        guard !windingDown else { return }
+        Task(priority: .userInitiated) {
+            if speaking { await self.holdOnGPU() } else { await self.unlockUnlessAsked() }
+        }
     }
 
     /// While the user speaks, until their request is sent: the GPU's driver wires every weight and the conversation's
@@ -921,7 +926,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// of 32 GB used: the app, OrbStack's virtual machine, Claude, Arc, Music), that wiring was gone 1.6 s later, at the
     /// request, the weights all in RAM: the request read its 47 new tokens in 8.4 s (the Mac compressed 27 GB meanwhile,
     /// the weights among them, and decompressed 13.8 GB), and its first token came 5.6 s later; 17.1 s from the end of the
-    /// user's speech to Maé's voice. Wired until the request, macOS can compress none of them.
+    /// user's speech to Maé's voice. Wired again every `holdSpacing` until the request, they stay wired while the Mac has
+    /// room; when it is short of memory, the driver lets them go all the same, unless they are locked (`lockWired`, set
+    /// here too).
     ///
     /// Not while a request is under way (a speculative one, the user still speaking: it has them wired), nor while `wakeUp`
     /// reads the weights from the CPU (the GPU's driver brings back what macOS compressed one page after the other, see
@@ -938,7 +945,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var slowest = Duration.zero  // of the wirings after the first
         var highest: UInt64 = 0  // the Mac's wired memory, at its highest at the start of a wiring
         var letGo = 0  // wirings that found the weights let go since the one before
+        var unlocked: String?  // why `lockWired` did not lock, the first time
         while userSpeaking.load(ordering: .relaxed), !windingDown, clock.now - start < Self.longestHold {
+            if pendingRequests.load(ordering: .relaxed) == 0, let why = await lockWired(), unlocked == nil {
+                unlocked = why
+                DebugLog.log("LLM: memory not locked wired: \(why)")
+            }
             if pendingRequests.load(ordering: .relaxed) == 0, !wakingUp.load(ordering: .relaxed) {
                 // The driver counts what it wires a little after the computation (0.1 to 0.5 s): the next wiring tells.
                 let wired = MemoryResidency.wiredBytes
@@ -971,6 +983,74 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     static let holdSpacing = Duration.milliseconds(250)
     /// How long `holdOnGPU` lasts at most, should the user's turn never end.
     static let longestHold = Duration.seconds(30)
+
+    /// Locks the weights and the conversation's memory wired until the request's first token (`generate`): MLX's wired
+    /// limit is raised to all the memory it holds, and its residency sets, with a standing request that it stay resident,
+    /// have the GPU's driver wire it and keep it wired, whatever memory the Mac lacks meanwhile.
+    ///
+    /// Wiring them again and again while the user speaks (`holdOnGPU`) is not enough on a Mac short of memory: in the app,
+    /// on the reference Mac with the usual apps open, 4 requests of 6 had their first token 0.8 to 1.0 s after they were
+    /// sent (2.1 to 2.4 s from the end of the user's speech to Maé's voice), and 2 after 14.2 and 14.4 s (15.3 and 18.2 s
+    /// to Maé's voice): while other apps were busy, the wiring at the start of the user's speech
+    /// took 2.4 to 2.9 s and stopped at 11.6 and 6.8 GB of wired memory on the Mac (it decompressed 3.5 to 3.7 GB and
+    /// compressed 4.8 to 5.2 GB meanwhile, its memory pressure going from normal to warning), then the request read its 49
+    /// new tokens in 7.9 to 8.7 s (the Mac compressed 26 to 28 GB, the weights among them, and decompressed 11 to 15 GB),
+    /// and its first token came 5.2 to 5.7 s later.
+    ///
+    /// Not when the Mac already has `lockWhenWiredBelow` or more wired: the weights are mostly wired then (a computation
+    /// just used them, and `holdOnGPU` keeps them so), or the Mac could not spare their 15.5 GB (Gemma 4 26B). About 24 GB
+    /// wired at most, then, as in a request when the Mac has room (20 to 22 GB). Nor when memory pressure is critical.
+    /// Released at the request's first token, when the user's turn ends without a request (`unlockUnlessAsked`), after
+    /// `longestLock`, as soon as memory pressure turns critical, and when the model winds down: locking the weights in RAM
+    /// for good froze the Mac (see `weightPages`).
+    ///
+    /// Returns why it did not lock; nil once locked, or locked already.
+    private func lockWired() async -> String? {
+        guard !wiredLock.isHeld, !windingDown else { return nil }
+        let wired = MemoryResidency.wiredBytes
+        guard wired < Self.lockWhenWiredBelow else {
+            return String(format: "the Mac has %.2f GB wired", Double(wired) / 1e9)
+        }
+        guard !MemoryResidency.pressureIsCritical else { return "memory pressure critical" }
+        // All that MLX holds: the arrays in use, its free buffers (`releaseFreeBuffers`) and the heap of its small ones.
+        let size = Memory.activeMemory + Memory.cacheMemory + Self.lockMargin
+        guard let most = GPU.maxRecommendedWorkingSetBytes(), size <= most else {
+            return String(format: "%.2f GB, more than the GPU may use", Double(size) / 1e9)
+        }
+        let ticket = Self.lockPolicy.ticket(size: size)
+        guard wiredLock.hold(ticket) else { return nil }
+        let clock = ContinuousClock()
+        let start = clock.now
+        _ = await ticket.start()
+        wiredLock.watch(ticket, longest: Self.longestLock)
+        DebugLog.log(String(format: "LLM: memory locked wired (%.2f GB) in %@; the Mac had %.2f GB wired, pressure %@",
+                            Double(size) / 1e9, "\(clock.now - start)", Double(wired) / 1e9, MemoryResidency.pressure))
+        return nil
+    }
+
+    /// The user's turn is over: the lock waits `lockGrace` for their request, whose first token releases it (`lockWired`),
+    /// and goes if none comes. Kept if the user speaks again meanwhile.
+    private nonisolated func unlockUnlessAsked() async {
+        guard wiredLock.isHeld else { return }
+        let clock = ContinuousClock()
+        let start = clock.now
+        while clock.now - start < Self.lockGrace {
+            if pendingRequests.load(ordering: .relaxed) > 0 || userSpeaking.load(ordering: .relaxed) { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        wiredLock.release("no request after the user's turn")
+    }
+
+    /// `lockWired` locks only while the Mac has less than this wired.
+    static let lockWhenWiredBelow: UInt64 = 8_000_000_000
+    /// How long `lockWired`'s lock lasts at most.
+    static let longestLock = Duration.seconds(30)
+    /// How long the lock waits for the user's request once their turn is over (`unlockUnlessAsked`).
+    static let lockGrace = Duration.seconds(3)
+    /// The heap of MLX's smallest buffers (1 MB), and room for buffers made while the lock lasts (`lockWired`).
+    static let lockMargin = 64 * 1024 * 1024
+    /// One lock at a time: the wired limit is the largest ticket's, never their sum.
+    private static let lockPolicy = WiredMaxPolicy()
 
     /// Has the GPU's driver wire every weight and the conversation's memory, without reading them: one element of each
     /// array goes through the GPU, and the driver wires an array's whole memory for any computation that uses it. 66 to
@@ -1118,6 +1198,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     {
         let waited = requested.map { ContinuousClock.now - $0 } ?? .zero
         if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
+        defer { wiredLock.release("request over") }  // most often at its first token already (see `lockWired`)
         try refuseOnceWindingDown("the request")
         hold.set(false)  // a new answer never starts paused
         logResidency("before the request", weights: false)
@@ -1226,6 +1307,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if firstToken == nil {
                 firstToken = clock.now
                 DebugLog.log("LLM: first token \(clock.now - prefillEnd) after the prefill")
+                wiredLock.release("first token")
             }
             produced.append(token)
             if stopTokens.contains(token) || token == context.tokenizer.unknownTokenId { break }
@@ -1948,6 +2030,69 @@ final class WakeUpTimes: @unchecked Sendable {
         if let last, now - last < spacing { return false }
         last = now
         return true
+    }
+}
+
+/// The memory `MLXChatModel.lockWired` locked wired, one lock at a time, released from any thread.
+final class WiredLock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: (ticket: WiredMemoryTicket, since: ContinuousClock.Instant)?  // guarded by `lock`
+
+    var isHeld: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return held != nil
+    }
+
+    /// `ticket` becomes the lock, unless one is held already; the caller then starts it.
+    func hold(_ ticket: WiredMemoryTicket) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard held == nil else { return false }
+        held = (ticket, ContinuousClock.now)
+        return true
+    }
+
+    /// Ends the lock, if one is held; `why` goes to the log.
+    func release(_ why: String) {
+        lock.lock()
+        let released = held
+        held = nil
+        lock.unlock()
+        guard let released else { return }
+        let wired = MemoryResidency.wiredBytes
+        Task(priority: .userInitiated) {
+            _ = await released.ticket.end()
+            DebugLog.log(String(format: "LLM: memory lock released (%@) after %@; the Mac had %.2f GB wired, pressure %@",
+                                why, "\(ContinuousClock.now - released.since)", Double(wired) / 1e9,
+                                MemoryResidency.pressure))
+        }
+    }
+
+    /// Once `ticket` started: releases it after `longest`, or as soon as memory pressure turns critical, whatever holds
+    /// the model's actor. Then ends it once more: a release while it started may have reached MLX first, and an end
+    /// before the start goes unheeded.
+    func watch(_ ticket: WiredMemoryTicket, longest: Duration) {
+        Task.detached(priority: .userInitiated) { [self] in
+            let clock = ContinuousClock()
+            let start = clock.now
+            while holds(ticket) {
+                if clock.now - start >= longest {
+                    release("after \(longest)")
+                } else if MemoryResidency.pressureIsCritical {
+                    release("memory pressure critical")
+                } else {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            _ = await ticket.end()
+        }
+    }
+
+    private func holds(_ ticket: WiredMemoryTicket) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return held?.ticket.id == ticket.id
     }
 }
 
