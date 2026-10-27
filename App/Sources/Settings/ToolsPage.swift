@@ -296,7 +296,7 @@ final class ConnectedToolsAccess {
 
     /// Home Assistant's common actions get a title of their own; any other one the service's title, or its name.
     private static func title(_ tool: MCPTool) -> String {
-        switch tool.name {
+        switch ConnectedTools.homeAssistantName(tool.name) {
         case "GetLiveContext": String(localized: "Read the state of the home")
         case "GetDateTime": String(localized: "Read the date and time")
         case "HassTurnOn": String(localized: "Turn on")
@@ -312,6 +312,7 @@ final class ConnectedToolsAccess {
         case "HassSetVolume": String(localized: "Set the volume")
         case "HassListAddItem": String(localized: "Add to a list")
         case "HassListCompleteItem": String(localized: "Check off an item of a list")
+        case "HassListRemoveItem": String(localized: "Remove an item from a list")
         case "todo_get_items": String(localized: "Read a list")
         case "calendar_get_events": String(localized: "Read the calendar")
         default: tool.title ?? tool.name

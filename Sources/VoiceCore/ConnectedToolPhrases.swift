@@ -8,15 +8,16 @@ public enum ConnectedToolPhrases {
 
     /// The sentence before the user's "oui", with the question.
     public static func confirm(_ tool: MCPTool, _ arguments: [String: JSONValue], toolName: String) -> String {
-        let doing = home(tool.name, arguments).map { "\($0.sentence) avec \(toolName)." }
+        let doing = home(ConnectedTools.homeAssistantName(tool.name), arguments).map { "\($0.sentence) avec \(toolName)." }
             ?? "Je demande à \(toolName)\(nb): «\(nb)\(tool.title ?? tool.name)\(nb)»\(details(arguments))."
         return doing + " On y va\(nb)?"
     }
 
     /// The log's line: « Allumer le salon ».
     public static func title(_ tool: MCPTool, _ arguments: [String: JSONValue]) -> String {
-        if let home = home(tool.name, arguments) { return home.title }
-        if tool.name == "GetLiveContext" { return "Lire l’état de la maison" }
+        let name = ConnectedTools.homeAssistantName(tool.name)
+        if let home = home(name, arguments) { return home.title }
+        if name == "GetLiveContext" { return "Lire l’état de la maison" }
         return (tool.title ?? tool.name) + details(arguments)
     }
 

@@ -208,9 +208,12 @@ public actor ConnectedTools: ToolProvider {
         homeExample = nil
         for (index, connection) in self.connections.enumerated() {
             let names = offered.filter { $0.value.connection == index }
-            guard let turnOn = names.first(where: { $0.value.tool.name == "HassTurnOn" }) else { continue }
-            let turnOff = names.first { $0.value.tool.name == "HassTurnOff" }
-            let read = names.first { $0.value.tool.name == "GetLiveContext" }?.key
+            func named(_ name: String) -> (key: String, value: (connection: Int, tool: MCPTool))? {
+                names.first { Self.homeAssistantName($0.value.tool.name) == name }
+            }
+            guard let turnOn = named("HassTurnOn") else { continue }
+            let turnOff = named("HassTurnOff")
+            let read = named("GetLiveContext")?.key
             homeExample = HomeExample(
                 turnOn: (ToolCall(name: turnOn.key, arguments: Self.examples[0].arguments), turnOn.value.tool),
                 turnOff: turnOff.map { ToolCall(name: $0.key, arguments: Self.examples[1].arguments) },
@@ -384,7 +387,7 @@ public actor ConnectedTools: ToolProvider {
     /// their `device_class`, which a cover or a light never needs (their name, room or `domain` find them), is left out.
     static func parameters(_ tool: MCPTool) -> [ToolParameter] {
         let parameters = parameters(tool.inputSchema)
-        guard tool.name.hasPrefix("Hass") else { return parameters }
+        guard homeAssistantName(tool.name).hasPrefix("Hass") else { return parameters }
         return parameters.filter { $0.name != "device_class" }.map { parameter in
             guard parameter.description.isEmpty, let line = homeAssistantTargets[parameter.name] else { return parameter }
             var described = parameter
@@ -446,6 +449,22 @@ public actor ConnectedTools: ToolProvider {
         }
     }
 
+    // MARK: - Home Assistant's names
+
+    /// A Home Assistant tool's name as older versions list it, which the rules here know: newer ones put the
+    /// integration that offers it before it (`intent__HassTurnOn`, `homeassistant__GetLiveContext`, `llm__GetDateTime`,
+    /// `todo__get_items`, as the user's Home Assistant listed them on 2026-10-27). A `Hass…` intent or a `Get…` tool keeps
+    /// its own name; another one is named after its integration, as before (`todo_get_items`). Any other name is
+    /// returned as it is.
+    public static func homeAssistantName(_ name: String) -> String {
+        guard let separator = name.range(of: "__", options: .backwards), separator.lowerBound > name.startIndex,
+              separator.upperBound < name.endIndex
+        else { return name }
+        let integration = name[..<separator.lowerBound]
+        let base = String(name[separator.upperBound...])
+        return base.first?.isUppercase == true ? base : "\(integration)_\(base)"
+    }
+
     // MARK: - What is safe
 
     /// The reading tools of Home Assistant, which older versions list without annotations.
@@ -456,14 +475,14 @@ public actor ConnectedTools: ToolProvider {
     /// A tool that only reads: the service says so (`readOnlyHint: true`), or it is one of Home Assistant's that do. Any
     /// other one changes something.
     public static func reads(_ tool: MCPTool) -> Bool {
-        tool.readOnlyHint ?? homeAssistantReads.contains(tool.name)
+        tool.readOnlyHint ?? homeAssistantReads.contains(homeAssistantName(tool.name))
     }
 
     /// Home Assistant's tools that do what Maé's own actions do (timers, lists, the date and time, the calendar): off when
     /// the tool is added, so that her own are the ones used.
     static let builtInLike: Set<String> = [
         "GetDateTime", "HassGetCurrentDate", "HassGetCurrentTime", "todo_get_items", "HassListAddItem",
-        "HassListCompleteItem", "HassShoppingListAddItem", "HassShoppingListCompleteItem", "HassShoppingListLastItems",
+        "HassListCompleteItem", "HassListRemoveItem", "HassShoppingListAddItem", "HassShoppingListCompleteItem", "HassShoppingListLastItems",
         "calendar_get_events", "HassStartTimer", "HassCancelTimer", "HassCancelAllTimers", "HassIncreaseTimer",
         "HassDecreaseTimer", "HassPauseTimer", "HassUnpauseTimer", "HassTimerStatus",
     ]
@@ -471,7 +490,7 @@ public actor ConnectedTools: ToolProvider {
     /// Whether Maé has a built-in action for this tool (see `builtInLike`), by its name, Home Assistant's or another
     /// service's ("create_reminder", "set_timer", "get_current_time").
     public static func duplicatesBuiltIn(_ name: String) -> Bool {
-        if builtInLike.contains(name) { return true }
+        if builtInLike.contains(homeAssistantName(name)) { return true }
         let words = Set(name.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
             .lowercased().split { !$0.isLetter }.map(String.init))
         return !words.isDisjoint(with: ["timer", "timers", "reminder", "reminders", "alarm"])

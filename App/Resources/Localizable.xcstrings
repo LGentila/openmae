@@ -4031,6 +4031,16 @@
         }
       }
     },
+    "Remove an item from a list": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer un élément d’une liste"
+          }
+        }
+      }
+    },
     "Remove the folder %@": {
       "localizations": {
         "fr": {

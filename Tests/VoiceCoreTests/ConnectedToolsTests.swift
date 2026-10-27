@@ -226,6 +226,52 @@ struct ConnectedToolsTests {
         #expect(!ConnectedTools.duplicatesBuiltIn("search_notes"))
     }
 
+    /// Newer versions of Home Assistant put the integration before each tool's name, as the user's listed them on
+    /// 2026-10-27: the rules read them as the older names.
+    @Test func readsHomeAssistantsNamesWithTheirIntegration() {
+        #expect(ConnectedTools.homeAssistantName("intent__HassTurnOn") == "HassTurnOn")
+        #expect(ConnectedTools.homeAssistantName("light__HassLightSet") == "HassLightSet")
+        #expect(ConnectedTools.homeAssistantName("homeassistant__GetLiveContext") == "GetLiveContext")
+        #expect(ConnectedTools.homeAssistantName("todo__get_items") == "todo_get_items")
+        #expect(ConnectedTools.homeAssistantName("HassTurnOn") == "HassTurnOn")
+        #expect(ConnectedTools.homeAssistantName("search_notes") == "search_notes")
+        #expect(ConnectedTools.homeAssistantName("__odd") == "__odd")
+        // Off when added: what Maé does herself (lists, timers, the date)…
+        for name in ["todo__HassListAddItem", "todo__HassListCompleteItem", "todo__HassListRemoveItem", "todo__get_items",
+                     "intent__HassCancelAllTimers", "llm__GetDateTime"]
+        {
+            #expect(ConnectedTools.duplicatesBuiltIn(name), "\(name)")
+        }
+        // … but not the rest.
+        for name in ["intent__HassTurnOn", "light__HassLightSet", "media_player__HassMediaPause", "vacuum__HassVacuumStart"] {
+            #expect(!ConnectedTools.duplicatesBuiltIn(name), "\(name)")
+        }
+        #expect(ConnectedTools.reads(MCPTool(name: "homeassistant__GetLiveContext", description: "")))
+        #expect(ConnectedToolPhrases.confirm(MCPTool(name: "intent__HassTurnOn", title: "Turn on", description: ""),
+                                             ["area": "salon"], toolName: "Home Assistant")
+            == "J’allume le salon avec Home Assistant. On y va\(nb)?")
+        #expect(ConnectedToolPhrases.title(MCPTool(name: "homeassistant__GetLiveContext", description: ""), [:])
+            == "Lire l’état de la maison")
+        // The intents' targets are described, and their device_class left out.
+        let schema: JSONValue = ["type": "object", "properties": ["area": ["type": "string"], "device_class": ["type": "string"]]]
+        let parameters = ConnectedTools.parameters(MCPTool(name: "intent__HassTurnOn", description: "", inputSchema: schema))
+        #expect(parameters.map(\.name) == ["area"])
+        #expect(parameters.first?.description == ConnectedTools.homeAssistantTargets["area"])
+    }
+
+    @Test func showsTheExamplesWithHomeAssistantsNewerNames() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        var settings = ConnectedToolSettings(name: "Home Assistant", address: server.address.absoluteString, access: .none)
+        settings.actions = settings.merging(["intent__HassTurnOn", "intent__HassTurnOff", "homeassistant__GetLiveContext",
+                                            "todo__HassListAddItem"].map { MCPTool(name: $0, description: "") })
+        #expect(settings.actions.map(\.enabled) == [true, true, true, false])
+        let tools = ConnectedTools()
+        await tools.configure([.init(settings: settings, client: client)])
+        let examples = await tools.exampleExchanges(now: Date())
+        #expect(examples.contains { $0.role == .assistant && $0.content == "J’allume le couloir avec Home Assistant. On y va\(nb)?" })
+    }
+
     @Test func namesStayUnique() async throws {
         let (server, client) = try await home()
         defer { server.stop() }
