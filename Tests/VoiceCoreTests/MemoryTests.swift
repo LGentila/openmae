@@ -305,6 +305,80 @@ struct MemoryTests {
         #expect(try await store.sheet().count == 1)
     }
 
+    /// Everything on one topic, written as everything (Gemma 4 E2B, for « Efface tout ce que je t'ai dit sur mon
+    /// chien », writes `effacer_memoire` with the dog's entry, those words, or nothing): the one entry the user named,
+    /// read back, then forgotten after their « oui ». Never an entry they did not name; with no single entry on the
+    /// topic, refused as before.
+    @Test func erasingEverythingOnOneTopicForgetsItsEntry() async throws {
+        #expect(MemoryCatalog.erasingTopic("Efface tout ce que je t'ai dit sur mon chien.") == "chien")
+        #expect(MemoryCatalog.erasingTopic("Oublie tout ce que tu sais sur Margaux.") == "margaux")
+        #expect(MemoryCatalog.erasingTopic("Forget everything I told you about my dog.") == "dog")
+        for said in ["Efface toute ta mémoire.", "Oublie tout.", "Oublie tout ce que tu sais sur moi.",
+                     "J'oublie tout en ce moment, c'est terrible.", "Oublie tout ce que tu sais sur elle.",
+                     "Efface ça de ta mémoire.", "Efface tout ce qu'on s'est raconté hier soir.",
+                     "Efface toute ta mémoire sauf mon prénom.", "Efface toute ta mémoire à part mon prénom.",
+                     "Oublie que je fais du tennis.", "Tu as une bonne mémoire, toi ?"]
+        {
+            #expect(MemoryCatalog.erasingTopic(said) == nil, "\(said)")
+        }
+        let sheet = ["Allergique aux fruits de mer", "Son fils s'appelle Noé",
+                     "Son chien est un border collie qui s'appelle Câpre"]
+        let dog = sheet[2]
+        let said = "Efface tout ce que je t'ai dit sur mon chien."
+        let written: [ToolCall] = [
+            ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire", "reference": .string(dog)]),
+            ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire",
+                                                           "reference": "tout ce que je t'ai dit sur mon chien"]),
+            ToolCall(name: "effacer_memoire"),
+            ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "reference": "tout"]),
+        ]
+        for call in written {
+            let store = TransientMemoryStore(sheet: sheet)
+            let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true)])
+            _ = await runner.tools()
+            let asked = await runner.handle(call, context: context([said]))
+            #expect(asked.waitsForYes && asked.spoken == MemoryPhrases.confirmForget(dog, .french), "\(call)")
+            #expect(try await store.sheet().count == 3)  // nothing yet
+            let done = await runner.resolve(.confirm, context: context(["Oui."]))
+            #expect(done?.spoken == MemoryPhrases.forgotten(.french))
+            #expect(try await store.sheet() == Array(sheet.prefix(2)), "\(call)")
+        }
+        let erase = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
+        #expect(MemoryTools.entryInstead(of: erase, said: "Oublie tout ce que tu sais sur Margaux.",
+                                         sheet: ["Sa fille s'appelle Margaux, elle a 9 ans", dog])
+            == "Sa fille s'appelle Margaux, elle a 9 ans")
+        // Only for a call that erases everything, and only when the user's words narrow it to a topic.
+        #expect(MemoryTools.entryInstead(of: ToolCall(name: MemoryCatalog.name, arguments: ["action": "retenir",
+                                                                                            "texte": "chien"]),
+                                         said: said, sheet: sheet) == nil)
+        #expect(MemoryTools.entryInstead(of: erase, said: "Efface toute ta mémoire.", sheet: sheet) == nil)
+        // « J'oublie tout en ce moment » names nothing to forget, even with an entry that holds its words.
+        let hard = "Traverse un moment terrible au travail"
+        let moment = TransientMemoryStore(sheet: [hard, dog])
+        let runner = ToolRunner(providers: [MemoryTools(store: moment, enabled: true)])
+        _ = await runner.tools()
+        let naming = ToolCall(name: MemoryCatalog.name,
+                              arguments: ["action": "effacer_memoire", "reference": .string(hard)])
+        for call in [erase, naming] {
+            let refused = await runner.handle(call, context: context(["J'oublie tout en ce moment, c'est terrible."]))
+            #expect(!refused.waitsForYes && refused.retryable)
+        }
+        #expect(try await moment.sheet().count == 2)
+        // Two entries on the topic: the one the call names; neither named, refused.
+        let fear = "Son chien a peur de l'orage"
+        let two = TransientMemoryStore(sheet: [dog, fear])
+        let both = ToolRunner(providers: [MemoryTools(store: two, enabled: true)])
+        _ = await both.tools()
+        let named = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire", "reference": "l'orage"])
+        #expect(await both.handle(named, context: context([said])).spoken == MemoryPhrases.confirmForget(fear, .french))
+        let unnamed = await both.handle(erase, context: context([said]))
+        #expect(!unnamed.waitsForYes && unnamed.retryable)
+        // Another word for it (« toutou »): no entry holds it, refused the same way.
+        let other = await both.handle(erase, context: context(["Efface tout ce que je t'ai dit sur mon toutou."]))
+        #expect(!other.waitsForYes && other.retryable)
+        #expect(try await two.sheet().count == 2)
+    }
+
     /// Gemma 4 E2B writes the action as a tool's name (`effacer_memoire {}`, as it wrote `tout_oublier {}`, the
     /// action's former name, still read): the app reads it as the memory's call, which the history then holds, and asks
     /// the user as for the memory's own. Without the memory, no tool has that name.

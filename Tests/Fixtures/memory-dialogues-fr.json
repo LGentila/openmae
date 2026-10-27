@@ -1,5 +1,5 @@
 {
- "_comment": "French dialogues for voice-cli dialogue-bench --memory, with the memory switched on. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue starts with its sheet (\"sheet\": what the user already asked Maé to remember; empty when absent) and sends its turns in order; « [nouvelle conversation] » starts a new conversation, which reads the sheet again; the app answers « Oui. », « Non. » and « Annule. » itself. The goal is checked at the end, whatever the accents and case: remembered, the sheet holds an entry containing that word, and with answerMentions, the last answer names one of those words; forgotten, no entry contains it any more (the user said yes); kept, an entry still contains it (the user said no); notRemembered, no entry contains it (the user undid it, or said it in passing without asking Maé to remember it); erased, the sheet is empty (the user asked Maé to erase her whole memory, and said yes).",
+ "_comment": "French dialogues for voice-cli dialogue-bench --memory, with the memory switched on. The reference time is Thursday 15 October 2026, 18:42 (--now 2026-10-15T18:42). Each dialogue starts with its sheet (\"sheet\": what the user already asked Maé to remember; empty when absent) and sends its turns in order; « [nouvelle conversation] » starts a new conversation, which reads the sheet again; the app answers « Oui. », « Non. » and « Annule. » itself. The goal is checked at the end, whatever the accents and case: remembered, the sheet holds an entry containing that word, and with answerMentions, the last answer names one of those words; forgotten, no entry contains it any more (the user said yes); kept, an entry still contains it (the user said no, or asked to forget another entry: erasing everything does not reach the goal); notRemembered, no entry contains it (the user undid it, or said it in passing without asking Maé to remember it); erased, the sheet is empty (the user asked Maé to erase her whole memory, and said yes).",
  "now": "2026-10-15T18:42",
  "memory": true,
  "dialogues": [
@@ -91,6 +91,23 @@
    "goal": {
     "tool": "memoire",
     "erased": true
+   }
+  },
+  {
+   "name": "forget everything on one topic (the dog), answering yes",
+   "sheet": [
+    "Allergique aux fruits de mer",
+    "Son fils s'appelle Noé",
+    "Son chien est un border collie qui s'appelle Câpre"
+   ],
+   "turns": [
+    "Efface tout ce que je t'ai dit sur mon chien.",
+    "Oui."
+   ],
+   "goal": {
+    "tool": "memoire",
+    "forgotten": "Câpre",
+    "kept": "Noé"
    }
   },
   {

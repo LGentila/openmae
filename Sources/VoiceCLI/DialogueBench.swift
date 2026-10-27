@@ -738,14 +738,15 @@ private func isMarker(_ sentence: String) -> Bool {
     sentence == "[nouvelle conversation]" || sentence == taskEndedMarker
 }
 
-/// Whether words say an item was saved, changed or moved, or is being: « C'est noté », « C'est fait », « C'est
+/// Whether words say an item was saved, changed, moved or erased, or is being: « C'est noté », « C'est fait », « C'est
 /// déplacé », « J'ai ajouté… », « Je l'ai mis… », « Je la mets… » (not « Tu veux que je la décale ? »), « … est
-/// enregistré », « … est maintenant dans… ». Said in a pass without a call, nothing was.
+/// enregistré », « … est maintenant dans… », « J'ai effacé l'information sur ton chien. ». Said in a pass without a
+/// call, nothing was.
 private func saysItWasDone(_ text: String) -> Bool {
     let done = "(ajouté|créé|utilisé|mis|enregistré|noté|programmé|placé|calé|planifié|réservé|inscrit|déplacé|décalé"
-        + "|modifié|changé)"
+        + "|modifié|changé|effacé|supprimé|oublié|retiré)"
     let saved = "(noté|fait|enregistré|ajouté|programmé|créé|planifié|réservé|calé|mis|inscrit|déplacé|décalé|modifié"
-        + "|changé)"
+        + "|changé|effacé|supprimé|oublié|retiré)"
     let doing = "(mets|ajoute|note|enregistre|programme|place|inscris|déplace|décale|modifie|change)"
     let patterns = [#"\bc'est (bien |donc )?"# + saved + #"\b"#, #"\bj'ai (bien |donc )?"# + done,
                     #"\bje (te |t')?l'ai (bien |donc )?"# + done, #"\btu as (bien )?noté\b"#,

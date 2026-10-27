@@ -171,9 +171,10 @@ public enum MemoryCatalog {
     /// toute ta mémoire », « remets ta mémoire à zéro »), everything Maé knows or keeps of them (« oublie tout ce que tu
     /// sais sur moi »), or « tout » alone (« oublie tout ») — and no period (« efface tout ce qu'on s'est dit hier
     /// soir » is past conversations, not the memory), nor a topic that narrows it (« oublie tout ce que je t'ai dit sur
-    /// le tennis », « tout ce que tu sais sur elle », « efface ça de ta mémoire » are one entry, `oublier`). The
-    /// protection against a model that takes « j'oublie tout en ce moment » for an order, a topic for the whole memory,
-    /// or obeys a web page or an agent's report.
+    /// le tennis », « tout ce que tu sais sur elle », « efface ça de ta mémoire » are one entry, `oublier`, which the
+    /// app reads the call as when the user's words name it: `MemoryTools.entryInstead`). The protection against a model
+    /// that takes « j'oublie tout en ce moment » for an order, a topic for the whole memory, or obeys a web page or an
+    /// agent's report.
     public static func asksToEraseEverything(_ sentence: String) -> Bool {
         let words = EraseRequest.words(sentence)
         guard words.contains(where: EraseRequest.erases), !words.contains(where: EraseRequest.periods.contains) else {
@@ -191,6 +192,27 @@ public enum MemoryCatalog {
         }
     }
 
+    /// The topic a request to erase everything narrows « tout » to, in the user's words, folded: « chien » in « Efface
+    /// tout ce que je t'ai dit sur mon chien », « margaux » in « Oublie tout ce que tu sais sur Margaux ». Only for a
+    /// sentence that `asksToEraseEverything` refuses for that topic alone: the memory named, or « tout » with what Maé
+    /// knows. nil for any other sentence: « j'oublie tout en ce moment » erases nothing, a period is past conversations
+    /// (« efface tout ce qu'on s'est dit hier soir »), « sauf » keeps the topic (« efface toute ta mémoire sauf mon
+    /// prénom »), and words that only point to it name none (« tout ce que tu sais sur elle », « efface ça de ta
+    /// mémoire »).
+    public static func erasingTopic(_ sentence: String) -> String? {
+        let words = EraseRequest.words(sentence)
+        let everything = words.contains(where: EraseRequest.all.contains)
+        guard words.contains(where: EraseRequest.erases), !words.contains(where: EraseRequest.periods.contains),
+              !words.contains(where: EraseRequest.exceptions.contains),
+              !(" " + words.joined(separator: " ") + " ").contains(" a part "),
+              words.contains("memoire") || words.contains("memory")
+                || everything && words.contains(where: EraseRequest.knows.contains)
+        else { return nil }
+        let topic = words.filter { EraseRequest.narrows($0) && !EraseRequest.pointing.contains($0) }
+            .joined(separator: " ")
+        return MemoryText.contentWords(topic).isEmpty ? nil : topic
+    }
+
     /// The words of a request to erase the whole memory (`asksToEraseEverything`), folded.
     private enum EraseRequest {
         static let erasing = ["oubli", "effac", "supprim", "vide", "vider", "reinitialis", "remet", "zero", "forget",
@@ -205,6 +227,8 @@ public enum MemoryCatalog {
         /// What Maé knows or keeps of the user: « tout ce que tu sais », « tout ce que je t'ai dit ».
         static let knows: Set<String> = ["sais", "savais", "retiens", "retenu", "retenir", "dit", "demande", "know",
                                          "remember", "told"]
+        /// What keeps a part out of the erasing (« sauf mon prénom »; « à part », two words: `erasingTopic`): no topic.
+        static let exceptions: Set<String> = ["sauf", "excepte", "hormis", "except", "apart"]
         /// The only other words of « tout » alone: « Efface tout, s'il te plaît. »
         static let polite: Set<String> = ["s", "il", "te", "plait", "stp", "svp", "please", "bon", "allez", "maintenant",
                                           "now", "de", "ta", "ton", "your", "my", "moi", "me", "sur", "about"]
@@ -761,6 +785,10 @@ public actor MemoryTools: ToolProvider {
         case .effacerMemoire:
             // Only when the user's own words ask for it (none: one call of several, which the user hears read back).
             if let said = context.userSaid.first, !MemoryCatalog.asksToEraseEverything(said) {
+                // « tout » narrowed to one topic: the one entry the user named, forgotten after their « oui ».
+                if let entry = Self.entryInstead(of: call, said: said, sheet: (try? await store.loadSheet()) ?? []) {
+                    return .forgetEntry(entry)
+                }
                 throw ToolRefusal(forModel: "L'utilisateur n'a pas demandé d'effacer toute ta mémoire."
                                   + (journalOn ? " Pour une période de l'historique, action oublier avec quand." : ""),
                                   spoken: ActionPhrases.notUnderstood(language))
@@ -792,13 +820,47 @@ public actor MemoryTools: ToolProvider {
         guard !words.isEmpty else { return nil }
         let scored = sheet.map { entry -> (String, Double) in
             let theirs = Set(MemoryText.contentWords(entry))
-            let shared = words.filter { word in
-                theirs.contains(word) || theirs.contains { $0.count >= 4 && word.count >= 4 && ($0.hasPrefix(word) || word.hasPrefix($0)) }
-            }.count
+            let shared = words.filter { holds(theirs, $0) }.count
             return (entry, Double(shared) / Double(max(1, min(words.count, theirs.count))))
         }.filter { $0.1 >= 0.5 }.sorted { $0.1 > $1.1 }
         guard let best = scored.first, scored.dropFirst().first.map({ $0.1 < best.1 }) ?? true else { return nil }
         return best.0
+    }
+
+    /// Whether an entry's content words hold `word`: the same, or one beginning with the other, both of four letters at
+    /// least (the singular and the plural, « allergies » and « allergique »).
+    private static func holds(_ words: Set<String>, _ word: String) -> Bool {
+        words.contains(word)
+            || words.contains { $0.count >= 4 && word.count >= 4 && ($0.hasPrefix(word) || word.hasPrefix($0)) }
+    }
+
+    /// The sheet's entry that a call erasing the whole memory stands for, when the user's words narrow « tout » to one
+    /// topic (`MemoryCatalog.erasingTopic`): « Efface tout ce que je t'ai dit sur mon chien » is the dog's entry, which
+    /// the app reads back and forgets after the user's « oui », as with `oublier`. The one entry that holds a word of
+    /// the topic; of several, the one the call names (its `reference` or its text), else the one the topic's words
+    /// name (`entry`). nil for a call that erases nothing, when the user's words ask for everything or name no topic,
+    /// or when no single entry is found: the entry is always one the user named, never one the call alone names.
+    ///
+    /// Gemma 4 E2B writes `effacer_memoire` for « Efface tout ce que je t'ai dit sur mon chien », with the dog's entry,
+    /// those words, or nothing (`effacer_memoire {}`), where E4B and the 26B write `oublier` with the dog's entry.
+    /// Refused, its second try made no call: the user heard « Je n'ai pas bien compris… », or a sentence of its own,
+    /// even « J'ai effacé l'information sur ton chien. » with nothing erased (voice-cli dialogue-bench --memory, 10
+    /// runs: the entry forgotten in none; read so, in all 10). Told in the refusal how to forget one entry, it still
+    /// wrote no call there (« mon toutou », which no entry holds: 0 of 10), and said « Je ne peux pas effacer toute ma
+    /// mémoire sans une référence précise. »: left out.
+    public static func entryInstead(of call: ToolCall, said: String, sheet: [String]) -> String? {
+        guard MemoryCatalog.action(call) == .effacerMemoire, !MemoryCatalog.asksToEraseEverything(said),
+              let topic = MemoryCatalog.erasingTopic(said) else { return nil }
+        let words = MemoryText.contentWords(topic)
+        let onTopic = sheet.filter { entry in
+            let theirs = Set(MemoryText.contentWords(entry))
+            return words.contains { holds(theirs, $0) }
+        }
+        guard onTopic.count > 1 else { return onTopic.first }
+        if let named = call.text("reference") ?? MemoryCatalog.text(call), let entry = entry(named, in: onTopic) {
+            return entry
+        }
+        return entry(topic, in: onTopic)
     }
 
     /// The question, from what the call will do; kept for the "oui" (`readBack`).

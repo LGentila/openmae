@@ -588,11 +588,19 @@ func runActionsBench(_ o: Options) async throws {
             }
         } else if let call, call.name == NewsCatalog.readName {
             // The news: no argument, nothing for the app to refuse; the app reads them itself.
-        } else if let call, call.name == MemoryCatalog.name {
+        } else if let written = call, written.name == MemoryCatalog.name {
             // The memory: the action, the words the corpus expects, and whether the app accepts the call (a fact the
-            // user did not say is refused).
+            // user did not say is refused). As the app, a call erasing everything that the user's words narrow to one
+            // topic is forgetting the one entry they named (`MemoryTools.entryInstead`).
+            let instead = context.userSaid.first.flatMap {
+                MemoryTools.entryInstead(of: written, said: $0, sheet: sheet)
+            }
+            let call = instead.map {
+                ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "reference": .string($0)])
+            } ?? written
             let action = MemoryCatalog.action(call)
-            result.resolved = action?.rawValue ?? "no action"
+            result.resolved = (action?.rawValue ?? "no action")
+                + (instead.map { " « \($0) », as the app reads it" } ?? "")
             do {
                 try checkMemory(call, sheet: sheet, journal: journal, context: context)
                 if result.toolOK, let expected = item.expected {
