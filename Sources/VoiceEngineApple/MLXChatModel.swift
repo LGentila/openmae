@@ -132,6 +132,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private nonisolated let weightPages: [Range<UInt>]
     /// When `wakeUp` last brought the weights back.
     private nonisolated let lastWakeUp = WakeUpTimes()
+    /// When the model last computed something on the GPU (a request, the history, a beginning, a keep-warm pass): see
+    /// `wakeUpOnGPU`.
+    private var lastComputed = ContinuousClock.now
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
@@ -470,6 +473,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             DebugLog.log("LLM: computed the conversations' beginning (\(tokens.count) tokens) in float32 in \(d)")
             logResidency("after the conversations' beginning")
         }
+        lastComputed = ContinuousClock.now
         guard let beginning else { return }
         cache = beginning.cache.map { $0.copy() }  // a copy: the beginning stays for the conversations to come
         cachedTokens = beginning.tokens
@@ -680,6 +684,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard !windingDown else { return }
         catchUpsUnderWay += 1
         defer {
+            lastComputed = ContinuousClock.now
             releaseFreeBuffers()
             catchUpsUnderWay -= 1
         }
@@ -756,6 +761,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         _ = try readingPrompt { try readPrompt(tokens, from: start) }
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
+        lastComputed = ContinuousClock.now
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
         return tokens.count - start
     }
@@ -867,24 +873,68 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             DebugLog.log("LLM: keep-warm given up after \(touched - start), the model winds down")
             return
         }
-        eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
+        readOnGPU(conversation)
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
         releaseFreeBuffers()
+    }
+
+    /// Reads every weight once on the GPU (a sum per tensor), and `conversation` (the conversation's memory).
+    private func readOnGPU(_ conversation: [MLXArray]) {
+        eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
+        lastComputed = ContinuousClock.now
     }
 
     /// Someone started to speak (see `KeepsWarm`): the weights macOS compressed or wrote to swap since the last keep-warm
     /// pass come back while they speak, several pages at a time, rather than during the request. Off the actor, so that
     /// a request that comes meanwhile does not wait for it; at most once every 5 s. The conversation's memory comes back
-    /// meanwhile too (`wakeConversationUp`). Not once the model winds down (`windDown`).
+    /// meanwhile too (`wakeConversationUp`), then the GPU reads it all once (`wakeUpOnGPU`). Not once the model winds down
+    /// (`windDown`).
     public nonisolated func wakeUp() {
         guard !windingDown, lastWakeUp.claim(spacing: .seconds(5)) else { return }
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let start = ContinuousClock.now
             MemoryResidency.touch(weightPages, threads: 4)
             DebugLog.log("LLM: weights woken up in \(ContinuousClock.now - start)")
+            Task(priority: .userInitiated) { await self.wakeUpOnGPU() }
         }
         Task(priority: .userInitiated) { await self.wakeConversationUp() }
     }
+
+    /// `wakeUp`, once the weights are read from the CPU: the GPU reads every weight once, and the conversation's memory, as
+    /// a keep-warm pass does (`readOnGPU`), while the user speaks; then the request finds them ready.
+    ///
+    /// The GPU's driver wires the memory a computation uses (macOS can then neither compress it nor write it to swap), and
+    /// lets it go again within seconds: between two requests the Mac's wired memory went back from 18–20 GB to 2.9–3.6 GB
+    /// (Gemma 4 26B, QAT, on the reference Mac: M1 Pro, 32 GB). Each computation has the 15 GB of weights wired again, and
+    /// when the Mac is short of memory, macOS first makes room for them, compressing other memory: the computation waits
+    /// meanwhile, even with the weights all in RAM (read from the CPU, `MemoryResidency.touch`, which wires nothing). In
+    /// `voice-cli conversation` with the usual apps open (7.5 GB of swap in use), the first request after the voice had
+    /// loaded read its 46 new tokens in 1.30, 3.27 and 3.32 s in three launches, the Mac decompressing 2.7 to 6.5 GB and
+    /// compressing 3.5 to 7.3 GB meanwhile, and in a fourth 2.96 s, then 2.64 s to its first token; later ones in 0.46 to
+    /// 0.57 s. In the app, requests that came after minutes of silence waited the same way (5.6 s for 52 new tokens, then
+    /// 0.74 s per token for the first ten), the weights read from the CPU in 2 s just before. Read once on the GPU while the
+    /// user speaks, macOS makes that room then (0.71 s after the voice had loaded, the wired memory going from 3.6 to 18.6
+    /// GB; 0.26 s when the Mac has room), and the request's own wiring finds it made: the first request then read its new
+    /// tokens in 0.56 s, and its first token came 0.10 s later.
+    ///
+    /// Not when a request is already sent (it goes first, and has them wired anyway), nor when the model computed something
+    /// in the last `recentlyComputed` (an answer the user speaks over, the history computed ahead, a keep-warm pass): the
+    /// room is made then.
+    private func wakeUpOnGPU() {
+        guard !windingDown, pendingRequests.load(ordering: .relaxed) == 0,
+              ContinuousClock.now - lastComputed >= Self.recentlyComputed
+        else { return }
+        let clock = ContinuousClock()
+        let start = clock.now
+        let paging = MemoryResidency.enabled ? MemoryResidency.paging : nil
+        readOnGPU(conversationMemory)
+        DebugLog.log("LLM: weights woken up on the GPU in \(clock.now - start)"
+            + (paging.map { ": " + MemoryResidency.paging.text(since: $0) } ?? ""))
+        releaseFreeBuffers()
+    }
+
+    /// How long after the model's last computation `wakeUpOnGPU` has nothing to do.
+    static let recentlyComputed = Duration.seconds(5)
 
     /// `wakeUp` for the conversation's memory: the cache, its copies and the conversations' beginning, read from the CPU on
     /// the actor (they change with every request), as soon as nothing else uses the cache.
@@ -1004,6 +1054,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return
         }
         eval(r.cache.flatMap(\.state))
+        lastComputed = ContinuousClock.now
         r.done = end
         rebuild = r
     }
@@ -1019,6 +1070,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         try refuseOnceWindingDown("the request")
         hold.set(false)  // a new answer never starts paused
         logResidency("before the request")
+        let pagingBefore = MemoryResidency.enabled ? MemoryResidency.paging : nil
         GPU.resetPeakMemory()
         defer { lastRequestPeakGB = Double(Memory.peakMemory) / 1e9 }
         let prompt = try render(conversation, generationPrompt: true)
@@ -1071,6 +1123,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
                        Double(waited.components.seconds) * 1000 + Double(waited.components.attoseconds) / 1e15)
         DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms")
+        let pagingAfterPrefill = pagingBefore.map { _ in MemoryResidency.paging }
+        if let pagingBefore, let pagingAfterPrefill {
+            DebugLog.log("LLM paging during the prefill: " + pagingAfterPrefill.text(since: pagingBefore))
+        }
+        let prefillEnd = clock.now
         if answeringAgain || wentBack {
             // Once the tool's result is in, or the prompt of a request that went back (see `snapshot`).
             if !answeringAgain { turnSnapshot = snapshot }  // the one from before (see `turnSnapshot`)
@@ -1101,6 +1158,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
                            Double(writing.components.seconds) * 1000 + Double(writing.components.attoseconds) / 1e15)
             DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
                                 produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
+            if let pagingAfterPrefill {
+                DebugLog.log("LLM paging during the answer: " + MemoryResidency.paging.text(since: pagingAfterPrefill))
+            }
+            lastComputed = ContinuousClock.now
             releaseFreeBuffers()
         }
         // Cancelled while the model read the prompt (up to 512 new tokens are read in one pass, which cannot stop): the
@@ -1112,7 +1173,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return
         }
         while let token = iterator.next() {
-            if firstToken == nil { firstToken = clock.now }
+            if firstToken == nil {
+                firstToken = clock.now
+                DebugLog.log("LLM: first token \(clock.now - prefillEnd) after the prefill")
+            }
             produced.append(token)
             if stopTokens.contains(token) || token == context.tokenizer.unknownTokenId { break }
             if Task.isCancelled {

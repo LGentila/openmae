@@ -134,6 +134,59 @@ enum MemoryResidency {
                       Double(info.ledger_tag_graphics_footprint_compressed) / 1e9, swapUsed)
     }
 
+    /// Diagnostics: the paging of the whole Mac since it started (`host_statistics64`) and this process's page faults
+    /// (`task_info`), to tell what a computation waited for: the pages macOS brought back from its compressor or from swap
+    /// meanwhile, and what it compressed or wrote to swap to make room; and the memory wired on the whole Mac (the GPU's
+    /// driver wires the memory a computation uses, and lets it go again when the Mac runs short).
+    struct Paging {
+        var decompressions: UInt64 = 0
+        var compressions: UInt64 = 0
+        var swapins: UInt64 = 0
+        var swapouts: UInt64 = 0
+        var faults: Int64 = 0
+        var wired: UInt64 = 0
+
+        /// What happened between `earlier` and this one.
+        func text(since earlier: Paging) -> String {
+            let pageGB = Double(page) / 1e9
+            return String(format: "the Mac decompressed %.2f GB and compressed %.2f GB, read %.2f GB from swap and wrote "
+                          + "%.2f GB to it, its wired memory went from %.2f to %.2f GB; %lld page faults in this process",
+                          Double(decompressions &- earlier.decompressions) * pageGB,
+                          Double(compressions &- earlier.compressions) * pageGB,
+                          Double(swapins &- earlier.swapins) * pageGB, Double(swapouts &- earlier.swapouts) * pageGB,
+                          Double(earlier.wired) * pageGB, Double(wired) * pageGB, faults - earlier.faults)
+        }
+    }
+
+    static var paging: Paging {
+        var result = Paging()
+        var vm = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let host = mach_host_self()
+        if withUnsafeMutablePointer(to: &vm, {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(host, HOST_VM_INFO64, $0, &count)
+            }
+        }) == KERN_SUCCESS {
+            result.decompressions = vm.decompressions
+            result.compressions = vm.compressions
+            result.swapins = vm.swapins
+            result.swapouts = vm.swapouts
+            result.wired = UInt64(vm.wire_count)
+        }
+        mach_port_deallocate(mach_task_self_, host)
+        var events = task_events_info_data_t()
+        var eventsCount = mach_msg_type_number_t(MemoryLayout<task_events_info_data_t>.size / MemoryLayout<integer_t>.size)
+        if withUnsafeMutablePointer(to: &events, {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(eventsCount)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_EVENTS_INFO), $0, &eventsCount)
+            }
+        }) == KERN_SUCCESS {
+            result.faults = Int64(events.faults)
+        }
+        return result
+    }
+
     /// How many of the pages are in RAM, how many macOS compressed or wrote to swap, and how many it counts as used lately
     /// (`mincore`).
     static func count(_ ranges: [Range<UInt>]) -> Count {
