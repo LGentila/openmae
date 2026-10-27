@@ -93,12 +93,13 @@ struct MemoryPage: View {
         }
     }
 
-    /// How many exchanges the journal holds.
+    /// How many exchanges the journal holds so far, said as a count of what she kept: under "Keep for", "5 exchanges
+    /// kept" read as a limit.
     static func kept(_ count: Int) -> Text {
         switch count {
-        case 0: Text("Nothing kept yet.")
-        case 1: Text("One exchange kept.")
-        default: Text("\(Units.count(count)) exchanges kept.")
+        case 0: Text("Maé has kept nothing yet.")
+        case 1: Text("So far, Maé has kept one exchange.")
+        default: Text("So far, Maé has kept \(Units.count(count)) exchanges.")
         }
     }
 

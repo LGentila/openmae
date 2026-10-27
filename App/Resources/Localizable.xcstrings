@@ -61,16 +61,6 @@
         }
       }
     },
-    "%@ exchanges kept.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ échanges gardés."
-          }
-        }
-      }
-    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -2561,6 +2551,16 @@
         }
       }
     },
+    "Maé has kept nothing yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé n’a encore rien gardé."
+          }
+        }
+      }
+    },
     "Maé is answering": {
       "localizations": {
         "fr": {
@@ -3171,16 +3171,6 @@
         }
       }
     },
-    "Nothing kept yet.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rien de gardé pour l’instant."
-          }
-        }
-      }
-    },
     "Nothing readable: an empty text, or broken JSON.": {
       "localizations": {
         "fr": {
@@ -3357,16 +3347,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un seul téléchargement : ensuite, tout fonctionne sans connexion."
-          }
-        }
-      }
-    },
-    "One exchange kept.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Un échange gardé."
           }
         }
       }
@@ -4277,6 +4257,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Veille"
+          }
+        }
+      }
+    },
+    "So far, Maé has kept %@ exchanges.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jusqu’ici, Maé a gardé %@ échanges."
+          }
+        }
+      }
+    },
+    "So far, Maé has kept one exchange.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jusqu’ici, Maé a gardé un échange."
           }
         }
       }
