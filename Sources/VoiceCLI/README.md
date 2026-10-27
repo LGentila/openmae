@@ -258,11 +258,14 @@ sentences left out), then as the model wrote them; `dialogue-bench` counts them 
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/memory-actions-fr.json
 ```
 
-The memory's history search, without a model: recall@4 and MRR by kind of query (the exchange's own words, paraphrases,
-a period, speech-to-text mistakes, traps) on a synthetic corpus, the same with the French sentence embedding macOS
-already has (to decide on searching by meaning), then the search's speed and the database's size at 20,000 exchanges:
+The memory's history search, without a language model: recall@4 and MRR by kind of query (the exchange's own words,
+paraphrases, a period, speech-to-text mistakes, traps) on a synthetic corpus, searched as the app does it, in full text
+and by meaning (the sentence-embedding model the app downloads once the journal is on: `voice-cli download
+--journal-search` fetches it), then the search's speed and the database's size at 20,000 exchanges. `--full-text`
+measures the full-text search alone, as before the search by meaning (also for `journal-bench`):
 
 ```bash
+.build/xcode/Build/Products/Release/voice-cli download --journal-search
 .build/xcode/Build/Products/Release/voice-cli memory-bench
 ```
 

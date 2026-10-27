@@ -387,6 +387,7 @@ private struct RowColors {
         case .speechRecognition: (disc, fill, icon) = (Palette.azureSoft, Palette.azure, .microphone)
         case .voice: (disc, fill, icon) = (Palette.coralSoft, Palette.coral, .speaker)
         case .languageModel: (disc, fill, icon) = (Palette.sunSoft, Palette.sun, .sparkles)
+        case .journalSearch: (disc, fill, icon) = (Palette.sunSoft, Palette.sun, .bulb)  // never a first-launch model
         }
     }
 }

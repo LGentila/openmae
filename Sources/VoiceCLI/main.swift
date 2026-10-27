@@ -34,11 +34,12 @@
 //   voice-cli read-sizes [--from 32] [--to 96] [--runs 5] [--compare-padding]
 //                                                       how long the model takes to read a request's new tokens, by
 //                                                       their number (text only; see ReadSizes.swift)
-//   voice-cli memory-bench [--corpus Tests/Fixtures/memory-fr.json] [--out folder]
+//   voice-cli memory-bench [--corpus Tests/Fixtures/memory-fr.json] [--full-text] [--out folder]
 //                                                       how well the memory's journal finds past exchanges: recall@4
 //                                                       and MRR per kind of query, speed and size on 20,000 exchanges
-//                                                       (no model; see MemoryBench.swift)
+//                                                       (no language model; see MemoryBench.swift)
 //   voice-cli journal-bench [--repeats 3] [--corpus Tests/Fixtures/journal-fr.json] [--request "…"]… [--watch-calls]
+//                           [--full-text]
 //                                                       the journal switched on for the run: does the model search it
 //                                                       when asked about a past conversation, find the exchange and
 //                                                       use it? (text only; see JournalBench.swift)
@@ -268,20 +269,13 @@ struct Options {
     var recordPages: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
-    /// memory-bench, journal-bench: the study of searching the journal by meaning (issue #167): a sentence-embedding
-    /// model's folder (`SentenceEmbedder`), run on the CPU with --embedder-cpu.
+    /// memory-bench, journal-bench: the journal searched in full text only, as before the search by meaning (issue
+    /// #167); else by meaning too, with the app's sentence-embedding model (`ModelCatalog.journalSearch`), or the one
+    /// in the folder --embedder gives.
+    var fullText = false
     var embedder: String?
-    var embedderCPU = false
-    /// journal-bench with --embedder: how the full-text search and the search by meaning are put together
-    /// (`HybridJournal.Fusion`), and what the search by meaning reads: the model's keywords, the user's request, or both.
-    var fusion: String?
-    var meaningOf: String?
-    /// journal-bench: the searches of an earlier report searched again, without the language model.
-    var replay: String?
-    /// memory-bench, journal-bench: each keyword widened with its neighbours in the system's French word embedding.
-    var widenWords = false
-    /// journal-bench --replay: each search's keywords widened by the tier's language model, in a short pass of its own.
-    var widenModel = false
+    /// download: the model of the journal's search by meaning, rather than a tier's models.
+    var journalSearch = false
 
     static func parse(_ args: [String]) -> Options? {
         var o = Options()
@@ -375,13 +369,9 @@ struct Options {
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
             case "--request": o.requests.append(it.next() ?? "")
+            case "--full-text": o.fullText = true
             case "--embedder": o.embedder = it.next()
-            case "--embedder-cpu": o.embedderCPU = true
-            case "--fusion": o.fusion = it.next()
-            case "--meaning-of": o.meaningOf = it.next()
-            case "--replay": o.replay = it.next()
-            case "--widen-words": o.widenWords = true
-            case "--widen-model": o.widenModel = true
+            case "--journal-search": o.journalSearch = true
             case "--hold": o.hold = Double(it.next() ?? "")
             case "--reread": o.reread = true
             case "--min-p": o.minP = Float(it.next() ?? "")
@@ -935,7 +925,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
         usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
                          [--no-speculative] [--silence-ms 500] [--minutes 10] [--new-conversation-every n]
                          [--barge-in mac|iphone] [--out folder] files.wav…
-               voice-cli download [--tier minimum|standard|comfort|max]
+               voice-cli download [--tier minimum|standard|comfort|max | --journal-search]
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]

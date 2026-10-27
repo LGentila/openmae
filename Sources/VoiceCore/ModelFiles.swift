@@ -134,5 +134,13 @@ extension ModelCatalog {
             ModelFile("tokenizer.json", 32169626, "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"),
             ModelFile("tokenizer_config.json", 2740, "080d9e1aff284e2f6043889cd05367966f7c7b80e025fbc0b06745e218158656"),
         ],
+        "lfm2.5-embedding-350m-4bit": [  // mlx-community/LFM2.5-Embedding-350M-4bit @ 3ba909f5
+            ModelFile("config.json", 1629, "210d648665843dcc2110b150f7d31252644ed7ac58e9194dc98f213931af457e"),
+            ModelFile("config_sentence_transformers.json", 555, "a6089803863955ce7b31274bd02ad3a5ddbabc061dfca7ba88460514b91399b0"),
+            ModelFile("model.safetensors", 199527808, "787e837519c7dc70288190ff010749bb7f66a082f7c923ad0728ebc5f0d985ff"),
+            ModelFile("special_tokens_map.json", 434, "742aefe2b7dec496e8caffdba03a75d0c1a9925d53bd3f3e0d388c96b591b6f4"),
+            ModelFile("tokenizer.json", 4733275, "eb89449ddea8caaff6bcefc4993f30da173f3f1c6f30ad96bc964863f692f1cf"),
+            ModelFile("tokenizer_config.json", 92067, "7787607af2d3ed1afe861f2c5da946f63b1ff7ee39460bfe847801ae612069af"),
+        ],
     ]
 }

@@ -138,8 +138,9 @@ team that openmae.com names; the app's own scanner works with any team.
 | Parakeet TDT 0.6B v3 | speech recognition (25 European languages) | CC-BY-4.0 | NVIDIA; CoreML export by FluidInference |
 | Gemma 4 (E2B, E4B, 26B-A4B) | language model | Apache-2.0 | Google; MLX conversions by mlx-community |
 | Pocket TTS | voice ("estelle" in French, "alba" in English) | CC-BY-4.0 (weights), MIT (code) | Kyutai; CoreML export by FluidInference |
+| LFM2.5-Embedding-350M | finds a past conversation asked about in other words (downloaded once the memory's past conversations are on) | LFM Open License 1.0 | Liquid AI; 4-bit MLX conversion by mlx-community |
 | [FluidAudio](https://github.com/FluidInference/FluidAudio) | runs the CoreML models | Apache-2.0 | |
-| [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | runs the language model | MIT | |
+| [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | runs the language model and the sentence-embedding model | MIT | |
 | [swift-transformers](https://github.com/huggingface/swift-transformers) | tokenizers | Apache-2.0 | |
 | Bricolage Grotesque, Figtree | interface typefaces | SIL Open Font License 1.1 | shipped in the app with their license (`App/Resources/Fonts`) |
 

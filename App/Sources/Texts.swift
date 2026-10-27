@@ -45,6 +45,7 @@ enum StateText {
         case .speechRecognition: "Speech recognition"
         case .languageModel: "Language model"
         case .voice: "Voice"
+        case .journalSearch: "Finding past conversations"
         }
     }
 

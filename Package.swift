@@ -7,7 +7,8 @@
 //                     unit-tested. Portable in spirit: nothing here is Apple-specific except the
 //                     NaturalLanguage language guesser.
 //   VoiceEngineApple  the Apple Silicon implementations of the four engine interfaces:
-//                     Silero VAD + Parakeet STT + Pocket TTS on CoreML (FluidAudio), Gemma 4 on MLX.
+//                     Silero VAD + Parakeet STT + Pocket TTS on CoreML (FluidAudio), Gemma 4 on MLX;
+//                     and the memory's journal (SQLite) with its sentence-embedding model (MLX).
 //                     Porting to Windows or Linux means rewriting this target only.
 //   voice-cli         command-line tool: measures the engine without an interface (feeds recorded speech in
 //                     real time, reports latencies per stage, interruption time and memory) and manages the
@@ -50,7 +51,7 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                // The study of searching the journal by meaning (issue #167, `SentenceEmbedder`).
+                // The journal's search by meaning (`SentenceEmbedder`).
                 .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
                 .product(name: "Hub", package: "swift-transformers"),
                 .product(name: "Tokenizers", package: "swift-transformers"),

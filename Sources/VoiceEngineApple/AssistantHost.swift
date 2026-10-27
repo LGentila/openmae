@@ -102,9 +102,16 @@ public actor AssistantHost: AssistantConnection {
     /// What Maé remembers when asked, and the journal of past exchanges, in `AppIdentity.memoryDirectory` (opened on
     /// first use). The provider is always among the tools, last, and offers its tool only while the memory is on.
     private let memoryStore = LazyMemoryStore()
+    /// The same, as the memory's tool and the journal's writer use it: the journal searched by meaning too, once the
+    /// sentence-embedding model is loaded (`configureMeaning`), and each exchange written embedded while Maé listens.
+    private let meaningStore: MeaningMemoryStore
     private let memoryTools: MemoryTools
     /// Writes the exchanges into the journal while it is on.
     private var journalWriter: StoreJournal?
+    /// The journal's sentence-embedding model (`ModelCatalog.journalSearch`), loaded while the journal is on.
+    private var embedder: SentenceEmbedder?
+    /// Its download, then its load, under way.
+    private var meaningSetUp: Task<Void, Never>?
     /// Forgets the exchanges older than the retention, at start-up and once a day.
     private var purge: Task<Void, Never>?
     /// The connected tools (MCP) that are on: with the actions on or off, like the web search.
@@ -121,7 +128,8 @@ public actor AssistantHost: AssistantConnection {
         calendarTools = CalendarTools(testCollection: actionsTestCollection)
         weatherTools = WeatherTools(here: here)
         travelTools = TravelTimeTools(here: here, estimator: MapKitTravel())
-        memoryTools = MemoryTools(store: memoryStore)
+        meaningStore = MeaningMemoryStore(store: memoryStore)
+        memoryTools = MemoryTools(store: meaningStore)
         agentTools = agentsTestFolder.map {
             AgentTools(store: TaskStore(folder: $0.appending(path: "Tasks", directoryHint: .isDirectory)), workspace: $0)
         } ?? AgentTools()
@@ -176,6 +184,10 @@ public actor AssistantHost: AssistantConnection {
         await loop?.value  // a start-up stopped at its next step (`start` makes no pipeline run once quitting)
         await startUp?.value  // its language model's load and warm-up use the GPU until then
         let commandOver = clock.now
+        // The journal's embedding model too: its load, and the exchange or search it may be embedding on the GPU.
+        meaningSetUp?.cancel()
+        await meaningSetUp?.value
+        await meaningStore.windDown()
         await MLXChatModel.windDownAll()
         DebugLog.log("quit: the engine wound down in \(clock.now - start) (the pipeline stopped in "
             + "\(pipelineStopped - start), the command or start-up under way was over \(commandOver - pipelineStopped) "
@@ -423,6 +435,10 @@ public actor AssistantHost: AssistantConnection {
             return
         }
         stage = .running
+        // The journal's search by meaning: its model downloaded or loaded now, while Maé listens; the exchanges waiting for
+        // their vector embedded while she does.
+        await meaningStore.allowIndexing(pipelineState == .listening)
+        await configureMeaning()
         let emit = emit
         tasks = [
             Task { for await event in pipeline.events { await self.forward(event) } },
@@ -514,6 +530,10 @@ public actor AssistantHost: AssistantConnection {
     /// Stops everything, before another tier is loaded or the models are deleted.
     private func stopEngine() async {
         if pipeline != nil { conversationDropped = true }
+        // A download of the journal's model stops: another tier's download may follow, and the end of each one clears
+        // the partial files of all (`ModelDownloader`). It starts again with the engine, and so do the embeddings.
+        meaningSetUp?.cancel()
+        await meaningStore.allowIndexing(false)
         let running = tasks
         tasks = []
         running.forEach { $0.cancel() }
@@ -625,6 +645,7 @@ public actor AssistantHost: AssistantConnection {
         case .idle, .setup:
             break
         }
+        await dropEmbedder()  // its model goes too: downloaded again once the journal is on
         do {
             try store.deleteAll()
             DebugLog.log("models deleted")
@@ -640,6 +661,7 @@ public actor AssistantHost: AssistantConnection {
     /// those the engine has loaded.
     private var packsInUse: Set<String> {
         Set(ModelCatalog.packs(for: tier).map(\.id)).union(loadedPacks)
+            .union(embedder != nil || meaningSetUp != nil ? [ModelCatalog.journalSearch.id] : [])
     }
 
     /// Settings › Advanced: one model, by the name of its folder. Only a model of the catalog, never one in use, and not
@@ -800,7 +822,7 @@ public actor AssistantHost: AssistantConnection {
         let journalOn = memory.journalOn(on: tier)
         let changed = await memoryTools.configure(enabled: memory.enabled, journal: journalOn)
         if journalOn {
-            let writer = journalWriter ?? StoreJournal(store: memoryStore)
+            let writer = journalWriter ?? StoreJournal(store: meaningStore)
             journalWriter = writer
             await pipeline?.setJournal(writer)
             schedulePurge()
@@ -809,7 +831,74 @@ public actor AssistantHost: AssistantConnection {
             purge?.cancel()
             purge = nil
         }
+        await configureMeaning()
         return changed
+    }
+
+    /// The journal's search by meaning, as the settings say: with the journal on and the engine running, its model is
+    /// downloaded if this Mac does not have it yet (204 MB, in the background), then loaded (0.4 s, 199 MB); with the
+    /// journal off, it is unloaded. Until it is loaded, the journal is searched in full text only. A download that fails
+    /// (no network) is tried again when the engine starts again or the memory's settings change.
+    private func configureMeaning() async {
+        guard settings.memory.journalOn(on: tier) else {
+            meaningSetUp?.cancel()
+            await dropEmbedder()
+            return
+        }
+        guard stage == .running, !quitting, embedder == nil, meaningSetUp == nil else { return }
+        let pack = ModelCatalog.journalSearch
+        let store = self.store
+        meaningSetUp = Task { [weak self] in
+            let missing = store.bytesToDownload([pack])
+            if !store.missingFiles(pack).isEmpty {
+                DebugLog.log("memory: downloading the model of the search by meaning (\(missing) bytes)")
+                do {
+                    try await ModelDownloader(store: store).download([pack]) { _ in }
+                } catch {
+                    DebugLog.log("memory: the model of the search by meaning was not downloaded: \(error)")
+                    await self?.meaningSetUpEnded(nil)
+                    return
+                }
+            }
+            do {
+                try Task.checkCancellation()
+                let start = ContinuousClock.now
+                let embedder = try await SentenceEmbedder.load(directory: store.folder(pack))
+                DebugLog.log("memory: search by meaning loaded in \(ContinuousClock.now - start), "
+                    + "\(embedder.weightBytes / 1_000_000) MB of weights")
+                await self?.meaningSetUpEnded(embedder)
+            } catch {
+                DebugLog.log("memory: the model of the search by meaning was not loaded: \(error)")
+                await self?.meaningSetUpEnded(nil)
+            }
+        }
+        reportStorage()
+    }
+
+    /// The model's download and load are over: it searches the journal from now on, unless the journal was switched
+    /// off meanwhile.
+    private func meaningSetUpEnded(_ loaded: SentenceEmbedder?) async {
+        meaningSetUp = nil
+        defer { reportStorage() }
+        guard let loaded else { return }
+        guard settings.memory.journalOn(on: tier), !quitting else {
+            MLXChatModel.releaseCachedMemory()  // the GPU memory its weights took, given back
+            return
+        }
+        embedder = loaded
+        await meaningStore.setEmbedder(loaded)
+        await meaningStore.allowIndexing(stage == .running && pipelineState == .listening)
+        DebugLog.log("memory: the journal is searched by meaning too")
+    }
+
+    /// The journal is searched in full text only, and the embedding model's memory given back.
+    private func dropEmbedder() async {
+        guard embedder != nil else { return }
+        await meaningStore.setEmbedder(nil)
+        embedder = nil
+        MLXChatModel.releaseCachedMemory()
+        DebugLog.log("memory: search by meaning off")
+        reportStorage()
     }
 
     /// Forgets the exchanges older than the retention: now, then once a day; never during an exchange (it waits for
@@ -1158,6 +1247,8 @@ public actor AssistantHost: AssistantConnection {
             adjustOtherApps()
             keepAwakeDuringExchange(state != .listening)
             emit.yield(.state(state))
+            // The journal's exchanges are embedded on the GPU only while nobody speaks and Maé neither thinks nor speaks.
+            await meaningStore.allowIndexing(state == .listening)
         case .partialTranscript(let text): emit.yield(.partialTranscript(text))
         case .userTranscript(let text, let language):
             DebugLog.log("user [\(language.rawValue)]: \(text)")

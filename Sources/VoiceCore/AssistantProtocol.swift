@@ -139,18 +139,17 @@ public struct MemorySettings: Sendable, Codable, Equatable {
     /// two months before (« redonne-moi la recette de spritz que tu m'avais donnée »). Settings saved with the first
     /// default keep it.
     public var retention = MemoryRetention.oneYear
-    /// Searching the journal by meaning too (embeddings): off, and not built while the plain search is enough.
-    public var semanticSearch = false
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case enabled, journal, retention, semanticSearch }
+    // Earlier versions also saved "semanticSearch", always false: the journal is now searched by meaning whenever it is
+    // on (`MeaningMemoryStore`), and the key is ignored.
+    private enum CodingKeys: String, CodingKey { case enabled, journal, retention }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         journal = try c.decodeIfPresent(Bool.self, forKey: .journal) ?? false
         retention = (try? c.decodeIfPresent(MemoryRetention.self, forKey: .retention)) ?? .oneYear
-        semanticSearch = try c.decodeIfPresent(Bool.self, forKey: .semanticSearch) ?? false
     }
 
     /// The journal is written and searched with this tier's model: offered on it, and the memory and the journal both

@@ -1601,6 +1601,16 @@
         }
       }
     },
+    "Finding past conversations": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrouver les conversations passées"
+          }
+        }
+      }
+    },
     "Finish": {
       "localizations": {
         "fr": {

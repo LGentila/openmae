@@ -932,8 +932,11 @@ public actor MemoryTools: ToolProvider {
                                    forModel: ["statut": "retenu", "entree": .string(entry)],
                                    undo: UndoToken(provider: identifier, id: entry))
             case .search(let text, let period, let words):
+                // The user's words too, for the search by meaning (`MeaningMemoryStore`): they often say the exchange's
+                // topic better than the keywords the model wrote.
                 let hits = try await store.searchJournal(JournalQuery(text: text, from: period?.start, to: period?.end,
-                                                                      limit: 4, now: context.now))
+                                                                      limit: 4, now: context.now,
+                                                                      request: context.userSaid.first))
                 DebugLog.log("memory: \(hits.count) exchanges found")
                 var asked: [String: JSONValue] = [:]
                 if let text { asked["requete"] = .string(text) }

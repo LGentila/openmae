@@ -27,6 +27,8 @@ public struct ModelFile: Sendable, Equatable, Codable {
 /// What a model does in the pipeline.
 public enum ModelRole: String, Sendable, Codable, CaseIterable {
     case speechRecognition, languageModel, voice
+    /// Searching the memory's journal by meaning (`MeaningMemoryStore`): only with the journal on.
+    case journalSearch
 }
 
 /// A downloadable model: some files of one Hugging Face repository, at one revision, stored in
@@ -113,7 +115,18 @@ public enum ModelCatalog {
         return [speechRecognition, voice, languageModel]
     }
 
-    public static let all = [speechRecognition, voice, gemmaE2B, gemmaE4B, gemma26B, gemma26BQAT, gemma26B8bit]
+    /// Searching the memory's journal by meaning, every tier (issue #167): Liquid AI's LFM2.5-Embedding-350M (a
+    /// sentence-embedding model, 1,024 dimensions), its 4-bit MLX conversion by mlx-community; only the files it needs,
+    /// 204 MB. Not a tier's pack: downloaded once the journal is on (`AssistantHost`), deleted from Settings › Advanced.
+    /// Chosen among five multilingual models (memory-bench's paraphrases found among the 4 excerpts: 75 % alone, against
+    /// 31 to 62 % for the others). Its license, LFM Open License 1.0, allows commercial use under 10 million dollars of
+    /// yearly revenue; it is not an open-source license.
+    public static let journalSearch = pack(
+        "lfm2.5-embedding-350m-4bit", .journalSearch, "LFM2.5 Embedding 350M", "mlx-community/LFM2.5-Embedding-350M-4bit",
+        "3ba909f5f92375b1a370bf66f7a868c5f4e06c36", "LFM Open License 1.0")
+
+    public static let all = [speechRecognition, voice, gemmaE2B, gemmaE4B, gemma26B, gemma26BQAT, gemma26B8bit,
+                             journalSearch]
 
     private static func pack(
         _ id: String, _ role: ModelRole, _ displayName: String, _ repository: String, _ revision: String,

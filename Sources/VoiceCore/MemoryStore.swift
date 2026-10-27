@@ -9,7 +9,8 @@ import Foundation
 // The journal (`journal.sqlite`, `SQLiteMemoryStore` in VoiceEngineApple) keeps one row per exchange the pipeline
 // processed: the user's words (without the date line or the English hint), what Maé answered (what the user heard when
 // cut off), the language, whether it was cut off, and whether the turn used something from outside (a web search, an
-// agent). Searched with full-text search, ranked by relevance with a light bonus for recent exchanges.
+// agent). Searched with full-text search, ranked by relevance with a light bonus for recent exchanges, and by meaning
+// too once its sentence-embedding model is there (`MeaningMemoryStore`): a vector per exchange, kept beside it.
 //
 // Everything stays on this Mac: no network, never in iCloud (`AppIdentity.memoryDirectory`).
 
@@ -55,13 +56,19 @@ public struct JournalQuery: Sendable, Equatable {
     public var limit: Int
     /// For the bonus of recent exchanges.
     public var now: Date
+    /// What the user said when they asked (their words, not the model's keywords): the search by meaning reads it too
+    /// (`MeaningMemoryStore`). nil: the keywords alone.
+    public var request: String?
 
-    public init(text: String?, from: Date? = nil, to: Date? = nil, limit: Int = 4, now: Date = Date()) {
+    public init(text: String?, from: Date? = nil, to: Date? = nil, limit: Int = 4, now: Date = Date(),
+                request: String? = nil)
+    {
         self.text = text
         self.from = from
         self.to = to
         self.limit = limit
         self.now = now
+        self.request = request
     }
 }
 
@@ -96,6 +103,19 @@ public protocol MemoryStore: Sendable {
     /// Deletes these exchanges; returns how many.
     @discardableResult
     func deleteJournal(ids: [Int64]) async throws -> Int
+}
+
+/// A store that also keeps, for searching the journal by meaning (`MeaningMemoryStore`), one vector per exchange and
+/// sentence-embedding model (`SentenceEmbedding.model`), erased with its exchange.
+public protocol JournalVectorStore: MemoryStore {
+    /// The vectors of `model` of the exchanges between these dates (nil: no bound), by exchange.
+    func journalVectors(model: String, from: Date?, to: Date?) async throws -> [Int64: [Float]]
+    /// Keeps an exchange's vector, in place of one of another model; nothing when the exchange is no longer there.
+    func saveJournalVector(_ vector: [Float], id: Int64, model: String) async throws
+    /// Exchanges without a vector of `model` yet, the latest first, `limit` at most.
+    func journalWithoutVector(model: String, limit: Int) async throws -> [JournalEntry]
+    /// These exchanges, those still there, in any order.
+    func journalEntries(ids: [Int64]) async throws -> [JournalEntry]
 }
 
 extension MemoryStore {
@@ -287,11 +307,12 @@ public enum MemoryText {
 
 /// The memory kept in this process only: for the tests and voice-cli (not the CLI's `MemoryCalendar`, which keeps
 /// events and reminders). Searches like the app's store: any of the query's words, as prefixes, ranked by BM25 with the
-/// same light bonus for recent exchanges.
-public actor TransientMemoryStore: MemoryStore {
+/// same light bonus for recent exchanges; keeps the exchanges' vectors as it does.
+public actor TransientMemoryStore: JournalVectorStore {
     private var sheetEntries: [String]
     private var rows: [JournalEntry] = []
     private var nextID: Int64 = 1
+    private var vectors: [Int64: (model: String, vector: [Float])] = [:]
 
     public init(sheet: [String] = []) {
         sheetEntries = sheet
@@ -357,6 +378,7 @@ public actor TransientMemoryStore: MemoryStore {
     public func deleteJournal(from: Date?, to: Date?) -> Int {
         let before = rows.count
         rows.removeAll { Self.within($0.date, from: from, to: to) }
+        dropVectorsOfErasedExchanges()
         return before - rows.count
     }
 
@@ -365,8 +387,41 @@ public actor TransientMemoryStore: MemoryStore {
         let before = rows.count
         let ids = Set(ids)
         rows.removeAll { $0.id.map(ids.contains) ?? false }
+        dropVectorsOfErasedExchanges()
         return before - rows.count
     }
+
+    private func dropVectorsOfErasedExchanges() {
+        let kept = Set(rows.compactMap(\.id))
+        vectors = vectors.filter { kept.contains($0.key) }
+    }
+
+    // MARK: Vectors
+
+    public func journalVectors(model: String, from: Date?, to: Date?) -> [Int64: [Float]] {
+        var found: [Int64: [Float]] = [:]
+        for row in rows where Self.within(row.date, from: from, to: to) {
+            if let id = row.id, let kept = vectors[id], kept.model == model { found[id] = kept.vector }
+        }
+        return found
+    }
+
+    public func saveJournalVector(_ vector: [Float], id: Int64, model: String) {
+        guard rows.contains(where: { $0.id == id }) else { return }
+        vectors[id] = (model, vector)
+    }
+
+    public func journalWithoutVector(model: String, limit: Int) -> [JournalEntry] {
+        Array(rows.reversed().filter { row in row.id.map { vectors[$0]?.model != model } ?? false }.prefix(limit))
+    }
+
+    public func journalEntries(ids: [Int64]) -> [JournalEntry] {
+        let ids = Set(ids)
+        return rows.filter { $0.id.map(ids.contains) ?? false }
+    }
+
+    /// How many exchanges have a vector of `model` (the tests).
+    public func vectorCount(model: String) -> Int { vectors.values.filter { $0.model == model }.count }
 }
 
 /// What the stores share for the journal's search.

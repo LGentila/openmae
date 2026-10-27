@@ -160,12 +160,13 @@ private struct ModelItem: View {
     }
 
     /// The colour and icon of the first-launch screen's rows: blue for speech recognition, coral for the voice, sun for
-    /// the language model.
+    /// the language model; the memory's icon for the model that finds past conversations.
     private static func disc(_ role: ModelRole) -> FamilyDisc {
         switch role {
         case .speechRecognition: FamilyDisc(icon: .microphone, color: Palette.azureSoft)
         case .voice: FamilyDisc(icon: .speaker, color: Palette.coralSoft)
         case .languageModel: FamilyDisc(icon: .sparkles, color: Palette.sunSoft)
+        case .journalSearch: FamilyDisc(icon: .bulb, color: Palette.sunSoft)
         }
     }
 }

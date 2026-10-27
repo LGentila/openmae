@@ -5,6 +5,7 @@ import VoiceCore
 // Model commands of voice-cli:
 //
 //   voice-cli download [--tier minimum|standard|comfort|max]   downloads a tier's models, like the app
+//   voice-cli download --journal-search                         the model of the journal's search by meaning
 //   voice-cli verify [--tier …|--all]                           re-reads the models and checks every SHA-256
 //   voice-cli catalog                                           regenerates Sources/VoiceCore/ModelFiles.swift
 
@@ -19,10 +20,16 @@ func tierOption(_ o: Options) throws -> HardwareTier {
 }
 
 func runDownload(_ o: Options) async throws {
-    let tier = try tierOption(o)
     let store = ModelStore()
-    let packs = ModelCatalog.packs(for: tier)
-    print("tier “\(tier.rawValue)”: \(packs.map(\.displayName).joined(separator: ", "))")
+    let packs: [ModelPack]
+    if o.journalSearch {
+        packs = [ModelCatalog.journalSearch]
+        print("the journal's search by meaning: \(ModelCatalog.journalSearch.displayName)")
+    } else {
+        let tier = try tierOption(o)
+        packs = ModelCatalog.packs(for: tier)
+        print("tier “\(tier.rawValue)”: \(packs.map(\.displayName).joined(separator: ", "))")
+    }
     print("folder: \(store.root.path)")
     print("to download: \(gb(store.bytesToDownload(packs))) · free space: \(gb(store.availableBytes()))")
     let clock = ContinuousClock()
@@ -88,7 +95,13 @@ private let selections: [String: Selection] = {
     }
     // MLX language models: the whole repository except its documentation.
     let mlx = Selection(listings: [("", true)]) { path in path != "README.md" && path != ".gitattributes" }
-    var selections = ["parakeet-tdt-0.6b-v3": parakeet, "pocket-tts": pocket]
+    // The sentence-embedding model of the journal's search: what MLXEmbedders loads (weights, configuration, the
+    // prompts it was trained with, tokenizer), not the repository's Python code, chat template, license or documentation.
+    let embedder = Selection(listings: [("", false)]) { path in
+        ["config.json", "config_sentence_transformers.json", "model.safetensors", "special_tokens_map.json",
+         "tokenizer.json", "tokenizer_config.json"].contains(path)
+    }
+    var selections = ["parakeet-tdt-0.6b-v3": parakeet, "pocket-tts": pocket, ModelCatalog.journalSearch.id: embedder]
     for pack in ModelCatalog.all where pack.role == .languageModel { selections[pack.id] = mlx }
     return selections
 }()
