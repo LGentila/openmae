@@ -269,16 +269,25 @@ struct MemoryTests {
         #expect(try await store.countJournal(from: nil, to: nil) == 0)
     }
 
-    /// Only the user's own request erases everything: not « j'oublie tout », nor a period of past conversations.
+    /// Only the user's own request erases everything: not « j'oublie tout », nor a period of past conversations, nor
+    /// everything on one topic (one entry).
     @Test func erasingEverythingNeedsTheUserToAskForIt() async throws {
         for asked in ["Efface toute ta mémoire.", "Oublie tout ce que tu sais sur moi.", "Remets ta mémoire à zéro, "
-            + "s'il te plaît.", "Vide ta mémoire.", "Oublie tout.", "Forget everything you know about me."]
+            + "s'il te plaît.", "Vide ta mémoire.", "Oublie tout.", "Forget everything you know about me.",
+            "Maé, efface complètement ta mémoire, s'il te plaît.", "Oublie tout ce que tu as retenu à mon sujet.",
+            "Efface ta mémoire tout de suite.", "Il faut que tu effaces ta mémoire.", "Oublie tout ce que je t'ai dit."]
         {
             #expect(MemoryCatalog.asksToEraseEverything(asked), "\(asked)")
         }
         for said in ["J'oublie tout en ce moment, c'est terrible.", "Efface tout ce qu'on s'est raconté hier soir.",
                      "Oublie tout ce dont on a parlé la semaine dernière.", "Tu as une bonne mémoire, toi ?",
-                     "Supprime de ta mémoire ce que je t'ai dit avant-hier."]
+                     "Supprime de ta mémoire ce que je t'ai dit avant-hier.",
+                     // One topic, « tout » or the memory named all the same.
+                     "Oublie tout ce que je t'ai dit sur le tennis.", "Efface tout ce que je t'ai dit sur mon chien.",
+                     "Oublie tout ce que tu sais sur Margaux.", "Oublie tout ce que tu sais sur elle.",
+                     "Efface de ta mémoire l'histoire de la Zoé, je l'ai vendue.", "Efface ça de ta mémoire.",
+                     "Efface tout ce que tu sais au sujet de Bastien.", "Forget everything I told you about my dog.",
+                     "Efface toute ta mémoire sauf mon prénom.", "Oublie tout de suite ce que je t'ai dit."]
         {
             #expect(!MemoryCatalog.asksToEraseEverything(said), "\(said)")
         }
@@ -288,6 +297,11 @@ struct MemoryTests {
         let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "effacer_memoire"])
         let reply = await runner.handle(call, context: context(["J'oublie tout en ce moment, c'est terrible."]))
         #expect(!reply.waitsForYes && reply.retryable)
+        #expect(try await store.sheet().count == 1)
+        // « tout » on one topic, written as everything (« oublier » with « tout » is `effacer_memoire`): refused too.
+        let all = ToolCall(name: MemoryCatalog.name, arguments: ["action": "oublier", "reference": "tout"])
+        let topic = await runner.handle(all, context: context(["Oublie tout ce que je t'ai dit sur le tennis."]))
+        #expect(!topic.waitsForYes && topic.retryable)
         #expect(try await store.sheet().count == 1)
     }
 

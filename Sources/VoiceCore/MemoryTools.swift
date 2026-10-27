@@ -150,31 +150,88 @@ public enum MemoryCatalog {
     /// Whether the user's sentence asks to erase the whole memory: a word that erases, then the memory itself (« efface
     /// toute ta mémoire », « remets ta mémoire à zéro »), everything Maé knows or keeps of them (« oublie tout ce que tu
     /// sais sur moi »), or « tout » alone (« oublie tout ») — and no period (« efface tout ce qu'on s'est dit hier
-    /// soir » is past conversations, not the memory). The protection against a model that takes « j'oublie tout en ce
-    /// moment » for an order, or obeys a web page or an agent's report.
+    /// soir » is past conversations, not the memory), nor a topic that narrows it (« oublie tout ce que je t'ai dit sur
+    /// le tennis », « tout ce que tu sais sur elle », « efface ça de ta mémoire » are one entry, `oublier`). The
+    /// protection against a model that takes « j'oublie tout en ce moment » for an order, a topic for the whole memory,
+    /// or obeys a web page or an agent's report.
     public static func asksToEraseEverything(_ sentence: String) -> Bool {
-        let words = MemoryText.words(sentence)
-        let erasing = ["oubli", "effac", "supprim", "vide", "vider", "reinitialis", "remet", "zero", "forget", "eras",
-                       "delet", "wipe", "clear", "reset"]
-        guard words.contains(where: { word in erasing.contains { word.hasPrefix($0) } }) else { return false }
-        let periods: Set<String> = [
+        let words = EraseRequest.words(sentence)
+        guard words.contains(where: EraseRequest.erases), !words.contains(where: EraseRequest.periods.contains) else {
+            return false
+        }
+        let everything = words.contains(where: EraseRequest.all.contains)
+        if words.contains("memoire") || words.contains("memory")
+            || everything && words.contains(where: EraseRequest.knows.contains)
+        {
+            return !words.contains(where: EraseRequest.narrows)
+        }
+        // Nothing else said: « Oublie tout. », « Efface tout, s'il te plaît. »
+        return everything && words.allSatisfy { word in
+            EraseRequest.all.contains(word) || EraseRequest.polite.contains(word) || EraseRequest.erases(word)
+        }
+    }
+
+    /// The words of a request to erase the whole memory (`asksToEraseEverything`), folded.
+    private enum EraseRequest {
+        static let erasing = ["oubli", "effac", "supprim", "vide", "vider", "reinitialis", "remet", "zero", "forget",
+                              "eras", "delet", "wipe", "clear", "reset"]
+        static let periods: Set<String> = [
             "hier", "aujourd", "semaine", "mois", "annee", "soir", "soiree", "matin", "nuit", "lundi", "mardi",
             "mercredi", "jeudi", "vendredi", "samedi", "dimanche", "janvier", "fevrier", "mars", "avril", "mai", "juin",
             "juillet", "aout", "septembre", "octobre", "novembre", "decembre", "yesterday", "today", "tonight", "week",
             "month", "year", "morning", "evening", "night",
         ]
-        guard !words.contains(where: periods.contains) else { return false }
-        if words.contains("memoire") || words.contains("memory") { return true }
-        let all: Set<String> = ["tout", "toute", "tous", "toutes", "everything", "all"]
-        guard words.contains(where: all.contains) else { return false }
-        let knows: Set<String> = ["sais", "savais", "retiens", "retenu", "retenir", "dit", "demande", "know", "remember",
-                                  "told"]
-        if words.contains(where: knows.contains) { return true }
-        // Nothing else said: « Oublie tout. », « Efface tout, s'il te plaît. »
-        let polite: Set<String> = ["s", "il", "te", "plait", "stp", "svp", "please", "bon", "allez", "maintenant", "now",
-                                   "de", "ta", "ton", "your", "my", "moi", "me", "sur", "about"]
-        return words.allSatisfy { word in
-            all.contains(word) || polite.contains(word) || erasing.contains { word.hasPrefix($0) }
+        static let all: Set<String> = ["tout", "toute", "tous", "toutes", "everything", "all"]
+        /// What Maé knows or keeps of the user: « tout ce que tu sais », « tout ce que je t'ai dit ».
+        static let knows: Set<String> = ["sais", "savais", "retiens", "retenu", "retenir", "dit", "demande", "know",
+                                         "remember", "told"]
+        /// The only other words of « tout » alone: « Efface tout, s'il te plaît. »
+        static let polite: Set<String> = ["s", "il", "te", "plait", "stp", "svp", "please", "bon", "allez", "maintenant",
+                                          "now", "de", "ta", "ton", "your", "my", "moi", "me", "sur", "about"]
+        /// Set phrases, taken out before reading the words: theirs would point to someone (« s'il te plaît », « il
+        /// faut »), or name a topic (« à mon sujet » is the user), and « tout de suite » is no « tout ».
+        static let phrases = ["s il te plait", "s il vous plait", "il faut", "il faudrait", "tout de suite",
+                              "une bonne fois pour toutes", "une fois pour toutes", "a mon sujet", "me concernant",
+                              "a propos de moi"]
+        /// Small words that point to someone or something other than the user, or to a part of the memory: « tout ce
+        /// que tu sais sur elle », « tout ce qu'il t'a dit », « efface ça de ta mémoire », « cette info », « une
+        /// entrée ». Not « ce » (« tout ce que… »).
+        static let pointing: Set<String> = [
+            "lui", "elle", "elles", "il", "ils", "eux", "ca", "cela", "ceci", "celui", "celle", "celles", "ceux", "ces",
+            "cet", "cette", "un", "une", "leur", "leurs", "she", "him", "her", "his", "hers", "it", "its", "they", "them",
+            "their", "this", "these", "those", "that",
+        ]
+        /// The words, besides the small ones, the erasing, « tout » and what Maé knows, that a request to erase
+        /// everything may hold: asking, insisting, calling Maé, hesitating, starting afresh, what she was told or
+        /// kept, and the memory's other names.
+        static let request: Set<String> = [
+            "aimerais", "souhaite", "souhaiterais", "faudrait", "vas", "va", "fais", "completement", "entierement",
+            "totalement", "absolument", "vraiment", "definitivement", "integralement", "simplement", "juste",
+            "maintenant", "immediatement", "directement", "entier", "neuf", "meme", "bon", "allez", "ok", "okay", "he",
+            "hey", "mae", "accord", "ouais", "euh", "heu", "hum", "ben", "bah", "enfin", "voila", "ah", "oh", "eh",
+            "repartir", "recommencer", "recommence", "raconte", "appris", "connais", "garde", "gardes", "enregistre",
+            "enregistres", "memoire", "souvenirs", "entree", "entrees", "info", "infos", "information", "informations",
+            "donnees", "contenu", "want", "like", "need", "completely", "entirely", "totally", "fully", "right", "away",
+            "now", "well", "um", "uh", "memory", "memories", "knew", "learned", "stored", "kept", "saved", "entries",
+            "data", "content",
+        ]
+
+        static func erases(_ word: String) -> Bool { erasing.contains { word.hasPrefix($0) } }
+
+        /// The sentence's folded words, set phrases taken out.
+        static func words(_ sentence: String) -> [String] {
+            var text = " " + MemoryText.words(sentence).joined(separator: " ") + " "
+            for phrase in phrases {
+                text = text.replacingOccurrences(of: " \(phrase) ", with: " ")
+            }
+            return text.split(separator: " ").map(String.init)
+        }
+
+        /// Whether a word narrows the request to a topic: « tennis », « Margaux », « elle », « ça », a number.
+        static func narrows(_ word: String) -> Bool {
+            if pointing.contains(word) { return true }
+            if MemoryText.stopWords.contains(word) { return false }
+            return !(erases(word) || all.contains(word) || knows.contains(word) || request.contains(word))
         }
     }
 
