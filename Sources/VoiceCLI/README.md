@@ -134,11 +134,15 @@ leaves it out, saying nothing of it (the report lists them, with that chance; `-
 request). The answers to the requests for an action are listed in full, to check that none says it was done or will be.
 `--addendum <file>` replaces the part said in place of the actions, and `--agents-addendum <file>` the delegation's, to
 try another wording without rebuilding. With a corpus that offers no tool at all (`Tests/Fixtures/actions-fr.json`),
-`--no-actions` gives the prompt and the messages of the app with everything off: nothing in place of the actions' part
-(unless `--addendum` gives one), and no date line:
+`--no-actions` gives the prompt and the messages of the app with everything off: in place of the actions' part, what the
+model is told then (that the actions are off and what it therefore does not have, that a question or a remark is
+answered as usual, and that it says it cannot do an action asked for), which `--addendum` replaces too, and no date
+line. A request whose earlier exchanges hold a call, which the app cannot have then, is left out of the score and its
+answer listed apart:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/agents-fr.json --no-actions
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/actions-fr.json --no-actions
 ```
 
 Searching the internet: requests that need a search, requests that do not (traps included), research for an agent,

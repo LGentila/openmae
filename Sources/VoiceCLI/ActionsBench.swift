@@ -49,8 +49,8 @@
 // exchanges (the shape of a case's "before", plus an optional "dateLine"; {"system": "…"} for a note from the app between
 // them).
 // --addendum <file> replaces the actions part of the system prompt (with --no-actions, what the prompt says in its place:
-// that the actions are off, and what the date line is), --web-addendum <file> the web search's, --agents-addendum <file>
-// the delegation's (experiments without rebuilding).
+// that the actions are off, and what the date line is; with no tool at all, what the model is told then),
+// --web-addendum <file> the web search's, --agents-addendum <file> the delegation's (experiments without rebuilding).
 // --no-actions leaves the actions out (their tools, their part of the prompt and their example exchanges), as the app
 // has Claude Code, the web search or the built-in sources on their own when the actions are off: the prompt then says
 // that the actions are off and what the model therefore does not have (`ActionCatalog.offRule`), and what the date
@@ -60,7 +60,10 @@
 // (`AgentCatalog.ignoredAfterWords`: the model gave a call little chance at its first token, which the report gives for
 // every call written after words; --watch-calls gives it for every request). With no tool at all (--no-actions with a
 // corpus that offers none, as Tests/Fixtures/actions-fr.json), the prompt and the messages are the app's with everything
-// off: nothing in place of the actions' part (unless --addendum gives one), and no date line.
+// off: in place of the actions' part, what the model is told then (`ActionCatalog.partWithoutTools`: that the actions are
+// off and what it therefore does not have, and that it says so when asked for one), and no date line; a request whose
+// earlier exchanges hold a call, which the app cannot have then (the tools come or go with a new conversation), is left
+// out of the score, and its answer listed apart.
 // A case's earlier exchanges ("before") may hold a search: its call, and what it found ("found", in the "recorded"
 // shape), which the model reads as the app gives it. A search made after one of them is checked for keywords of its own.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
@@ -269,6 +272,9 @@ private struct CaseResult: Encodable {
     var namesASite: Bool?
     /// The request needs the memory's journal, which is not offered: left out of the score.
     var needsJournal: Bool?
+    /// With no tool at all, the case's earlier exchanges hold a call, which the app cannot have then (the tools come or go
+    /// with a new conversation): left out of the score.
+    var callBeforeWithoutTools: Bool?
     /// How many tokens the results take in the model's memory.
     var resultTokens: Int?
     /// Results → first words of the summary, and its end; with --searxng, the search itself.
@@ -354,12 +360,14 @@ func runActionsBench(_ o: Options) async throws {
     var conversation = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     // As `VoicePipeline` puts it together: the actions' part, or without them that they are off and what the date line
-    // is; then the tools'. --addendum replaces either. With no tool at all (the actions off, and no corpus or option that
-    // offers one), as the app has it with everything off: none of it, and no date line in the messages, unless --addendum
-    // gives a part.
+    // is; then the tools'. With no tool at all (the actions off, and no corpus or option that offers one), as the app has
+    // it with everything off: what the model is told then (`ActionCatalog.partWithoutTools`), and no date line in the
+    // messages. --addendum replaces any of them.
     let actionsPart: String
     if let file = o.addendum {
         actionsPart = try String(contentsOfFile: file, encoding: .utf8)
+    } else if tools.isEmpty {
+        actionsPart = ActionCatalog.partWithoutTools
     } else {
         actionsPart = actions ? ActionCatalog.promptAddendum(exampleCall: exampleCall) : ActionCatalog.partWithoutActions
     }
@@ -368,7 +376,7 @@ func runActionsBench(_ o: Options) async throws {
     let agentsPart = try o.agentsAddendum.map {
         try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
     } ?? (actions ? AgentCatalog.promptAddendum : AgentCatalog.promptAddendumWithoutActions(exampleCall: delegationCall))
-    conversation.systemAddenda = (tools.isEmpty && o.addendum == nil ? [] : [actionsPart]) + (agents ? [agentsPart] : [])
+    conversation.systemAddenda = [actionsPart] + (agents ? [agentsPart] : [])
         + (web ? [try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
             ?? WebSearchCatalog.promptAddendum] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
@@ -502,6 +510,7 @@ func runActionsBench(_ o: Options) async throws {
         result.callChanceAtStart = startChance
         result.peakGB = await model.lastRequestPeakGB
         if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
+        if tools.isEmpty, before.contains(where: { $0.call != nil }) { result.callBeforeWithoutTools = true }
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
         if !earlierSearches.isEmpty { result.earlierSearches = earlierSearches }
@@ -1333,9 +1342,11 @@ private func matches(_ resolved: Resolved, _ expected: Corpus.Expected, _ contex
 }
 
 private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, options o: Options) {
-    // Without the memory's journal, the requests that need it are left out of the score, and reported apart.
+    // Without the memory's journal, the requests that need it are left out of the score, and reported apart; with no tool
+    // at all, so are those whose earlier exchanges hold a call, which the app cannot have then.
     let apart = all.filter { $0.needsJournal == true }
-    let results = all.filter { $0.needsJournal != true }
+    let callBefore = all.filter { $0.callBeforeWithoutTools == true }
+    let results = all.filter { $0.needsJournal != true && $0.callBeforeWithoutTools != true }
     let actions = results.filter { $0.expected != "aucun" }
     let others = results.filter { $0.expected == "aucun" }
     let rightTool = actions.filter(\.toolOK).count
@@ -1344,7 +1355,8 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     let missed = actions.filter { $0.chosen == "aucun" }.count
 
     print("\n=== \(model) — \(results.count) requests ===" + (apart.isEmpty ? ""
-        : " (\(apart.count) more that need the memory's journal, left out: see below)"))
+        : " (\(apart.count) more that need the memory's journal, left out: see below)") + (callBefore.isEmpty ? ""
+        : " (\(callBefore.count) more whose earlier exchanges hold a call, left out: see below)"))
     print(String(format: "right tool: %d / %d (%.0f %%)", rightTool, actions.count, percent(rightTool, actions.count)))
     print(String(format: "right tool and right date / length / name: %d / %d (%.0f %%)", rightAction, actions.count,
                  percent(rightAction, actions.count)))
@@ -1369,16 +1381,23 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     print("calls written after the model's own words, not left out: \(kept.count)"
           + kept.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected); \(atStart($0)))" }.joined())
     // Without the actions, what the model made of a request for one of them: it is to say, in words, that it cannot
-    // (`ActionCatalog.offRule`), never that it did it, will or can do it.
+    // (`ActionCatalog.offRule`, `ActionCatalog.partWithoutTools`), never that it did it, will or can do it.
+    func inFull(_ result: CaseResult) -> String {
+        "\n    · \(result.phrase) (\(result.actionNotOffered ?? result.expected)) → "
+            + (result.chosen == "aucun" ? "" : "\(result.chosen) ")
+            + "“\(result.text.replacingOccurrences(of: "\n", with: " "))”"
+            + (result.leftOutAfterWords.map { "  [then \($0), left out]" } ?? "")
+    }
     let notOffered = results.filter { $0.actionNotOffered != nil }
     if !notOffered.isEmpty {
         print("requests for an action that is off (no tool does it), and the answers in full: \(notOffered.count)"
-              + notOffered.map { result in
-                  "\n    · \(result.phrase) (\(result.actionNotOffered ?? "")) → "
-                      + (result.chosen == "aucun" ? "" : "\(result.chosen) ")
-                      + "“\(result.text.replacingOccurrences(of: "\n", with: " "))”"
-                      + (result.leftOutAfterWords.map { "  [then \($0), left out]" } ?? "")
-              }.joined())
+              + notOffered.map(inFull).joined())
+    }
+    if !callBefore.isEmpty {
+        // Shown a call it made with a tool it no longer has, the model may write another one in words.
+        print("requests whose earlier exchanges hold a call, which the app cannot have with no tool at all (the tools come "
+              + "or go with a new conversation), left out of the score, and the answers in full: \(callBefore.count)"
+              + callBefore.map(inFull).joined())
     }
     let more = results.filter { $0.moreCalls == true }
     print("requests with another call after the first (an action more than asked when one is expected): \(more.count)"

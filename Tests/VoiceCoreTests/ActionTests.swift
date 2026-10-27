@@ -1610,6 +1610,45 @@ struct PipelineActionTests {
         #expect(request.first?.content.hasSuffix(ActionCatalog.promptAddendum(exampleCall: "[minuteur]")) == true)
     }
 
+    /// With no tool at all (everything off in the settings), the prompt says what the model is told then, and nothing else
+    /// of the actions, not even their example exchanges; the messages have no date line. With tools again (the actions, or
+    /// others on their own), their prompt, without it; and back to it when they go.
+    @Test func withNoToolThePromptSaysWhatTheModelCannotDo() async throws {
+        let model = ScriptedModel()
+        var config = PipelineConfig()
+        config.actionExamples = true
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: FakeSpeaker(), config: config)
+        try await pipeline.start()
+        #expect(await model.tools.isEmpty)
+        await pipeline.submit(text: "Mets un minuteur")
+        await waitFor { await model.requests.count == 1 }
+        let request = try #require(await model.requests.last)
+        #expect(request.map(\.content) == [Conversation.defaultSystemPrompt + " " + ActionCatalog.partWithoutTools,
+                                           "Mets un minuteur"])
+        #expect(!ActionCatalog.partWithoutTools.contains(ActionCatalog.dateLineRule))
+
+        try await pipeline.setTools(ToolRunner(providers: [RecordingTools()]))
+        await pipeline.submit(text: "Bonjour")
+        await waitFor { await model.requests.count == 2 }
+        let withActions = try #require(await model.requests.last?.first?.content)
+        #expect(withActions == Conversation.defaultSystemPrompt + " " + ActionCatalog.promptAddendum(exampleCall: "[minuteur]"))
+        let search = WebSearchTools(provider: FakeSearch(WebSearchResults(results: [])))
+        try await pipeline.setTools(ToolRunner(providers: [search], actions: false))
+        await pipeline.submit(text: "Bonjour")
+        await waitFor { await model.requests.count == 3 }
+        let alone = try #require(await model.requests.last?.first?.content)
+        #expect(alone == Conversation.defaultSystemPrompt + " " + ActionCatalog.partWithoutActions + " "
+                + WebSearchCatalog.promptAddendum)
+
+        try await pipeline.setTools(nil)
+        try await pipeline.resetConversation()
+        await pipeline.submit(text: "Bonjour")
+        await waitFor { await model.requests.count == 4 }
+        #expect(await model.requests.last?.map(\.content) == [Conversation.defaultSystemPrompt + " "
+            + ActionCatalog.partWithoutTools, "Bonjour"])
+    }
+
     /// Two actions asked at once: the model writes the first call, then goes on to another one, which `MLXChatModel` does
     /// not write (`moreToolCalls`); another model may write both calls. The first is carried out, the app says it does
     /// one thing at a time, and the history keeps the first call and its result.

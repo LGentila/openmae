@@ -212,7 +212,8 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
         }
     }
 
-    // As the app: its system prompt; with the actions, their instructions and tools, and the date line.
+    // As the app: its system prompt; with the actions, their instructions and tools, and the date line; without them (no
+    // tool at all), what the model is told then.
     var base = Conversation()
     base.cutOffPlacement = style.placement ?? Conversation.cutOffPlacement(on: tier)  // a drop's note goes there too
     var dateLine: String?
@@ -221,6 +222,8 @@ func runCutOffBench(_ o: Options, arguments: [String]) async throws {
         base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         if ActionCatalog.showsExamples(on: tier) { base.examples = ActionCatalog.examples(now: now, timeZone: timeZone) }
         dateLine = ActionCatalog.dateLine(now, timeZone: timeZone)
+    } else {
+        base.systemAddenda = [ActionCatalog.partWithoutTools]
     }
 
     let repeats = max(o.repeats ?? 10, 1)

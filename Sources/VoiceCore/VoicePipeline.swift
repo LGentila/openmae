@@ -547,8 +547,9 @@ public actor VoicePipeline {
     /// model itself, hence `async`) or, for the tools offered on their own, that the actions are off and what the date line
     /// is (`ActionCatalog.partWithoutActions`); then what the tools' providers add (handing tasks to an agent, with an
     /// example call of its own without the actions; searching the web); and, when the config asks for them, the actions'
-    /// example exchanges, or without the actions the tools' own (handing tasks over). Set with the tools, and kept for the
-    /// conversations that follow, so the model's memory of them stays valid.
+    /// example exchanges, or without the actions the tools' own (handing tasks over). With no tool at all, what the model is
+    /// told then (`ActionCatalog.partWithoutTools`). Set with the tools, and kept for the conversations that follow, so the
+    /// model's memory of them stays valid.
     private func updatePrompt() async {
         conversation.systemAddenda = await promptAddenda()
         if let tools, config.actionExamples {
@@ -560,7 +561,8 @@ public actor VoicePipeline {
     }
 
     /// What follows the system prompt: the extensions' sentences, the actions' part (or, without them, that they are off
-    /// and the date line's rule), then what the tools' providers add, the memory's sheet last.
+    /// and the date line's rule), then what the tools' providers add, the memory's sheet last. With no tool at all, what
+    /// the model is told then (`ActionCatalog.partWithoutTools`).
     private func promptAddenda() async -> [String] {
         var addenda = extensions.compactMap { $0.systemPromptAddendum(language: .french) }
         if let tools {
@@ -570,6 +572,8 @@ public actor VoicePipeline {
                 addenda.append(ActionCatalog.partWithoutActions)
             }
             addenda += await tools.promptAddenda(writeCall: { [model] in await model.toolCallText($0) })
+        } else {
+            addenda.append(ActionCatalog.partWithoutTools)
         }
         return addenda
     }

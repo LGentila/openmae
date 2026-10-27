@@ -158,6 +158,35 @@ public enum ActionCatalog {
         + "agenda, ni raccourcis, tu ne pourras rien rappeler à l'utilisateur plus tard, et tu ne sais pas ce qu'il a de "
         + "prévu."
 
+    /// What the system prompt says when no tool at all is offered (everything off in the settings: the actions, Claude
+    /// Code, the web search, the built-in sources, the news and the memory): `offRule`, then `noToolRule`. Nothing of the
+    /// date line, which the messages do not have then.
+    public static let partWithoutTools = offRule + " " + noToolRule
+
+    /// What follows `offRule` with no tool at all: that a question (even about how to do one of the actions), a memory, a
+    /// taste or a remark asks nothing of the model, which answers it as usual, without speaking of the actions, with a
+    /// question for an example; but that when the user clearly asks for one of them now (`example`'s request), it says it
+    /// cannot, because they are off in the settings.
+    ///
+    /// voice-cli actions-bench with Tests/Fixtures/actions-fr.json and --no-actions (no tool at all), its 60 requests for
+    /// an action without earlier exchanges and its 40 that ask for none. With nothing in the prompt, the models said they
+    /// could not in 0 (Gemma 4 E2B), 1 (E4B) and 2 (26B) of 60: they answered as if it were done (« J'ai réglé le
+    /// minuteur pour toi. », « Je note ton rendez-vous. ») and made up the agenda (« Tu as une réunion à dix heures. »).
+    /// The facts alone (`offRule`, as with other tools on) were not enough: E4B still answered « J'ai bien noté ton apéro
+    /// ce soir. » and « Le salon est maintenant allumé. », and E2B said it could not in 29 of 60 only; more facts did not
+    /// help it (that it can note, add, switch on or start nothing: 38; that it has no tool and can only talk: 27). Told
+    /// what to answer, they said so in 55 to 60, but also to a question or a remark about reminders (« Comment on crée un
+    /// rappel sur iPhone ? »: « Je ne peux pas faire ça pour toi. Les rappels sont désactivés dans mes réglages. »; « Les
+    /// rappels sur mon téléphone, c'est pratique »: « Malheureusement, je ne peux pas gérer ça. »). Saying first that
+    /// those ask nothing spared the remark, not the question: E2B answered it so in two of four runs, E4B in one of three.
+    /// With the two examples, in none of E2B's five runs nor E4B's four; E2B then says it cannot in 54 or 55 of 60 instead
+    /// of 57 or 58 (« Je note votre apéro ce soir. »), E4B and the 26B in all 60.
+    static let noToolRule = "Une question (même sur la façon de faire l'une de ces actions), un souvenir, un goût ou une "
+        + "remarque ne te demandent rien : réponds-y normalement, sans parler des actions ; à « Comment on règle un "
+        + "minuteur ? », explique comment faire. Mais quand l'utilisateur te demande clairement de faire l'une d'elles "
+        + "maintenant, comme « \(example.request) », dis-lui que tu ne peux pas, parce que les actions sont désactivées "
+        + "dans les réglages."
+
     /// The line that ends every user message when tools are on (actions or the web search), e.g.
     /// "(Nous sommes le jeudi 15 octobre 2026, il est 18:42.)". It stays in the history.
     public static func dateLine(_ now: Date, timeZone: TimeZone = .current) -> String {
