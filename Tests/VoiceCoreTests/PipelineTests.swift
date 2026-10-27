@@ -24,6 +24,8 @@ actor CountingTranscriber: Transcriber {
 
 actor ScriptedModel: LanguageModel {
     private(set) var requests: [[ChatMessage]] = []
+    /// How each request asked the answer to open (`reply(to:opening:)`), in order.
+    private(set) var openings: [AnswerOpening] = []
     private(set) var tools: [ToolSpec] = []
     /// What to answer, request after request (the last one is repeated).
     private var scripts: [[ModelOutput]]
@@ -50,9 +52,12 @@ actor ScriptedModel: LanguageModel {
     }
 
     nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
+        reply(to: conversation, opening: .free)
+    }
+    nonisolated func reply(to conversation: [ChatMessage], opening: AnswerOpening) -> AsyncThrowingStream<ModelOutput, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                let script = await self.log(conversation)
+                let script = await self.log(conversation, opening: opening)
                 for (i, output) in script.enumerated() {
                     if i == self.pauseAfter {
                         while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
@@ -66,8 +71,9 @@ actor ScriptedModel: LanguageModel {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
-    private func log(_ c: [ChatMessage]) -> [ModelOutput] {
+    private func log(_ c: [ChatMessage], opening: AnswerOpening) -> [ModelOutput] {
         requests.append(c)
+        openings.append(opening)
         return scripts.count > 1 ? scripts.removeFirst() : scripts[0]
     }
     func useTools(_ tools: [ToolSpec]) { self.tools = tools }

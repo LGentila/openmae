@@ -393,7 +393,8 @@ private struct Talk {
             var chunker = SentenceChunker()
             func send(_ piece: SentenceChunker.Piece) { SpeakableText.record(piece.text, after: piece.separator, in: &answer) }
             // As the app (`VoicePipeline.answerWithTools`): the calls carried out in order, at most `maxCalls`; one second
-            // try for the refused ones, only they carried out from it, none twice; one summing up of what came from outside,
+            // try for the refused ones, only they (or calls standing for them) carried out from it, none twice, opening with
+            // a call when the refusals want one; one summing up of what came from outside,
             // no call carried out then; the app's questions, the one for the sensitive calls, and how many things it does
             // at a time when the model asked for more; a first answer with neither a word nor a call asked for once more.
             enum Kind { case first, secondTry, summing }
@@ -402,7 +403,8 @@ private struct Talk {
             var askedAgain = false
             var begun = false
             var carriedOut: [ToolCall] = []
-            var toCorrect: [(tool: String, question: String)] = []
+            var toCorrect: [(tools: Set<String>, question: String)] = []
+            var secondTryOpening = AnswerOpening.free
             var questions: [String] = []
             var waitsForYes = false
             var toSum: [String] = []
@@ -421,7 +423,8 @@ private struct Talk {
                 // The whole pass first: whether another call follows a call tells whether the user asked for several
                 // actions (the app knows it at the model's next output, before carrying the call out).
                 var outputs: [ModelOutput] = []
-                for try await output in model.reply(to: request) { outputs.append(output) }
+                let opening = kind == .secondTry ? secondTryOpening : .free
+                for try await output in model.reply(to: request, opening: opening) { outputs.append(output) }
                 for (place, output) in outputs.enumerated() {
                     let followed = outputs[(place + 1)...].first.map { if case .text = $0 { false } else { true } } ?? false
                     switch output {
@@ -445,7 +448,7 @@ private struct Talk {
                                 passes.append(callPass)
                                 continue
                             }
-                            guard let index = toCorrect.firstIndex(where: { $0.tool == call.name }) else {
+                            guard let index = toCorrect.firstIndex(where: { $0.tools.contains(call.name) }) else {
                                 results.append(["erreur": .string(ToolOutcome.onlyRefusedCalls)])
                                 callPass.result = results.last
                                 passes.append(callPass)
@@ -562,7 +565,8 @@ private struct Talk {
                     break
                 }
                 if secondTry {
-                    toCorrect = refusedHere.map { (calls[$0.index].name, $0.question) }
+                    toCorrect = refusedHere.map { ($0.refusal.correctedBy.union([calls[$0.index].name]), $0.question) }
+                    secondTryOpening = refusedHere.allSatisfy(\.refusal.secondTryIsACall) ? .toolCall : .free
                     kind = .secondTry
                     request = conversation.messages(adding: message) + steps
                     continue

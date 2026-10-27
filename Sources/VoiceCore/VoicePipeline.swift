@@ -1580,7 +1580,8 @@ public actor VoicePipeline {
     /// model's own is left out, with nothing said of it (`ToolRunner.ignoresAfterWords`: without the actions, a call to the
     /// delegation tools after an answer to something else, that the model did not mean from the start). Then, in this
     /// order: the model's second try for the calls refused for their arguments (one for the request, holding every result
-    /// already obtained, and only those calls carried out from it); one pass where it sums up every result that came from
+    /// already obtained, and only those calls carried out from it; opening with a call when each refusal says which call
+    /// to write, `ToolRefusal.secondTryIsACall`); one pass where it sums up every result that came from
     /// outside (no call carried out then); the app's questions about the refused calls; the one question for the sensitive
     /// calls, which wait together for the user's "oui"; and, when the model asked for more calls than the app carries out
     /// at once, how many it does (`ActionPhrases.atMost`), once. A first answer with neither a word nor a call is asked for
@@ -1608,6 +1609,8 @@ public actor VoicePipeline {
         /// (its own, and those of `ToolRefusal.correctedBy`), and the app's questions about them (`ToolRefusal.spoken`),
         /// said if that try does not correct them and says nothing.
         var toCorrect: [(tools: Set<String>, question: String)] = []
+        /// How the second try opens: with a call when every refused call wants one (`ToolRefusal.secondTryIsACall`).
+        var secondTryOpening = AnswerOpening.free
         /// The app's questions about refused calls the model gets no (more) try for, said after the confirmations.
         var questions: [String] = []
         /// Some sensitive call waits for the user's "oui": the question for all of them ends the turn.
@@ -1641,12 +1644,13 @@ public actor VoicePipeline {
             /// The call being written comes after words of the model's own in this pass: a call to some tools is then left
             /// out (`ToolRunner.ignoresAfterWords`).
             var afterWords = false
+            let opening = pass == .secondTry ? secondTryOpening : .free
             DebugLog.log("turn \(turn.id): LLM request" + (pass == .first ? "" : pass == .secondTry ? " (second try)"
-                                                            : " (summing up)"))
+                                                            : " (summing up)") + (opening == .toolCall ? ", opening a call" : ""))
             /// A call written, carried out at the model's next output (a token later at most): whether another call
             /// follows tells whether the user asked for several actions at once.
             var written: ToolCall?
-            var outputs = model.reply(to: request).makeAsyncIterator()
+            var outputs = model.reply(to: request, opening: opening).makeAsyncIterator()
             while true {
                 let output = try await outputs.next()
                 if metrics.firstTokenMs == nil, output != nil { metrics.firstTokenMs = ms(clock.now - t1) }
@@ -1830,6 +1834,7 @@ public actor VoicePipeline {
                 // try, for the request.
                 DebugLog.log("turn \(turn.id): \(refused.count) call(s) refused, second try")
                 toCorrect = refused.map { ($0.refusal.correctedBy.union([calls[$0.index].name]), $0.question) }
+                secondTryOpening = refused.allSatisfy(\.refusal.secondTryIsACall) ? .toolCall : .free
                 pass = .secondTry
                 request = conversation.messages(adding: turn.userMessage!) + turn.steps
                 continue

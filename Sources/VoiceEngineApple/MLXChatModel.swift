@@ -265,13 +265,21 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     // MARK: - VoiceCore.LanguageModel
 
     public nonisolated func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error> {
+        reply(to: conversation, opening: .free)
+    }
+
+    public nonisolated func reply(to conversation: [ChatMessage], opening: AnswerOpening)
+        -> AsyncThrowingStream<ModelOutput, Error>
+    {
         AsyncThrowingStream { continuation in
             let requested = ContinuousClock.now
             pendingRequests.add(1, ordering: .relaxed)  // counted at once: the history computed ahead gives way
             let task = Task {
                 defer { self.pendingRequests.subtract(1, ordering: .relaxed) }
                 do {
-                    try await self.generate(conversation, requested: requested) { continuation.yield($0) }
+                    try await self.generate(conversation, requested: requested, opening: opening) {
+                        continuation.yield($0)
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -990,7 +998,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// `requested`: when the request was sent (`reply`), to tell how long it waited for the model.
     private func generate(_ conversation: [ChatMessage], maxTokens: Int? = nil, requested: ContinuousClock.Instant? = nil,
-                          onOutput: @Sendable (ModelOutput) -> Void) throws
+                          opening: AnswerOpening = .free, onOutput: @Sendable (ModelOutput) -> Void) throws
     {
         let waited = requested.map { ContinuousClock.now - $0 } ?? .zero
         if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
@@ -1034,6 +1042,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let draws = TokenWatch.Draws()
         if watchingTokens {
             components = components.appendingLogitProcessor { TokenWatch(draws: draws) }
+        }
+        if opening == .toolCall, let toolCallStart, !tools.isEmpty {
+            // After the chances read above, which stay the model's own (`callChanceAtStart`).
+            components = components.appendingLogitProcessor { OpeningToken(token: toolCallStart) }
         }
         var iterator = try readingPrompt { try readPrompt(prompt, from: start, components: components) }
         let d = clock.now - t0
@@ -1660,6 +1672,29 @@ private struct FirstLogits: LogitProcessor {
     func process(logits: MLXArray) -> MLXArray {
         if !drawn { chance.firstLogits = logits }
         return logits
+    }
+
+    mutating func didSample(token: MLXArray) { drawn = true }
+}
+
+/// The answer's first token is this one (`AnswerOpening.toolCall`), whatever chance the model gave it: it alone can be
+/// drawn there. The tokens after it are the model's own.
+private struct OpeningToken: LogitProcessor {
+    let token: Int
+    private var drawn = false
+
+    init(token: Int) {
+        self.token = token
+    }
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray {
+        guard !drawn else { return logits }
+        // Far above the likeliest token: after the temperature and the top-p filter, the only one left.
+        let index = MLXArray([Int32(token)]).reshaped([1, 1])
+        let above = logits.max(axis: -1, keepDims: true) + 100
+        return putAlong(logits, index, values: above.asType(logits.dtype), axis: -1)
     }
 
     mutating func didSample(token: MLXArray) { drawn = true }

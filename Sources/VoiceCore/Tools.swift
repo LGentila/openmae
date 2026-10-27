@@ -232,6 +232,10 @@ public struct ToolRefusal: Error, Sendable {
     /// correction (otherwise only a call to the refused tool is). deleguer_tache for a completer_tache that names no
     /// task handed over: a new request the model took for a follow-up.
     public var correctedBy: Set<String> = []
+    /// The model's second try is a call (`AnswerOpening.toolCall`), the reason saying which one to write: for a
+    /// completer_tache that names no task handed over, the deleguer_tache of the new request it stands for. Gemma 4 E4B
+    /// and E2B hardly ever open a call on their own right after a tool's result (see `AgentTools.find`).
+    public var secondTryIsACall = false
 
     public init(forModel: String, spoken: String, retryable: Bool = true) {
         self.forModel = forModel

@@ -423,9 +423,9 @@ struct DelegationTests {
     }
 
     /// A new request the model took for a follow-up, sharing one ordinary word with a finished task of an earlier
-    /// launch (« Poème et recette de crêpes »): refused, with the tasks and a word about deleguer_tache, whose call may
-    /// stand for it on the second try. A task this conversation handed over is named by one word; after a new
-    /// conversation, no longer.
+    /// launch (« Poème et recette de crêpes »): refused, with the tasks and the deleguer_tache to write, with the
+    /// follow-up's message as its instruction, whose call stands for it on the second try, which opens with a call. A
+    /// task this conversation handed over is named by one word; after a new conversation, no longer.
     @Test func followUpNamesATaskOfAnEarlierLaunchByMostOfItsWords() async throws {
         let folder = scratchFolder()
         let store = TaskStore(folder: folder.appending(path: "Tasks"))
@@ -447,11 +447,11 @@ struct DelegationTests {
         let refused = await runner.handle(tests, context: context())
         #expect(refused.retryable)
         #expect(refused.refusal?.correctedBy == [AgentCatalog.delegateName])
+        #expect(refused.refusal?.secondTryIsACall == true)
         #expect(refused.forModel == ["erreur": .string(
-            "Aucune tâche ne correspond à « application de recette ». Tâches : d1 « Poème et recette de crêpes ». Si "
-                + "l'utilisateur demande un nouveau travail pour l'agent (code, site, application, recherche, fichiers, "
-                + "document), confie-le avec deleguer_tache, sans poser de question ; sinon, réponds-lui sans appel. "
-                + ToolRefusal.secondTry(AgentCatalog.followUpName))])
+            "Aucune tâche ne correspond à « application de recette » (tâches : d1 « Poème et recette de crêpes ») : "
+                + "c'est une nouvelle demande. Confie-la maintenant avec deleguer_tache, avec la consigne « Ajoute des "
+                + "tests automatiques à l'application de recette. ». " + ToolRefusal.secondTry(AgentCatalog.followUpName))])
         #expect(refused.spoken == AgentPhrases.unknownTask(.french))
 
         // Named well, the old task gets it (read back first).
@@ -652,6 +652,7 @@ struct PipelineAgentTests {
         #expect(await log.pieces.joined(separator: " ") == readBack)
         #expect(await model.requests.count == 2)  // the second try
         #expect(await model.requests.last?.last?.toolResult?["erreur"]?.text?.contains("deleguer_tache") == true)
+        #expect(await model.openings == [.free, .toolCall])  // the second try opens with a call
 
         await waitFor { await log.states.last == .listening }
         await push(pipeline, "1111111111" + String(repeating: "0", count: 20))  // « Oui »

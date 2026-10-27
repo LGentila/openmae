@@ -92,6 +92,15 @@ public enum ModelOutput: Sendable, Equatable {
     case moreToolCalls
 }
 
+/// How an answer begins (`LanguageModel.reply(to:opening:)`).
+public enum AnswerOpening: Sendable, Equatable {
+    /// As the model writes it.
+    case free
+    /// With a tool call: the answer's first token opens one, whatever chance the model gave it; the model writes the call
+    /// itself, and what follows. A model without tools, or that writes no calls of its own, answers as it would.
+    case toolCall
+}
+
 /// The conversational model.
 ///
 /// Implementations keep the model's working memory (KV cache) between calls and only process what
@@ -100,6 +109,8 @@ public enum ModelOutput: Sendable, Equatable {
 public protocol LanguageModel: Sendable {
     /// Streams the answer to the conversation, piece by piece. Cancel the consuming task to stop.
     func reply(to conversation: [ChatMessage]) -> AsyncThrowingStream<ModelOutput, Error>
+    /// The same, the answer opening as `opening` says. By default `reply(to:)`, whatever the opening.
+    func reply(to conversation: [ChatMessage], opening: AnswerOpening) -> AsyncThrowingStream<ModelOutput, Error>
     /// The tools the model may call. They are part of the system prompt: change them only between
     /// conversations, then `prefillBeginning` again.
     func useTools(_ tools: [ToolSpec]) async
@@ -140,6 +151,9 @@ public protocol LanguageModel: Sendable {
 }
 
 extension LanguageModel {
+    public func reply(to conversation: [ChatMessage], opening: AnswerOpening) -> AsyncThrowingStream<ModelOutput, Error> {
+        reply(to: conversation)
+    }
     public var callChanceAtStart: Double? { nil }
     public func useTools(_ tools: [ToolSpec]) async {}
     public func limitToolCalls(_ count: Int) async {}

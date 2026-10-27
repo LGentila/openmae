@@ -173,7 +173,7 @@ public actor AgentTools: ToolProvider {
                 _ = try find(reference, for: call.name, language)
             }
         default:
-            _ = try find(call.text("reference"), for: call.name, language)
+            _ = try find(call.text("reference"), for: call.name, message: call.text("message"), language)
         }
     }
 
@@ -342,7 +342,7 @@ public actor AgentTools: ToolProvider {
 
     private func followUp(_ call: ToolCall, _ context: ToolContext) throws -> ToolOutcome {
         let language = context.language
-        var task = try find(call.text("reference"), for: call.name, language)
+        var task = try find(call.text("reference"), for: call.name, message: call.text("message"), language)
         inConversation.insert(task.id)
         let message = call.text("message") ?? ""
         task.followUps.append(message)
@@ -604,17 +604,28 @@ public actor AgentTools: ToolProvider {
     // MARK: - Finding a task
 
     /// The task a reference names (`match`), for a call to `tool`. None: the model gets the list of tasks and one more
-    /// try; for completer_tache, the new request it may have taken for a follow-up is handed over then, by a call to
-    /// deleguer_tache (`ToolRefusal.correctedBy`).
+    /// try; for completer_tache, that try is the new request it took for a follow-up, handed over by a call to
+    /// deleguer_tache (`ToolRefusal.correctedBy`), with the follow-up's `message` as its instruction: the try opens with
+    /// a call (`ToolRefusal.secondTryIsACall`).
     ///
     /// In voice-cli actions-bench, actions off, with « Poème et recette de crêpes » on disk, « Ajoute des tests
-    /// automatiques à mon application de recettes » taken for a follow-up of « application de recettes »: with this
-    /// sentence about deleguer_tache, Gemma 4 26B handed it over on its second try each time (it took it for a follow-up
-    /// in 1 run of 10); Gemma 4 E4B, which takes it for one in every run, asked which application the user meant or said
-    /// nothing, with this sentence or two others (0 of 10 each). With no task at all, the refusal stays as it was, without
-    /// a second try: the 26B, actions off, takes « Ajoute un rendez-vous à la gare de Lyon vendredi à 10 h » for a
-    /// follow-up in each of 10 runs, and with such a sentence it handed the appointment to Claude Code in each.
-    private func find(_ reference: String?, for tool: String, _ language: SpeechLanguage) throws -> AgentTask {
+    /// automatiques à mon application de recettes » taken for a follow-up of « application de recettes ». Told that a new
+    /// request goes to deleguer_tache (« Si l'utilisateur demande un nouveau travail pour l'agent (…), confie-le avec
+    /// deleguer_tache, sans poser de question ; sinon, réponds-lui sans appel. »), Gemma 4 26B handed it over on its
+    /// second try each time (it took it for a follow-up in 1 run of 10); Gemma 4 E4B, which takes it for one in every
+    /// run, handed it over in none of 10 runs with that sentence or two others: it ended its answer at once (half the
+    /// runs), asked which application the user meant, or said it had added the request. It gave opening a call under
+    /// 0.1 % at the first token of that try, and never opened one there in the benchmarks' runs (144 second tries; Gemma 4
+    /// E2B none in 92). Made to open a call with that sentence, E4B asked etat_taches about « application de recettes »
+    /// (10 of 10); with this one, which says it is a new request, to hand over now with the follow-up's message, it
+    /// handed it over in 10 of 10 (1 of 10 without being made to open a call), and so did E2B (10 of 10), which with
+    /// « si l'utilisateur ne parle d'aucune de ces tâches » in it wrote its follow-up of a task of its example exchanges
+    /// again (9 of 10). With no task at all, the refusal stays as it was, without a second try: the 26B, actions off,
+    /// takes « Ajoute un rendez-vous à la gare de Lyon vendredi à 10 h » for a follow-up in each of 10 runs, and with
+    /// such a sentence it handed the appointment to Claude Code in each.
+    private func find(_ reference: String?, for tool: String, message: String? = nil, _ language: SpeechLanguage) throws
+        -> AgentTask
+    {
         let handed = tasks.filter { $0.status != .awaitingConfirmation }
         guard !handed.isEmpty else {
             throw ToolRefusal(forModel: "Aucune tâche n'a été confiée.", spoken: AgentPhrases.noTask(language),
@@ -625,10 +636,11 @@ public actor AgentTools: ToolProvider {
         var refusal = ToolRefusal(forModel: "Aucune tâche ne correspond à « \(reference ?? "") ». Tâches : \(known).",
                                   spoken: AgentPhrases.unknownTask(language))
         if tool == AgentCatalog.followUpName {
-            refusal.forModel += " Si l'utilisateur demande un nouveau travail pour l'agent (code, site, application, "
-                + "recherche, fichiers, document), confie-le avec \(AgentCatalog.delegateName), sans poser de question ; "
-                + "sinon, réponds-lui sans appel."
+            refusal.forModel = "Aucune tâche ne correspond à « \(reference ?? "") » (tâches : \(known)) : c'est une "
+                + "nouvelle demande. Confie-la maintenant avec \(AgentCatalog.delegateName)"
+                + (message.map { ", avec la consigne « \($0) »." } ?? ".")
             refusal.correctedBy = [AgentCatalog.delegateName]
+            refusal.secondTryIsACall = true
         }
         throw refusal
     }

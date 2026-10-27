@@ -1892,6 +1892,7 @@ struct PipelineActionTests {
         // the turn to be over, not for its first piece.
         await waitFor { await log.finished.count == 1 }
         #expect(await model.requests.count == 2)
+        #expect(await model.openings == [.free, .free])  // a try that may ask the user instead of calling
         let second = try #require(await model.requests.last)
         #expect(second.suffix(2).map(\.role) == [.assistant, .tool])  // the model sees why it was refused
         #expect(second.last?.toolResult == ["erreur": .string("Il manque « titre ». " + ToolRefusal.secondTry("noter"))])
