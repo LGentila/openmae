@@ -268,6 +268,20 @@ struct Options {
     var recordPages: String?
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
+    /// memory-bench, journal-bench: the study of searching the journal by meaning (issue #167): a sentence-embedding
+    /// model's folder (`SentenceEmbedder`), run on the CPU with --embedder-cpu.
+    var embedder: String?
+    var embedderCPU = false
+    /// journal-bench with --embedder: how the full-text search and the search by meaning are put together
+    /// (`HybridJournal.Fusion`), and what the search by meaning reads: the model's keywords, the user's request, or both.
+    var fusion: String?
+    var meaningOf: String?
+    /// journal-bench: the searches of an earlier report searched again, without the language model.
+    var replay: String?
+    /// memory-bench, journal-bench: each keyword widened with its neighbours in the system's French word embedding.
+    var widenWords = false
+    /// journal-bench --replay: each search's keywords widened by the tier's language model, in a short pass of its own.
+    var widenModel = false
 
     static func parse(_ args: [String]) -> Options? {
         var o = Options()
@@ -361,6 +375,13 @@ struct Options {
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
             case "--request": o.requests.append(it.next() ?? "")
+            case "--embedder": o.embedder = it.next()
+            case "--embedder-cpu": o.embedderCPU = true
+            case "--fusion": o.fusion = it.next()
+            case "--meaning-of": o.meaningOf = it.next()
+            case "--replay": o.replay = it.next()
+            case "--widen-words": o.widenWords = true
+            case "--widen-model": o.widenModel = true
             case "--hold": o.hold = Double(it.next() ?? "")
             case "--reread": o.reread = true
             case "--min-p": o.minP = Float(it.next() ?? "")

@@ -4,6 +4,16 @@
 //   voice-cli journal-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/journal-fr.json] [--repeats 3] [--examples app|none|file]
 //                           [--web] [--request "cookies"] [--watch-calls] [--own-thoughts] [--out measurements]
+//                           [--embedder folder [--fusion fts1-meaning@0.2] [--meaning-of keywords|request|both]]
+//                           [--widen-words] [--replay report.json [--widen-model]]
+//
+// The study of issue #167. --embedder: the journal searched by meaning too, with this sentence-embedding model's folder
+// (`MeaningJournal`): --fusion, how its ranking and the full-text search's are put together (`MeaningFusion`, with a
+// cosine floor after « @ »); --meaning-of, what it embeds: the model's keywords, the user's request, or the better of
+// the two. --widen-words: the keywords widened with the system's French word embedding. --replay: no language model
+// runs; the searches an earlier report holds (the keywords and periods the model wrote) are searched again in each way
+// of the study, and the report counts how often the expected exchange is among the excerpts; --widen-model asks the
+// tier's model, in a short pass of its own, for the words the exchange may have used, and times that pass.
 //
 // --request: only the corpus's requests whose phrase holds this text (repeatable), to run a rare case many times.
 // --watch-calls: each pass exactly as the model wrote it, special tokens included, under its run; the report keeps it with
@@ -125,10 +135,10 @@ private struct JournalRun: Encodable {
 /// The app's store, keeping what each search gave the model (the exchanges' ids), for the report. It never deletes
 /// anything: the journal stays as the corpus has it.
 private actor RecordingStore: MemoryStore {
-    private let store: SQLiteMemoryStore
+    private let store: any MemoryStore
     private(set) var found: [Int64] = []
 
-    init(_ store: SQLiteMemoryStore) {
+    init(_ store: any MemoryStore) {
         self.store = store
     }
 
@@ -196,7 +206,24 @@ func runJournalBench(_ o: Options) async throws {
 
     let scratch = FileManager.default.temporaryDirectory.appending(path: "openmae-journal-bench-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: scratch) }
-    let store = RecordingStore(try SQLiteMemoryStore(folder: scratch))
+    // The study of issue #167: the journal searched by meaning too (--embedder), or its keywords widened (--widen-words).
+    var meaning: MeaningJournal?
+    if o.embedder != nil || o.widenWords || o.replay != nil {
+        var embedder: SentenceEmbedder?
+        if let path = o.embedder {
+            embedder = try await SentenceEmbedder.load(directory: URL(fileURLWithPath: path), cpu: o.embedderCPU)
+        }
+        let (fusion, floor) = studyFusion(o.fusion ?? (embedder == nil ? "fts" : "rrf"))
+        meaning = MeaningJournal(store: try SQLiteMemoryStore(folder: scratch), embedder: embedder, fusion: fusion,
+                                 meaningOf: o.meaningOf ?? "keywords", widen: o.widenWords)
+        await meaning?.setFusion(fusion, cosineFloor: floor)
+        print("searching: \(fusion.rawValue)" + (floor > 0 ? " (cosine at least \(floor))" : "")
+              + (embedder.map { " · by meaning with \($0.folder.lastPathComponent), reading \(o.meaningOf ?? "keywords")" } ?? "")
+              + (o.widenWords ? " · keywords widened" : ""))
+    }
+    let inner: any MemoryStore
+    if let meaning { inner = meaning } else { inner = try SQLiteMemoryStore(folder: scratch) }
+    let store = RecordingStore(inner)
     var corpusID: [Int64: String] = [:]
     for exchange in exchanges {
         let id = try await store.addExchange(JournalEntry(
@@ -207,6 +234,18 @@ func runJournalBench(_ o: Options) async throws {
     }
     let sheet = corpus.sheet ?? []
     try await store.saveSheet(sheet)
+    if let replay = o.replay, let meaning {
+        var widener: MLXChatModel?
+        if o.widenModel {
+            let tier = try tierOption(o)
+            let models = ModelStore()
+            guard let pack = ModelCatalog.languageModel(for: tier) else { throw CLIError("no language model for this tier") }
+            widener = try await MLXChatModel.load(directory: o.llm.map { URL(fileURLWithPath: $0) } ?? models.folder(pack))
+        }
+        try await replaySearches(replay, journal: meaning, corpus: corpus, corpusID: corpusID, dateOf: dateOf,
+                                 now: now, calendar: reference.calendar, widener: widener)
+        return
+    }
 
     // 2. The model, with the app's tools: the actions, the web search, the memory with its journal (last).
     let tier = try tierOption(o)
@@ -262,6 +301,7 @@ func runJournalBench(_ o: Options) async throws {
         let expected = Set(request.expected ?? [])
         for run in 1...repeats {
             await store.forget()
+            await meaning?.setRequest(request.phrase)
             var talk = AppTalk(model: model, runner: runner, calendar: calendar, conversation: base, now: now,
                                timeZone: timeZone, maxCalls: maxCalls, watchCalls: o.watchCalls)
             let start = clock.now
@@ -317,6 +357,13 @@ func runJournalBench(_ o: Options) async throws {
         }
     }
     print("\n\(runs.count) runs in \(clock.now - benchStart)")
+    if let meaning {
+        let writes = await meaning.writeMilliseconds.sorted(), searches = await meaning.searchMilliseconds.sorted()
+        let embeds = await meaning.embedMilliseconds.sorted()
+        func median(_ a: [Double]) -> Double { a.isEmpty ? 0 : a[a.count / 2] }
+        print(String(format: "study: an exchange written %.1f ms (median) · a search %.1f ms (median, %d searches; "
+                     + "embedding its words %.1f ms)", median(writes), median(searches), searches.count, median(embeds)))
+    }
     summarize(runs, requests: requests, repeats: repeats, tier: tier, model: folder.lastPathComponent)
 
     let encoder = JSONEncoder()
@@ -468,5 +515,120 @@ private func summarize(_ runs: [JournalRun], requests: [JournalCorpus.Request], 
               + share(passes.filter { $0.contains("<|channel>") }.count, passes.count) + " · with « much » "
               + share(tokens.filter { $0.contains { $0.token.trimmingCharacters(in: .whitespaces).lowercased() == "much" } }
                   .count, tokens.count))
+    }
+}
+
+/// "rrf", "fts2-meaning@0.5": the way of putting the searches together, and the cosine floor of the search by meaning.
+func studyFusion(_ text: String) -> (MeaningFusion, Float) {
+    let parts = text.split(separator: "@")
+    let fusion = MeaningFusion(rawValue: String(parts.first ?? "rrf")) ?? .rrf
+    return (fusion, parts.count > 1 ? Float(parts[1]) ?? 0 : 0)
+}
+
+/// An earlier report's runs, as far as the replay needs them.
+private struct ReplayedRun: Decodable {
+    var phrase: String
+    var label: String
+    var run: Int
+    var searches: [Search]
+    var found: Bool?
+    struct Search: Decodable {
+        var texte: String?
+        var quand: String?
+        var refused: Bool
+    }
+}
+
+/// The searches an earlier journal-bench report holds (the keywords and periods the model wrote), searched again in each
+/// way of the study, without the language model: how often the expected exchange is among the excerpts ("found"), by
+/// kind of request. The runs that did not search stay not found.
+private func replaySearches(_ path: String, journal: MeaningJournal, corpus: JournalCorpus, corpusID: [Int64: String],
+                            dateOf: [String: Date], now: Date, calendar: Calendar, widener: MLXChatModel?) async throws
+{
+    // The model's own words for each search, asked once (approach 2 of the study: a short pass of its own).
+    var widened: [String: String] = [:]
+    var passSeconds: [Double] = []
+    func widen(_ keywords: String, _ phrase: String) async throws -> String {
+        let key = phrase + "|" + keywords
+        if let known = widened[key] { return known }
+        guard let widener else { return keywords }
+        let ask = "L'utilisateur cherche une conversation passée avec toi. Sa demande : « \(phrase) ». Les mots-clés "
+            + "de sa recherche : « \(keywords) ». Écris huit à douze mots que cette conversation a pu employer à leur "
+            + "place : synonymes, mots plus précis (lieux, plats, objets, métiers, prénoms possibles), mots plus courants "
+            + "ou plus familiers. Seulement les mots, séparés par des espaces, sans phrase."
+        let start = ContinuousClock.now
+        var text = ""
+        for try await piece in await widener.reply(to: [ChatMessage(.user, ask)]) {
+            if case .text(let t) = piece { text += t }
+        }
+        passSeconds.append(studyMilliseconds(ContinuousClock.now - start) / 1000)
+        let words = SpeakableText.clean(text).replacingOccurrences(of: ",", with: " ")
+        let result = keywords + " " + words
+        widened[key] = result
+        print("   « \(keywords) » → \(words.prefix(160))")
+        return result
+    }
+    let runs = try JSONDecoder().decode([ReplayedRun].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+    let expectedOf = Dictionary(corpus.requests.map { ($0.phrase, Set($0.expected ?? [])) }, uniquingKeysWith: { a, _ in a })
+    let searching = runs.filter { !(expectedOf[$0.phrase] ?? []).isEmpty }
+    print("replay of \(path): \(searching.count) runs of requests that must search, "
+          + "\(searching.filter { !$0.searches.isEmpty }.count) of them searched")
+    var ways: [(String, MeaningFusion, Float, String)] = [("fts (the app)", .fts, 0, "keywords")]
+    if widener != nil { ways.append(("fts, keywords widened by the model", .fts, -1, "keywords")) }
+    if journal.embedder != nil {
+        let floor = journal.embedder?.folder.lastPathComponent.contains("lfm2") == true ? Float(0.2) : Float(0.45)
+        for meaningOf in ["keywords", "request", "both"] {
+            ways.append(("meaning alone · \(meaningOf)", .meaning, 0, meaningOf))
+            ways.append(("meaning alone@\(floor) · \(meaningOf)", .meaning, floor, meaningOf))
+            ways.append(("rrf · \(meaningOf)", .rrf, 0, meaningOf))
+            ways.append(("fts1-meaning@\(floor) · \(meaningOf)", .ftsOneThenMeaning, floor, meaningOf))
+            ways.append(("fts2-meaning@\(floor) · \(meaningOf)", .ftsTwoThenMeaning, floor, meaningOf))
+        }
+    }
+    let groups: [(String, (String) -> Bool)] = [
+        ("same words", { $0.contains("same words") }), ("other words", { $0.contains("other words") }),
+        ("all", { _ in true }),
+    ]
+    print("found (the expected exchange among the excerpts), of the runs".padding(toLength: 52, withPad: " ", startingAt: 0)
+          + groups.map { $0.0.padding(toLength: 18, withPad: " ", startingAt: 0) }.joined())
+    var rows: [[String: Any]] = []
+    let originalFusion = await journal.fusion
+    for (name, fusion, floor, meaningOf) in ways {
+        await journal.setFusion(fusion, cosineFloor: max(0, floor))
+        let widenedByModel = floor < 0
+        await journal.setMeaningOf(meaningOf)
+        var found: [String: (Int, Int)] = [:]
+        for run in searching {
+            let expected = expectedOf[run.phrase] ?? []
+            await journal.setRequest(run.phrase)
+            var excerpts: [String] = []
+            for search in run.searches where !search.refused {
+                let period = search.quand.flatMap { MemoryPeriod.read($0, now: now, calendar: calendar) }
+                if search.quand != nil, period == nil { continue }
+                var text = search.texte
+                if widenedByModel, let keywords = text { text = try await widen(keywords, run.phrase) }
+                let hits = try await journal.searchJournal(JournalQuery(text: text, from: period?.start,
+                                                                        to: period?.end, limit: 4, now: now))
+                excerpts += hits.compactMap { $0.entry.id.flatMap { corpusID[$0] } }
+            }
+            let hit = excerpts.contains(where: expected.contains)
+            for (group, matches) in groups where matches(run.label) {
+                let (f, n) = found[group] ?? (0, 0)
+                found[group] = (f + (hit ? 1 : 0), n + 1)
+            }
+        }
+        print(name.padding(toLength: 52, withPad: " ", startingAt: 0) + groups.map { group -> String in
+            let (f, n) = found[group.0] ?? (0, 0)
+            return String(format: "%3d/%-3d %3.0f %%     ", f, n, n == 0 ? 0 : Double(f) * 100 / Double(n))
+        }.joined())
+        rows.append(["way": name, "found": found.mapValues { [$0.0, $0.1] }])
+    }
+    await journal.setFusion(originalFusion, cosineFloor: 0)
+    _ = rows
+    if !passSeconds.isEmpty {
+        let sorted = passSeconds.sorted()
+        print(String(format: "the model's pass to widen the keywords: median %.2f s, 90th percentile %.2f s (%d passes)",
+                     sorted[sorted.count / 2], sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.9))],
+                     sorted.count))
     }
 }

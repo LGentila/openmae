@@ -3,6 +3,13 @@
 // light bonus for recent exchanges). No model, no network.
 //
 //   voice-cli memory-bench [--corpus Tests/Fixtures/memory-fr.json] [--now 2026-10-15T18:42] [--out measurements]
+//                          [--embedder folder [--embedder-cpu]] [--widen-words]
+//
+// --embedder (the study of issue #167): a sentence-embedding model's folder (MLX, `SentenceEmbedder`): the corpus's
+// exchanges embedded as they are written, each query searched by meaning alone and put together with the full-text
+// search in several ways (`MeaningFusion`), recall@4 by kind of query, the best cosine of each trap, and the costs (load,
+// weights, time per exchange written and per query, a scan of 20,000 vectors); every ranking in a JSON report.
+// --widen-words: the keywords widened with the system's French word embedding (`WordWidening`).
 //
 // The corpus (synthetic) holds about 300 exchanges and 40 queries in five kinds: lexical (the exchange's own words),
 // paraphrases (other words), with a period ("la semaine dernière"), as speech-to-text may garble them, and traps (nothing
@@ -176,6 +183,12 @@ func runMemoryBench(_ o: Options) async throws {
         print("\nno French sentence embedding on this Mac: searching by meaning not measured")
     }
 
+    // 2b. The study of issue #167: a sentence-embedding model (--embedder), the keywords widened (--widen-words).
+    if o.embedder != nil || o.widenWords {
+        try await studyMeaning(o, corpus: corpus, now: now, calendar: calendar, timeZone: timeZone,
+                               folder: scratch.appending(path: "meaning"))
+    }
+
     // 3. Speed and size: 20,000 exchanges, the corpus's again and again over two years.
     let big = try SQLiteMemoryStore(folder: scratch.appending(path: "large"))
     let total = 20_000
@@ -221,4 +234,162 @@ func runMemoryBench(_ o: Options) async throws {
 
 private func milliseconds(_ d: Duration) -> Double {
     Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+}
+
+/// One query of the study, for the analysis outside the app: each search's ranking by the corpus's ids.
+private struct MeaningQuery: Encodable {
+    var category: String
+    var query: String
+    var expected: [String]
+    var fts: [Ranked]
+    var meaning: [Ranked]
+    struct Ranked: Encodable {
+        var id: String
+        var score: Double
+    }
+}
+
+private struct MeaningReport: Encodable {
+    var model: String
+    var dimension: Int
+    var weightsMB: Double
+    var loadSeconds: Double
+    var peakMB: Double
+    var writeMs: [Double]
+    var queryMs: [Double]
+    var documentTokens: [Int]
+    var widen: Bool
+    var queries: [MeaningQuery]
+    var scanMs20k: Double
+}
+
+/// Searching by meaning (issue #167): the corpus's exchanges embedded as they are written, each query searched in each
+/// way of putting the full-text search and the search by meaning together (`MeaningFusion`), recall@4 by kind of query;
+/// the costs: the model's load, its memory, the time to embed an exchange and a query, a scan of 20,000 vectors.
+private func studyMeaning(_ o: Options, corpus: MemoryCorpus, now: Date, calendar: Calendar, timeZone: TimeZone,
+                          folder: URL) async throws
+{
+    let clock = ContinuousClock()
+    var embedder: SentenceEmbedder?
+    var loadSeconds = 0.0
+    let activeBefore = SentenceEmbedder.activeMemory
+    if let path = o.embedder {
+        let start = clock.now
+        embedder = try await SentenceEmbedder.load(directory: URL(fileURLWithPath: path), cpu: o.embedderCPU)
+        loadSeconds = studyMilliseconds(clock.now - start) / 1000
+    }
+    let name = embedder?.folder.lastPathComponent ?? "none"
+    let journal = MeaningJournal(store: try SQLiteMemoryStore(folder: folder), embedder: embedder, fusion: .fts,
+                                 meaningOf: "keywords", widen: o.widenWords)
+    var corpusID: [Int64: String] = [:]
+    var tokens: [Int] = []
+    for exchange in corpus.exchanges {
+        let id = try await journal.addExchange(JournalEntry(
+            date: LocalDateTime.parse(exchange.date, in: timeZone)!.date, user: exchange.user, answer: exchange.answer,
+            language: exchange.language == "en" ? .english : .french))
+        corpusID[id] = exchange.id
+        if let embedder { tokens.append(await embedder.tokenCount(exchange.user + "\n" + exchange.answer, query: false)) }
+    }
+    let weightsMB = Double(embedder?.weightBytes ?? 0) / 1e6
+    let peakMB = Double(SentenceEmbedder.peakMemory - activeBefore) / 1e6
+    print("\n=== searching by meaning: \(name)" + (o.embedderCPU ? " (on the CPU)" : "")
+          + (o.widenWords ? " · keywords widened with the system's French word embedding" : "") + " ===")
+    if let embedder {
+        print("prefixes: query « \(embedder.queryPrefix.debugDescription) », exchange « "
+              + "\(embedder.documentPrefix.debugDescription) » · \(embedder.dimension) dimensions")
+    }
+
+    let floors: [Float] = [0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    var queries: [MeaningQuery] = []
+    var recall: [String: [String: [Double]]] = [:]  // fusion (and floor) → category → recall per query
+    var trapsFound: [String: Int] = [:]
+    for query in corpus.queries {
+        let period = query.quand.flatMap { MemoryPeriod.read($0, now: now, calendar: calendar) }
+        let q = JournalQuery(text: query.query, from: period?.start, to: period?.end, limit: 4, now: now)
+        let fts = try await journal.fullText(q)
+        let meaning = embedder == nil ? [] : try await journal.meaningRanking(q)
+        queries.append(MeaningQuery(
+            category: query.category, query: query.query, expected: query.expected,
+            fts: fts.map { .init(id: corpusID[$0.id] ?? "?", score: $0.score) },
+            meaning: meaning.prefix(30).map { .init(id: corpusID[$0.id] ?? "?", score: Double($0.cosine)) }))
+        let wanted = Set(query.expected)
+        for fusion in MeaningFusion.allCases where embedder != nil || fusion == .fts {
+            for floor in (fusion == .ftsTwoThenMeaning || fusion == .strongFTSThenMeaning ? floors : [0]) {
+                let key = fusion.rawValue + (floor > 0 ? String(format: "@%.1f", floor) : "")
+                let found = fusion.merge(fts: fts, meaning: meaning, limit: 4, cosineFloor: floor)
+                    .compactMap { corpusID[$0] }
+                if wanted.isEmpty {
+                    if !found.isEmpty { trapsFound[key, default: 0] += 1 }
+                } else {
+                    recall[key, default: [:]][query.category, default: []].append(
+                        Double(found.filter(wanted.contains).count) / Double(min(4, wanted.count)))
+                }
+            }
+        }
+    }
+    let categories = ["lexical", "paraphrase", "period", "transcription"]
+    print("recall@4 by kind of query        " + categories.map { $0.padding(toLength: 14, withPad: " ", startingAt: 0) }
+        .joined() + "traps with something")
+    for key in recall.keys.sorted() {
+        let row = categories.map { category -> String in
+            let values = recall[key]?[category] ?? []
+            return String(format: "%3.0f %%         ", values.reduce(0, +) / Double(max(1, values.count)) * 100)
+        }.joined()
+        print(key.padding(toLength: 33, withPad: " ", startingAt: 0) + row + "\(trapsFound[key] ?? 0)/8")
+    }
+    if !meaningTrapCosines(queries).isEmpty {
+        print("best cosine, traps: " + meaningTrapCosines(queries))
+    }
+
+    // Costs: one exchange written, one query, a scan of 20,000 vectors.
+    let writes = await journal.writeMilliseconds.sorted()
+    let embeds = await journal.embedMilliseconds.sorted()
+    var scanMs = 0.0
+    if let embedder {
+        let vectors = try await (0..<20).asyncMap { i in
+            try await embedder.embed(corpus.exchanges[i].user, query: false)
+        }
+        let all = (0..<20_000).map { vectors[$0 % vectors.count] }
+        let q = try await embedder.embed("le métier de ma sœur", query: true)
+        var times: [Double] = []
+        for _ in 0..<20 {
+            let start = clock.now
+            var best: Float = -1
+            for v in all { best = max(best, studyDot(q, v)) }
+            times.append(studyMilliseconds(clock.now - start))
+            if best > 2 { print(best) }
+        }
+        scanMs = times.sorted()[times.count / 2]
+        func median(_ a: [Double]) -> Double { a.isEmpty ? 0 : a[a.count / 2] }
+        func p90(_ a: [Double]) -> Double { a.isEmpty ? 0 : a[min(a.count - 1, Int(Double(a.count) * 0.9))] }
+        print(String(format: "costs: loaded in %.2f s · weights %.0f MB · peak while embedding %.0f MB above before · "
+                     + "an exchange written %.1f ms (median; 90th percentile %.1f; %.0f tokens on average) · a query "
+                     + "%.1f ms (median; 90th percentile %.1f) · 20,000 vectors scanned in %.1f ms (%.1f MB as float32)",
+                     loadSeconds, weightsMB, peakMB, median(writes), p90(writes),
+                     Double(tokens.reduce(0, +)) / Double(max(1, tokens.count)), median(embeds), p90(embeds), scanMs,
+                     Double(20_000 * embedder.dimension * 4) / 1e6))
+    }
+    let report = MeaningReport(model: name, dimension: embedder?.dimension ?? 0, weightsMB: weightsMB,
+                               loadSeconds: loadSeconds, peakMB: peakMB, writeMs: writes, queryMs: embeds,
+                               documentTokens: tokens, widen: o.widenWords, queries: queries, scanMs20k: scanMs)
+    let url = o.out.appending(path: "memory-meaning-\(name)\(o.widenWords ? "-widened" : "")\(o.embedderCPU ? "-cpu" : "").json")
+    try FileManager.default.createDirectory(at: o.out, withIntermediateDirectories: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    try encoder.encode(report).write(to: url)
+    print("study report: \(url.path)")
+}
+
+/// The best cosine the search by meaning gives each trap (a topic the journal never mentions).
+private func meaningTrapCosines(_ queries: [MeaningQuery]) -> String {
+    queries.filter { $0.expected.isEmpty }.compactMap { $0.meaning.first.map { String(format: "%.2f", $0.score) } }
+        .joined(separator: ", ")
+}
+
+extension Sequence {
+    func asyncMap<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var values: [T] = []
+        for element in self { values.append(try await transform(element)) }
+        return values
+    }
 }
