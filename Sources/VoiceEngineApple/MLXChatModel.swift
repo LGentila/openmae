@@ -177,9 +177,16 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// Template variables: no hidden "thinking" before answering (it would delay the voice).
     private let templateContext: [String: any Sendable] = ["enable_thinking": false]
+    /// The tokens of a thought block of the model's own, kept out of its answers (`NoOwnThoughts`): nil for a model whose
+    /// template opens no answer with an empty thought block (Gemma 4 E2B, E4B), which writes none of its own.
+    private let ownThoughts: NoOwnThoughts.Tokens?
+    /// The model may write thought blocks of its own in its answers, as before they were kept out (`allowOwnThoughts`);
+    /// only for comparisons.
+    private var ownThoughtsAllowed = false
 
+    /// `answersOpenWithThought`: the template opens every answer with an empty thought block (`GemmaTemplateFix`).
     private init(context: ModelContext, tokenizer: any Tokenizers.Tokenizer, chatTemplate: String?,
-                 parameters: GenerateParameters) throws
+                 answersOpenWithThought: Bool, parameters: GenerateParameters) throws
     {
         self.context = context
         self.tokenizer = tokenizer
@@ -193,6 +200,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         stopTokens = stops
         toolCallStart = tokenizer.convertTokenToId("<|tool_call>")
         toolCallEnd = tokenizer.convertTokenToId("<tool_call|>")
+        ownThoughts = answersOpenWithThought ? NoOwnThoughts.Tokens(tokenizer) : nil
         cache = try context.model.newCache(parameters: parameters)
         // Not the small weights computing in float32 swaps for copies (`prepareFloat32Swap`): once swapped, the arrays
         // loaded go, and with MLX's free buffers given back (`releaseFreeBuffers`), so does their memory, which `wakeUp`
@@ -218,9 +226,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
                                    encoding: .utf8)
         let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
-        let model = try MLXChatModel(context: context, tokenizer: tokenizer,
-                                     chatTemplate: template.map { GemmaTemplateFix.patched($0) ?? $0 },
-                                     parameters: parameters)
+        let patched = template.flatMap(GemmaTemplateFix.patched)
+        let model = try MLXChatModel(context: context, tokenizer: tokenizer, chatTemplate: patched ?? template,
+                                     answersOpenWithThought: patched != nil, parameters: parameters)
         loaded.withLock { models in
             models.removeAll { $0.model == nil }
             models.append(LoadedModel(model: model))
@@ -339,6 +347,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// this fraction of the likeliest one is never drawn; 0: none), for comparisons in one build.
     public func sampleWithMinP(_ minP: Float) {
         parameters.minP = minP
+    }
+
+    /// Benchmark diagnostics (`voice-cli … --own-thoughts`): `true` lets the model write thought blocks of its own in its
+    /// answers, as before Gemma 4 26B was kept from it (`NoOwnThoughts`), for comparisons in one build.
+    public func allowOwnThoughts(_ on: Bool) {
+        ownThoughtsAllowed = on
     }
 
     /// Diagnostics: how the answers' tokens are drawn.
@@ -1043,6 +1057,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if watchingTokens {
             components = components.appendingLogitProcessor { TokenWatch(draws: draws) }
         }
+        if let ownThoughts, !ownThoughtsAllowed {
+            // After the chances read above, which stay the model's own.
+            components = components.appendingLogitProcessor { NoOwnThoughts(ownThoughts) }
+        }
         if opening == .toolCall, let toolCallStart, !tools.isEmpty {
             // After the chances read above, which stay the model's own (`callChanceAtStart`).
             components = components.appendingLogitProcessor { OpeningToken(token: toolCallStart) }
@@ -1698,6 +1716,74 @@ private struct OpeningToken: LogitProcessor {
     }
 
     mutating func didSample(token: MLXArray) { drawn = true }
+}
+
+/// Keeps a model whose template opens every answer with an empty thought block (`<|channel>thought\n<channel|>`, Gemma 4
+/// 26B's: `GemmaTemplateFix`) from writing thought blocks of its own in its answers, while thinking is off: `<|channel>`
+/// is never drawn, nor ` much` at the answer's first token and right after `<channel|>`, where the model writes it for one
+/// of its marks (`ReasoningFilter`).
+///
+/// Gemma 4 26B opened such blocks all the same, its template's block notwithstanding. mlx-community's 4-bit conversion
+/// (`voice-cli journal-bench --tier comfort --watch-calls`, `Tests/Fixtures/journal-fr.json`): at the first token of
+/// « Samedi dernier tu m'as donné une recette de cookies, tu peux me la redonner ? », `<|channel>` was the likeliest token
+/// (91.3 %; then `<|tool_call>` 7.3 % and ` much` 1.4 %, which took most of the chance `<|channel>` lost when it alone was
+/// kept out: about 16 %). Empty blocks, often two in a row before the call or the words (6 first answers of 7 for a spritz
+/// request): four tokens each, written for nothing. Others left open, the answer inside or before the call, their words
+/// often heading for a wrong answer (« je n'ai pas accès à l'historique de nos conversations », while the memory's tool
+/// searches it); the voice says nothing of a block, so a first answer written inside one was heard as nothing and asked
+/// again (`VoicePipeline.answerWithTools`), a whole answer more (2 to 3 s). Google's QAT conversion (the comfort tier's)
+/// opens fewer, all empty before a call: 2 passes of 172 in the corpus run 3 times (« Tu te souviens de ce que je donne à
+/// manger à ma pâte mère ? », `<|channel>` 9 % at its first token), 1 run of 20 for « Tu peux me redire comment on fait le
+/// cocktail italien que tu m'avais expliqué ? » (15.9 %; `<|tool_call>` 82.8 %), none for the cookies request (0.9 %).
+/// Kept out, none was opened: those answers opened their call at once, and the corpus's requests searched, found and used
+/// the exchanges as often (`voice-cli journal-bench --own-thoughts` compares).
+///
+/// Whether the token before was `<channel|>` is computed on the GPU, with the rest of the next token: nothing waits for the
+/// token drawn (read on the CPU, it would have the GPU finish that token before the next one could be handed to it).
+private struct NoOwnThoughts: LogitProcessor {
+    /// `<|channel>`, `<channel|>`, and ` much`.
+    struct Tokens: Sendable {
+        let open: Int
+        let close: Int
+        let markInWords: Int
+
+        /// Nil when the tokenizer lacks one of them.
+        init?(_ tokenizer: any Tokenizers.Tokenizer) {
+            func id(_ token: String) -> Int? {
+                tokenizer.convertTokenToId(token).flatMap { tokenizer.convertIdToToken($0) == token ? $0 : nil }
+            }
+            guard let open = id("<|channel>"), let close = id("<channel|>"), let markInWords = id("▁much") else { return nil }
+            self.open = open
+            self.close = close
+            self.markInWords = markInWords
+        }
+    }
+
+    /// The tokens, as `putAlong` takes their places (`[[token]]`), and `<channel|>`.
+    private let open: MLXArray
+    private let markInWords: MLXArray
+    private let close: MLXArray
+    /// The token drawn last, as the GPU has it; nil before the answer's first token.
+    private var previous: MLXArray?
+
+    init(_ tokens: Tokens) {
+        open = MLXArray([Int32(tokens.open)]).reshaped([1, 1])
+        markInWords = MLXArray([Int32(tokens.markInWords)]).reshaped([1, 1])
+        close = MLXArray(Int32(tokens.close))
+    }
+
+    mutating func prompt(_ prompt: MLXArray) {}
+
+    func process(logits: MLXArray) -> MLXArray {
+        let never = MLXArray(-Float.infinity).asType(logits.dtype).reshaped([1, 1])
+        let logits = putAlong(logits, open, values: never, axis: -1)
+        guard let previous else { return putAlong(logits, markInWords, values: never, axis: -1) }
+        let afterBlock = previous.reshaped([1, 1]) .== close
+        return putAlong(logits, markInWords, values: which(afterBlock, never, takeAlong(logits, markInWords, axis: -1)),
+                        axis: -1)
+    }
+
+    mutating func didSample(token: MLXArray) { previous = token }
 }
 
 /// When `MLXChatModel.wakeUp` last ran, from any thread.

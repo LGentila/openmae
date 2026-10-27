@@ -193,6 +193,9 @@ struct Options {
     /// cache-check, read-sizes: a mixture-of-experts model's experts never pad their rows, as before
     /// (`MLXChatModel.padExpertRows`), for comparisons in one build.
     var unpaddedExperts = false
+    /// actions-bench, journal-bench, cache-check: Gemma 4 26B may write thought blocks of its own in its answers, as before
+    /// it was kept from it (`MLXChatModel.allowOwnThoughts`), for comparisons in one build.
+    var ownThoughts = false
     var addendum: String?
     /// actions-bench: the web search's part of the system prompt, read from this file.
     var webAddendum: String?
@@ -298,6 +301,7 @@ struct Options {
             case "--bfloat16-prompts": o.bfloat16Prompts = true
             case "--bfloat16-experts": o.bfloat16Experts = true
             case "--unpadded-experts": o.unpaddedExperts = true
+            case "--own-thoughts": o.ownThoughts = true
             case "--addendum": o.addendum = it.next()
             case "--web-addendum": o.webAddendum = it.next()
             case "--agents-addendum": o.agentsAddendum = it.next()

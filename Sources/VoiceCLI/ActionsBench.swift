@@ -14,7 +14,7 @@
 //                           [--web-addendum file] [--agents-addendum file]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
 //                           [--record file.json] [--sources] [--news] [--memory [--journal]] [--compare-beginnings]
-//                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
+//                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts] [--own-thoughts]
 //
 // With Claude Code's tools (a corpus with "agents": true), a call to them is checked by the app's own delegation tools
 // (`AgentTools`, with an agent that does nothing), which know the tasks the case's earlier exchanges handed over and the
@@ -81,6 +81,8 @@
 // --bfloat16-prompts computes the requests' new tokens and the history in bfloat16, as the app did before (comparisons in
 // one build; the beginning stays in float32). --bfloat16-experts computes a mixture-of-experts model's experts' products
 // in bfloat16 as the requests and the history are computed in float32 (the app computes them in float32 too).
+// --own-thoughts lets Gemma 4 26B write thought blocks of its own in its answers, as before it was kept from it
+// (`MLXChatModel.allowOwnThoughts`; comparisons in one build).
 
 import Foundation
 import VoiceCore
@@ -354,6 +356,8 @@ func runActionsBench(_ o: Options) async throws {
     if o.bfloat16Prompts { print("requests and history computed in bfloat16 (--bfloat16-prompts)") }
     await model.computeExpertsInHalfPrecision(o.bfloat16Experts)
     if o.bfloat16Experts { print("experts' products in bfloat16 in the requests and the history (--bfloat16-experts)") }
+    await model.allowOwnThoughts(o.ownThoughts)
+    if o.ownThoughts { print("thought blocks of the model's own allowed in its answers (--own-thoughts)") }
     let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
     await model.limitToolCalls(maxCalls)
     print("calls carried out in one request: \(maxCalls) at most")

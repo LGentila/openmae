@@ -3,11 +3,14 @@
 //
 //   voice-cli journal-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/journal-fr.json] [--repeats 3] [--examples app|none|file]
-//                           [--web] [--request "cookies"] [--watch-calls] [--out measurements]
+//                           [--web] [--request "cookies"] [--watch-calls] [--own-thoughts] [--out measurements]
 //
 // --request: only the corpus's requests whose phrase holds this text (repeatable), to run a rare case many times.
 // --watch-calls: each pass exactly as the model wrote it, special tokens included, under its run; the report keeps it with
-// its tokens, each with its chance and the likeliest ones there.
+// its tokens, each with its chance and the likeliest ones there, and counts the passes that open a thought block of the
+// model's own or hold « much ».
+// --own-thoughts: Gemma 4 26B may write thought blocks of its own in its answers, as before it was kept from it
+// (`MLXChatModel.allowOwnThoughts`), to compare in one build.
 //
 // Text only, and nothing is carried out for real. The journal is switched on for this run only, whatever the app's
 // settings say (`MemorySettings.journalOffered`): the app's store (`SQLiteMemoryStore`) in a folder of the system's
@@ -225,6 +228,8 @@ func runJournalBench(_ o: Options) async throws {
         await model.watchToolCalls(true)
         await model.watchTokens(true)
     }
+    await model.allowOwnThoughts(o.ownThoughts)
+    if o.ownThoughts { print("thought blocks of the model's own allowed in its answers (--own-thoughts)") }
     let web = corpus.web == true || o.web
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
     let memory = MemoryTools(store: store, enabled: true, journal: true)
@@ -452,4 +457,14 @@ private func summarize(_ runs: [JournalRun], requests: [JournalCorpus.Request], 
     print("nothing heard " + share(runs.filter { SpeakableText.clean($0.answer).isEmpty }.count, runs.count)
           + " · « much » heard " + share(runs.filter { $0.answer.lowercased().contains("much") }.count, runs.count)
           + " · first answer with nothing said, asked again " + share(runs.filter { $0.askedAgain == true }.count, runs.count))
+    // With --watch-calls, the passes as the model wrote them: those that open a thought block of its own (the one its
+    // template opens every answer with is not in them), or hold « much » (`MLXChatModel.allowOwnThoughts`).
+    let passes = runs.flatMap { $0.raw ?? [] }
+    let tokens = runs.flatMap { $0.tokens ?? [] }
+    if !passes.isEmpty {
+        print("passes as written: with a thought block of the model's own (<|channel>) "
+              + share(passes.filter { $0.contains("<|channel>") }.count, passes.count) + " · with « much » "
+              + share(tokens.filter { $0.contains { $0.token.trimmingCharacters(in: .whitespaces).lowercased() == "much" } }
+                  .count, tokens.count))
+    }
 }
