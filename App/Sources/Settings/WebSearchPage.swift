@@ -36,6 +36,10 @@ struct WebSearchPage: View {
                 SwitchRow("On", isOn: $model.settings.webSearch.enabled)
                     .accessibilityLabel(Text("Web search"))
                 Caption("Maé searches the web with the engine you choose: the news, a score, opening hours, a price.")
+                // On the tiers that open a result's page.
+                if model.tier.map(WebSearchCatalog.opensPages(on:)) ?? false {
+                    Caption("When the search isn’t enough, she can open a website to read the details there.")
+                }
                 if search.enabled {
                     Hairline()
                     SettingRow("Engine") { engineMenu }

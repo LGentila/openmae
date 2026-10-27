@@ -5851,6 +5851,16 @@
         }
       }
     },
+    "When the search isn’t enough, she can open a website to read the details there.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand la recherche ne suffit pas, elle peut ouvrir un site pour y lire le détail."
+          }
+        }
+      }
+    },
     "While it is paused, its address answers as if it did not exist.": {
       "localizations": {
         "fr": {
