@@ -35,6 +35,13 @@ request, how much of the weights, of the conversation's memory (the cache and it
 macOS had compressed or written to swap, and how much MLX kept of its free buffers; then how long the request took to
 read its new tokens (“LLM: prefill”).
 
+`--web-results Tests/Fixtures/web-fr.json` offers the web search as the app does, its searches answered offline with the
+results the corpus recorded for the request whose words they share the most: record the corpus's requests (« Combien
+coûte le nouvel iPhone ? ») to have the model sum up a search's results, turn after turn. `--prefill-step 512` has the
+model read 512 new tokens at most in one pass instead of the app's 256, and `--no-request-lock` locks its memory wired
+only while the user speaks, not as each request starts, to compare in one build (see `lockForRequest` in
+`MLXChatModel.swift`).
+
 Interruptions (speaking over the assistant):
 
 ```bash

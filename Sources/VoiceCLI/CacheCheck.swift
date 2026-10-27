@@ -153,9 +153,9 @@ private actor CacheCheck {
     }
 
     /// A request the user cancels while the model reads its prompt (they spoke over the waiting phrase while it read a
-    /// long result): it is cancelled once the model has read the first chunk of its new tokens (more than 512 are read in
-    /// chunks), and gives no output. Prints what the model had read then, and whether it still counts the tokens its
-    /// cache holds.
+    /// long result): it is cancelled once the model has read the first chunk of its new tokens (more than
+    /// `MLXChatModel.readingStep` are read in chunks), and gives no output. Prints what the model had read then, and
+    /// whether it still counts the tokens its cache holds.
     private func cancelledRequest(_ label: String, _ messages: [ChatMessage]) async throws {
         let promptTokens = try await model.tokenCount(messages)
         let progress = PrefillProgress()
