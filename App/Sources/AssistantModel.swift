@@ -261,7 +261,7 @@ final class AssistantModel {
         connection.send(.forgetMemoryEntry(entry))
     }
 
-    /// The journal of past exchanges, erased. Not offered while the journal is not (`MemorySettings.journalOffered`).
+    /// "Erase past conversations": the journal of past exchanges, erased (what Maé remembers stays).
     func clearMemoryJournal() {
         connection.send(.clearMemoryJournal)
     }

@@ -181,12 +181,20 @@ extension Snapshots {
                      "Réunion d’équipe le lundi à 9\u{00A0}h", "Aime randonner sur le GR34",
                      "Lave le linge à 30\u{00A0}degrés",
                      "Ses parents arrivent pour Noël"]
-        func memory(_ entries: [String]) -> AssistantEvent {
+        func memory(_ entries: [String], exchanges: Int = 0) -> AssistantEvent {
             .memory(MemoryOverview(entries: entries, characters: entries.reduce(0) { $0 + $1.count },
-                                   capacity: MemorySheet.capacity, exchanges: 0,
+                                   capacity: MemorySheet.capacity, exchanges: exchanges,
                                    folder: "/Users/me/Library/Application Support/OpenMaé/Memory"))
         }
         let memoryOn: (inout AssistantSettings) -> Void = { $0.memory.enabled = true }
+        let journalOn: (inout AssistantSettings) -> Void = { s in
+            s.memory.enabled = true
+            s.memory.journal = true
+        }
+        // The same Mac on the standard tier, whose model is not offered the past conversations.
+        var standardInfo = Demo.info
+        standardInfo.tier = .standard
+        standardInfo.languageModel = "Gemma 4 E4B"
 
         // Relay. As the user's own: the OpenMaé relay, two devices, a source from the internet, no home relay.
         let homeAssistantOnline = InboundSource(name: "Home Assistant", origin: .internet, mayBeUrgent: true,
@@ -427,6 +435,18 @@ extension Snapshots {
             SettingsScene(name: "RgMemoire-eteinte", page: .memory, events: [memory(remembered)]),
             SettingsScene(name: "RgMemoire-tout-effacer", page: .memory, events: [memory(remembered)],
                           settings: memoryOn, prepare: { navigation, _, _ in navigation.sheet = .eraseMemory }),
+            // The past conversations kept (the journal): on the comfort tier; then on the standard one, which does not
+            // offer them, the switch saved on all the same
+            SettingsScene(name: "RgMemoire-conversations", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)), exchanges: 1_248)], settings: journalOn),
+            SettingsScene(name: "RgMemoire-conversations-vides", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)))], settings: journalOn),
+            SettingsScene(name: "RgMemoire-conversations-autre-palier", page: .memory,
+                          events: [.ready(standardInfo), memory(Array(remembered.prefix(4)), exchanges: 1_248)],
+                          settings: journalOn),
+            SettingsScene(name: "RgMemoire-effacer-conversations", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)), exchanges: 1_248)], settings: journalOn,
+                          prepare: { navigation, _, _ in navigation.sheet = .clearMemoryJournal }),
             // Connected tools (drawn, greyed in the sidebar)
             SettingsScene(name: "RgMcp", page: .tools, tools: tools),
             SettingsScene(name: "RgMcpVide", page: .tools),

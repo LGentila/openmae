@@ -206,7 +206,7 @@ struct Options {
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
     var agents = false
     /// actions-bench, dialogue-bench, cache-check: the memory's tool offered too (`memoire`), with the journal of past
-    /// exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal.
+    /// exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`) or with --journal.
     var memory = false
     var journal = false
     var searxng: String?
@@ -223,6 +223,8 @@ struct Options {
     var newsAddendum: String?
     /// actions-bench: the memory's rules in the system prompt, read from this file (the sheet still follows).
     var memoryAddendum: String?
+    /// actions-bench: the journal's part of the memory's rules, read from this file (with the journal only).
+    var journalAddendum: String?
     /// story-bench: these requests only, instead of the corpus's; journal-bench: only the corpus's requests that hold one
     /// of these texts.
     var requests: [String] = []
@@ -319,6 +321,7 @@ struct Options {
             case "--news": o.news = true
             case "--news-addendum": o.newsAddendum = it.next()
             case "--memory-addendum": o.memoryAddendum = it.next()
+            case "--journal-addendum": o.journalAddendum = it.next()
             case "--live-sources": o.liveSources = true
             case "--record-sources": o.recordSources = it.next()
             case "--request": o.requests.append(it.next() ?? "")
@@ -873,7 +876,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--no-actions] [--addendum file] [--web-addendum file]
                                        [--agents-addendum file] [--sources] [--live-sources]
                                        [--record-sources file.json] [--news] [--news-addendum file]
-                                       [--memory [--journal]] [--memory-addendum file]
+                                       [--memory [--journal]] [--memory-addendum file] [--journal-addendum file]
                                        [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]

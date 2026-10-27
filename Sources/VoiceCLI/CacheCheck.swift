@@ -420,13 +420,13 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let scenario = arguments.firstIndex(of: "--scenario").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     let agents = arguments.contains("--agents")
     let memory = arguments.contains("--memory")
-    // The memory's journal as the app offers it, or with --journal.
-    let journal = MemorySettings.journalOffered || arguments.contains("--journal")
     let timeZone = TimeZone.current
     guard let now = LocalDateTime.parse(o.now ?? "2026-10-15T18:42", in: timeZone)?.date else {
         throw CLIError("--now: expected a date like 2026-10-15T18:42")
     }
     let tier = try tierOption(o)
+    // The memory's journal as the app offers it on this tier, or with --journal.
+    let journal = MemorySettings.journalOffered(on: tier) || arguments.contains("--journal")
     var placement = Conversation.cutOffPlacement(on: tier)  // as the app on this tier
     if let name = arguments.firstIndex(of: "--cut-off").flatMap({ $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }) {
         guard let chosen = Conversation.CutOffPlacement(rawValue: name) else {
@@ -478,8 +478,8 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
         let empty = try await model.tokenCount(withSheet([]).messages)
         let usual = try await model.tokenCount(withSheet(memorySheet).messages)
         let full = try await model.tokenCount(withSheet(fullSheet).messages)
-        print("memory (\(journal ? "with the journal" : "without the journal, as the app")): the prompt without it "
-              + "\(without) tokens; its rules with an empty sheet +\(empty - without); with "
+        print("memory (\(journal ? "with the journal" : "without the journal, as the app on this tier")): the prompt "
+              + "without it \(without) tokens; its rules with an empty sheet +\(empty - without); with "
               + "\(memorySheet.count) entries (\(MemorySheet(entries: memorySheet).characters) characters) +\(usual - without); "
               + "with a full sheet (\(fullSheet.count) entries, \(MemorySheet(entries: fullSheet).characters) characters) "
               + "+\(full - without), of which the entries \(full - empty)")

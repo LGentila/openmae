@@ -686,7 +686,9 @@ public actor AssistantHost: AssistantConnection {
         var memoryChanged = false
         if new.memory != old.memory {
             memoryChanged = await configureMemory()
-            DebugLog.log("memory: \(new.memory.enabled ? "on" : "off"), journal \(new.memory.journalOn ? "on" : "off")")
+            DebugLog.log("memory: \(new.memory.enabled ? "on" : "off"), journal "
+                + (new.memory.journalOn(on: tier) ? "on" : MemorySettings.journalOffered(on: tier) ? "off"
+                    : "not offered on the \(tier.rawValue) tier"))
             if new.memory.retention != old.memory.retention { Task { await self.purgeJournal() } }
             await reportMemory()
         }
@@ -754,14 +756,15 @@ public actor AssistantHost: AssistantConnection {
 
     // MARK: - Memory
 
-    /// Switches the memory and its journal as the settings say (the journal only while it is offered:
-    /// `MemorySettings.journalOffered`). Returns true when what the model sees changed (its tool, or `chercher` with the
-    /// journal).
+    /// Switches the memory and its journal as the settings say (the journal only on a tier that offers it:
+    /// `MemorySettings.journalOffered(on:)`). Another tier chosen goes through start-up again, which calls this with it.
+    /// Returns true when what the model sees changed (its tool, or `chercher` with the journal).
     @discardableResult
     private func configureMemory() async -> Bool {
         let memory = settings.memory
-        let changed = await memoryTools.configure(enabled: memory.enabled, journal: memory.journalOn)
-        if memory.journalOn {
+        let journalOn = memory.journalOn(on: tier)
+        let changed = await memoryTools.configure(enabled: memory.enabled, journal: journalOn)
+        if journalOn {
             let writer = journalWriter ?? StoreJournal(store: memoryStore)
             journalWriter = writer
             await pipeline?.setJournal(writer)
@@ -787,7 +790,7 @@ public actor AssistantHost: AssistantConnection {
     }
 
     private func purgeJournal() async {
-        guard let days = settings.memory.retention.days, settings.memory.journalOn else { return }
+        guard let days = settings.memory.retention.days, settings.memory.journalOn(on: tier) else { return }
         while pipelineState != .listening {
             try? await Task.sleep(for: .seconds(60))
             if Task.isCancelled { return }

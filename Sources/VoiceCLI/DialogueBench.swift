@@ -30,12 +30,12 @@
 // the task is over (`answerMentions`); either way, never an answer that says it still runs (`answerNeverMentions`, which
 // any goal may have). --web offers the web search too (nothing is searched: a call is declined). --memory (or
 // "memory": true, as in Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet kept in memory,
-// and its journal of past exchanges only as the app offers it (`MemorySettings.journalOffered`) or with --journal: a
-// dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]" starts a new conversation (the sheet
-// read again), and its goal is checked once all its sentences are said (what the sheet holds, what the last answer
-// says). --now replaces every reference time of the corpus (a dialogue may have its own). --examples and --addendum are
-// those of actions-bench. --watch-calls adds each first pass's chance of opening a call (at its first token, and at its
-// most tempted token).
+// and its journal of past exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: the
+// comfort tier) or with --journal: a dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]"
+// starts a new conversation (the sheet read again), and its goal is checked once all its sentences are said (what the
+// sheet holds, what the last answer says). --now replaces every reference time of the corpus (a dialogue may have its
+// own). --examples and --addendum are those of actions-bench. --watch-calls adds each first pass's chance of opening a
+// call (at its first token, and at its most tempted token).
 
 import Foundation
 import VoiceCore
@@ -175,11 +175,13 @@ func runDialogueBench(_ o: Options) async throws {
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
     // The memory last, as in the app; off, it offers nothing.
     let memory = corpus.memory == true || o.memory
-    let journal = MemorySettings.journalOffered || o.journal
+    let offered = MemorySettings.journalOffered(on: tier)
+    let journal = offered || o.journal
     let memoryStore = TransientMemoryStore()
     let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: journal)
     if memory {
-        print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)"))
+        print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")
+            : "without the journal, as the app on this tier (--journal to offer it)"))
     }
     // Claude Code's tasks and their folders go into a folder of their own, removed at the end.
     let agentsFolder = FileManager.default.temporaryDirectory

@@ -29,7 +29,7 @@ own devices.
 - **French first, English too.** She answers in the language you speak.
 - **Actions.** Calendar events, reminders, timers and your own Shortcuts.
 - **Searching the internet.** The news, opening hours, the weather, a travel time…
-- **Memory.** She remembers what you ask her to.
+- **Memory.** She remembers what you ask her to, and on the comfort tier she can find a past conversation again.
 - **From your iPhone.** Talk to Maé from anywhere; the work stays on the Mac.
 - **Private by design.** Speech recognition, the language model and the voice all run on your Mac. No account, no
   telemetry: once the models are downloaded, only what you turn on goes online.

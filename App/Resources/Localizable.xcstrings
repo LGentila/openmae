@@ -61,6 +61,16 @@
         }
       }
     },
+    "%@ exchanges kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ échanges gardés."
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -197,6 +207,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "1 outil"
+          }
+        }
+      }
+    },
+    "1 year": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 an"
+          }
+        }
+      }
+    },
+    "30 days": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 jours"
           }
         }
       }
@@ -1441,6 +1471,26 @@
         }
       }
     },
+    "Erase past conversations?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer les conversations passées ?"
+          }
+        }
+      }
+    },
+    "Erase past conversations…": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer les conversations passées…"
+          }
+        }
+      }
+    },
     "Erase the log?": {
       "localizations": {
         "fr": {
@@ -1471,12 +1521,12 @@
         }
       }
     },
-    "Everything Maé remembers is erased from this Mac, with the history of past exchanges if there is one.": {
+    "Every exchange kept is erased from this Mac. What Maé remembers stays.": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tout ce que Maé retient est effacé de ce Mac, avec l’historique des échanges passés s’il y en a un."
+            "value": "Tous les échanges gardés sont effacés de ce Mac. Ce que Maé retient reste."
           }
         }
       }
@@ -1587,6 +1637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Pour Home Assistant : active l’intégration « Serveur MCP » dans Paramètres › Appareils et services. Seuls les comptes administrateur peuvent s’y connecter."
+          }
+        }
+      }
+    },
+    "For now, only with the Comfort tier’s model.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour l’instant, seulement avec le modèle du palier Confort."
           }
         }
       }
@@ -2171,12 +2231,42 @@
         }
       }
     },
+    "Keep for": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder pendant"
+          }
+        }
+      }
+    },
     "Keep for later": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "Garder pour plus tard"
+          }
+        }
+      }
+    },
+    "Keep past conversations": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder les conversations passées"
+          }
+        }
+      }
+    },
+    "Keep past conversations for": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder les conversations passées pendant"
           }
         }
       }
@@ -3081,6 +3171,16 @@
         }
       }
     },
+    "Nothing kept yet.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rien de gardé pour l’instant."
+          }
+        }
+      }
+    },
     "Nothing readable: an empty text, or broken JSON.": {
       "localizations": {
         "fr": {
@@ -3261,6 +3361,16 @@
         }
       }
     },
+    "One exchange kept.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un échange gardé."
+          }
+        }
+      }
+    },
     "Open %@": {
       "localizations": {
         "fr": {
@@ -3397,6 +3507,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mot de passe"
+          }
+        }
+      }
+    },
+    "Past conversations": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversations passées"
           }
         }
       }
@@ -5111,6 +5231,16 @@
         }
       }
     },
+    "Unlimited": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans limite"
+          }
+        }
+      }
+    },
     "Unreachable": {
       "localizations": {
         "fr": {
@@ -5307,6 +5437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce que Maé retient"
+          }
+        }
+      }
+    },
+    "What Maé remembers and the past conversations she keeps are erased from this Mac.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que Maé retient et les conversations passées qu’elle garde sont effacés de ce Mac."
           }
         }
       }
@@ -5707,6 +5847,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton essai"
+          }
+        }
+      }
+    },
+    "Your words and Maé’s answers, so that she can find a conversation again when you ask her about it.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tes mots et les réponses de Maé, pour qu’elle retrouve une conversation quand tu lui en parles."
           }
         }
       }

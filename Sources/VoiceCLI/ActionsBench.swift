@@ -14,7 +14,7 @@
 //                           [--web-addendum file] [--agents-addendum file]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
 //                           [--record file.json] [--sources] [--news] [--memory [--journal]] [--memory-addendum file]
-//                           [--compare-beginnings]
+//                           [--journal-addendum file] [--compare-beginnings]
 //                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts] [--own-thoughts]
 //
 // With Claude Code's tools (a corpus with "agents": true), a call to them is checked by the app's own delegation tools
@@ -38,10 +38,11 @@
 // --news-addendum <file> replaces its part of the system prompt.
 //
 // The memory's tool, memoire (a corpus with "memory": true, as Tests/Fixtures/memory-actions-fr.json, or --memory with
-// any corpus), with the journal of past exchanges only as the app offers it (`MemorySettings.journalOffered`), or with
-// --journal. Without the journal, the requests that need it (to search past conversations, to erase a period of them)
-// are left out of the score and reported apart: what the model did with them. --memory-addendum <file> replaces the
-// memory's rules in the system prompt (the journal's part and the sheet still follow). With any corpus, the report counts
+// any corpus), with the journal of past exchanges only as the app offers it on the tier
+// (`MemorySettings.journalOffered(on:)`: the comfort tier), or with --journal. Without the journal, the requests that
+// need it (to search past conversations, to erase a period of them) are left out of the score and reported apart: what
+// the model did with them. --memory-addendum <file> replaces the memory's rules in the system prompt (the journal's
+// part and the sheet still follow), --journal-addendum <file> the journal's part. With any corpus, the report counts
 // the answers without a call that say something was noted, remembered or saved (« C'est noté », « Je retiens que… »):
 // nothing was, and the user believes Maé will remember it.
 //
@@ -111,8 +112,8 @@ private struct Corpus: Decodable {
     var sources: Bool?
     /// Where "here" is for them.
     var here: Place?
-    /// The memory's tool is offered too (`memoire`; with the journal as the app offers it, or with --journal), with this
-    /// sheet in the prompt.
+    /// The memory's tool is offered too (`memoire`; with the journal as the app offers it on the tier, or with
+    /// --journal), with this sheet in the prompt.
     var memory: Bool?
     var memorySheet: [String]?
     /// What a source answered for a request (by its phrase), as the model reads it: summed up by the model.
@@ -325,7 +326,7 @@ func runActionsBench(_ o: Options) async throws {
     if !actions { print("the actions left out, as in the app when they are off") }
     let news = corpus.news == true || o.news
     let memory = corpus.memory == true || o.memory
-    let journal = MemorySettings.journalOffered || o.journal
+    let journal = MemorySettings.journalOffered(on: tier) || o.journal
     let sheet = corpus.memorySheet ?? []
     // In the app's order: the actions, the agents, the web search, the built-in sources, the news, the memory (last).
     let actionTools: [ToolSpec] = actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer]
@@ -394,10 +395,13 @@ func runActionsBench(_ o: Options) async throws {
             : [])
         + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, rules: try o.memoryAddendum.map {
             try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        }, journalRules: try o.journalAddendum.map {
+            try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         })] : [])
     if memory {
-        print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)")
-              + ", \(sheet.count) entries in the sheet")
+        let offered = MemorySettings.journalOffered(on: tier)
+        print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")
+            : "without the journal, as the app on this tier (--journal to offer it)") + ", \(sheet.count) entries in the sheet")
     }
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) && (actions || agents) ? "app" : "none")
     // Without the actions, the app's are the delegation's (`AgentTools.exampleExchanges`, Claude Code reading back).

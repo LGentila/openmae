@@ -109,20 +109,31 @@ public enum MemoryRetention: String, Sendable, Codable, CaseIterable {
 
 /// Maé's memory, kept on this Mac only (Application Support/<name>/Memory), never sent anywhere: a sheet of what the user
 /// asked her to remember, which goes into the beginning of each conversation, and, with its own switch, a journal of past
-/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…"). The journal is not offered in this version
-/// (`journalOffered`).
+/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…"). The journal is offered on the tiers whose
+/// model was measured with it (`journalOffered(on:)`).
 public struct MemorySettings: Sendable, Codable, Equatable {
-    /// The journal is switched off for everyone, whatever `journal` says: nothing is written to it, Maé does not search it
-    /// (her tool offers `retenir` and `oublier` only), and it is never purged (a journal already on disk stays as it is,
-    /// until "Erase everything"). Its code stays, for when it comes back once measured.
-    public static let journalOffered = false
+    /// The tiers that offer the journal, the one place that says so (the engine, Settings › Memory and the benches read
+    /// it): Gemma 4 26B's, the comfort tier. `voice-cli journal-bench` (3 runs of each request): asked with some of the
+    /// exchange's own words, the 26B searched the journal and found the exchange in every run, and its answer used it in
+    /// 94 and 97 % (two rounds); when the search missed the exchange, it said it found nothing and offered to search with
+    /// other words, in all 84 such answers of three rounds. Gemma 4 E2B and E4B then told something false as if they
+    /// remembered it (12 of 28 answers, about 5 of 31): not offered on the minimum and standard tiers until that is
+    /// fixed. The maximum tier (the 26B in 8 bits) could not be measured.
+    ///
+    /// On another tier, the journal is off whatever `journal` says: nothing is written to it, Maé does not search it (her
+    /// tool offers `retenir` and `oublier` only), and it is never purged (what is on disk stays as it is, until "Erase
+    /// everything"). The saved switch is kept: back on a tier that offers it, the journal is on again as it was.
+    public static func journalOffered(on tier: HardwareTier) -> Bool { tier == .comfort }
 
     /// Off by default. On, the sheet is on.
     public var enabled = false
-    /// The journal of past exchanges, off by default even with the memory on. Kept as it was saved, and not used while
-    /// the journal is not offered.
+    /// The journal of past exchanges, off by default even with the memory on. Kept as it was saved, and not used on a
+    /// tier that does not offer the journal.
     public var journal = false
-    public var retention = MemoryRetention.thirtyDays
+    /// One year unless the user chose otherwise: 30 days, the first default, was too short to find again what Maé gave
+    /// two months before (« redonne-moi la recette de spritz que tu m'avais donnée »). Settings saved with the first
+    /// default keep it.
+    public var retention = MemoryRetention.oneYear
     /// Searching the journal by meaning too (embeddings): off, and not built while the plain search is enough.
     public var semanticSearch = false
     public init() {}
@@ -133,12 +144,13 @@ public struct MemorySettings: Sendable, Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         journal = try c.decodeIfPresent(Bool.self, forKey: .journal) ?? false
-        retention = (try? c.decodeIfPresent(MemoryRetention.self, forKey: .retention)) ?? .thirtyDays
+        retention = (try? c.decodeIfPresent(MemoryRetention.self, forKey: .retention)) ?? .oneYear
         semanticSearch = try c.decodeIfPresent(Bool.self, forKey: .semanticSearch) ?? false
     }
 
-    /// The journal is written and searched: offered, and the memory and the journal both switched on.
-    public var journalOn: Bool { Self.journalOffered && enabled && journal }
+    /// The journal is written and searched with this tier's model: offered on it, and the memory and the journal both
+    /// switched on.
+    public func journalOn(on tier: HardwareTier) -> Bool { Self.journalOffered(on: tier) && enabled && journal }
 }
 
 /// What the memory page shows (`AssistantEvent.memory`).

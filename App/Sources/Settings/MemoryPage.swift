@@ -1,15 +1,27 @@
 import SwiftUI
 import VoiceCore
 
-/// Settings › Memory: the switch, named after what it does; then what Maé remembers (newest first, ten at a time, each
-/// entry can be deleted), and erasing everything. Everything stays on this Mac, in the memory's folder. The journal of
-/// past exchanges is not offered in this version (`MemorySettings.journalOffered`): the page says nothing of it, and
-/// "Erase everything" still erases one that is on disk.
+/// Settings › Memory: the memory's switch, named after what it does. With it on: the past conversations, their switch
+/// named after what it keeps, how long they are kept and how many exchanges are; what Maé remembers (newest first, ten at
+/// a time, each entry can be deleted); erasing the past conversations, or everything. Everything stays on this Mac, in
+/// the memory's folder.
+///
+/// The past conversations (the journal) are offered with some tiers' model only (`MemorySettings.journalOffered(on:)`):
+/// on another one, their switch is off and disabled, a line says why, and nothing more is shown of them; the saved
+/// switch stays as it is, for a tier that offers them.
 struct MemoryPage: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
 
     private var memory: MemorySettings { model.settings.memory }
+
+    /// The tier's model offers the journal; not known yet (the engine has not said its tier), it does.
+    private var journalOffered: Bool { model.tier.map { MemorySettings.journalOffered(on: $0) } ?? true }
+
+    /// Off on a tier that does not offer the journal, whatever is saved.
+    private var journalSwitch: Binding<Bool> {
+        journalOffered ? $model.settings.memory.journal : .constant(false)
+    }
 
     var body: some View {
         SettingsPageScroll {
@@ -22,11 +34,17 @@ struct MemoryPage: View {
                 Caption("Say “remember that…”: Maé keeps it here and uses it when it helps, in every conversation.")
             }
             if memory.enabled {
+                PageSection("Past conversations")
+                SettingsCard { journalRows }
                 PageSection("What Maé remembers")
                 SettingsCard { entries }
                 PageSection("Erase")
                 SettingsCard {
                     ActionRow(top: 14, bottom: 14) {
+                        if journalOffered, (model.memory?.exchanges ?? 0) > 0 {
+                            Button("Erase past conversations…") { navigation.sheet = .clearMemoryJournal }
+                                .buttonStyle(WindowButtonStyle(kind: .danger))
+                        }
                         Button("Erase everything…") { navigation.sheet = .eraseMemory }
                             .buttonStyle(WindowButtonStyle(kind: .danger))
                     }
@@ -35,6 +53,53 @@ struct MemoryPage: View {
             }
         }
         .onAppear { model.refreshMemory() }
+    }
+
+    /// The journal's switch, what it keeps and why; then, on, how long and how many.
+    @ViewBuilder private var journalRows: some View {
+        SwitchRow("Keep past conversations", isOn: journalSwitch)
+            .disabled(!journalOffered)
+        Caption("Your words and Maé’s answers, so that she can find a conversation again when you ask her about it.")
+        if !journalOffered {
+            Caption("For now, only with the Comfort tier’s model.")
+        } else if memory.journal {
+            Hairline()
+            SettingRow("Keep for") { retentionMenu }
+            if let count = model.memory?.exchanges {
+                Caption(Self.kept(count))
+            }
+        }
+    }
+
+    private var retentionMenu: some View {
+        PopUpMenu(title: Self.name(memory.retention), label: Text("Keep past conversations for")) {
+            Picker(selection: $model.settings.memory.retention) {
+                ForEach(MemoryRetention.allCases, id: \.self) { retention in
+                    Self.name(retention).tag(retention)
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
+    }
+
+    static func name(_ retention: MemoryRetention) -> Text {
+        switch retention {
+        case .thirtyDays: Text("30 days")
+        case .oneYear: Text("1 year")
+        case .unlimited: Text("Unlimited")
+        }
+    }
+
+    /// How many exchanges the journal holds.
+    static func kept(_ count: Int) -> Text {
+        switch count {
+        case 0: Text("Nothing kept yet.")
+        case 1: Text("One exchange kept.")
+        default: Text("\(Units.count(count)) exchanges kept.")
+        }
     }
 
     /// The sheet, newest first, one row per entry, each with its delete button; then how full it is.
@@ -85,14 +150,37 @@ private struct EntryRow: View {
     }
 }
 
-/// "Erase everything?": what Maé remembers, and the journal of past exchanges if one is on disk.
+/// "Erase past conversations?": the journal is erased; what Maé remembers stays.
+struct ClearMemoryJournalSheet: View {
+    @Bindable var model: AssistantModel
+    let navigation: SettingsNavigation
+
+    var body: some View {
+        SheetCard(width: 460, title: Text("Erase past conversations?"),
+                  text: Text("Every exchange kept is erased from this Mac. What Maé remembers stays."))
+        {
+            EmptyView()
+        } footer: {
+            Button("Cancel") { navigation.sheet = nil }
+                .buttonStyle(WindowButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Button("Erase") {
+                navigation.sheet = nil
+                model.clearMemoryJournal()
+            }
+            .buttonStyle(WindowButtonStyle(kind: .solidDanger))
+        }
+    }
+}
+
+/// "Erase everything?": what Maé remembers, and the past conversations kept, on this tier or another.
 struct EraseMemorySheet: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
 
     var body: some View {
         SheetCard(width: 460, title: Text("Erase everything?"),
-                  text: Text("Everything Maé remembers is erased from this Mac, with the history of past exchanges if there is one."))
+                  text: Text("What Maé remembers and the past conversations she keeps are erased from this Mac."))
         {
             EmptyView()
         } footer: {

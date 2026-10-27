@@ -12,13 +12,14 @@
 // --own-thoughts: Gemma 4 26B may write thought blocks of its own in its answers, as before it was kept from it
 // (`MLXChatModel.allowOwnThoughts`), to compare in one build.
 //
-// Text only, and nothing is carried out for real. The journal is switched on for this run only, whatever the app's
-// settings say (`MemorySettings.journalOffered`): the app's store (`SQLiteMemoryStore`) in a folder of the system's
-// temporary directory, deleted at the end, never the user's. It holds the exchanges of the corpus's "journal"
-// (Tests/Fixtures/memory-fr.json, memory-bench's) and the corpus's own, where Maé gave something (a recipe, an address, a
-// recommendation…); the sheet in the prompt is the corpus's. Each request starts a new conversation, as the app has it
-// with the actions on, the memory's tool with the journal (`memoire`: retenir, chercher, oublier) last, and with "web":
-// true (or --web) the web search, which searches nothing (a call is declined). Each call goes through the app's
+// Text only, and nothing is carried out for real. The journal is switched on for this run only, on any tier, whatever
+// the app's settings say and whether the app offers it on that tier (`MemorySettings.journalOffered(on:)`, which the
+// report's first lines say): the app's store (`SQLiteMemoryStore`) in a folder of the system's temporary directory,
+// deleted at the end, never the user's. It holds the exchanges of the corpus's "journal"
+// (Tests/Fixtures/memory-fr.json, memory-bench's) and the corpus's own, where Maé gave something (a recipe, an address,
+// a recommendation…); the sheet in the prompt is the corpus's. Each request starts a new conversation, as the app has
+// it with the actions on, the memory's tool with the journal (`memoire`: retenir, chercher, oublier) last, and with
+// "web": true (or --web) the web search, which searches nothing (a call is declined). Each call goes through the app's
 // `ToolRunner`, its checks and its second try; a search through the app's `MemoryTools`, whose excerpts the model then
 // sums up as in the app (`AppTalk`, dialogue-bench's turn). The model samples its answers: each request runs --repeats
 // times (default 3). A fact remembered on the way is taken out of the sheet before the next request.
@@ -217,7 +218,8 @@ func runJournalBench(_ o: Options) async throws {
     }
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue)) · reference time "
           + LocalDateTime.format(now, in: timeZone))
-    print("journal: \(exchanges.count) exchanges (switched on for this run only, in a temporary folder) · sheet: "
+    print("journal: \(exchanges.count) exchanges (switched on for this run only, in a temporary folder; the app "
+          + (MemorySettings.journalOffered(on: tier) ? "offers it" : "does not offer it") + " on this tier) · sheet: "
           + "\(sheet.count) entries · \(requests.count) requests"
           + (requests.count < corpus.requests.count ? " of \(corpus.requests.count)" : ""))
     let clock = ContinuousClock()
