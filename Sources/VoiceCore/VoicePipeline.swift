@@ -2647,7 +2647,10 @@ public actor VoicePipeline {
     private func setState(_ newState: PipelineState) {
         guard newState != state else { return }
         // The interfaces show the user's words in a new line each time they speak, until their turn is over.
-        if newState == .userSpeaking || state == .userSpeaking { resetPartials() }
+        if newState == .userSpeaking || state == .userSpeaking {
+            resetPartials()
+            userSpeaks(newState == .userSpeaking)
+        }
         state = newState
         // Back at rest after the few seconds of attention: Maé waits for the phrase again.
         if newState == .listening, let awakeUntil, clock.now >= awakeUntil { fallAsleep() }
@@ -2689,6 +2692,12 @@ public actor VoicePipeline {
     private func wakeModelsUp() {
         guard config.keepWarmSeconds > 0 else { return }
         for stage in warmStages { stage.wakeUp() }
+    }
+
+    /// The user's turn starts or ends (see `KeepsWarm.userSpeaks`).
+    private func userSpeaks(_ speaking: Bool) {
+        guard config.keepWarmSeconds > 0 else { return }
+        for stage in warmStages { stage.userSpeaks(speaking) }
     }
 
     /// Root-mean-square level in dB (0 dB = full scale).

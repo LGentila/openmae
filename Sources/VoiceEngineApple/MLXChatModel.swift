@@ -132,9 +132,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private nonisolated let weightPages: [Range<UInt>]
     /// When `wakeUp` last brought the weights back.
     private nonisolated let lastWakeUp = WakeUpTimes()
-    /// When the model last computed something on the GPU (a request, the history, a beginning, a keep-warm pass): see
-    /// `wakeUpOnGPU`.
-    private var lastComputed = ContinuousClock.now
+    /// `wakeUp` reads the weights from the CPU (`holdOnGPU` waits for it).
+    private nonisolated let wakingUp = Atomic<Bool>(false)
+    /// The user's turn is under way (`userSpeaks`).
+    private nonisolated let userSpeaking = Atomic<Bool>(false)
+    /// `holdOnGPU` runs.
+    private var holding = false
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
@@ -209,6 +212,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         // loaded go, and with MLX's free buffers given back (`releaseFreeBuffers`), so does their memory, which `wakeUp`
         // reads off the actor. They are smaller than a page anyway, so far.
         weightPages = MemoryResidency.ranges(context.model.parameters().flattened().map(\.1).filter { !Self.isSmall($0) })
+        MemoryResidency.watchWiring()
     }
 
     /// Gives back to macOS the GPU memory MLX keeps for reuse, once a model has been released (tier change,
@@ -473,7 +477,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             DebugLog.log("LLM: computed the conversations' beginning (\(tokens.count) tokens) in float32 in \(d)")
             logResidency("after the conversations' beginning")
         }
-        lastComputed = ContinuousClock.now
         guard let beginning else { return }
         cache = beginning.cache.map { $0.copy() }  // a copy: the beginning stays for the conversations to come
         cachedTokens = beginning.tokens
@@ -684,7 +687,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         guard !windingDown else { return }
         catchUpsUnderWay += 1
         defer {
-            lastComputed = ContinuousClock.now
             releaseFreeBuffers()
             catchUpsUnderWay -= 1
         }
@@ -761,7 +763,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         _ = try readingPrompt { try readPrompt(tokens, from: start) }
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
-        lastComputed = ContinuousClock.now
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
         return tokens.count - start
     }
@@ -873,35 +874,38 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             DebugLog.log("LLM: keep-warm given up after \(touched - start), the model winds down")
             return
         }
-        readOnGPU(conversation)
+        eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
         releaseFreeBuffers()
-    }
-
-    /// Reads every weight once on the GPU (a sum per tensor), and `conversation` (the conversation's memory).
-    private func readOnGPU(_ conversation: [MLXArray]) {
-        eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
-        lastComputed = ContinuousClock.now
     }
 
     /// Someone started to speak (see `KeepsWarm`): the weights macOS compressed or wrote to swap since the last keep-warm
     /// pass come back while they speak, several pages at a time, rather than during the request. Off the actor, so that
     /// a request that comes meanwhile does not wait for it; at most once every 5 s. The conversation's memory comes back
-    /// meanwhile too (`wakeConversationUp`), then the GPU reads it all once (`wakeUpOnGPU`). Not once the model winds down
-    /// (`windDown`).
+    /// meanwhile too (`wakeConversationUp`). If it is the user's turn, the GPU's driver then wires it all (`holdOnGPU`).
+    /// Not once the model winds down (`windDown`).
     public nonisolated func wakeUp() {
         guard !windingDown, lastWakeUp.claim(spacing: .seconds(5)) else { return }
+        wakingUp.store(true, ordering: .relaxed)
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let start = ContinuousClock.now
             MemoryResidency.touch(weightPages, threads: 4)
             DebugLog.log("LLM: weights woken up in \(ContinuousClock.now - start)")
-            Task(priority: .userInitiated) { await self.wakeUpOnGPU() }
+            wakingUp.store(false, ordering: .relaxed)
         }
         Task(priority: .userInitiated) { await self.wakeConversationUp() }
     }
 
-    /// `wakeUp`, once the weights are read from the CPU: the GPU reads every weight once, and the conversation's memory, as
-    /// a keep-warm pass does (`readOnGPU`), while the user speaks; then the request finds them ready.
+    /// The user's turn starts or ends (see `KeepsWarm`): while it lasts, the GPU's driver keeps the weights wired
+    /// (`holdOnGPU`).
+    public nonisolated func userSpeaks(_ speaking: Bool) {
+        userSpeaking.store(speaking, ordering: .relaxed)
+        guard speaking, !windingDown else { return }
+        Task(priority: .userInitiated) { await self.holdOnGPU() }
+    }
+
+    /// While the user speaks, until their request is sent: the GPU's driver wires every weight and the conversation's
+    /// memory (`wireOnGPU`), and again every `holdSpacing`, so that the request finds them wired.
     ///
     /// The GPU's driver wires the memory a computation uses (macOS can then neither compress it nor write it to swap), and
     /// lets it go again within seconds: between two requests the Mac's wired memory went back from 18–20 GB to 2.9–3.6 GB
@@ -911,30 +915,76 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// `voice-cli conversation` with the usual apps open (7.5 GB of swap in use), the first request after the voice had
     /// loaded read its 46 new tokens in 1.30, 3.27 and 3.32 s in three launches, the Mac decompressing 2.7 to 6.5 GB and
     /// compressing 3.5 to 7.3 GB meanwhile, and in a fourth 2.96 s, then 2.64 s to its first token; later ones in 0.46 to
-    /// 0.57 s. In the app, requests that came after minutes of silence waited the same way (5.6 s for 52 new tokens, then
-    /// 0.74 s per token for the first ten), the weights read from the CPU in 2 s just before. Read once on the GPU while the
-    /// user speaks, macOS makes that room then (0.71 s after the voice had loaded, the wired memory going from 3.6 to 18.6
-    /// GB; 0.26 s when the Mac has room), and the request's own wiring finds it made: the first request then read its new
-    /// tokens in 0.56 s, and its first token came 0.10 s later.
+    /// 0.57 s. Read once on the GPU at the start of the user's speech, macOS made that room then (0.71 s after the voice had
+    /// loaded, the wired memory going from 3.6 to 18.6 GB; 0.26 s when the Mac has room): the first request then read its
+    /// new tokens in 0.56 s, and its first token came 0.10 s later. But in the app, on the same Mac with its memory full (31
+    /// of 32 GB used: the app, OrbStack's virtual machine, Claude, Arc, Music), that wiring was gone 1.6 s later, at the
+    /// request, the weights all in RAM: the request read its 47 new tokens in 8.4 s (the Mac compressed 27 GB meanwhile,
+    /// the weights among them, and decompressed 13.8 GB), and its first token came 5.6 s later; 17.1 s from the end of the
+    /// user's speech to Maé's voice. Wired until the request, macOS can compress none of them.
     ///
-    /// Not when a request is already sent (it goes first, and has them wired anyway), nor when the model computed something
-    /// in the last `recentlyComputed` (an answer the user speaks over, the history computed ahead, a keep-warm pass): the
-    /// room is made then.
-    private func wakeUpOnGPU() {
-        guard !windingDown, pendingRequests.load(ordering: .relaxed) == 0,
-              ContinuousClock.now - lastComputed >= Self.recentlyComputed
-        else { return }
+    /// Not while a request is under way (a speculative one, the user still speaking: it has them wired), nor while `wakeUp`
+    /// reads the weights from the CPU (the GPU's driver brings back what macOS compressed one page after the other, see
+    /// `wakeConversationUp`). Ends with the user's turn, or after `longestHold`. Not for speech the model only listens to,
+    /// waiting for the wake phrase: the television would have 15 GB wired every 5 s.
+    private func holdOnGPU() async {
+        guard !holding else { return }
+        holding = true
+        defer { holding = false }
         let clock = ContinuousClock()
         let start = clock.now
-        let paging = MemoryResidency.enabled ? MemoryResidency.paging : nil
-        readOnGPU(conversationMemory)
-        DebugLog.log("LLM: weights woken up on the GPU in \(clock.now - start)"
-            + (paging.map { ": " + MemoryResidency.paging.text(since: $0) } ?? ""))
-        releaseFreeBuffers()
+        let weights = UInt64(weightPages.reduce(0) { $0 + $1.count })
+        var wirings = 0
+        var slowest = Duration.zero  // of the wirings after the first
+        var highest: UInt64 = 0  // the Mac's wired memory, at its highest at the start of a wiring
+        var letGo = 0  // wirings that found the weights let go since the one before
+        while userSpeaking.load(ordering: .relaxed), !windingDown, clock.now - start < Self.longestHold {
+            if pendingRequests.load(ordering: .relaxed) == 0, !wakingUp.load(ordering: .relaxed) {
+                // The driver counts what it wires a little after the computation (0.1 to 0.5 s): the next wiring tells.
+                let wired = MemoryResidency.wiredBytes
+                if wirings > 1, wired + weights / 2 < highest { letGo += 1 }
+                highest = max(highest, wired)
+                let paging = wirings == 0 && MemoryResidency.enabled ? MemoryResidency.paging : nil
+                let t = clock.now
+                wireOnGPU()
+                let took = clock.now - t
+                if wirings == 0 {
+                    DebugLog.log("LLM: weights woken up on the GPU in \(took)"
+                        + (paging.map { ": " + MemoryResidency.paging.text(since: $0) } ?? ""))
+                } else {
+                    slowest = max(slowest, took)
+                }
+                wirings += 1
+            }
+            try? await Task.sleep(for: Self.holdSpacing)
+        }
+        DebugLog.log(String(format: "LLM: weights kept wired for %.2f s: %d wirings after the first, the slowest in %.0f ms; "
+                            + "let go meanwhile %d times",
+                            Double((clock.now - start).components.attoseconds) / 1e18
+                                + Double((clock.now - start).components.seconds),
+                            max(wirings - 1, 0),
+                            Double(slowest.components.seconds) * 1000 + Double(slowest.components.attoseconds) / 1e15,
+                            letGo))
     }
 
-    /// How long after the model's last computation `wakeUpOnGPU` has nothing to do.
-    static let recentlyComputed = Duration.seconds(5)
+    /// How often `holdOnGPU` has the weights wired again.
+    static let holdSpacing = Duration.milliseconds(250)
+    /// How long `holdOnGPU` lasts at most, should the user's turn never end.
+    static let longestHold = Duration.seconds(30)
+
+    /// Has the GPU's driver wire every weight and the conversation's memory, without reading them: one element of each
+    /// array goes through the GPU, and the driver wires an array's whole memory for any computation that uses it. 66 to
+    /// 82 ms when they are wired already, 0.4 to 0.9 s when the driver let them go and the Mac has room (Gemma 4 26B, on
+    /// the reference Mac), where a keep-warm pass's sums read them all (0.25 s once wired).
+    private func wireOnGPU() {
+        let arrays = context.model.parameters().flattened().map(\.1) + conversationMemory
+        let elements: [MLXArray] = arrays.filter { $0.size > 0 }.map { array in
+            var element = array
+            while element.ndim > 0 { element = element[0] }
+            return square(element)
+        }
+        eval(elements)
+    }
 
     /// `wakeUp` for the conversation's memory: the cache, its copies and the conversations' beginning, read from the CPU on
     /// the actor (they change with every request), as soon as nothing else uses the cache.
@@ -992,15 +1042,17 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): how much of the weights and of the conversation's memory is in RAM, and of
     /// the conversations' beginning and the cache on their own (they share their memory until the cache moves on).
-    private func logResidency(_ moment: String) {
+    /// `weights: false` leaves the weights out, in a request's way: counting their pages takes 0.35 to 0.45 s with Gemma 4
+    /// 26B on the reference Mac.
+    private func logResidency(_ moment: String, weights countWeights: Bool = true) {
         guard MemoryResidency.enabled else { return }
         let clock = ContinuousClock()
         let t0 = clock.now
-        let weights = MemoryResidency.count(weightPages)
+        let weights = countWeights ? "weights \(MemoryResidency.count(weightPages).text), " : ""
         let conversation = MemoryResidency.count(MemoryResidency.ranges(conversationMemory))
         let kept = MemoryResidency.count(MemoryResidency.ranges(beginning?.cache.flatMap(\.state) ?? []))
         let current = MemoryResidency.count(MemoryResidency.ranges(cache.flatMap(\.state)))
-        DebugLog.log("LLM memory \(moment): weights \(weights.text), conversation \(conversation.text) (beginning: "
+        DebugLog.log("LLM memory \(moment): \(weights)conversation \(conversation.text) (beginning: "
             + "\(kept.text); cache: \(current.text)); "
             + String(format: "MLX free buffers %.2f GB; ", Double(Memory.cacheMemory) / 1e9)
             + MemoryResidency.processText + " (read in \(clock.now - t0))")
@@ -1054,7 +1106,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return
         }
         eval(r.cache.flatMap(\.state))
-        lastComputed = ContinuousClock.now
         r.done = end
         rebuild = r
     }
@@ -1069,7 +1120,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         if requested != nil { DebugLog.log("LLM: waiting for the model (\(waited))") }
         try refuseOnceWindingDown("the request")
         hold.set(false)  // a new answer never starts paused
-        logResidency("before the request")
+        logResidency("before the request", weights: false)
         let pagingBefore = MemoryResidency.enabled ? MemoryResidency.paging : nil
         GPU.resetPeakMemory()
         defer { lastRequestPeakGB = Double(Memory.peakMemory) / 1e9 }
@@ -1161,7 +1212,6 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if let pagingAfterPrefill {
                 DebugLog.log("LLM paging during the answer: " + MemoryResidency.paging.text(since: pagingAfterPrefill))
             }
-            lastComputed = ContinuousClock.now
             releaseFreeBuffers()
         }
         // Cancelled while the model read the prompt (up to 512 new tokens are read in one pass, which cannot stop): the

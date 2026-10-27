@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import MLX
 import Synchronization
+import VoiceCore
 
 /// The memory of MLX arrays, page by page: read from the CPU, or (diagnostics, `VOICE_DEBUG_MEMORY=1`) counted.
 ///
@@ -128,11 +129,67 @@ enum MemoryResidency {
         var size = MemoryLayout<xsw_usage>.size
         let swapUsed = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 ? Double(swap.xsu_used) / 1e9 : -1
         return String(format: "process: footprint %.2f GB, %.2f GB in RAM, %.2f GB compressed or in swap (GPU memory: "
-                      + "%.2f GB, %.2f GB of it compressed or in swap); the Mac's swap in use: %.2f GB",
+                      + "%.2f GB, %.2f GB of it compressed or in swap); the Mac's swap in use: %.2f GB, its wired "
+                      + "memory %.2f GB, memory pressure %@",
                       Double(info.phys_footprint) / 1e9, Double(info.resident_size) / 1e9,
                       Double(info.compressed) / 1e9, Double(info.ledger_tag_graphics_footprint) / 1e9,
-                      Double(info.ledger_tag_graphics_footprint_compressed) / 1e9, swapUsed)
+                      Double(info.ledger_tag_graphics_footprint_compressed) / 1e9, swapUsed,
+                      Double(wiredBytes) / 1e9, pressure)
     }
+
+    /// The memory wired on the whole Mac (`host_statistics64`): the GPU's driver wires the memory a computation uses (macOS
+    /// can then neither compress it nor write it to swap), and lets it go again once the GPU no longer uses it.
+    static var wiredBytes: UInt64 {
+        var vm = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
+        guard withUnsafeMutablePointer(to: &vm, {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(host, HOST_VM_INFO64, $0, &count)
+            }
+        }) == KERN_SUCCESS else { return 0 }
+        return UInt64(vm.wire_count) * UInt64(page)
+    }
+
+    /// Diagnostics: the memory pressure macOS reports for the whole Mac (`kern.memorystatus_vm_pressure_level`).
+    static var pressure: String {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else { return "unknown" }
+        switch level {
+        case 1: return "normal"
+        case 2: return "warning"
+        case 4: return "critical"
+        default: return "level \(level)"
+        }
+    }
+
+    /// Diagnostics (`VOICE_DEBUG_MEMORY=1`): from the first call on, looks at the Mac's wired memory and memory pressure
+    /// every 100 ms, and logs each move of the wired memory by 1 GB or more and each change of pressure: when the GPU's
+    /// driver wires the weights for a computation, and when it lets them go.
+    static func watchWiring() {
+        guard enabled else { return }
+        _ = wiringWatch
+    }
+
+    private static let wiringWatch: Void = {
+        Thread.detachNewThread {
+            var logged = wiredBytes
+            var level = pressure
+            DebugLog.log(String(format: "Mac memory: wired %.2f GB, pressure %@", Double(logged) / 1e9, level))
+            while true {
+                Thread.sleep(forTimeInterval: 0.1)
+                let wired = wiredBytes
+                let now = pressure
+                guard max(wired, logged) - min(wired, logged) >= 1_000_000_000 || now != level else { continue }
+                DebugLog.log(String(format: "Mac memory: wired %.2f → %.2f GB, pressure %@",
+                                    Double(logged) / 1e9, Double(wired) / 1e9, now))
+                logged = wired
+                level = now
+            }
+        }
+    }()
 
     /// Diagnostics: the paging of the whole Mac since it started (`host_statistics64`) and this process's page faults
     /// (`task_info`), to tell what a computation waited for: the pages macOS brought back from its compressor or from swap

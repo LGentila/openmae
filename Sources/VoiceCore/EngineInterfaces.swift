@@ -174,10 +174,14 @@ public protocol KeepsWarm: Sendable {
     /// brings back now what macOS pushed out of memory since the last `keepWarm()`, so that the request does not wait
     /// for it. Returns at once; cheap when nothing was pushed out.
     func wakeUp()
+    /// The user's turn starts (`true`: they speak, their request should follow) or ends (`false`: it is sent, or they
+    /// stopped without one): what `wakeUp` brought back may be kept ready meanwhile. Returns at once.
+    func userSpeaks(_ speaking: Bool)
 }
 
 extension KeepsWarm {
     public func wakeUp() {}
+    public func userSpeaks(_ speaking: Bool) {}
 }
 
 /// A language model that can pause its generation while the voice starts. Both share the GPU: while
