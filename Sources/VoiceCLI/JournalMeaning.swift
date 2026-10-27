@@ -21,6 +21,9 @@ enum MeaningFusion: String, CaseIterable {
     case ftsOneThenMeaning = "fts1-meaning"
     /// The same with the full-text search's 2 best.
     case ftsTwoThenMeaning = "fts2-meaning"
+    /// The search by meaning's 3 best (above the cosine floor) first, then the full-text search's best, then the rest of
+    /// both: a small model mostly uses the first excerpts.
+    case meaningThenFTS = "meaning3-fts"
     /// The full-text search's best hits whose score is at least a third of the best one's, then the search by
     /// meaning's (only those above a cosine floor), then the rest of the full-text search's.
     case strongFTSThenMeaning = "strong-fts-meaning"
@@ -46,6 +49,10 @@ enum MeaningFusion: String, CaseIterable {
             for (rank, hit) in fts.prefix(20).enumerated() { scores[hit.id, default: 0] += 1 / Double(60 + rank + 1) }
             for (rank, hit) in meaning.prefix(20).enumerated() { scores[hit.id, default: 0] += 1 / Double(60 + rank + 1) }
             scores.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.forEach { add($0.key) }
+        case .meaningThenFTS:
+            meaning.filter { $0.cosine >= cosineFloor }.prefix(3).forEach { add($0.id) }
+            fts.forEach { add($0.id) }
+            meaning.filter { $0.cosine >= cosineFloor }.forEach { add($0.id) }
         case .ftsTwoThenMeaning:
             fts.prefix(2).forEach { add($0.id) }
             meaning.filter { $0.cosine >= cosineFloor }.forEach { add($0.id) }

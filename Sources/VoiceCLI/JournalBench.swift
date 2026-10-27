@@ -573,10 +573,19 @@ private func replaySearches(_ path: String, journal: MeaningJournal, corpus: Jou
     let searching = runs.filter { !(expectedOf[$0.phrase] ?? []).isEmpty }
     print("replay of \(path): \(searching.count) runs of requests that must search, "
           + "\(searching.filter { !$0.searches.isEmpty }.count) of them searched")
+    // A floor below 0: the keywords widened by the model's own pass first.
     var ways: [(String, MeaningFusion, Float, String)] = [("fts (the app)", .fts, 0, "keywords")]
     if widener != nil { ways.append(("fts, keywords widened by the model", .fts, -1, "keywords")) }
     if journal.embedder != nil {
         let floor = journal.embedder?.folder.lastPathComponent.contains("lfm2") == true ? Float(0.2) : Float(0.45)
+        if widener != nil {
+            ways.append(("fts1-meaning@\(floor) · both, keywords widened by the model", .ftsOneThenMeaning, -floor,
+                         "both"))
+            ways.append(("meaning3-fts@\(floor) · both, keywords widened by the model", .meaningThenFTS, -floor,
+                         "both"))
+            ways.append(("meaning alone · both, keywords widened by the model", .meaning, -0.0001, "both"))
+        }
+        ways.append(("meaning3-fts@\(floor) · both", .meaningThenFTS, floor, "both"))
         for meaningOf in ["keywords", "request", "both"] {
             ways.append(("meaning alone · \(meaningOf)", .meaning, 0, meaningOf))
             ways.append(("meaning alone@\(floor) · \(meaningOf)", .meaning, floor, meaningOf))
@@ -594,10 +603,11 @@ private func replaySearches(_ path: String, journal: MeaningJournal, corpus: Jou
     var rows: [[String: Any]] = []
     let originalFusion = await journal.fusion
     for (name, fusion, floor, meaningOf) in ways {
-        await journal.setFusion(fusion, cosineFloor: max(0, floor))
+        await journal.setFusion(fusion, cosineFloor: abs(floor) < 0.001 ? 0 : abs(floor))
         let widenedByModel = floor < 0
         await journal.setMeaningOf(meaningOf)
         var found: [String: (Int, Int)] = [:]
+        var firstTwo = 0, firstTwoOf = 0
         for run in searching {
             let expected = expectedOf[run.phrase] ?? []
             await journal.setRequest(run.phrase)
@@ -609,9 +619,16 @@ private func replaySearches(_ path: String, journal: MeaningJournal, corpus: Jou
                 if widenedByModel, let keywords = text { text = try await widen(keywords, run.phrase) }
                 let hits = try await journal.searchJournal(JournalQuery(text: text, from: period?.start,
                                                                         to: period?.end, limit: 4, now: now))
-                excerpts += hits.compactMap { $0.entry.id.flatMap { corpusID[$0] } }
+                let ids = hits.compactMap { $0.entry.id.flatMap { corpusID[$0] } }
+                if !excerpts.contains(where: expected.contains), ids.prefix(2).contains(where: expected.contains),
+                   run.label.contains("other words")
+                {
+                    firstTwo += 1
+                }
+                excerpts += ids
             }
             let hit = excerpts.contains(where: expected.contains)
+            if run.label.contains("other words") { firstTwoOf += 1 }
             for (group, matches) in groups where matches(run.label) {
                 let (f, n) = found[group] ?? (0, 0)
                 found[group] = (f + (hit ? 1 : 0), n + 1)
@@ -620,7 +637,7 @@ private func replaySearches(_ path: String, journal: MeaningJournal, corpus: Jou
         print(name.padding(toLength: 52, withPad: " ", startingAt: 0) + groups.map { group -> String in
             let (f, n) = found[group.0] ?? (0, 0)
             return String(format: "%3d/%-3d %3.0f %%     ", f, n, n == 0 ? 0 : Double(f) * 100 / Double(n))
-        }.joined())
+        }.joined() + String(format: "other words, among the first 2 excerpts: %d/%d", firstTwo, firstTwoOf))
         rows.append(["way": name, "found": found.mapValues { [$0.0, $0.1] }])
     }
     await journal.setFusion(originalFusion, cosineFloor: 0)
