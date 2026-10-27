@@ -245,7 +245,8 @@ private struct PairingQRCode: View {
         .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
             .strokeBorder(Palette.ink.opacity(0.08), lineWidth: 1))
-        .shadow(color: Palette.ink.opacity(0.1).color, radius: 12, y: 10)
+        .outerShadow(RoundedRectangle(cornerRadius: Radius.card, style: .continuous),
+                     ShadowLayer(opacity: 0.1, radius: 12, y: 10))
     }
 }
 

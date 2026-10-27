@@ -204,7 +204,7 @@ private struct OnPhoneBanner: View {
         .frame(height: 40)
         .background(Palette.white, in: Capsule())
         .hairline(Capsule())
-        .shadow(color: Palette.ink.opacity(0.08).color, radius: 8, y: 6)
+        .outerShadow(Capsule(), ShadowLayer(opacity: 0.08, radius: 8, y: 6))
         .accessibilityElement(children: .combine)
     }
 }

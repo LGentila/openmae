@@ -1257,8 +1257,8 @@ struct SheetCard<Content: View, Footer: View>: View {
         .background(Palette.sheet, in: RoundedRectangle(cornerRadius: Radius.window, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.window, style: .continuous)
             .stroke(RGBA(0x000000).opacity(0.18), lineWidth: 0.5))
-        .shadow(color: Palette.ink.opacity(0.3).color, radius: 35, y: 30)
-        .shadow(color: Palette.ink.opacity(0.12).color, radius: 10, y: 8)
+        .outerShadow(RoundedRectangle(cornerRadius: Radius.window, style: .continuous),
+                     ShadowLayer(opacity: 0.3, radius: 35, y: 30), ShadowLayer(opacity: 0.12, radius: 10, y: 8))
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }

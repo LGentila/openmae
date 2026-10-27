@@ -44,8 +44,7 @@ struct PanelChrome<Content: View>: View {
                 .offset(x: pointerX - 8, y: -7)
                 .accessibilityHidden(true)
         }
-        .shadow(color: Palette.ink.opacity(0.28).color, radius: 35, y: 30)
-        .shadow(color: Palette.ink.opacity(0.12).color, radius: 10, y: 8)
+        .outerShadow(shape, ShadowLayer(opacity: 0.28, radius: 35, y: 30), ShadowLayer(opacity: 0.12, radius: 10, y: 8))
     }
 }
 

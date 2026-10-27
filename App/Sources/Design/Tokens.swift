@@ -256,17 +256,48 @@ struct CubicBezier: Sendable {
 
 // MARK: - Shadows and outlines
 
+/// One shadow of `outerShadow`: its opacity of `ink`, its blur radius, and how far down it falls.
+struct ShadowLayer {
+    var opacity: Double
+    var radius: CGFloat
+    var y: CGFloat
+}
+
 extension View {
+    /// Shadows cast by `shape` alone, and only outside it. A shadow set on the view itself is cast by everything drawn
+    /// in it: in a sheet, each field, text and button cast its own, a dark blur across the light fields; and a
+    /// translucent background is darkened from within.
+    func outerShadow<S: Shape>(_ shape: S, _ layers: ShadowLayer...) -> some View {
+        background {
+            ZStack {
+                ForEach(Array(layers.enumerated()), id: \.offset) { _, layer in
+                    shape.fill(Palette.ink.color)
+                        .shadow(color: Palette.ink.opacity(layer.opacity).color, radius: layer.radius, y: layer.y)
+                }
+            }
+            .mask {
+                // Everything around the shape, as far as its shadows reach, but not the shape itself.
+                ZStack {
+                    Rectangle().padding(-160)
+                    shape.blendMode(.destinationOut)
+                }
+                .compositingGroup()
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
     /// `shadow-card`: a 1-point outline and a soft shadow below.
     func cardShadow(cornerRadius: CGFloat = Radius.card) -> some View {
-        overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .strokeBorder(Palette.ink.opacity(0.07), lineWidth: 1))
-            .shadow(color: Palette.ink.opacity(0.05).color, radius: 10, y: 6)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return overlay(shape.strokeBorder(Palette.ink.opacity(0.07), lineWidth: 1))
+            .outerShadow(shape, ShadowLayer(opacity: 0.05, radius: 10, y: 6))
     }
 
     /// `shadow-button`: under the main button.
     func buttonShadow() -> some View {
-        shadow(color: Palette.ink.opacity(0.22).color, radius: 12, y: 10)
+        outerShadow(Capsule(), ShadowLayer(opacity: 0.22, radius: 12, y: 10))
     }
 
     /// `shadow-hairline`: inner outline of the round buttons.
