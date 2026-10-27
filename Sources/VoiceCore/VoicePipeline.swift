@@ -1654,7 +1654,7 @@ public actor VoicePipeline {
             /// The calls written while summing up, in order, and among them the one carried out once the pass is over:
             /// the first one the results allow (`allowed`), if any. The others are not carried out.
             var summingCalls: [ToolCall] = []
-            var opening: Int?
+            var carried: Int?
             /// The model's own words in this pass.
             var said = ""
             /// The call being written comes after words of the model's own in this pass: a call to some tools is then left
@@ -1776,8 +1776,8 @@ public actor VoicePipeline {
                     unreadable = true
                 case .toolCallStarted, .toolCallNamed, .moreToolCalls, .unreadableToolCall: break
                 case .toolCall(let call):
-                    if opening == nil, ToolNames.match(call.name, among: allowed) != nil {
-                        opening = summingCalls.count
+                    if carried == nil, ToolNames.match(call.name, among: allowed) != nil {
+                        carried = summingCalls.count
                     } else {
                         DebugLog.log("turn \(turn.id): call ignored while summing up: \(call.name)")
                     }
@@ -1790,18 +1790,18 @@ public actor VoicePipeline {
             if pass == .summing {
                 chunker.remainingPieces().forEach(send)
                 let notCarriedOut: JSONValue = ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]
-                if let opening, let tools {
+                if let carried, let tools {
                     // A call the results allow (a search's: opening the page of one of them), carried out like any, as
                     // one more of the request's (it must not drop what waits for the user's "oui"), then summed up in
                     // turn. The history keeps the pass's calls as written; the others are not carried out.
-                    let named = await tools.named(summingCalls[opening])
-                    summingCalls[opening] = named
+                    let named = await tools.named(summingCalls[carried])
+                    summingCalls[carried] = named
                     callsWhileSumming += 1
                     metrics.tool = (metrics.tool.map { $0 + ", " } ?? "") + named.name
                     DebugLog.log("turn \(turn.id): tool call while summing up \(named.name) \(named.arguments)")
                     let reply = await tools.handle(named, context: toolContext(turn, now: now), sameRequest: true)
                     turn.steps += [.calls(summingCalls)] + summingCalls.indices.map {
-                        .result(of: summingCalls[$0], $0 == opening ? reply.forModel : notCarriedOut)
+                        .result(of: summingCalls[$0], $0 == carried ? reply.forModel : notCarriedOut)
                     }
                     if reply.modelSpeaks {
                         let summed = (fallback: reply.spoken, allows: reply.allowedWhileSumming)
@@ -1817,14 +1817,14 @@ public actor VoicePipeline {
                     }
                     DebugLog.log("turn \(turn.id): tool call refused while summing up: \(reply.forModel)")
                 }
-                let ignored = summingCalls.indices.filter { $0 != opening }.map { summingCalls[$0] }
+                let ignored = summingCalls.indices.filter { $0 != carried }.map { summingCalls[$0] }
                 if !modelSpoke, !ignored.isEmpty, !summedUpAgain {
                     // Calls instead of a summary (often another search, when the results or the page do not hold the
                     // answer; or a page past the limit): rather than the app's sentence, the model is told they are not
                     // carried out and sums up once more, then without any call carried out.
                     DebugLog.log("turn \(turn.id): a call instead of a summary, summing up once more")
                     summedUpAgain = true
-                    if opening == nil { turn.steps += [.calls(ignored)] + ignored.map { .result(of: $0, notCarriedOut) } }
+                    if carried == nil { turn.steps += [.calls(ignored)] + ignored.map { .result(of: $0, notCarriedOut) } }
                     request = conversation.messages(adding: turn.userMessage!) + turn.steps
                     continue
                 }
