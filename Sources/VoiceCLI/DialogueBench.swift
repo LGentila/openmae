@@ -12,8 +12,9 @@
 // so (an item put in the calendar it is in) has its goal checked at the end: nothing done, and nothing said done. The
 // model samples its answers: each dialogue runs --repeats times (default 10), and the report counts, turn by turn, what
 // the model did, which items its changes named (« dernier », "r1"), how many answers said nothing to the user, how many
-// second tries answered in words that say it was done (« C'est noté », with nothing saved) and how often the goal was
-// reached; and, for a dialogue that creates an item on the way that its later sentences must leave as it was, how often
+// second tries answered in words that say it was done (« C'est noté », with nothing saved), how many answers with
+// nothing done said something was noted, remembered or saved (« Je retiens que… ») and how often the goal was reached;
+// and, for a dialogue that creates an item on the way that its later sentences must leave as it was, how often
 // that item was changed or deleted.
 //
 //   voice-cli dialogue-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
@@ -133,6 +134,9 @@ private struct TurnResult: Encodable {
     var bestCallChance: Double?
     /// The model's first answer wrote neither a word nor a call: it was asked once more (`VoicePipeline.answerWithTools`).
     var askedAgain: Bool?
+    /// Nothing done (no call, or every call refused), and the model's words say something was noted, remembered or
+    /// saved (`saysItWasSaved`).
+    var claimsASave: Bool?
 }
 
 private struct RunResult: Encodable {
@@ -263,6 +267,7 @@ func runDialogueBench(_ o: Options) async throws {
                     continue
                 }
                 var turn = try await talk.turn(sentence)
+                if claimsASave(turn) { turn.claimsASave = true }
                 if memoryGoal || nothingToDo || (endsTasks && (result.tasksEnded ?? 0) == 0) {
                     // A dialogue about a task that ended reaches nothing before one did.
                     turn.goalReached = false
@@ -750,6 +755,63 @@ private func saysItWasDone(_ text: String) -> Bool {
     return patterns.contains { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
 }
 
+/// Whether the model answered a turn with nothing done (no call carried out, or waiting for the user's "oui": none, or
+/// all refused) in words that say something was noted, remembered or saved (`saysItWasSaved`).
+private func claimsASave(_ turn: TurnResult) -> Bool {
+    guard turn.answeredByApp != true, !turn.passes.contains(where: { $0.call != nil && $0.refused != true }) else {
+        return false
+    }
+    return saysItWasSaved(turn.passes.map(\.text).joined(separator: " "))
+}
+
+/// Whether the model's words say that something was noted, remembered or saved, or will be: « C'est noté », « J'ai
+/// bien retenu… », « Je l'ai enregistré dans ma mémoire », « Je note que… », « Je la garde en tête », « Je prends
+/// note… », « Je m'en souviendrai », "I've noted that". Said with no call, nothing was, and the user believes Maé will
+/// remember it. Questions and offers aside: a sentence that ends with « ? » (« Tu veux que je le note ? ») or offers
+/// (« Si tu veux, je le retiens ») promises nothing, and « Je peux la noter pour toi » says nothing was.
+func saysItWasSaved(_ text: String) -> Bool {
+    let kept = "(noté|retenu|enregistré|mémorisé|sauvegardé|gardé|consigné|pris note)"
+    let keeping = "(note|retiens|enregistre|mémorise|sauvegarde|garde|consigne)"
+    let patterns = [
+        // « C'est noté », « C'est bien retenu », « C'est dans ma mémoire ».
+        #"\bc'est (bien |donc |déjà |maintenant |désormais )?"# + kept,
+        #"\bc'est (bien |donc |déjà |maintenant |désormais )?(dans ma mémoire|en mémoire)"#,
+        // « Noté, … », « Bien noté. »
+        #"^(bien )?noté\b"#,
+        // « J'ai bien noté… », « J'en ai pris note », « Je l'ai enregistré », « Je te l'ai noté ».
+        #"\bj'(en )?ai (bien |donc |déjà )?"# + kept,
+        #"\bje (te |t')?(l'|les )ai (bien |donc |déjà )?(noté|retenu|enregistré|mémorisé|sauvegardé|gardé|ajouté|mis)"#,
+        // « Je note que… », « Je la retiens », « Je garde ça en tête » (not « Tu veux que je le note »).
+        #"(?<!que )\bje (te |t')?(le |la |les |l')?"# + keeping + #"\b"#,
+        #"\b(je|j'en) prends (bien |bonne |donc )?note\b"#,
+        // « Je le retiendrai », « Je vais le noter », « Je m'en souviendrai », « Je ne l'oublierai pas ».
+        #"\bje (te |t')?(le |la |les |l')?(noterai|retiendrai|enregistrerai|mémoriserai|garderai)\b"#,
+        #"\bje vais (te |t')?(le |la |les |l')?(noter|retenir|enregistrer|mémoriser|garder|m'en souvenir)\b"#,
+        #"\bje (m'en |me |me le |me la |me les )(souviendrai|rappellerai)\b"#,
+        #"\bje ne (l'|les |le |la )?oublierai (pas|jamais)\b"#,
+        #"\b(i've|i have|i) (noted|saved|stored|memorized|made a note)\b"#, #"\b(i'll|i will) (remember|note|keep)\b"#,
+        #"^noted\b"#,
+    ]
+    let offer = #"\bsi tu (le |la |l')?(veux|voulais|souhaites|préfères|désires)\b|\bif you (want|like)\b"#
+    // The sentences: a space after « . », « ! », « ? » or « … » begins the next one.
+    var sentences = [""]
+    var ended = false
+    for character in text.replacingOccurrences(of: "’", with: "'") {
+        if ended, character.isWhitespace {
+            sentences.append("")
+            ended = false
+            continue
+        }
+        sentences[sentences.count - 1].append(character)
+        ended = ".!?…".contains(character)
+    }
+    return sentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.contains { sentence in
+        guard !sentence.hasSuffix("?"),
+              sentence.range(of: offer, options: [.regularExpression, .caseInsensitive]) == nil else { return false }
+        return patterns.contains { sentence.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
+    }
+}
+
 private func show(_ turn: TurnResult, index: Int) {
     let chance = turn.bestCallChance.map {
         String(format: "  (call chance %.0f %% first, %.0f %% at most)", (turn.firstCallChance ?? 0) * 100, $0 * 100)
@@ -774,6 +836,7 @@ private func show(_ turn: TurnResult, index: Int) {
         }
     }
     print("      🔊 \(turn.answer)")
+    if turn.claimsASave == true { print("      ✗ says something was saved: nothing was") }
 }
 
 private func describe(_ call: ToolCall) -> String {
@@ -797,7 +860,9 @@ extension JSONValue {
 /// Per dialogue: how often the goal was reached and at which turn, and how often the item to keep was changed or
 /// deleted; per turn, what the model did at its first pass and at its second try ("nothing said": no call and not a
 /// word), over the runs that got that far, which items its changes and deletions named, how many second tries after a
-/// refused call answered in words that say it was done, and how many answers left the user in silence.
+/// refused call answered in words that say it was done, how many answers with nothing done said something was saved,
+/// and how many answers left the user in silence. Then, over every dialogue, the answers with nothing done that said
+/// something was noted, remembered or saved.
 private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
     func outcome(_ pass: Pass) -> String {
         guard let call = pass.call else {
@@ -875,6 +940,8 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
                 .filter { outcome($0) == "no call" }
             let claiming = worded.filter { saysItWasDone($0.text) }.count
             if !worded.isEmpty { print("  second tries in words that say it was done: \(claiming) / \(worded.count)") }
+            let claims = turns.filter { $0.claimsASave == true }.count
+            if claims > 0 { print("  answers with nothing done that say something was saved: \(claims) / \(turns.count)") }
             let silent = turns.filter { $0.answer.isEmpty }.count
             if silent > 0 { print("  silent answers (nothing said to the user): \(silent)") }
             let chances = turns.compactMap(\.firstCallChance)
@@ -884,6 +951,10 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             }
         }
     }
+    let byModel = runs.flatMap(\.turns).filter { $0.answeredByApp != true }
+    let claims = byModel.filter { $0.claimsASave == true }
+    print("\nanswers with nothing done that say something was noted, remembered or saved: \(claims.count) / "
+          + "\(byModel.count) turns answered by the model" + claims.map { "\n    · \($0.user) → “\($0.answer)”" }.joined())
 }
 
 extension Array where Element == String {

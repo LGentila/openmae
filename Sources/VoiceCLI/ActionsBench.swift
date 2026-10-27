@@ -13,7 +13,8 @@
 //                           [--watch-calls] [--examples app|none|file] [--web] [--no-actions] [--addendum file]
 //                           [--web-addendum file] [--agents-addendum file]
 //                           [--searxng http://127.0.0.1:8888 [--searxng-user name]]
-//                           [--record file.json] [--sources] [--news] [--memory [--journal]] [--compare-beginnings]
+//                           [--record file.json] [--sources] [--news] [--memory [--journal]] [--memory-addendum file]
+//                           [--compare-beginnings]
 //                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts] [--own-thoughts]
 //
 // With Claude Code's tools (a corpus with "agents": true), a call to them is checked by the app's own delegation tools
@@ -39,7 +40,10 @@
 // The memory's tool, memoire (a corpus with "memory": true, as Tests/Fixtures/memory-actions-fr.json, or --memory with
 // any corpus), with the journal of past exchanges only as the app offers it (`MemorySettings.journalOffered`), or with
 // --journal. Without the journal, the requests that need it (to search past conversations, to erase a period of them)
-// are left out of the score and reported apart: what the model did with them.
+// are left out of the score and reported apart: what the model did with them. --memory-addendum <file> replaces the
+// memory's rules in the system prompt (the journal's part and the sheet still follow). With any corpus, the report counts
+// the answers without a call that say something was noted, remembered or saved (« C'est noté », « Je retiens que… »):
+// nothing was, and the user believes Maé will remember it.
 //
 // --watch-calls also reports, for each request, the chance the model gave to opening a tool call (at the
 // first token of its answer, and at its most tempted token) and the answer as written, special tokens
@@ -274,6 +278,8 @@ private struct CaseResult: Encodable {
     var namesASite: Bool?
     /// The request needs the memory's journal, which is not offered: left out of the score.
     var needsJournal: Bool?
+    /// An answer without a call that says something was noted, remembered or saved (`saysItWasSaved`): nothing was.
+    var claimsASave: Bool?
     /// With no tool at all, the case's earlier exchanges hold a call, which the app cannot have then (the tools come or go
     /// with a new conversation): left out of the score.
     var callBeforeWithoutTools: Bool?
@@ -386,7 +392,9 @@ func runActionsBench(_ o: Options) async throws {
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
         + (news ? [try o.newsAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) } ?? NewsCatalog.promptAddendum]
             : [])
-        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal)] : [])
+        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, rules: try o.memoryAddendum.map {
+            try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        })] : [])
     if memory {
         print("memory: on, " + (journal ? "with the journal" : "without the journal, as the app (--journal to offer it)")
               + ", \(sheet.count) entries in the sheet")
@@ -514,6 +522,7 @@ func runActionsBench(_ o: Options) async throws {
         result.callChanceAtStart = startChance
         result.peakGB = await model.lastRequestPeakGB
         if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
+        if chosen == "aucun", saysItWasSaved(text) { result.claimsASave = true }
         if tools.isEmpty, before.contains(where: { $0.call != nil }) { result.callBeforeWithoutTools = true }
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
             .compactMap(WebSearchCatalog.query)
@@ -700,6 +709,7 @@ func runActionsBench(_ o: Options) async throws {
               + (leftOut.map { "  [then \($0), left out: after the model's own words, \(atStart)]" } ?? "")
               + (result.keptAfterWords == true ? "  [after the model's own words “\(wordsBefore)”, kept: \(atStart)]" : "")
               + (moreCalls ? "  [then another call, not carried out]" : "")
+              + (result.claimsASave == true ? "  [says it was saved: nothing was]" : "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
         if let second = result.secondTry {
             print("      second try → \(second)" + (result.rightAfterSecondTry == true ? "  ✓" : "  ✗"))
@@ -1376,6 +1386,13 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     print("requests without an action that triggered one: \(falseTriggers.count) / \(others.count)"
           + falseTriggers.map { "\n    · \($0.phrase) → \($0.chosen)" }.joined())
     print("action requests answered without a tool: \(missed)")
+    // Every request, those left out of the score too: whatever the request, nothing was saved.
+    let claims = all.filter { $0.claimsASave == true }
+    print("answers without a call that say something was noted, remembered or saved (questions and offers aside): "
+          + "\(claims.count) / \(all.filter { $0.chosen == "aucun" }.count)" + claims.map { result in
+              "\n    · \(result.phrase) (expected: \(result.expected)) → “"
+                  + result.text.replacingOccurrences(of: "\n", with: " ") + "”"
+          }.joined())
     func atStart(_ result: CaseResult) -> String {
         result.callChanceAtStart.map { String(format: "%.1f %% at the first token", $0 * 100) } ?? "first token not read"
     }
