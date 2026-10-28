@@ -100,20 +100,20 @@ public actor ClaudeCodeConnector: AgentConnector {
             }
             Self.processes.add(process, for: task.id)
             DebugLog.log("claude: \(task.reference) started (pid \(process.processIdentifier), \(resume ? "follow-up" : "new session"))")
+            // Each pipe on a thread of its own (PipeLines): read with FileHandle.bytes next to the error output, which
+            // stays open and silent, the reports only came when the run ended.
+            let reports = PipeLines.lines(of: output.fileHandleForReading)
+            let errorLines = PipeLines.lines(of: errors.fileHandleForReading)
             // Its error output only goes to the debug log, but it must be read: a full pipe would block it.
             Task.detached {
-                do {
-                    for try await line in errors.fileHandleForReading.bytes.lines { DebugLog.log("claude: \(line)") }
-                } catch {}
+                for await line in errorLines where !line.isEmpty {
+                    DebugLog.log("claude: \(String(decoding: line, as: UTF8.self))")
+                }
             }
             Task.detached {
                 var reader = ClaudeCode.Reader()
-                do {
-                    for try await line in output.fileHandleForReading.bytes.lines {
-                        for update in reader.read(line) { continuation.yield(update) }
-                    }
-                } catch {
-                    DebugLog.log("claude: reading the reports failed: \(error)")
+                for await line in reports {
+                    for update in reader.read(String(decoding: line, as: UTF8.self)) { continuation.yield(update) }
                 }
                 for await status in exits { DebugLog.log("claude: \(task.reference) ended (status \(status))") }
                 Self.processes.remove(task.id)
