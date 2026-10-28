@@ -93,6 +93,21 @@ struct SaveClaimsTests {
         #expect(SentenceChunker.words(in: MemoryPhrases.acknowledged(.french)) >= 5)
     }
 
+    /// The memory's rule that nothing is noted without the call ends the memory's rules: after the journal's part when
+    /// the journal is on (Gemma 4 26B), which then also says that « N'oublie pas que… » and a fact asks to remember it.
+    @Test func theRuleAboutClaimsEndsTheMemorysRules() throws {
+        let rule = "Sans appel à memoire, rien n'est retenu"
+        let without = MemoryCatalog.promptAddendum(sheet: [], journal: false)
+        let with = MemoryCatalog.promptAddendum(sheet: [], journal: true)
+        #expect(without.hasSuffix("que tu t'en souviendras. Ta mémoire est vide pour l'instant."))
+        #expect(!without.contains("N'oublie pas"))
+        let ruleThere = try #require(with.range(of: rule))
+        let search = try #require(with.range(of: "action chercher"))
+        #expect(search.lowerBound < ruleThere.lowerBound)
+        #expect(with.contains("« N'oublie pas que… » suivi d'un fait demande de le retenir"))
+        #expect(with.hasSuffix("que tu t'en souviendras. Ta mémoire est vide pour l'instant."))
+    }
+
     /// Off (the memory not offered, or something saved in the turn): nothing is left out.
     @Test func offItLeavesNothingOut() {
         let answer = "C'est une bonne nouvelle. Je note que tu as arrêté de fumer."
