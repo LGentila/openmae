@@ -244,8 +244,8 @@ for something else (an appointment, saved without bringing the task up):
 The memory's tool (`memoire`: remember, forget an entry, erase everything): requests to remember, forget and erase
 everything, and above all traps — small talk, general knowledge, a real web search, an action, and facts said without
 asking Maé to remember them, which must not be remembered; `--memory` offers the tool with the other corpora too (with
-an empty sheet). Its journal of past exchanges (searching them, erasing a period of them) is offered only as the app
-offers it, which it does not in this version: `--journal` offers it; without it, the requests that need it are left out
+an empty sheet). Its journal of past exchanges (searching them, erasing a period of them) is offered as the app offers
+it, on the comfort tier (Gemma 4 26B) for now, or with `--journal`; without it, the requests that need it are left out
 of the score and reported apart (the same goes for `dialogue-bench` and `cache-check`). The report also counts the
 answers without a call that say something was noted, remembered or saved (« C'est noté », « Je retiens que… »,
 questions and offers aside): nothing was, and the user believes Maé will remember it; `dialogue-bench` counts them too,
@@ -345,13 +345,14 @@ and the tokens it found likeliest there. A hyphenated word the system's French s
 word, and every word it does not know is reported too: the report prints each one with the tokens the model drew for
 it, and counts per request the answers holding one, in what the model wrote and in what the voice is given.
 `--request "…"` asks that instead of the corpus; `--actions`, `--agents`, `--web`, `--sources`, `--news` and `--memory`
-put those tools in the prompt as in the app; `--hold 1` holds the model a second after each piece, as while the voice
-needs the GPU; `--reread` reads each answer again in one pass, as a prompt is read, in the model's own type and in
-float32, and shows the chances the model gives each such word's tokens then; `--min-p` draws the tokens with another
-min-p than the app's, and `--bfloat16-prompts` computes the requests in bfloat16, to compare in one build. `--speed`
-leaves the tokens' chances out (reading them slows the writing) and measures each answer instead: the time from the
-request to its first word, its writing speed in tokens per second and the GPU memory peak, with the memory after loading
-(to compare two models, run it with the GPU kept to itself):
+put those tools in the prompt as in the app (the memory's journal as the app offers it on the tier, or with
+`--journal`); `--hold 1` holds the model a second after each piece, as while the voice needs the GPU; `--reread` reads
+each answer again in one pass, as a prompt is read, in the model's own type and in float32, and shows the chances the
+model gives each such word's tokens then; `--min-p` draws the tokens with another min-p than the app's, and
+`--bfloat16-prompts` computes the requests in bfloat16, to compare in one build. `--speed` leaves the tokens' chances
+out (reading them slows the writing) and measures each answer instead: the time from the request to its first word, its
+writing speed in tokens per second and the GPU memory peak, with the memory after loading (to compare two models, run it
+with the GPU kept to itself):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli story-bench --actions --agents --web --sources --memory --reread

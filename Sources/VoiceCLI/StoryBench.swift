@@ -4,8 +4,10 @@
 // Text only. Each request of the corpus (Tests/Fixtures/stories-fr.json: requests for a story) is sent --repeats times
 // (default 20), each time in a new conversation with the app's system prompt; with --actions, --agents (Claude Code),
 // --web, --sources, --news and --memory (with an empty sheet), their parts of the prompt and their tools as in the app
-// when they are on, and the date line (nothing is carried out: a call ends the answer). With --hold, the model is held
-// that many seconds after each piece of the answer, as the pipeline holds it while the voice needs the GPU.
+// when they are on, and the date line (nothing is carried out: a call ends the answer). The memory's journal of past
+// exchanges is offered only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: the comfort tier),
+// or with --journal. With --hold, the model is held that many seconds after each piece of the answer, as the pipeline
+// holds it while the voice needs the GPU.
 //
 // The answer goes to the voice as in the app (`ReasoningFilter`, `SentenceChunker`, then `SpeakableText.clean` and
 // `SpeakableText.forVoice` for each piece), and every token the model drew is kept, with the chance the model gave it and
@@ -24,8 +26,8 @@
 // memory peak meanwhile; the memory after loading is printed first. Run it with the GPU kept to itself, as any timing.
 //
 //   voice-cli story-bench [--tier tier] [--llm folder] [--corpus Tests/Fixtures/stories-fr.json] [--request "…"]…
-//                         [--repeats 20] [--actions] [--agents] [--web] [--sources] [--news] [--memory] [--hold 1]
-//                         [--reread | --speed] [--now 2026-10-15T18:42] [--min-p 0.05] [--bfloat16-prompts]
+//                         [--repeats 20] [--actions] [--agents] [--web] [--sources] [--news] [--memory [--journal]]
+//                         [--hold 1] [--reread | --speed] [--now 2026-10-15T18:42] [--min-p 0.05] [--bfloat16-prompts]
 //                         [--out measurements]
 //
 // --request sends that request instead of the corpus's (several times for several). --min-p draws the tokens with that
@@ -114,11 +116,14 @@ func runStoryBench(_ o: Options) async throws {
     // without them that they are off and what the date line is; then the tools' parts; the actions' example exchanges.
     // With no tool at all, what the model is told then (`ActionCatalog.partWithoutTools`), and no date line.
     var conversation = Conversation()
+    // The memory's journal of past exchanges as the app offers it on this tier, or with --journal.
+    let journalOffered = MemorySettings.journalOffered(on: tier)
+    let journal = journalOffered || o.journal
     let tools: [ToolSpec] = (o.actions ? ActionCatalog.calendarTools(on: tier) + [ActionCatalog.timer] : [])
         + (o.agents ? AgentCatalog.tools(agents: [(ClaudeCode.displayName, AgentCatalog.claudeCodeDescription)],
                                          folders: []) : [])
         + (o.web ? [WebSearchCatalog.search] : []) + (o.sources ? BuiltInSources.tools : [])
-        + (o.news ? [NewsCatalog.read] : []) + (o.memory ? [MemoryCatalog.tool(journal: true)] : [])
+        + (o.news ? [NewsCatalog.read] : []) + (o.memory ? [MemoryCatalog.tool(journal: journal)] : [])
     await model.useTools(tools)
     var dateLine: String?
     if !tools.isEmpty {
@@ -131,7 +136,7 @@ func runStoryBench(_ o: Options) async throws {
             + (o.web ? [WebSearchCatalog.promptAddendum] : [])
             + (o.sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
             + (o.news ? [NewsCatalog.promptAddendum] : [])
-            + (o.memory ? [MemoryCatalog.promptAddendum(sheet: [], journal: true)] : [])
+            + (o.memory ? [MemoryCatalog.promptAddendum(sheet: [], journal: journal)] : [])
         if o.actions, ActionCatalog.showsExamples(on: tier) {
             conversation.examples = ActionCatalog.examples(now: now, timeZone: timeZone)
         }
@@ -142,7 +147,9 @@ func runStoryBench(_ o: Options) async throws {
     print("model: \(folder.lastPathComponent) (tier \(tier.rawValue))"
           + (o.actions ? " · with the actions" : "") + (o.agents ? " · with Claude Code" : "")
           + (o.web ? " · with the web search" : "") + (o.sources ? " · with the built-in sources" : "")
-          + (o.news ? " · with the news" : "") + (o.memory ? " · with the memory (empty)" : "")
+          + (o.news ? " · with the news" : "")
+          + (o.memory ? " · with the memory (empty)" + (!journal ? ", without its journal, as the app on this tier"
+              : " and its journal" + (journalOffered ? ", as the app on this tier" : " (--journal)")) : "")
           + (o.hold.map { " · generation held \($0) s after each piece" } ?? "")
           + String(format: " · sampling: temperature %.2f, top-p %.2f, min-p %.2f", sampling.temperature, sampling.topP,
                    sampling.minP)

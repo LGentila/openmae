@@ -216,8 +216,9 @@ struct Options {
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
     var agents = false
-    /// actions-bench, dialogue-bench, cache-check: the memory's tool offered too (`memoire`), with the journal of past
-    /// exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`) or with --journal.
+    /// actions-bench, dialogue-bench, cache-check, story-bench: the memory's tool offered too (`memoire`), with the
+    /// journal of past exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`) or with
+    /// --journal.
     var memory = false
     var journal = false
     var searxng: String?
@@ -928,8 +929,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
-                                        [--watch-calls]
-               voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents]
+                                        [--memory [--journal]] [--watch-calls]
+               voice-cli cache-check [--tier tier] [--llm folder] [--scenario name] [--agents] [--memory [--journal]]
                                      [--cut-off ahead|after-user-words] [--bfloat16-prompts] [--bfloat16-experts]
                                      [--unpadded-experts]
                voice-cli read-sizes [--tier tier] [--llm folder] [--from 32] [--to 96] [--runs 5] [--compare-padding]
@@ -939,8 +940,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--note-role system|user] [--drop written|heard|cut-off|none|whole]
                                        [--dialogue name]
                voice-cli story-bench [--tier tier] [--llm folder] [--corpus file.json] [--request "…"]… [--repeats 20]
-                                     [--actions] [--agents] [--web] [--sources] [--news] [--memory] [--hold s]
-                                     [--reread] [--min-p 0.05] [--bfloat16-prompts] [--speed]
+                                     [--actions] [--agents] [--web] [--sources] [--news] [--memory [--journal]]
+                                     [--hold s] [--reread] [--min-p 0.05] [--bfloat16-prompts] [--speed]
                voice-cli web-search --searxng <address> [--searxng-user name] [--language fr|en] keywords…
                voice-cli read-page <address> [--words "…"] [--language fr|en] [--repeats 1]
                voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] [--out folder] files.wav…
