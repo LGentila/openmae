@@ -523,6 +523,32 @@ struct MemoryTests {
         #expect(period("cette nuit") == "2026-10-14T22:00 → 2026-10-15T06:00")
     }
 
+    /// A length alone, as the model sometimes writes « il y a deux semaines »: the journal only holds the past, so it is
+    /// that far back, the same day as with « il y a » (a month back for « mois »).
+    @Test func aLengthAloneIsThatFarBack() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = paris
+        func period(_ text: String) -> String? {
+            guard let (start, end) = MemoryPeriod.read(text, now: now, calendar: calendar) else { return nil }
+            return LocalDateTime.format(start, in: paris) + " → " + LocalDateTime.format(end, in: paris)
+        }
+        #expect(period("il y a deux semaines") == "2026-10-01T00:00 → 2026-10-02T00:00")
+        #expect(period("il y a 3 jours") == "2026-10-12T00:00 → 2026-10-13T00:00")
+        #expect(period("il y a un mois") == "2026-09-15T00:00 → 2026-09-16T00:00")
+        #expect(period("il y a quinze jours") == "2026-09-30T00:00 → 2026-10-01T00:00")
+        for length in ["deux semaines", "3 jours", "un mois", "quinze jours", "une semaine", "2 mois", "Deux semaines"] {
+            #expect(period(length) != nil, "\(length)")
+            #expect(period(length) == period("il y a " + length.lowercased()), "\(length)")
+        }
+        // Bounded, as with « il y a »: everything since or before that day.
+        #expect(period("depuis deux semaines") == "2026-10-01T00:00 → 2026-10-15T18:42")
+        #expect(period("avant deux semaines") == period("avant il y a deux semaines"))
+        // Not a length alone: as before.
+        #expect(period("deux heures") == nil)
+        #expect(period("semaines") == nil)
+        #expect(period("les deux dernières semaines") == nil)
+    }
+
     // MARK: The journal
 
     @Test func theJournalForgetsWhatIsOlderThanItsRetention() async throws {

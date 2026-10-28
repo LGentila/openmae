@@ -334,9 +334,10 @@ public enum MemoryCatalog {
 }
 
 /// The period of a journal search or erasure, in the user's words, always in the past: "hier", "la semaine dernière",
-/// "le mois dernier", "samedi dernier", "il y a 3 jours", "en septembre"… Bounded by a word, everything before it, up
-/// to it or since it: « avant aujourd'hui » ends where today begins, « jusqu'à hier » where yesterday ends, « depuis
-/// lundi » goes from Monday to now; « avant-hier » (« avant hier ») stays the day before yesterday.
+/// "le mois dernier", "samedi dernier", "il y a 3 jours" (or « 3 jours » alone), "en septembre"… Bounded by a word,
+/// everything before it, up to it or since it: « avant aujourd'hui » ends where today begins, « jusqu'à hier » where
+/// yesterday ends, « depuis lundi » goes from Monday to now; « avant-hier » (« avant hier ») stays the day before
+/// yesterday.
 public enum MemoryPeriod {
     /// The start of a period that has none: « avant aujourd'hui », « jusqu'à hier ».
     public static let beginning = Date.distantPast
@@ -380,10 +381,13 @@ public enum MemoryPeriod {
             guard let monday = calendar.date(byAdding: .day, value: -((weekday + 5) % 7), to: today) else { return nil }
             return (monday, now)
         }
-        if let i = words.indices.first(where: { $0 + 2 < words.count && words[$0] == "il" && words[$0 + 1] == "y"
-            && words[$0 + 2] == "a" })
-        {
-            var k = i + 3
+        // « il y a 3 jours », or the length alone, « deux semaines », « quinze jours », « un mois »: the journal only
+        // holds the past, so a length can only say that far back.
+        let ago = words.indices.first(where: { $0 + 2 < words.count && words[$0] == "il" && words[$0 + 1] == "y"
+            && words[$0 + 2] == "a" }).map { $0 + 3 }
+        let lengthAlone = words.count == 2 && (Int(words[0]) ?? numbers[words[0]]) != nil
+        if let from = ago ?? (lengthAlone ? 0 : nil) {
+            var k = from
             var number = 1
             if k < words.count, let n = Int(words[k]) ?? numbers[words[k]] {
                 number = n
