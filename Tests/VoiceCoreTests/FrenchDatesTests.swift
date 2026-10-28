@@ -219,6 +219,24 @@ struct FrenchDatesTests {
         for (text, expected) in cases { #expect(try period(text) == expected, "\(text)") }
     }
 
+    /// « le week-end dernier » (« passé ») is the one before this week's Monday, not the coming one; « la semaine
+    /// passée » is « la semaine dernière ». The agenda's « ce week-end » said on a Sunday still begins today.
+    @Test func theLastWeekEndAndTheWeekGoneBy() throws {
+        #expect(try period("le week-end dernier") == "2026-10-10T00:00 → 2026-10-12T00:00")
+        #expect(try period("le week-end passé") == "2026-10-10T00:00 → 2026-10-12T00:00")
+        #expect(try period("la semaine passée") == "2026-10-05T00:00 → 2026-10-12T00:00")
+        #expect(try period("la semaine passée") == period("la semaine dernière"))
+        #expect(try moment("le week-end dernier") == "2026-10-10")
+        let sunday = LocalDateTime.parse("2026-10-18T20:00", in: paris)!.date
+        func onSunday(_ text: String) throws -> String {
+            let (start, end) = try FrenchDates.period(text, now: sunday, calendar: calendar)
+            return LocalDateTime.format(start, in: paris) + " → " + LocalDateTime.format(end, in: paris)
+        }
+        #expect(try onSunday("le week-end dernier") == "2026-10-10T00:00 → 2026-10-12T00:00")
+        #expect(try onSunday("ce week-end") == "2026-10-18T00:00 → 2026-10-19T00:00")
+        #expect(try onSunday("le week-end prochain") == "2026-10-24T00:00 → 2026-10-26T00:00")
+    }
+
     @Test func wordsAreTheUsersOrNot() {
         let said = ["Ajoute un rendez-vous demain à 15 h chez le médecin"]
         #expect(FrenchDates.wordsAreTheUser("demain à 15 h", said: said))

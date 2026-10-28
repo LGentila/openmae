@@ -627,6 +627,39 @@ struct MemoryTests {
         for (text, expected) in kept { #expect(period(text) == expected, "\(text)") }
     }
 
+    /// « le week-end dernier » (« passé ») is the one before this week's Monday, also said on a Saturday or a Sunday;
+    /// « ce week-end » said on a Sunday has its Saturday; « la semaine passée » is « la semaine dernière ».
+    @Test func theLastWeekEndAndTheWeekGoneBy() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = paris
+        func period(_ text: String, at reference: String) -> String? {
+            let at = LocalDateTime.parse(reference, in: paris)!.date
+            guard let (start, end) = MemoryPeriod.read(text, now: at, calendar: calendar) else { return nil }
+            return LocalDateTime.format(start, in: paris) + " → " + LocalDateTime.format(end, in: paris)
+        }
+        for weekend in ["2026-10-17T20:00", "2026-10-18T20:00"] {  // Saturday, Sunday
+            for text in ["le week-end dernier", "le week-end passé", "week-end dernier", "le week end dernier"] {
+                #expect(period(text, at: weekend) == "2026-10-10T00:00 → 2026-10-12T00:00", "\(text), \(weekend)")
+            }
+            for text in ["ce week-end", "le week-end"] {
+                #expect(period(text, at: weekend) == "2026-10-17T00:00 → \(weekend)", "\(text), \(weekend)")
+            }
+        }
+        let thursday = "2026-10-15T18:42"
+        for text in ["la semaine passée", "semaine passée", "la semaine dernière"] {
+            #expect(period(text, at: thursday) == "2026-10-05T00:00 → 2026-10-12T00:00", "\(text)")
+        }
+        for text in ["le week-end dernier", "le week-end passé", "ce week-end", "le week-end"] {
+            #expect(period(text, at: thursday) == "2026-10-10T00:00 → 2026-10-12T00:00", "\(text)")
+        }
+        // On a Monday, the week-end that has just ended.
+        let monday = "2026-10-19T09:00"
+        for text in ["le week-end dernier", "ce week-end"] {
+            #expect(period(text, at: monday) == "2026-10-17T00:00 → 2026-10-19T00:00", "\(text)")
+        }
+        #expect(period("la semaine passée", at: monday) == "2026-10-12T00:00 → 2026-10-19T00:00")
+    }
+
     // MARK: The journal
 
     @Test func theJournalForgetsWhatIsOlderThanItsRetention() async throws {

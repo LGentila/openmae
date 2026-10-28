@@ -400,6 +400,8 @@ public enum FrenchDates {
 
     fileprivate enum Period: Equatable {
         case thisWeek, nextWeek, lastWeek, weekend(next: Bool), thisMonth, nextMonth, month(Int), comingDays(Int)
+        /// « le week-end dernier », « le week-end passé »: the one before this week's Monday, also said on a weekend.
+        case lastWeekend
     }
 
     fileprivate struct Clock: Equatable {
@@ -800,19 +802,22 @@ public enum FrenchDates {
 
         // MARK: Periods
 
-        /// "cette semaine", "la semaine prochaine", "ce week-end", "le mois prochain", "en novembre", "les 3
-        /// prochains jours".
+        /// "cette semaine", "la semaine prochaine", "la semaine passée", "ce week-end", "le week-end dernier", "le mois
+        /// prochain", "en novembre", "les 3 prochains jours".
         func period(at i: Int) -> (Period, Int)? {
             let (w0, w1, w2) = (word(i), word(i + 1), word(i + 2))
+            let last: Set<String?> = ["dernier", "derniere", "passe", "passee"]
             switch (w0, w1, w2) {
             case ("cette", "semaine", _): return (.thisWeek, i + 2)
             case ("la", "semaine", "prochaine"), ("la", "semaine", "suivante"): return (.nextWeek, i + 3)
             case ("semaine", "prochaine", _), ("semaine", "suivante", _): return (.nextWeek, i + 2)
-            case ("la", "semaine", "derniere"): return (.lastWeek, i + 3)
-            case ("semaine", "derniere", _): return (.lastWeek, i + 2)
+            case ("la", "semaine", let w) where last.contains(w): return (.lastWeek, i + 3)
+            case ("semaine", let w, _) where last.contains(w): return (.lastWeek, i + 2)
             case ("ce", "week-end", _): return (.weekend(next: false), i + 2)
             case ("le", "week-end", "prochain"): return (.weekend(next: true), i + 3)
             case ("week-end", "prochain", _): return (.weekend(next: true), i + 2)
+            case ("le", "week-end", let w) where last.contains(w): return (.lastWeekend, i + 3)
+            case ("week-end", let w, _) where last.contains(w): return (.lastWeekend, i + 2)
             case ("le", "week-end", _): return (.weekend(next: false), i + 2)
             case ("week-end", _, _): return (.weekend(next: false), i + 1)
             case ("ce", "mois", _): return (.thisMonth, w2 == "ci" ? i + 3 : i + 2)
@@ -1269,7 +1274,9 @@ public enum FrenchDates {
             case .weekend(let next):
                 var saturday = days(5, after: monday)
                 if next, todays == 7 || todays == 1 { saturday = days(7, after: saturday) }
-                return (max(saturday, today), days(2, after: saturday))
+                // For the past, the whole of it: « ce week-end » said on a Sunday has its Saturday.
+                return (past ? saturday : max(saturday, today), days(2, after: saturday))
+            case .lastWeekend: return (days(-2, after: monday), monday)
             case .thisMonth: return (today, firstOfMonth(1))
             case .nextMonth: return (firstOfMonth(1), firstOfMonth(2))
             case .month(let month):
@@ -1429,7 +1436,7 @@ public enum FrenchDates {
             switch p.period {
             case .month?: steps.append(.year)
             case .thisMonth?, .nextMonth?: steps.append(.month)
-            case .thisWeek?, .nextWeek?, .lastWeek?, .weekend?: steps.append(.week)
+            case .thisWeek?, .nextWeek?, .lastWeek?, .weekend?, .lastWeekend?: steps.append(.week)
             case .comingDays?, nil: break
             }
             for day in p.days + [p.endDay].compactMap({ $0 }) {
