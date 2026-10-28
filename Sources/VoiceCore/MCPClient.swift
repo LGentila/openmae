@@ -3,7 +3,19 @@ import Foundation
 // A small client of the Model Context Protocol, for the connected tools: a service reached at an address (Home
 // Assistant, …) whose tools become actions Maé can call. Only the Streamable HTTP transport (MCP 2025-03-26 and later):
 // each JSON-RPC message is POSTed to the address, and the answer comes back as JSON or as a stream of server-sent
-// events. The old HTTP+SSE transport (a GET stream, then POSTs to another address) is not spoken.
+// events. The old HTTP+SSE transport (a GET stream, then POSTs to another address) is not spoken. A program on this Mac
+// is spoken to over its standard input and output instead (MCPProgramClient.swift).
+
+/// What reaches one connected tool's MCP server: `MCPClient` for a service at an address, `MCPProgramClient` for a
+/// program this Mac starts.
+public protocol MCPConnection: Actor {
+    /// Every tool, all pages of the list.
+    func listTools() async throws -> [MCPTool]
+    /// Calls a tool. A failure the tool reports (`isError`) is a result, not an error.
+    func call(_ name: String, arguments: [String: JSONValue]) async throws -> MCPCallResult
+    /// The server said its list of tools changed (`notifications/tools/list_changed`) since it was last listed.
+    var toolsChanged: Bool { get }
+}
 
 /// Why a connected tool could not be reached or used.
 public enum MCPError: Error, Sendable, Codable, Equatable {
@@ -17,6 +29,11 @@ public enum MCPError: Error, Sendable, Codable, Equatable {
     case notMCP(String)
     /// The server refused the request (a JSON-RPC error): its message.
     case refused(String)
+    /// A program on this Mac: its command is not on this Mac, or is not a program (the command as typed: "npx").
+    case notFound(String)
+    /// A program on this Mac ended before it answered, or could not be started: the last line it wrote (on its error
+    /// output, else on its output), else why it could not start; empty when it said nothing.
+    case ended(String)
 }
 
 /// A tool a connected service offers, as its `tools/list` gives it.
@@ -54,10 +71,71 @@ public struct MCPCallResult: Sendable, Equatable {
     }
 }
 
+/// The messages of the protocol and how their answers are read, whatever carries them.
+enum MCPMessages {
+    /// `initialize`'s parameters: the protocol version asked for, no capability of the client's own (no roots, no
+    /// sampling: a server asks nothing of Maé), its name.
+    static var initialize: [String: JSONValue] {
+        ["protocolVersion": .string(MCPClient.protocolVersion), "capabilities": .object([:]),
+         "clientInfo": ["name": .string(AppIdentity.name), "version": "1"]]
+    }
+
+    /// The protocol version the server answered `initialize` with; throws when the answer is not one.
+    static func initialized(_ result: JSONValue) throws -> String? {
+        guard case .object(let info) = result, info["protocolVersion"] != nil || info["capabilities"] != nil else {
+            throw MCPError.notMCP("initialize")
+        }
+        return info["protocolVersion"]?.text
+    }
+
+    /// One page of `tools/list`: its tools, and the cursor of the next page (nil: the last one).
+    static func page(_ result: JSONValue) throws -> (tools: [MCPTool], next: String?) {
+        guard case .object(let page) = result, case .array(let items)? = page["tools"] else {
+            throw MCPError.notMCP("tools/list")
+        }
+        let next = page["nextCursor"]?.text
+        return (items.compactMap(tool), next?.isEmpty == false ? next : nil)
+    }
+
+    /// What `tools/call` gave back: its text contents, one after the other (structured content written as JSON when
+    /// there is no text).
+    static func callResult(_ result: JSONValue) throws -> MCPCallResult {
+        guard case .object(let object) = result else { throw MCPError.notMCP("tools/call") }
+        var texts: [String] = []
+        if case .array(let content)? = object["content"] {
+            for item in content {
+                guard case .object(let part) = item else { continue }
+                if part["type"]?.text == "text", let text = part["text"]?.text {
+                    texts.append(text)
+                } else if case .object(let resource)? = part["resource"], let text = resource["text"]?.text {
+                    texts.append(text)
+                }
+            }
+        }
+        if texts.isEmpty, let structured = object["structuredContent"],
+           let data = try? JSONEncoder().encode(structured)
+        {
+            texts.append(String(decoding: data, as: UTF8.self))
+        }
+        return MCPCallResult(text: texts.joined(separator: "\n"), isError: object["isError"]?.boolean ?? false)
+    }
+
+    static func tool(_ value: JSONValue) -> MCPTool? {
+        guard case .object(let item) = value, let name = item["name"]?.text, !name.isEmpty else { return nil }
+        var annotations: [String: JSONValue] = [:]
+        if case .object(let a)? = item["annotations"] { annotations = a }
+        let title = item["title"]?.text ?? annotations["title"]?.text
+        return MCPTool(name: name, title: title?.isEmpty == false ? title : nil,
+                       description: item["description"]?.text ?? "",
+                       inputSchema: item["inputSchema"] ?? ["type": "object"],
+                       readOnlyHint: annotations["readOnlyHint"]?.boolean)
+    }
+}
+
 /// Talks to one MCP server at an address. Connects on first use (`initialize`, then `notifications/initialized`), keeps
 /// the server's session (`Mcp-Session-Id`) and starts a new one when the server forgot it (404 to a request in a
 /// session).
-public actor MCPClient {
+public actor MCPClient: MCPConnection {
     /// The protocol version asked for; the server answers with the one it speaks, used from then on.
     public static let protocolVersion = "2025-06-18"
 
@@ -123,15 +201,8 @@ public actor MCPClient {
         guard !connected else { return }
         sessionID = nil
         negotiatedVersion = nil
-        let result = try await request("initialize", [
-            "protocolVersion": .string(Self.protocolVersion),
-            "capabilities": .object([:]),
-            "clientInfo": ["name": .string(AppIdentity.name), "version": "1"],
-        ], connecting: true)
-        guard case .object(let info) = result, info["protocolVersion"] != nil || info["capabilities"] != nil else {
-            throw MCPError.notMCP("initialize")
-        }
-        negotiatedVersion = info["protocolVersion"]?.text
+        let result = try await request("initialize", MCPMessages.initialize, connecting: true)
+        negotiatedVersion = try MCPMessages.initialized(result)
         connected = true
         try await notify("notifications/initialized")
     }
@@ -142,13 +213,10 @@ public actor MCPClient {
         var tools: [MCPTool] = []
         var cursor: String?
         for _ in 0..<50 {
-            let result = try await request("tools/list", cursor.map { ["cursor": .string($0)] } ?? [:])
-            guard case .object(let page) = result, case .array(let items)? = page["tools"] else {
-                throw MCPError.notMCP("tools/list")
-            }
-            tools += items.compactMap(Self.tool)
-            cursor = page["nextCursor"]?.text
-            if cursor?.isEmpty != false { break }
+            let page = try MCPMessages.page(try await request("tools/list", cursor.map { ["cursor": .string($0)] } ?? [:]))
+            tools += page.tools
+            cursor = page.next
+            if cursor == nil { break }
         }
         toolsChanged = false
         return tools
@@ -157,36 +225,8 @@ public actor MCPClient {
     /// Calls a tool. A failure the tool reports (`isError`) is a result, not an error.
     public func call(_ name: String, arguments: [String: JSONValue]) async throws -> MCPCallResult {
         try await connect()
-        let result = try await request("tools/call", ["name": .string(name), "arguments": .object(arguments)])
-        guard case .object(let object) = result else { throw MCPError.notMCP("tools/call") }
-        var texts: [String] = []
-        if case .array(let content)? = object["content"] {
-            for item in content {
-                guard case .object(let part) = item else { continue }
-                if part["type"]?.text == "text", let text = part["text"]?.text {
-                    texts.append(text)
-                } else if case .object(let resource)? = part["resource"], let text = resource["text"]?.text {
-                    texts.append(text)
-                }
-            }
-        }
-        if texts.isEmpty, let structured = object["structuredContent"],
-           let data = try? JSONEncoder().encode(structured)
-        {
-            texts.append(String(decoding: data, as: UTF8.self))
-        }
-        return MCPCallResult(text: texts.joined(separator: "\n"), isError: object["isError"]?.boolean ?? false)
-    }
-
-    private static func tool(_ value: JSONValue) -> MCPTool? {
-        guard case .object(let item) = value, let name = item["name"]?.text, !name.isEmpty else { return nil }
-        var annotations: [String: JSONValue] = [:]
-        if case .object(let a)? = item["annotations"] { annotations = a }
-        let title = item["title"]?.text ?? annotations["title"]?.text
-        return MCPTool(name: name, title: title?.isEmpty == false ? title : nil,
-                       description: item["description"]?.text ?? "",
-                       inputSchema: item["inputSchema"] ?? ["type": "object"],
-                       readOnlyHint: annotations["readOnlyHint"]?.boolean)
+        return try MCPMessages.callResult(try await request("tools/call", ["name": .string(name),
+                                                                           "arguments": .object(arguments)]))
     }
 
     // MARK: - JSON-RPC over HTTP

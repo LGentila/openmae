@@ -109,8 +109,9 @@ public actor AssistantHost: AssistantConnection {
     private var purge: Task<Void, Never>?
     /// The connected tools (MCP) that are on: with the actions on or off, like the web search.
     private let connectedTools = ConnectedTools()
-    /// One client per connected tool, kept while its address, access and token stay the same (its session with it too).
-    private var mcpClients: [UUID: (key: String, client: MCPClient)] = [:]
+    /// One client per connected tool that is on, kept while its address, access and token stay the same (its session
+    /// with it too), or its program's command and arguments: a program runs for as long as its tool is on.
+    private var mcpClients: [UUID: (key: String, client: any MCPConnection)] = [:]
     /// Connected tools that said their list of actions changed: fetched again at the next new conversation.
     private var changedLists: Set<UUID> = []
 
@@ -138,9 +139,11 @@ public actor AssistantHost: AssistantConnection {
         Task { await self.observeConnectedTools() }
     }
 
-    /// The app is quitting: the agents' runs stop with it (synchronous, from the app's last moments).
-    public static func stopAgentsNow() {
+    /// The app is quitting: the agents' runs and the connected tools' programs stop with it (synchronous, from the app's
+    /// last moments).
+    public static func stopProgramsNow() {
         ClaudeCodeConnector.stopAll()
+        MCPProgramClient.stopAll()
     }
 
     /// The app is quitting (before it ends: `applicationShouldTerminate`): the engine starts nothing more, and this
@@ -852,52 +855,79 @@ public actor AssistantHost: AssistantConnection {
                                           folder: memoryStore.folder.path)))
     }
 
-    /// Hands the connected tools that are on to their provider, each with its client. Returns true when what the model
-    /// sees changed.
+    /// Hands the connected tools that are on to their provider, each with its client. The programs of the tools turned
+    /// off, removed or changed stop. Returns true when what the model sees changed.
     @discardableResult
     private func configureConnectedTools() async -> Bool {
         var connections: [ConnectedTools.Connection] = []
-        var kept: [UUID: (key: String, client: MCPClient)] = [:]
+        var kept: [UUID: (key: String, client: any MCPConnection)] = [:]
         for tool in settings.connectedTools where tool.enabled {
             guard let client = mcpClient(tool) else { continue }
             kept[tool.id] = mcpClients[tool.id]
             connections.append(ConnectedTools.Connection(settings: tool, client: client))
         }
+        for (id, known) in mcpClients where kept[id] == nil { stopProgram(known.client) }
         mcpClients = kept
         return await connectedTools.configure(connections)
     }
 
-    /// The client of a tool, the same one while its address, access and token do not change; nil when the address cannot
-    /// be one.
-    private func mcpClient(_ tool: ConnectedToolSettings) -> MCPClient? {
-        guard let address = MCPClient.address(tool.address) else { return nil }
-        let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
-        let key = "\(address.absoluteString) \(tool.access.rawValue) \(token.map { String($0.hashValue) } ?? "")"
-        if let known = mcpClients[tool.id], known.key == key { return known.client }
-        let client = MCPClient(address: address, token: token)
+    /// The client of a tool, the same one while its address, access and token, or its program, do not change (another
+    /// program's stops); nil when the address cannot be one. A program starts with its client, and its state goes to the
+    /// settings: connected once it answered, "Unreachable" with why when it does not start (as if tested).
+    private func mcpClient(_ tool: ConnectedToolSettings) -> (any MCPConnection)? {
+        guard let program = tool.program else {
+            guard let address = MCPClient.address(tool.address) else { return nil }
+            let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
+            let key = "\(address.absoluteString) \(tool.access.rawValue) \(token.map { String($0.hashValue) } ?? "")"
+            if let known = mcpClients[tool.id] {
+                if known.key == key { return known.client }
+                stopProgram(known.client)
+            }
+            let client = MCPClient(address: address, token: token)
+            mcpClients[tool.id] = (key, client)
+            return client
+        }
+        let key = Self.key(program)
+        if let known = mcpClients[tool.id] {
+            if known.key == key { return known.client }
+            stopProgram(known.client)
+        }
+        let client = MCPProgramClient(launch: MCPProgram.launch(program), name: tool.name)
+        let (id, emit) = (tool.id, emit)
+        Task {
+            await client.keepRunning { status in
+                switch status {
+                case .running: emit.yield(.connectedToolState(id, .connected))
+                case .failed(let error): emit.yield(.connectedToolTested(id, .failed(error)))
+                }
+            }
+        }
         mcpClients[tool.id] = (key, client)
         return client
     }
 
+    private static func key(_ program: ConnectedToolSettings.Program) -> String {
+        "program \(program.command) \(program.arguments)"
+    }
+
+    private func stopProgram(_ client: any MCPConnection) {
+        guard let program = client as? MCPProgramClient else { return }
+        Task { await program.stop() }
+    }
+
     /// The settings' "Test" button, or a tool being added: connects, lists its actions, and says how long it took.
     private func testConnectedTool(_ tool: ConnectedToolSettings) async {
-        guard let address = MCPClient.address(tool.address) else {
-            emit.yield(.connectedToolTested(tool.id, .failed(.unreachable)))
-            return
-        }
-        // A new client: the token may have just been saved, and an old session must not hide a problem.
-        let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
-        let client = MCPClient(address: address, token: token)
         let start = ContinuousClock.now
         let test: ConnectedToolTest
         do {
-            let tools = try await client.listTools()
+            let tools = try await listTools(of: tool)
             let d = ContinuousClock.now - start
             test = .works(tools: tools,
                           seconds: Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
             if settings.connectedTools.contains(where: { $0.id == tool.id }) {
                 emit.yield(.connectedToolState(tool.id, .connected))
-                mcpClients[tool.id] = nil  // the next configuration reads the token again
+                // The next configuration reads the token again (a program keeps running).
+                if tool.program == nil { mcpClients[tool.id] = nil }
             }
         } catch let error as MCPError {
             test = .failed(error)
@@ -910,6 +940,27 @@ public actor AssistantHost: AssistantConnection {
             DebugLog.log("connected tool test: \(test)")
         }
         emit.yield(.connectedToolTested(tool.id, test))
+    }
+
+    /// The actions a tool offers, asked anew. A service at its address, by a new client: the token may have just been
+    /// saved, and an old session must not hide a problem. A program on this Mac: its own when its tool is on (started at
+    /// once if it does not run: "Try again"), else a run of its own (a new tool, in the sheet), stopped once it answered.
+    private func listTools(of tool: ConnectedToolSettings) async throws -> [MCPTool] {
+        guard let program = tool.program else {
+            guard let address = MCPClient.address(tool.address) else { throw MCPError.unreachable }
+            let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
+            return try await MCPClient(address: address, token: token).listTools()
+        }
+        if let known = mcpClients[tool.id], known.key == Self.key(program) { return try await known.client.listTools() }
+        let client = MCPProgramClient(launch: MCPProgram.launch(program), name: tool.name)
+        do {
+            let tools = try await client.listTools()
+            await client.stop()
+            return tools
+        } catch {
+            await client.stop()
+            throw error
+        }
     }
 
     /// A tool said its list of actions changed: the conversation under way keeps the tools it has.

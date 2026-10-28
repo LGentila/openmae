@@ -238,16 +238,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// of the objects MLX keeps for the whole process, under that computation: the crash the wind-down is there to avoid
     /// (a command encoder released while still open, a mutex destroyed under Metal's completion queue, segmentation faults
     /// in MLX's encoding). `_exit` ends the process without running them, and without AppKit's last steps either: what
-    /// `applicationWillTerminate` does is done here first, so that the agents' runs do not outlive the app.
+    /// `applicationWillTerminate` does is done here first, so that the agents' runs and the connected tools' programs do
+    /// not outlive the app.
     private static func endNow() -> Never {
-        AssistantHost.stopAgentsNow()
-        DebugLog.log("quit: the agents' runs stopped, the app ends at once (_exit: MLX's objects are left as they are)")
+        AssistantHost.stopProgramsNow()
+        DebugLog.log("quit: the agents' runs and the connected tools' programs stopped, the app ends at once (_exit: "
+            + "MLX's objects are left as they are)")
         _exit(0)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AssistantHost.stopAgentsNow()
-        DebugLog.log("quit: the agents' runs stopped, the app ends")
+        AssistantHost.stopProgramsNow()
+        DebugLog.log("quit: the agents' runs and the connected tools' programs stopped, the app ends")
     }
 
     /// A task's notification shows even when OpenMaé is in front (the user may be reading something else in it); a

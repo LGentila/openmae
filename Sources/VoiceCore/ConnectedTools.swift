@@ -1,9 +1,10 @@
 import Foundation
 
-// Connected tools (MCP): services the user adds by their address (Home Assistant, …), whose tools become actions Maé
-// can call next to the built-in ones. The list of a tool's actions is fetched when it is added, tested or reconnected,
-// and kept with the settings, so the system prompt stays the same from one launch to the next. Their tokens are in the
-// keychain, never here.
+// Connected tools (MCP): services the user adds by their address (Home Assistant, …), or programs this Mac starts
+// (`npx -y @modelcontextprotocol/server-filesystem ~/Documents`), whose tools become actions Maé can call next to the
+// built-in ones. The list of a tool's actions is fetched when it is added, tested or reconnected, and kept with the
+// settings, so the system prompt stays the same from one launch to the next. Their tokens are in the keychain, never
+// here.
 
 /// A connected tool, as the settings keep it.
 public struct ConnectedToolSettings: Sendable, Codable, Equatable, Identifiable {
@@ -39,18 +40,34 @@ public struct ConnectedToolSettings: Sendable, Codable, Equatable, Identifiable 
         public var reads: Bool { ConnectedTools.reads(tool) }
     }
 
+    /// A program on this Mac that speaks MCP over its standard input and output: its command and arguments as typed
+    /// (`MCPProgram.launch` reads them).
+    public struct Program: Sendable, Codable, Equatable {
+        /// "npx -y @modelcontextprotocol/server-filesystem": the command, and maybe its first arguments.
+        public var command: String
+        /// "~/Documents/Notes".
+        public var arguments: String
+
+        public init(command: String, arguments: String = "") {
+            self.command = command
+            self.arguments = arguments
+        }
+    }
+
     public var id: UUID
     /// The user's name for it: "Home Assistant".
     public var name: String
-    /// As typed: "http://homeassistant.local:8123/api/mcp".
+    /// As typed: "http://homeassistant.local:8123/api/mcp". Empty for a program.
     public var address: String
     public var access: Access
     public var enabled = true
     public var whenActing = WhenActing.askFirst
     public var actions: [Action] = []
+    /// A program this Mac starts, instead of a service at an address (an older version's settings have none).
+    public var program: Program?
 
     public init(id: UUID = UUID(), name: String, address: String, access: Access, enabled: Bool = true,
-                whenActing: WhenActing = .askFirst, actions: [Action] = [])
+                whenActing: WhenActing = .askFirst, actions: [Action] = [], program: Program? = nil)
     {
         self.id = id
         self.name = name
@@ -59,6 +76,7 @@ public struct ConnectedToolSettings: Sendable, Codable, Equatable, Identifiable 
         self.enabled = enabled
         self.whenActing = whenActing
         self.actions = actions
+        self.program = program
     }
 
     /// The actions a new list gives, keeping the switches of those already known; a new one is on, unless Maé has a
@@ -90,10 +108,11 @@ public enum ConnectedToolFailure: Sendable, Codable, Equatable {
     init(_ error: MCPError) {
         switch error {
         case .noAnswer: self = .noAnswer
-        case .unreachable: self = .unreachable
+        case .unreachable, .notFound: self = .unreachable
         case .unauthorized: self = .unauthorized
         case .notMCP(let what): self = .said(what)
         case .refused(let message): self = .said(message)
+        case .ended(let said): self = said.isEmpty ? .unreachable : .said(said)
         }
     }
 }
@@ -137,9 +156,9 @@ public actor ConnectedTools: ToolProvider {
     /// A tool that is on, with what reaches it.
     public struct Connection: Sendable {
         public var settings: ConnectedToolSettings
-        public var client: MCPClient
+        public var client: any MCPConnection
 
-        public init(settings: ConnectedToolSettings, client: MCPClient) {
+        public init(settings: ConnectedToolSettings, client: any MCPConnection) {
             self.settings = settings
             self.client = client
         }
@@ -335,7 +354,7 @@ public actor ConnectedTools: ToolProvider {
         } catch let error as MCPError {
             let state: ConnectedToolState = switch error {
             case .unauthorized: .needsReconnect
-            case .unreachable, .noAnswer: .unreachable
+            case .unreachable, .noAnswer, .notFound, .ended: .unreachable
             case .notMCP, .refused: .connected  // it answered
             }
             report(.state(id, state))

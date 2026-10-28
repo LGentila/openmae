@@ -36,6 +36,7 @@ public enum ConnectedToolPhrases {
         case .unreachable: "Je n’arrive pas à joindre \(toolName)."
         case .unauthorized: "\(toolName) refuse l’accès. Reconnecte-le dans les réglages."
         case .notMCP, .refused: failed(toolName)
+        case .notFound, .ended: "Je n’arrive pas à lancer \(toolName)."
         }
     }
 
@@ -47,6 +48,7 @@ public enum ConnectedToolPhrases {
         case .unauthorized: "\(toolName) refuse l'accès"
         case .notMCP(let what): "\(toolName) a répondu autre chose (\(what))"
         case .refused(let message): "\(toolName) a refusé : \(message)"
+        case .notFound, .ended: "\(toolName) n'a pas pu démarrer"
         }
         return why + ". Rien n'est fait : ne dis pas que c'est fait."
     }

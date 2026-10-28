@@ -3,9 +3,9 @@ import VoiceCore
 import VoiceEngineApple
 
 // Settings › Connected tools (MCP): services Maé can ask for actions (turn on a light, add a task, search notes),
-// several at once, reached at their address. `ConnectedToolsAccess` turns the settings' connected tools and what the
-// engine reports (states, tests, logs) into what the pages show, and carries out what they change. A program on this Mac
-// (stdio) and signing in with an account (OAuth) are not built yet: shown greyed, "Soon".
+// several at once, reached at their address or started on this Mac. `ConnectedToolsAccess` turns the settings' connected
+// tools and what the engine reports (states, tests, logs) into what the pages show, and carries out what they change.
+// Signing in with an account (OAuth) is not built yet: shown greyed, "Soon".
 
 /// A connected tool, as the settings show it.
 struct ConnectedTool: Identifiable, Equatable {
@@ -173,7 +173,18 @@ final class ConnectedToolsAccess {
             name = tool.name
             address = tool.address
             access = ConnectedToolsAccess.shown(tool.access)
+            if let program = tool.program {
+                kind = .program
+                command = program.command
+                arguments = program.arguments
+            }
             changes = true
+        }
+
+        /// The program it starts, as typed.
+        var program: ConnectedToolSettings.Program {
+            .init(command: command.trimmingCharacters(in: .whitespacesAndNewlines),
+                  arguments: arguments.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 
@@ -187,9 +198,18 @@ final class ConnectedToolsAccess {
         model?.settings.connectedTools.first { $0.id == id }.map(Draft.init(changing:))
     }
 
-    /// Connects to the tool of a draft, to see what it offers.
+    /// Connects to the tool of a draft, to see what it offers: a program on this Mac is started, then stopped.
     func trial(_ draft: Draft) async -> Trial {
         guard let model else { return .failed(String(localized: "Connected tools are not available yet.")) }
+        if draft.kind == .program {
+            let program = draft.program
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            guard MCPProgram.words(program.command, home: home) != nil, MCPProgram.words(program.arguments, home: home) != nil
+            else { return .failed(String(localized: "A quote is not closed.")) }
+            let tested = ConnectedToolSettings(id: draft.trialID, name: draft.name, address: "", access: .none,
+                                               program: program)
+            return found(await model.testConnectedTool(tested), for: draft, program: true)
+        }
         guard MCPClient.address(draft.address) != nil else { return .failed(String(localized: "This address can’t be one.")) }
         let access = Self.settings(draft.access)
         var token = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -197,38 +217,43 @@ final class ConnectedToolsAccess {
         if access == .token, token.isEmpty { return .failed(String(localized: "Paste the tool’s token first.")) }
         ConnectedToolsKeychain.setToken(access == .token ? token : nil, for: draft.trialID, name: draft.name)
         let tested = ConnectedToolSettings(id: draft.trialID, name: draft.name, address: draft.address, access: access)
-        switch await model.testConnectedTool(tested) {
+        return found(await model.testConnectedTool(tested), for: draft, program: false)
+    }
+
+    private func found(_ test: ConnectedToolTest, for draft: Draft, program: Bool) -> Trial {
+        switch test {
         case .works(let tools, _):
             trialTools[draft.trialID] = tools
             return .connected(actions: tools.count)
         case .failed(let error):
             trialTools[draft.trialID] = nil
-            return .failed(Self.reason(error))
+            return .failed(Self.reason(error, program: program))
         }
     }
 
     /// Adds the tool the trial connected to, or saves the changed connection; its id.
     func add(_ draft: Draft) -> ConnectedTool.ID? {
         guard let model, let found = trialTools.removeValue(forKey: draft.trialID) else { return nil }
-        let access = Self.settings(draft.access)
+        let access = draft.kind == .program ? .none : Self.settings(draft.access)
         if draft.trialID != draft.id {
             ConnectedToolsKeychain.setToken(access == .token ? ConnectedToolsKeychain.token(for: draft.trialID) : nil,
                                             for: draft.id, name: draft.name)
             ConnectedToolsKeychain.setToken(nil, for: draft.trialID)
         }
         let name = draft.name.trimmingCharacters(in: .whitespaces)
+        let address = draft.kind == .program ? "" : draft.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let program = draft.kind == .program ? draft.program : nil
         if let i = model.settings.connectedTools.firstIndex(where: { $0.id == draft.id }) {
             var tool = model.settings.connectedTools[i]
-            tool.address = draft.address.trimmingCharacters(in: .whitespacesAndNewlines)
+            tool.address = address
             tool.access = access
+            tool.program = program
             if !name.isEmpty { tool.name = name }
             tool.actions = tool.merging(found)
             model.settings.connectedTools[i] = tool
             model.reconnected(draft.id)
         } else {
-            var tool = ConnectedToolSettings(id: draft.id, name: name,
-                                             address: draft.address.trimmingCharacters(in: .whitespacesAndNewlines),
-                                             access: access)
+            var tool = ConnectedToolSettings(id: draft.id, name: name, address: address, access: access, program: program)
             tool.actions = tool.merging(found)
             model.settings.connectedTools.append(tool)
         }
@@ -248,7 +273,7 @@ final class ConnectedToolsAccess {
     private static func shown(_ tool: ConnectedToolSettings, index: Int, model: AssistantModel) -> ConnectedTool {
         let host = MCPClient.address(tool.address)?.host() ?? ""
         let home = tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
-        let place: ConnectedTool.Place = MCPClient.isHomeNetwork(host) ? .home : .internet
+        let place: ConnectedTool.Place = tool.program != nil ? .thisMac : MCPClient.isHomeNetwork(host) ? .home : .internet
         let colors = [Palette.azureSoft, Palette.sunSoft, Palette.coralSoft]
         let state: ConnectedTool.State = switch model.connectedToolStates[tool.id] {
         case _ where !tool.enabled: .paused
@@ -259,7 +284,7 @@ final class ConnectedToolsAccess {
         let lastTest: ConnectedTool.Test? = switch model.connectedToolTests[tool.id] {
         case .works(let tools, let seconds)?: .works(actions: tools.count, seconds: seconds)
         case .failed(let error)? where error == .noAnswer || error == .unreachable: .noAnswer
-        case .failed(let error)?: .failed(reason(error))
+        case .failed(let error)?: .failed(reason(error, program: tool.program != nil))
         case nil: nil
         }
         let log = (model.connectedToolLogs[tool.id] ?? []).enumerated().map { i, entry in
@@ -267,9 +292,11 @@ final class ConnectedToolsAccess {
                                    result: result(entry.result))
         }
         return ConnectedTool(
-            id: tool.id, name: tool.name, icon: home ? .home : place == .home ? .plug : .globe,
+            id: tool.id, name: tool.name, icon: home ? .home : place == .home ? .plug : place == .thisMac ? .laptop : .globe,
             color: home ? Palette.turquoiseSoft : colors[index % colors.count], place: place,
-            connection: .service(address: tool.address, access: shown(tool.access)), state: state, enabled: tool.enabled,
+            connection: tool.program.map { .program(command: $0.command, arguments: $0.arguments) }
+                ?? .service(address: tool.address, access: shown(tool.access)),
+            state: state, enabled: tool.enabled,
             whenActing: tool.whenActing == .askFirst ? .askFirst : .doDirectly,
             actions: tool.actions.map { ConnectedTool.Action(id: $0.name, title: title($0.tool), reads: $0.reads,
                                                               enabled: $0.enabled) },
@@ -330,14 +357,19 @@ final class ConnectedToolsAccess {
         }
     }
 
-    /// Why a trial or a test failed, for the sheet and the tool's page.
-    static func reason(_ error: MCPError) -> String {
+    /// Why a trial or a test failed, for the sheet and the tool's page; `program`: a program on this Mac.
+    static func reason(_ error: MCPError, program: Bool = false) -> String {
         switch error {
         case .unreachable: String(localized: "Nothing answers at this address. Check it, and that this Mac is on the same network.")
+        case .noAnswer where program: String(localized: "The program did not answer in time.")
         case .noAnswer: String(localized: "The tool did not answer in time.")
         case .unauthorized: String(localized: "The tool refuses the access: check the token.")
+        case .notMCP(let what) where program: String(localized: "The program started, but it does not speak MCP (\(what)).")
         case .notMCP(let what): String(localized: "Something answers at this address, but not a connected tool (\(what)).")
         case .refused(let why): String(localized: "The tool refused: \(why)")
+        case .notFound(let command): String(localized: "“\(command)” is not on this Mac. Install it, or type the command’s full path.")
+        case .ended(let said) where said.isEmpty: String(localized: "The program stopped as soon as it started.")
+        case .ended(let said): String(localized: "The program stopped: \(said)")
         }
     }
 }
@@ -474,8 +506,7 @@ struct ToolPage: View {
             }
             PageSubtitle(icon: ToolWords.placeIcon(tool.place), text: ToolWords.line(tool))
             if tool.state == .unreachable {
-                Note(Text("\(tool.name) does not answer. Check that this Mac is on the same network as it, then try again."),
-                     tone: .error)
+                Note(unreachable, tone: .error)
                     .padding(.top, 18)
                 ActionRow(top: 12, bottom: 0) {
                     Button("Try again") { tools.test(tool.id) }
@@ -505,6 +536,18 @@ struct ToolPage: View {
             Button("Remove this tool…") { navigation.sheet = .removeTool(tool.id) }
                 .buttonStyle(WindowButtonStyle(kind: .danger))
                 .padding(.top, 22)
+        }
+    }
+
+    /// Why it is unreachable: a service does not answer; a program does not start, and its last test says why.
+    private var unreachable: Text {
+        guard case .program = tool.connection else {
+            return Text("\(tool.name) does not answer. Check that this Mac is on the same network as it, then try again.")
+        }
+        return switch tool.lastTest {
+        case .failed(let reason)?: Text("\(tool.name) does not start. \(reason)")
+        case .noAnswer?: Text("\(tool.name) does not start: it did not answer in time. Check its command, then try again.")
+        default: Text("\(tool.name) does not start. Check its command, then try again.")
         }
     }
 
@@ -563,8 +606,9 @@ struct ToolPage: View {
                 case .noAnswer:
                     StatusPill(text: Text("No answer"), style: .refused)
                 case .failed(let reason):
-                    StatusPill(text: Text("Failed: \(reason)"), style: .refused)
-                        .lineLimit(1)
+                    // Cut when long (a program's reason): the button keeps its room, and the note above says it all.
+                    StatusPill(text: Text("Failed: \(reason)"), style: .refused, shrinks: true)
+                        .layoutPriority(-1)
                 case nil:
                     EmptyView()
                 }
@@ -640,8 +684,9 @@ struct ToolPage: View {
 
 // MARK: - Sheets
 
-/// "Add a tool": a service on the network or on the internet (a program on this Mac comes later); tested when added.
-/// Also "Change…" and "Reconnect" of a tool's connection: its address, its access, a new token.
+/// "Add a tool": a service on the network or on the internet ("Test", then "Add"), or a program on this Mac ("Test and
+/// add": added as soon as it answered). Also "Change…" and "Reconnect" of a tool's connection: its address, its access,
+/// a new token.
 struct AddToolSheet: View {
     let tools: ConnectedToolsAccess
     let navigation: SettingsNavigation
@@ -686,7 +731,7 @@ struct AddToolSheet: View {
                 }
                 SheetChoice(disc: FamilyDisc(icon: .laptop, color: Palette.sunSoft, size: 48),
                             title: Text("A program on this Mac"),
-                            detail: Text("Notes, files, browser… Maé starts it herself."), isEnabled: false)
+                            detail: Text("Notes, files, browser… Maé starts it herself."))
                 {
                     draft.kind = .program
                     step = .form
@@ -827,8 +872,12 @@ struct AddToolSheet: View {
         let draft = draft
         Task {
             trial = await tools.trial(draft)
-            if case .connected = trial { tried = draft }
             isTrying = false
+            guard case .connected = trial else { return }
+            tried = draft
+            // "Test and add": a program that answered is added at once (unless it was changed since); its page lists
+            // its actions.
+            if draft.kind == .program, !draft.changes, self.draft == draft { next() }
         }
     }
 }

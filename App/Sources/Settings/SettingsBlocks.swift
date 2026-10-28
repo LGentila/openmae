@@ -64,7 +64,9 @@ struct StatusDot: View {
     }
 }
 
-/// A pill of 28 points: a dot and a word on white (a page's state), or a tinted word (a test's result).
+/// A pill of 28 points: a dot and a word on white (a page's state), or a tinted word (a test's result). `shrinks`: cut at
+/// its end when its row is too narrow for it and what is beside it (a test's failure, whose reason can be long); else
+/// always whole.
 struct StatusPill: View {
     enum Style: Equatable {
         case dot(StatusTone)
@@ -73,6 +75,7 @@ struct StatusPill: View {
 
     let text: Text
     let style: Style
+    var shrinks = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -87,7 +90,7 @@ struct StatusPill: View {
         .frame(height: 28)
         .background(background, in: Capsule())
         .overlay { if isDot { Capsule().strokeBorder(Palette.ink.opacity(0.1), lineWidth: 1) } }
-        .fixedSize()
+        .fixedSize(horizontal: !shrinks, vertical: true)
         .accessibilityElement(children: .combine)
     }
 

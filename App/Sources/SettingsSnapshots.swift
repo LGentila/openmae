@@ -6,8 +6,8 @@ import VoiceCore
 
 /// Still pictures of the settings window (see `Snapshots`): every page in the states its design draws, named after the
 /// design's screens (RgVoix, RgActionsRefuse…), each page whole, at its own height; then the states the design does
-/// not draw (the Relay page, the sheets of received information, the pairing's expiry…), and the connected tools'
-/// pages, drawn but not reachable yet. The scenes start from the default settings, not the user's.
+/// not draw (the Relay page, the sheets of received information, the pairing's expiry, a connected program that does not
+/// start…). The scenes start from the default settings, not the user's.
 extension Snapshots {
     private struct SettingsScene {
         var name: String
@@ -298,6 +298,11 @@ extension Snapshots {
         homeToolDown.lastTest = .noAnswer
         homeToolDown.log.insert(.init(date: at(11, 42), title: "Allumer le salon", result: .failed("pas de réponse")),
                                 at: 0)
+        // A program that does not start: its command is not on this Mac.
+        let notFound = ConnectedToolsAccess.reason(.notFound("npx"), program: true)
+        var notesDown = notes
+        notesDown.state = .unreachable
+        notesDown.lastTest = .failed(notFound)
         let tools = [homeTool, notes, github, todoist]
         let navigationForSheets = SettingsNavigation()
         let emptyTools = ConnectedToolsAccess()
@@ -454,6 +459,10 @@ extension Snapshots {
                           prepare: { navigation, _, _ in navigation.tool = homeTool.id }),
             SettingsScene(name: "RgMcpOutilErreur", page: .tools, tools: [homeToolDown],
                           prepare: { navigation, _, _ in navigation.tool = homeToolDown.id }),
+            SettingsScene(name: "RgMcpOutilProgramme", page: .tools, tools: [notes],
+                          prepare: { navigation, _, _ in navigation.tool = notes.id }),
+            SettingsScene(name: "RgMcpOutilProgrammeErreur", page: .tools, tools: [notesDown],
+                          prepare: { navigation, _, _ in navigation.tool = notesDown.id }),
             SettingsScene(name: "RgMcpAjout", page: .tools, tools: tools,
                           prepare: { navigation, _, _ in navigation.sheet = .addTool }),
             SettingsScene(name: "RgMcpAjoutAdresse", page: .tools, tools: tools,
@@ -463,6 +472,10 @@ extension Snapshots {
             SettingsScene(name: "RgMcpAjoutProgramme", page: .tools, tools: tools,
                           sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,
                                                       draft: program)),
+                          sheetTop: 60),
+            SettingsScene(name: "RgMcpAjoutProgrammeEchec", page: .tools, tools: tools,
+                          sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,
+                                                      draft: program, trial: .failed(notFound))),
                           sheetTop: 60),
             SettingsScene(name: "RgMcpAjoutEchec", page: .tools, tools: tools,
                           sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,

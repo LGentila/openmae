@@ -25,6 +25,13 @@
 //                                                       a conversation with a pretend Home Assistant connected, typed
 //                                                       turns: asks first, « oui », « non », reading, "Do it directly"
 //                                                       (see ConnectedToolsDialogue.swift)
+//   voice-cli connected-program [--command "…"] [--arguments "…"] [--name …] [--request "…"]… | --lifecycle
+//                                                       a connected tool that is a program on this Mac (by default this
+//                                                       voice-cli's pretend Home Assistant), typed turns; --lifecycle:
+//                                                       turned on, off, removed, the app's quit: is it still running?
+//                                                       (see ConnectedProgram.swift)
+//   voice-cli fake-home-assistant                      the pretend Home Assistant's MCP server on standard input and
+//                                                       output (see ConnectedProgram.swift)
 //   voice-cli dialogue-bench [--repeats 10] [--corpus file.json]
 //                                                       the model in short conversations, turn after turn, as the
 //                                                       app has them (text only; see DialogueBench.swift)
@@ -830,6 +837,17 @@ func speak(_ text: String, manager: PocketTtsManager, voice: String, temperature
 
 setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file: a crash keeps the lines printed before it
 
+if CommandLine.arguments.dropFirst().first == "fake-home-assistant" { serveFakeHomeAssistant() }
+if let options = Options.parse(CommandLine.arguments), options.command == "connected-program" {
+    do {
+        try await runConnectedProgram(options, arguments: CommandLine.arguments)
+    } catch {
+        print("ERROR: \(error)")
+        await exitOnceIdle(1)
+    }
+    await exitOnceIdle(0)
+}
+
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
     "cut-off-bench", "story-bench", "read-sizes", "memory-bench", "journal-bench", "link-client", "delegate",
@@ -926,6 +944,9 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--pages on|off] [--live-pages] [--record-pages file.json]
                                        [--memory [--journal]] [--memory-addendum file] [--journal-addendum file]
                                        [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
+               voice-cli connected-program [--command "…"] [--arguments "…"] [--name …] [--request "…"]… [--tier tier]
+               voice-cli connected-program --lifecycle
+               voice-cli fake-home-assistant
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--watch-calls]

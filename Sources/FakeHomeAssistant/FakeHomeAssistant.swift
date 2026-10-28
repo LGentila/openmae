@@ -3,7 +3,8 @@ import Network
 import VoiceCore
 
 /// A pretend Home Assistant for the tests and the benchmarks: its MCP server (the "Model Context Protocol Server"
-/// integration) on a local port, Streamable HTTP at `/api/mcp`, with the tools Home Assistant lists for its Assist API,
+/// integration) on a local port, Streamable HTTP at `/api/mcp` (or on standard input and output, as a program on this Mac:
+/// `reply(to:)`, which `voice-cli fake-home-assistant` serves), with the tools Home Assistant lists for its Assist API,
 /// named, described and shaped as it sends them (without annotations, as older versions do), over a small house:
 /// lights in four rooms, a thermostat and two covers. It changes its house as the calls ask and answers as Home
 /// Assistant does (an intent's response as JSON text; `isError` and "Error calling tool: …" when nothing matches).
@@ -205,12 +206,30 @@ public final class FakeHomeAssistant: @unchecked Sendable {
                 return Response(status: 404, body: Data("Session not found".utf8), type: "text/plain")
             }
         }
-        guard let id = object["id"] else { return Response(status: 202, type: "text/plain", headers: headers) }
+        guard let reply = reply(to: message) else { return Response(status: 202, type: "text/plain", headers: headers) }
+        let json = (try? JSONEncoder().encode(reply)) ?? Data()
+        guard options.stream else { return Response(status: 200, body: json, headers: headers) }
+        var events = ""
+        if options.saysToolsChanged {
+            events += "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n"
+        }
+        events += ": a comment line\n"
+        events += "event: message\nid: 1\ndata: " + String(decoding: json, as: UTF8.self) + "\n\n"
+        return Response(status: 200, body: Data(events.utf8), type: "text/event-stream", headers: headers)
+    }
+
+    // MARK: - JSON-RPC
+
+    /// The answer to one JSON-RPC message, whatever carries it (HTTP here, standard input and output in `voice-cli
+    /// fake-home-assistant`): nil for a notification, or what is not a message.
+    public func reply(to message: JSONValue) -> JSONValue? {
+        guard case .object(let object) = message, let method = object["method"]?.text, let id = object["id"] else {
+            return nil
+        }
         let params: [String: JSONValue] = if case .object(let p)? = object["params"] { p } else { [:] }
-        let reply: JSONValue
         switch method {
         case "initialize":
-            reply = ["jsonrpc": "2.0", "id": id, "result": [
+            return ["jsonrpc": "2.0", "id": id, "result": [
                 "protocolVersion": "2025-03-26",
                 "capabilities": ["tools": ["listChanged": false], "prompts": ["listChanged": false]],
                 "serverInfo": ["name": "home-assistant", "version": "2026.10.0"],
@@ -221,29 +240,21 @@ public final class FakeHomeAssistant: @unchecked Sendable {
             let end = min(tools.count, start + (options.pageSize ?? tools.count))
             var result: [String: JSONValue] = ["tools": .array(Array(tools[start..<end]))]
             if end < tools.count { result["nextCursor"] = .string(String(end)) }
-            reply = ["jsonrpc": "2.0", "id": id, "result": .object(result)]
+            return ["jsonrpc": "2.0", "id": id, "result": .object(result)]
         case "tools/call":
             let name = params["name"]?.text ?? ""
             let arguments: [String: JSONValue] = if case .object(let a)? = params["arguments"] { a } else { [:] }
             lock.withLock { made.append(Call(name: name, arguments: arguments)) }
             let (text, isError) = call(name, arguments)
-            reply = ["jsonrpc": "2.0", "id": id, "result": [
+            return ["jsonrpc": "2.0", "id": id, "result": [
                 "content": [["type": "text", "text": .string(text)]], "isError": .bool(isError),
             ]]
         case "ping":
-            reply = ["jsonrpc": "2.0", "id": id, "result": [:]]
+            return ["jsonrpc": "2.0", "id": id, "result": [:]]
         default:
-            reply = ["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found", "data": .string(method)]]
+            return ["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found",
+                                                          "data": .string(method)]]
         }
-        let json = (try? JSONEncoder().encode(reply)) ?? Data()
-        guard options.stream else { return Response(status: 200, body: json, headers: headers) }
-        var events = ""
-        if options.saysToolsChanged {
-            events += "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n"
-        }
-        events += ": a comment line\n"
-        events += "event: message\nid: 1\ndata: " + String(decoding: json, as: UTF8.self) + "\n\n"
-        return Response(status: 200, body: Data(events.utf8), type: "text/event-stream", headers: headers)
     }
 
     // MARK: - The house

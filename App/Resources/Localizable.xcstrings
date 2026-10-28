@@ -61,6 +61,36 @@
         }
       }
     },
+    "%@ does not start. %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ ne démarre pas. %2$@"
+          }
+        }
+      }
+    },
+    "%@ does not start. Check its command, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ne démarre pas. Vérifie sa commande, puis réessaie."
+          }
+        }
+      }
+    },
+    "%@ does not start: it did not answer in time. Check its command, then try again.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ne démarre pas : il n’a pas répondu à temps. Vérifie sa commande, puis réessaie."
+          }
+        }
+      }
+    },
     "%@ more free space is needed. Free up space on this Mac, then try again.": {
       "localizations": {
         "fr": {
@@ -287,6 +317,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un programme sur ce Mac"
+          }
+        }
+      }
+    },
+    "A quote is not closed.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un guillemet n’est pas fermé."
           }
         }
       }
@@ -5091,6 +5131,46 @@
         }
       }
     },
+    "The program did not answer in time.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le programme n’a pas répondu à temps."
+          }
+        }
+      }
+    },
+    "The program started, but it does not speak MCP (%@).": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le programme a démarré, mais il ne parle pas MCP (%@)."
+          }
+        }
+      }
+    },
+    "The program stopped as soon as it started.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le programme s’est arrêté dès son lancement."
+          }
+        }
+      }
+    },
+    "The program stopped: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le programme s’est arrêté : %@"
+          }
+        }
+      }
+    },
     "The server refused the user name or the password. Check them, then try again.": {
       "localizations": {
         "fr": {
@@ -6387,6 +6467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "non testé / estimé"
+          }
+        }
+      }
+    },
+    "“%@” is not on this Mac. Install it, or type the command’s full path.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %@ » n’est pas sur ce Mac. Installe-le, ou écris le chemin complet de la commande."
           }
         }
       }
