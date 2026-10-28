@@ -74,6 +74,16 @@ public enum FrenchDates {
         try Resolver(now: now, calendar: calendar, base: nil).period(Parser(tokens(text)).parse())
     }
 
+    /// The period words say of the past, for a reading of the journal: the last one, not the next. A date or a month
+    /// is the last one to have begun (« le 3 octobre », « le 3 », « mi-septembre », « en septembre », « en octobre »
+    /// said in October: since the 1st); what is still ahead goes back by the step its words come back with: a week for
+    /// a weekday or a week-end (« samedi » on a Thursday, « mardi soir »), a day for a part of the day or an hour
+    /// (« cette nuit » said in the evening is last night). Throws `Problem.notUnderstood` for words said once that
+    /// are still ahead (« demain », « dans deux jours », a date to come with its year): not in the past.
+    public static func lastPeriod(_ text: String, now: Date, calendar: Calendar) throws -> (start: Date, end: Date) {
+        try Resolver(now: now, calendar: calendar, base: nil, past: true).lastPeriod(Parser(tokens(text)).parse())
+    }
+
     /// "10 minutes", "une heure et quart", "1 h 30", "trois quarts d'heure", in seconds (a day counts 24 hours).
     /// nil without a unit, or for months and years.
     public static func duration(_ text: String) -> Int? {
@@ -1040,6 +1050,8 @@ public enum FrenchDates {
         let now: Date
         let calendar: Calendar
         let base: Base?
+        /// Dates and months are the last ones, not the next (`lastPeriod`).
+        var past = false
 
         var today: Date { calendar.startOfDay(for: now) }
 
@@ -1143,15 +1155,21 @@ public enum FrenchDates {
             case .date(let n, let month, let year, let weekday): return try date(n, month, year, weekday)
             case .monthPart(let month, let part):
                 let thisMonth = calendar.component(.month, from: today)
-                let year = calendar.component(.year, from: today) + (month < thisMonth ? 1 : 0)
-                guard let first = calendar.date(from: DateComponents(year: year, month: month, day: 1)) else {
-                    throw Problem.notUnderstood
+                let thisYear = calendar.component(.year, from: today)
+                func on(_ year: Int) throws -> Date {
+                    guard let first = calendar.date(from: DateComponents(year: year, month: month, day: 1)) else {
+                        throw Problem.notUnderstood
+                    }
+                    switch part {
+                    case 1: return first
+                    case 2: return days(14, after: first)
+                    default: return days(-1, after: calendar.date(byAdding: .month, value: 1, to: first) ?? first)
+                    }
                 }
-                switch part {
-                case 1: return first
-                case 2: return days(14, after: first)
-                default: return days(-1, after: calendar.date(byAdding: .month, value: 1, to: first) ?? first)
-                }
+                guard past else { return try on(thisYear + (month < thisMonth ? 1 : 0)) }
+                // The last one: « fin octobre » said on 15 October is last year's.
+                let thisYears = try on(thisYear)
+                return thisYears <= today ? thisYears : try on(thisYear - 1)
             }
         }
 
@@ -1173,30 +1191,37 @@ public enum FrenchDates {
             }
         }
 
+        /// That day of that month, nil when the month has no such day (31 November).
+        func dated(_ n: Int, _ month: Int, _ year: Int) -> Date? {
+            guard let date = calendar.date(from: DateComponents(year: year, month: month, day: n)),
+                  calendar.component(.day, from: date) == n
+            else { return nil }
+            return date
+        }
+
         /// A date said without its year (the next one) or its month (this month's or the next); a weekday said with
-        /// it must match, and may tell the year ("samedi 12 juin").
+        /// it must match, and may tell the year ("samedi 12 juin"). For the past (`past`), the last one: this year's
+        /// or last year's, this month's or an earlier month's.
         func date(_ n: Int, _ month: Int?, _ year: Int?, _ weekday: Int?) throws -> Date {
-            func make(_ year: Int, _ month: Int) -> Date? {
-                guard let date = calendar.date(from: DateComponents(year: year, month: month, day: n)),
-                      calendar.component(.day, from: date) == n  // no 31 November
-                else { return nil }
-                return date
-            }
             let c = calendar.dateComponents([.year, .month], from: today)
             let (thisYear, thisMonth) = (c.year ?? 2000, c.month ?? 1)
+            let way = past ? -1 : 1
+            /// Today or after it; for the past, today or before it.
+            func onItsSide(_ date: Date) -> Bool { past ? date <= today : date >= today }
             var candidates: [Date]
             if let month {
                 guard (1...12).contains(month) else { throw Problem.notUnderstood }
                 if let year {
-                    candidates = [make(year, month)].compactMap { $0 }
+                    candidates = [dated(n, month, year)].compactMap { $0 }
                 } else {
-                    candidates = [make(thisYear, month), make(thisYear + 1, month)].compactMap { $0 }.filter { $0 >= today }
+                    candidates = [dated(n, month, thisYear), dated(n, month, thisYear + way)].compactMap { $0 }
+                        .filter(onItsSide)
                 }
             } else {
                 candidates = (0..<3).compactMap { offset in
-                    let index = thisMonth - 1 + offset
-                    return make(thisYear + index / 12, index % 12 + 1)
-                }.filter { $0 >= today }
+                    let index = thisYear * 12 + thisMonth - 1 + way * offset
+                    return dated(n, index % 12 + 1, index / 12)
+                }.filter(onItsSide)
             }
             guard let first = candidates.first else { throw Problem.notUnderstood }
             guard let weekday else { return first }
@@ -1216,6 +1241,14 @@ public enum FrenchDates {
                     candidate = days(1, after: candidate)
                 }
                 throw Problem.notUnderstood
+            case .date(let n, let month?, nil, let weekday) where past:
+                // « du 10 au 20 octobre » said on the 15th: the 20th after the 10th, not last year's.
+                let year = calendar.component(.year, from: first)
+                guard let last = [dated(n, month, year), dated(n, month, year + 1)].compactMap({ $0 })
+                    .first(where: { $0 >= first })
+                else { throw Problem.notUnderstood }
+                if let weekday, calendar.component(.weekday, from: last) != weekday { throw Problem.wrongWeekday(last) }
+                return last
             default:
                 return try self.day(day)
             }
@@ -1241,8 +1274,9 @@ public enum FrenchDates {
             case .nextMonth: return (firstOfMonth(1), firstOfMonth(2))
             case .month(let month):
                 let thisMonth = calendar.component(.month, from: today)
-                let first = firstOfMonth((month - thisMonth + 12) % 12)
-                return (max(first, today), calendar.date(byAdding: .month, value: 1, to: first) ?? first)
+                // For the past, the last one begun, from its 1st (« en octobre » said in October).
+                let first = firstOfMonth(past ? -((thisMonth - month + 12) % 12) : (month - thisMonth + 12) % 12)
+                return (past ? first : max(first, today), calendar.date(byAdding: .month, value: 1, to: first) ?? first)
             case .comingDays(let n): return (today, days(max(n, 1), after: today))
             }
         }
@@ -1365,6 +1399,56 @@ public enum FrenchDates {
             if let context { return range(context, on: chosen ?? today) }
             guard let chosen else { throw Problem.notUnderstood }
             return (chosen, days(1, after: chosen))
+        }
+
+        // MARK: A period of the past
+
+        /// `period`, with dates and months already the last ones (`past`); what is still ahead goes back by the step
+        /// its words come back with (`recurrence`).
+        func lastPeriod(_ p: Parsed) throws -> (start: Date, end: Date) {
+            var (start, end) = try period(p)
+            guard start > now else { return (start, end) }
+            guard let back = recurrence(p) else { throw Problem.notUnderstood }
+            while start > now {
+                guard let earlier = calendar.date(byAdding: back, to: start),
+                      let earlierEnd = calendar.date(byAdding: back, to: end), earlier < start
+                else { throw Problem.notUnderstood }
+                (start, end) = (earlier, earlierEnd)
+            }
+            return (start, end)
+        }
+
+        /// One step back to the time the words say before: a year for a date or a month (« le 3 octobre à 20 h »
+        /// said that day at 18 h, « en septembre »), a month for a day of the month alone (« le 3 »), a week for a
+        /// weekday or a week (« mardi soir », « le week-end »), a day for a part of the day or an hour (« ce soir »,
+        /// « cette nuit », « à 20 h »). The longest step of the words wins: « mardi soir » is a week back. nil for words
+        /// said once (« demain », « dans deux jours », a date with its year).
+        func recurrence(_ p: Parsed) -> DateComponents? {
+            enum Step: Comparable { case day, week, month, year }
+            var steps: [Step] = []
+            switch p.period {
+            case .month?: steps.append(.year)
+            case .thisMonth?, .nextMonth?: steps.append(.month)
+            case .thisWeek?, .nextWeek?, .lastWeek?, .weekend?: steps.append(.week)
+            case .comingDays?, nil: break
+            }
+            for day in p.days + [p.endDay].compactMap({ $0 }) {
+                switch day {
+                case .weekday: steps.append(.week)
+                case .date(_, _, _?, _): return nil
+                case .date(_, _?, nil, _), .monthPart: steps.append(.year)
+                case .date(_, nil, nil, _): steps.append(.month)
+                case .relative(0): steps.append(.day)
+                case .relative, .fromBase: return nil
+                }
+            }
+            if steps.isEmpty, p.offset != nil { return nil }
+            switch steps.max() ?? .day {
+            case .day: return DateComponents(day: -1)
+            case .week: return DateComponents(day: -7)
+            case .month: return DateComponents(month: -1)
+            case .year: return DateComponents(year: -1)
+            }
         }
     }
 }

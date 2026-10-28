@@ -408,19 +408,8 @@ public enum MemoryPeriod {
         if joined.contains("day before yesterday") { return day(-2) }
         if words.contains("yesterday") { return day(-1) }
         if words.contains("today") { return day(0) }
-        guard let found = try? FrenchDates.period(text, now: now, calendar: calendar) else { return nil }
-        var (start, end) = found
-        // The journal only holds the past: a period the dates place ahead ("samedi", "en septembre", « cette nuit »)
-        // is the last one: a year back for a month, a day back for a part of a day, a week back for the rest.
-        while start > now {
-            let span = end.timeIntervalSince(start)
-            let back = span > 20 * 86_400 ? calendar.date(byAdding: .year, value: -1, to: start)
-                : span < 20 * 3_600 ? calendar.date(byAdding: .day, value: -1, to: start)
-                : calendar.date(byAdding: .day, value: -7, to: start)
-            guard let back else { return nil }
-            end = back.addingTimeInterval(span)
-            start = back
-        }
+        // The journal only holds the past: the last « samedi », « le 3 octobre », « mardi soir », « en septembre ».
+        guard let (start, end) = try? FrenchDates.lastPeriod(text, now: now, calendar: calendar) else { return nil }
         return (start, min(end, now))
     }
 

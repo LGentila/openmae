@@ -204,6 +204,9 @@ struct MemoryTests {
         #expect(said("depuis lundi") == "depuis le lundi 12 octobre")
         #expect(said("la semaine dernière") == "du lundi 5 octobre au dimanche 11 octobre")
         #expect(said("il y a 3 jours") == "du lundi 12 octobre")
+        #expect(said("le 3 octobre") == "du samedi 3 octobre")
+        #expect(said("mardi soir") == "d’avant-hier de 18\u{00A0}h à minuit")
+        #expect(said("lundi matin") == "du lundi 12 octobre de minuit à midi")
     }
 
     // MARK: Erasing everything
@@ -547,6 +550,81 @@ struct MemoryTests {
         #expect(period("deux heures") == nil)
         #expect(period("semaines") == nil)
         #expect(period("les deux dernières semaines") == nil)
+    }
+
+    /// The last period the words say: a dated day is this year's or last year's (not the last day of the same weekday),
+    /// a weekday with a part of the day the last one (not today's), a day of the month alone this month's or an earlier
+    /// one's.
+    @Test func aDatedDayOrAWeekdayEveningIsTheLastOne() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = paris
+        func period(_ text: String) -> String? {
+            guard let (start, end) = MemoryPeriod.read(text, now: now, calendar: calendar) else { return nil }
+            let from = start == MemoryPeriod.beginning ? "…" : LocalDateTime.format(start, in: paris)
+            return from + " → " + LocalDateTime.format(end, in: paris)
+        }
+        let read: [(String, String?)] = [
+            ("le 3 octobre", "2026-10-03T00:00 → 2026-10-04T00:00"),
+            ("le 10 octobre", "2026-10-10T00:00 → 2026-10-11T00:00"),
+            ("3 octobre", "2026-10-03T00:00 → 2026-10-04T00:00"),
+            ("le 1er octobre", "2026-10-01T00:00 → 2026-10-02T00:00"),
+            ("01/10", "2026-10-01T00:00 → 2026-10-02T00:00"),
+            ("mardi soir", "2026-10-13T18:00 → 2026-10-14T00:00"),
+            ("lundi matin", "2026-10-12T00:00 → 2026-10-12T12:00"),
+            ("mi-septembre", "2026-09-15T00:00 → 2026-09-16T00:00"),
+            ("fin septembre", "2026-09-30T00:00 → 2026-10-01T00:00"),
+            // The same steps for the same kinds of words.
+            ("le 14 octobre", "2026-10-14T00:00 → 2026-10-15T00:00"),
+            ("le 30 septembre", "2026-09-30T00:00 → 2026-10-01T00:00"),
+            ("le 31 octobre", "2025-10-31T00:00 → 2025-11-01T00:00"),  // still ahead this year
+            ("fin octobre", "2025-10-31T00:00 → 2025-11-01T00:00"),
+            ("le 3", "2026-10-03T00:00 → 2026-10-04T00:00"),
+            ("le 20", "2026-09-20T00:00 → 2026-09-21T00:00"),
+            ("samedi 3 octobre", "2026-10-03T00:00 → 2026-10-04T00:00"),  // this year's falls on a Saturday
+            ("le 3 octobre au soir", "2026-10-03T18:00 → 2026-10-04T00:00"),
+            ("le 3 octobre à 20 h", "2026-10-03T20:00 → 2026-10-04T00:00"),
+            ("du 3 au 5 octobre", "2026-10-03T00:00 → 2026-10-06T00:00"),
+            ("du 10 au 20 octobre", "2026-10-10T00:00 → 2026-10-15T18:42"),
+            ("depuis le 3 octobre", "2026-10-03T00:00 → 2026-10-15T18:42"),
+            ("avant le 3 octobre", "… → 2026-10-03T00:00"),
+            ("mardi à 20 h", "2026-10-13T20:00 → 2026-10-14T00:00"),
+            ("dimanche soir", "2026-10-11T18:00 → 2026-10-12T00:00"),
+            ("depuis mardi soir", "2026-10-13T18:00 → 2026-10-15T18:42"),
+            ("en octobre", "2026-10-01T00:00 → 2026-10-15T18:42"),  // this month, since its 1st
+            ("jeudi", "2026-10-15T00:00 → 2026-10-15T18:42"),  // today's weekday: today
+            // Words said once, still ahead: never in the journal.
+            ("demain", nil),
+            ("dans deux jours", nil),
+        ]
+        for (text, expected) in read { #expect(period(text) == expected, "\(text)") }
+        // What read right before reads the same.
+        let kept: [(String, String)] = [
+            ("hier", "2026-10-14T00:00 → 2026-10-15T00:00"),
+            ("avant-hier", "2026-10-13T00:00 → 2026-10-14T00:00"),
+            ("aujourd'hui", "2026-10-15T00:00 → 2026-10-15T18:42"),
+            ("ce matin", "2026-10-15T00:00 → 2026-10-15T12:00"),
+            ("ce soir", "2026-10-15T18:00 → 2026-10-15T18:42"),
+            ("hier soir", "2026-10-14T18:00 → 2026-10-15T00:00"),
+            ("cette nuit", "2026-10-14T22:00 → 2026-10-15T06:00"),
+            ("cette semaine", "2026-10-12T00:00 → 2026-10-15T18:42"),
+            ("la semaine dernière", "2026-10-05T00:00 → 2026-10-12T00:00"),
+            ("le mois dernier", "2026-09-01T00:00 → 2026-10-01T00:00"),
+            ("ce mois-ci", "2026-10-01T00:00 → 2026-10-15T18:42"),
+            ("samedi", "2026-10-10T00:00 → 2026-10-11T00:00"),
+            ("samedi dernier", "2026-10-10T00:00 → 2026-10-11T00:00"),
+            ("le week-end dernier", "2026-10-10T00:00 → 2026-10-12T00:00"),
+            ("en septembre", "2026-09-01T00:00 → 2026-10-01T00:00"),
+            ("septembre dernier", "2026-09-01T00:00 → 2026-10-01T00:00"),
+            ("en novembre", "2025-11-01T00:00 → 2025-12-01T00:00"),
+            ("début octobre", "2026-10-01T00:00 → 2026-10-02T00:00"),
+            ("il y a 3 jours", "2026-10-12T00:00 → 2026-10-13T00:00"),
+            ("depuis lundi", "2026-10-12T00:00 → 2026-10-15T18:42"),
+            ("du lundi au mercredi", "2026-10-12T00:00 → 2026-10-15T00:00"),
+            ("avant aujourd'hui", "… → 2026-10-15T00:00"),
+            ("jusqu'à hier", "… → 2026-10-15T00:00"),
+            ("lundi dernier au matin", "2026-10-12T00:00 → 2026-10-12T12:00"),
+        ]
+        for (text, expected) in kept { #expect(period(text) == expected, "\(text)") }
     }
 
     // MARK: The journal
