@@ -1671,6 +1671,16 @@
         }
       }
     },
+    "For Home Assistant: add the “Model Context Protocol Server” integration in Settings › Devices & services. By default, only administrator accounts can connect.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour Home Assistant : ajoute l’intégration « Model Context Protocol Server » dans Paramètres › Appareils et services. Par défaut, seuls les comptes administrateur peuvent se connecter."
+          }
+        }
+      }
+    },
     "For now, only with the Comfort tier’s model.": {
       "localizations": {
         "fr": {
@@ -4451,12 +4461,32 @@
         }
       }
     },
+    "Sign in": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se connecter"
+          }
+        }
+      }
+    },
     "Sign-in needed": {
       "localizations": {
         "fr": {
           "stringUnit": {
             "state": "translated",
             "value": "À connecter"
+          }
+        }
+      }
+    },
+    "Signing in was cancelled.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion a été annulée."
           }
         }
       }
@@ -5131,6 +5161,16 @@
         }
       }
     },
+    "The tool refused the sign-in: %@": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’outil a refusé la connexion : %@"
+          }
+        }
+      }
+    },
     "The tool refused: %@": {
       "localizations": {
         "fr": {
@@ -5147,6 +5187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’outil refuse l’accès : vérifie le jeton."
+          }
+        }
+      }
+    },
+    "The tool refuses this account. Sign in again, or with an account that may connect.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’outil refuse ce compte. Reconnecte-toi, ou connecte-toi avec un compte qui y a droit."
           }
         }
       }
@@ -5327,6 +5377,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ce palier demande plus de mémoire que ce Mac n’en a : l’assistant risque d’être très lent."
+          }
+        }
+      }
+    },
+    "This tool does not offer to sign in with an account. Choose “With a token”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cet outil ne propose pas de se connecter avec un compte. Choisis « Avec un jeton »."
           }
         }
       }
@@ -6057,6 +6117,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton SearXNG prend OpenMaé pour un robot : protège-le par un mot de passe et coupe sa protection anti-robots."
+          }
+        }
+      }
+    },
+    "Your browser opens so you can sign in. The access is kept in your Mac’s keychain.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton navigateur s’ouvre pour que tu te connectes. L’accès est gardé dans le trousseau de ton Mac."
           }
         }
       }

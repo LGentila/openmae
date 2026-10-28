@@ -304,6 +304,8 @@ extension Snapshots {
         var service = ConnectedToolsAccess.Draft()
         service.name = "Home Assistant"
         service.address = "http://homeassistant.local:8123/api/mcp"
+        var account = service
+        account.access = .account
         var program = ConnectedToolsAccess.Draft()
         program.kind = .program
         program.name = "Notes"
@@ -459,6 +461,11 @@ extension Snapshots {
             SettingsScene(name: "RgMcpAjoutAdresse", page: .tools, tools: tools,
                           sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,
                                                       draft: service, trial: .connected(actions: 14))),
+                          sheetTop: 40),
+            // "With my account", before signing in (not in the design).
+            SettingsScene(name: "RgMcpAjoutCompte", page: .tools, tools: tools,
+                          sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,
+                                                      draft: account)),
                           sheetTop: 40),
             SettingsScene(name: "RgMcpAjoutProgramme", page: .tools, tools: tools,
                           sheet: AnyView(AddToolSheet(tools: emptyTools, navigation: navigationForSheets, step: .form,

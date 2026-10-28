@@ -868,15 +868,20 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// The client of a tool, the same one while its address, access and token do not change; nil when the address cannot
-    /// be one.
+    /// be one. With an account, the token is the account's (`ConnectedToolsKeychain.account`), which the client renews.
     private func mcpClient(_ tool: ConnectedToolSettings) -> MCPClient? {
         guard let address = MCPClient.address(tool.address) else { return nil }
         let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
         let key = "\(address.absoluteString) \(tool.access.rawValue) \(token.map { String($0.hashValue) } ?? "")"
         if let known = mcpClients[tool.id], known.key == key { return known.client }
-        let client = MCPClient(address: address, token: token)
+        let client = Self.client(tool, address: address, token: token)
         mcpClients[tool.id] = (key, client)
         return client
+    }
+
+    private static func client(_ tool: ConnectedToolSettings, address: URL, token: String?) -> MCPClient {
+        tool.access == .account ? MCPClient(address: address, authorization: ConnectedToolsKeychain.account(for: tool.id))
+            : MCPClient(address: address, token: token)
     }
 
     /// The settings' "Test" button, or a tool being added: connects, lists its actions, and says how long it took.
@@ -887,7 +892,7 @@ public actor AssistantHost: AssistantConnection {
         }
         // A new client: the token may have just been saved, and an old session must not hide a problem.
         let token = tool.access == .token ? ConnectedToolsKeychain.token(for: tool.id) : nil
-        let client = MCPClient(address: address, token: token)
+        let client = Self.client(tool, address: address, token: token)
         let start = ContinuousClock.now
         let test: ConnectedToolTest
         do {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import VoiceCore
@@ -9,7 +10,8 @@ import VoiceCore
 /// Assistant does (an intent's response as JSON text; `isError` and "Error calling tool: …" when nothing matches).
 ///
 /// How it answers depends on `options`: JSON (Home Assistant's way) or a stream of server-sent events, with a session or
-/// not, a token to check or not, the list in pages, no answer at all.
+/// not, a token to check or not, the list in pages, no answer at all. With `accounts`, it also signs apps in as Home
+/// Assistant does (OAuth with PKCE, its apps named by URLs), or as a service that registers them.
 public final class FakeHomeAssistant: @unchecked Sendable {
     public struct Options: Sendable {
         /// Answers as a stream of server-sent events instead of JSON.
@@ -26,6 +28,31 @@ public final class FakeHomeAssistant: @unchecked Sendable {
         public var saysToolsChanged = false
         /// More devices in the house, for a long `GetLiveContext`.
         public var extraDevices = 0
+        /// Signs apps in with the user's account, and takes only the access tokens it gave (`token` is not used).
+        public var accounts: Accounts?
+
+        public init() {}
+    }
+
+    /// How it signs apps in (OAuth 2.1 with PKCE): its pretend user always agrees at once.
+    public struct Accounts: Sendable {
+        /// Its protected resource metadata at `/.well-known/oauth-protected-resource`, named by its 401's
+        /// `WWW-Authenticate`, as Home Assistant 2026 has them; false: only its authorization server's metadata.
+        public var resourceMetadata = true
+        /// Its metadata at other addresses, as some services have them: the protected resource's only named by the 401's
+        /// `WWW-Authenticate`, the authorization server's under its own path (`/auth-server`).
+        public var metadataElsewhere = false
+        /// The addresses in its metadata relative, as Home Assistant gives them when it does not know its own URL.
+        public var relativeEndpoints = false
+        /// Registers apps at `/register` (RFC 7591), as many services do; false: an app is a URL, and the way back must
+        /// share its scheme and host (Home Assistant's IndieAuth).
+        public var registration = false
+        /// How long an access token lasts, in seconds (Home Assistant's: 30 minutes).
+        public var lifetime = 1800
+        /// Refuses every refresh, as after the user took the app's access back.
+        public var refusesRefresh = false
+        /// Gives a new refresh token at each refresh, and refuses the old one.
+        public var rotatesRefreshTokens = false
 
         public init() {}
     }
@@ -62,7 +89,22 @@ public final class FakeHomeAssistant: @unchecked Sendable {
     private var devices: [Device]
     private var session: String?
     private var heldConnections: [NWConnection] = []
+    private var codes: [String: Grant] = [:]
+    /// Access token → when it expires.
+    private var accessTokens: [String: Date] = [:]
+    /// Refresh token → the app it was given to.
+    private var refreshTokens: [String: String] = [:]
+    /// Registered app → its ways back.
+    private var registered: [String: [String]] = [:]
+    private var refreshCount = 0
+    private var refusalCount = 0
     public private(set) var port: UInt16 = 0
+
+    private struct Grant {
+        var client: String
+        var redirect: String
+        var challenge: String
+    }
 
     public init(options: Options = Options()) {
         currentOptions = options
@@ -87,6 +129,21 @@ public final class FakeHomeAssistant: @unchecked Sendable {
     public func forgetSession() {
         lock.withLock { session = "forgotten" }
     }
+
+    /// The access tokens it gave expire now (their refresh tokens still work).
+    public func expireAccessTokens() {
+        lock.withLock {
+            for token in accessTokens.keys { accessTokens[token] = .distantPast }
+        }
+    }
+
+    /// How many refreshes it did, and how many requests to its MCP server it refused (401).
+    public var refreshes: Int { lock.withLock { refreshCount } }
+    public var refusals: Int { lock.withLock { refusalCount } }
+    /// The apps registered, by id.
+    public var registeredApps: [String] { lock.withLock { Array(registered.keys) } }
+    /// The refresh tokens it still takes.
+    public var liveRefreshTokens: Int { lock.withLock { refreshTokens.count } }
 
     /// Whether a light (by its name) is on.
     public func isOn(_ name: String) -> Bool? {
@@ -122,6 +179,7 @@ public final class FakeHomeAssistant: @unchecked Sendable {
     private struct Request {
         var method: String
         var path: String
+        var query = ""
         var headers: [String: String]
         var body: Data
     }
@@ -165,8 +223,10 @@ public final class FakeHomeAssistant: @unchecked Sendable {
         let length = Int(headers["content-length"] ?? "0") ?? 0
         let body = data[end.upperBound...]
         guard body.count >= length else { return nil }
-        return Request(method: String(parts[0]), path: String(parts[1].prefix { $0 != "?" }), headers: headers,
-                       body: Data(body.prefix(length)))
+        let target = String(parts[1])
+        let path = String(target.prefix { $0 != "?" })
+        return Request(method: String(parts[0]), path: path, query: String(target.dropFirst(path.count + 1)),
+                       headers: headers, body: Data(body.prefix(length)))
     }
 
     private static func send(_ response: Response, on connection: NWConnection) {
@@ -179,9 +239,20 @@ public final class FakeHomeAssistant: @unchecked Sendable {
 
     private func route(_ request: Request) -> Response {
         let options = self.options
+        if let accounts = options.accounts, let response = signIn(request, accounts) { return response }
         guard request.path == "/api/mcp" else { return Response(status: 404, body: Data("404: Not Found".utf8), type: "text/plain") }
         guard request.method == "POST" else { return Response(status: 405, type: "text/plain") }
-        if let token = options.token, request.headers["authorization"] != "Bearer \(token)" {
+        if let accounts = options.accounts {
+            let authorization = request.headers["authorization"] ?? ""
+            let token = authorization.hasPrefix("Bearer ") ? String(authorization.dropFirst(7)) : ""
+            let valid = lock.withLock { accessTokens[token].map { $0 > Date() } ?? false }
+            if !valid {
+                lock.withLock { refusalCount += 1 }
+                let headers = accounts.resourceMetadata
+                    ? ["WWW-Authenticate": "Bearer resource_metadata=\"\(origin)\(Self.resourceMetadataPath(accounts))\""] : [:]
+                return Response(status: 401, body: Data("401: Unauthorized".utf8), type: "text/plain", headers: headers)
+            }
+        } else if let token = options.token, request.headers["authorization"] != "Bearer \(token)" {
             return Response(status: 401, body: Data("401: Unauthorized".utf8), type: "text/plain")
         }
         guard (request.headers["accept"] ?? "").contains("application/json") else {
@@ -244,6 +315,138 @@ public final class FakeHomeAssistant: @unchecked Sendable {
         events += ": a comment line\n"
         events += "event: message\nid: 1\ndata: " + String(decoding: json, as: UTF8.self) + "\n\n"
         return Response(status: 200, body: Data(events.utf8), type: "text/event-stream", headers: headers)
+    }
+
+    // MARK: - Signing in
+
+    private var origin: String { "http://127.0.0.1:\(port)" }
+
+    private static func resourceMetadataPath(_ accounts: Accounts) -> String {
+        accounts.metadataElsewhere ? "/api/mcp-metadata" : "/.well-known/oauth-protected-resource"
+    }
+
+    /// Its metadata, registration, sign-in page, tokens and revocation; nil for any other request.
+    private func signIn(_ request: Request, _ accounts: Accounts) -> Response? {
+        let base = accounts.relativeEndpoints ? "" : origin
+        switch (request.method, request.path) {
+        case ("GET", Self.resourceMetadataPath(accounts)):
+            guard accounts.resourceMetadata else { return Response(status: 404, type: "text/plain") }
+            let issuer = accounts.metadataElsewhere ? "\(origin)/auth-server" : origin
+            return json(200, ["resource": .string(origin), "authorization_servers": [.string(issuer)]])
+        case ("GET", accounts.metadataElsewhere ? "/.well-known/oauth-authorization-server/auth-server"
+            : "/.well-known/oauth-authorization-server"):
+            var metadata: [String: JSONValue] = [
+                "authorization_endpoint": .string("\(base)/auth/authorize"), "token_endpoint": .string("\(base)/auth/token"),
+                "revocation_endpoint": .string("\(base)/auth/revoke"),
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "code_challenge_methods_supported": ["S256"], "response_types_supported": ["code"],
+            ]
+            if accounts.registration { metadata["registration_endpoint"] = .string("\(base)/register") }
+            return json(200, .object(metadata))
+        case ("POST", "/register") where accounts.registration:
+            guard let body = try? JSONDecoder().decode(JSONValue.self, from: request.body), case .object(let app) = body,
+                  case .array(let ways)? = app["redirect_uris"], !ways.isEmpty
+            else { return json(400, ["error": "invalid_client_metadata"]) }
+            let id = "app-\(UUID().uuidString.prefix(8))"
+            lock.withLock { registered[id] = ways.compactMap(\.text) }
+            return json(201, ["client_id": .string(id), "redirect_uris": .array(ways), "token_endpoint_auth_method": "none"])
+        case ("GET", "/auth/authorize"):
+            let query = Self.form(request.query)
+            guard query["response_type"] == "code", let client = query["client_id"], let back = query["redirect_uri"],
+                  allows(client, back, accounts), let state = query["state"]
+            else { return Response(status: 400, body: Data("Invalid client id or redirect uri".utf8), type: "text/plain") }
+            guard let challenge = query["code_challenge"], challenge.count == 43, query["code_challenge_method"] == "S256"
+            else { return Response(status: 400, body: Data("PKCE required".utf8), type: "text/plain") }
+            let code = Self.random()
+            lock.withLock { codes[code] = Grant(client: client, redirect: back, challenge: challenge) }
+            var way = URLComponents(string: back)!
+            way.queryItems = (way.queryItems ?? []) + [URLQueryItem(name: "code", value: code), URLQueryItem(name: "state", value: state)]
+            return Response(status: 302, type: "text/plain", headers: ["Location": way.url!.absoluteString])
+        case ("POST", "/auth/token"):
+            return token(Self.form(String(decoding: request.body, as: UTF8.self)), accounts)
+        case ("POST", "/auth/revoke"):
+            let form = Self.form(String(decoding: request.body, as: UTF8.self))
+            lock.withLock {
+                if let token = form["token"] { refreshTokens[token] = nil }
+            }
+            return Response(status: 200, type: "text/plain")
+        default:
+            return nil
+        }
+    }
+
+    /// Home Assistant's rule for an app that is a URL: the way back shares its scheme and host; a registered app's
+    /// ways back are the ones it gave.
+    private func allows(_ client: String, _ back: String, _ accounts: Accounts) -> Bool {
+        if accounts.registration { return lock.withLock { registered[client]?.contains(back) ?? false } }
+        guard let app = URLComponents(string: client), let way = URLComponents(string: back), app.host != nil else {
+            return false
+        }
+        return app.scheme == way.scheme && app.host == way.host && app.port == way.port
+    }
+
+    private func token(_ form: [String: String], _ accounts: Accounts) -> Response {
+        switch form["grant_type"] {
+        case "authorization_code":
+            guard let code = form["code"], let grant = lock.withLock({ codes.removeValue(forKey: code) }),
+                  form["client_id"] == grant.client
+            else { return json(400, ["error": "invalid_request", "error_description": "Invalid code"]) }
+            let verifier = form["code_verifier"] ?? ""
+            let hashed = Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            guard hashed == grant.challenge else {
+                return json(400, ["error": "invalid_grant", "error_description": "Invalid code verifier"])
+            }
+            let (access, refresh) = lock.withLock { () -> (String, String) in
+                let access = Self.random()
+                let refresh = Self.random()
+                accessTokens[access] = Date().addingTimeInterval(TimeInterval(accounts.lifetime))
+                refreshTokens[refresh] = grant.client
+                return (access, refresh)
+            }
+            return json(200, ["access_token": .string(access), "token_type": "Bearer", "refresh_token": .string(refresh),
+                              "expires_in": .int(accounts.lifetime)])
+        case "refresh_token":
+            guard !accounts.refusesRefresh, let refresh = form["refresh_token"],
+                  lock.withLock({ refreshTokens[refresh] }) == form["client_id"], form["client_id"] != nil
+            else { return json(400, ["error": "invalid_grant"]) }
+            let (access, new) = lock.withLock { () -> (String, String?) in
+                refreshCount += 1
+                let access = Self.random()
+                accessTokens[access] = Date().addingTimeInterval(TimeInterval(accounts.lifetime))
+                guard accounts.rotatesRefreshTokens else { return (access, nil) }
+                let new = Self.random()
+                refreshTokens[new] = refreshTokens.removeValue(forKey: refresh)
+                return (access, new)
+            }
+            var answer: [String: JSONValue] = ["access_token": .string(access), "token_type": "Bearer",
+                                               "expires_in": .int(accounts.lifetime)]
+            if let new { answer["refresh_token"] = .string(new) }
+            return json(200, .object(answer))
+        default:
+            return json(400, ["error": "unsupported_grant_type"])
+        }
+    }
+
+    private func json(_ status: Int, _ value: JSONValue) -> Response {
+        Response(status: status, body: (try? JSONEncoder().encode(value)) ?? Data())
+    }
+
+    /// `a=1&b=x%20y` → its values.
+    private static func form(_ text: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for pair in text.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map {
+                String($0).replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? String($0)
+            }
+            if let name = parts.first, values[name] == nil { values[name] = parts.count > 1 ? parts[1] : "" }
+        }
+        return values
+    }
+
+    private static func random() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     // MARK: - The house
