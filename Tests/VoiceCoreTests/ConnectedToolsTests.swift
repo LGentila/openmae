@@ -45,11 +45,45 @@ struct MCPClientTests {
         let (server, client) = try await home(options)
         defer { server.stop() }
         let tools = try await client.listTools()
+        // As the user's Home Assistant listed them on 2026-10-27, with the thermostat's and the covers' two.
+        #expect(tools.map(\.name) == [
+            "assist_satellite__HassBroadcast", "climate__HassClimateSetTemperature", "homeassistant__GetLiveContext",
+            "intent__HassTurnOn", "intent__HassTurnOff", "intent__HassSetPosition", "intent__HassCancelAllTimers",
+            "light__HassLightSet", "llm__GetDateTime", "media_player__HassMediaUnpause", "media_player__HassMediaPause",
+            "media_player__HassMediaNext", "media_player__HassMediaPrevious", "media_player__HassSetVolume",
+            "media_player__HassSetVolumeRelative", "media_player__HassMediaPlayerMute", "media_player__HassMediaPlayerUnmute",
+            "media_player__search_media", "media_player__play_media", "todo__get_items", "todo__HassListAddItem",
+            "todo__HassListCompleteItem", "todo__HassListRemoveItem", "vacuum__HassVacuumStart",
+            "vacuum__HassVacuumReturnToBase", "vacuum__HassVacuumCleanArea",
+        ])
+        let turnOn = try #require(tools.first { $0.name == "intent__HassTurnOn" })
+        #expect(turnOn.title == "Turn on")
+        #expect(turnOn.description.hasPrefix("Turns on/opens/presses a device or entity.") == true)
+        #expect(turnOn.readOnlyHint == false)
+        #expect(tools.filter { $0.readOnlyHint == true }.map(\.name)
+            == ["homeassistant__GetLiveContext", "llm__GetDateTime", "media_player__search_media", "todo__get_items"])
+    }
+
+    /// Older versions of Home Assistant: no integration before the names, no titles, no annotations.
+    @Test func listsTheOlderNamesWhenAskedTo() async throws {
+        var options = FakeHomeAssistant.Options()
+        options.olderNames = true
+        let (server, client) = try await home(options)
+        defer { server.stop() }
+        let tools = try await client.listTools()
         #expect(tools.map(\.name) == ["HassTurnOn", "HassTurnOff", "HassSetPosition", "HassListAddItem",
                                       "HassListCompleteItem", "HassLightSet", "HassClimateSetTemperature",
                                       "todo_get_items", "GetDateTime", "GetLiveContext"])
-        #expect(tools.first?.description.hasPrefix("Turns on/opens/presses a device or entity.") == true)
-        #expect(tools.allSatisfy { $0.readOnlyHint == nil })
+        #expect(tools.allSatisfy { $0.readOnlyHint == nil && $0.title == nil })
+        #expect(!(try await client.call("HassTurnOn", arguments: ["area": "Salon"])).isError)
+        // A name it does not list is no tool of its own, whichever version lists the other.
+        #expect(try await client.call("intent__HassTurnOn", arguments: ["area": "Salon"]).isError)
+        var newer = server.options
+        newer.olderNames = false
+        server.options = newer
+        #expect(try await client.call("HassTurnOn", arguments: ["area": "Salon"]).text
+            == "Error calling tool: Tool \"HassTurnOn\" not found")
+        #expect(server.calls.map(\.name) == ["HassTurnOn", "intent__HassTurnOn", "HassTurnOn"])
     }
 
     @Test func keepsTheSessionItIsGivenAndStartsANewOneWhenItIsForgotten() async throws {
@@ -57,21 +91,21 @@ struct MCPClientTests {
         options.sessions = true
         let (server, client) = try await home(options)
         defer { server.stop() }
-        #expect(try await client.listTools().count == 10)
+        #expect(try await client.listTools().count == FakeHomeAssistant.newerTools.count)
         server.forgetSession()
-        let result = try await client.call("HassTurnOn", arguments: ["area": "Salon"])
+        let result = try await client.call("intent__HassTurnOn", arguments: ["area": "Salon"])
         #expect(!result.isError)
-        #expect(server.calls.map(\.name) == ["HassTurnOn"])
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOn"])
     }
 
     @Test func callsATool() async throws {
         let (server, client) = try await home()
         defer { server.stop() }
-        let result = try await client.call("HassTurnOn", arguments: ["area": "Salon", "domain": ["light"]])
+        let result = try await client.call("intent__HassTurnOn", arguments: ["area": "Salon", "domain": ["light"]])
         #expect(!result.isError)
         #expect(result.text.contains("\"response_type\":\"action_done\""))
         #expect(result.text.contains("Plafonnier du salon"))
-        #expect(server.calls == [.init(name: "HassTurnOn", arguments: ["area": "Salon", "domain": ["light"]])])
+        #expect(server.calls == [.init(name: "intent__HassTurnOn", arguments: ["area": "Salon", "domain": ["light"]])])
         #expect(server.isOn("Plafonnier du salon") == true)
     }
 
@@ -81,8 +115,8 @@ struct MCPClientTests {
         options.saysToolsChanged = true
         let (server, client) = try await home(options)
         defer { server.stop() }
-        #expect(try await client.listTools().count == 10)
-        let result = try await client.call("HassTurnOff", arguments: ["name": "Lampe du bureau"])
+        #expect(try await client.listTools().count == FakeHomeAssistant.newerTools.count)
+        let result = try await client.call("intent__HassTurnOff", arguments: ["name": "Lampe du bureau"])
         #expect(!result.isError)
         #expect(server.isOn("Lampe du bureau") == false)
         // The stream also said the list of tools changed.
@@ -92,9 +126,25 @@ struct MCPClientTests {
     @Test func aFailureTheToolReportsIsAResult() async throws {
         let (server, client) = try await home()
         defer { server.stop() }
-        let result = try await client.call("HassTurnOn", arguments: ["area": "Garage"])
+        let result = try await client.call("intent__HassTurnOn", arguments: ["area": "Garage"])
         #expect(result.isError)
         #expect(result.text == "Error calling tool: No area named Garage")
+    }
+
+    /// Newer versions read only what is asked (a room, a kind, a name), and act on the other devices they list tools for.
+    @Test func readsTheHouseAsAskedAndActsOnItsOtherDevices() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let kitchen = try await client.call("homeassistant__GetLiveContext", arguments: ["area": "cuisine"]).text
+        #expect(kitchen.contains("Lumière de la cuisine") && kitchen.contains("Robot aspirateur") && !kitchen.contains("Salon"))
+        let lights = try await client.call("homeassistant__GetLiveContext", arguments: ["domain": "light", "area": "Salon"]).text
+        #expect(lights.contains("Plafonnier du salon") && !lights.contains("Thermostat") && !lights.contains("Enceinte"))
+        // A name is a device's: nothing found is an error, as Home Assistant says it.
+        let room = try await client.call("homeassistant__GetLiveContext", arguments: ["name": "salon"])
+        #expect(room.isError && room.text == "Error calling tool: No exposed entities matched name 'salon'")
+        let pause = try await client.call("media_player__HassMediaPause", arguments: ["area": "Salon"])
+        #expect(!pause.isError && pause.text.contains("Enceinte du salon"))
+        #expect(!(try await client.call("vacuum__HassVacuumStart", arguments: [:])).isError)
     }
 
     @Test func sendsTheTokenAndTellsARefusedOne() async throws {
@@ -102,7 +152,7 @@ struct MCPClientTests {
         options.token = "the-right-token"
         let (server, client) = try await home(options, token: "the-right-token")
         defer { server.stop() }
-        #expect(try await client.listTools().count == 10)
+        #expect(try await client.listTools().count == FakeHomeAssistant.newerTools.count)
         let wrong = MCPClient(address: server.address, token: "a-wrong-token", timeout: .seconds(5))
         await #expect(throws: MCPError.unauthorized) { try await wrong.listTools() }
         let none = MCPClient(address: server.address, token: nil, timeout: .seconds(5))
@@ -155,22 +205,28 @@ struct ConnectedToolsTests {
         func parameters(_ name: String) -> [ToolParameter] {
             ConnectedTools.parameters(tools.first { $0.name == name }!.inputSchema)
         }
-        let turnOn = parameters("HassTurnOn")
+        let turnOn = parameters("intent__HassTurnOn")
         #expect(turnOn.map(\.name) == ["area", "device_class", "domain", "floor", "name"])
         #expect(turnOn[0].kind == .string)
         if case .strings(let classes) = turnOn[1].kind { #expect(classes.contains("shutter")) } else { Issue.record() }
         #expect(turnOn[2].kind == .strings([]))
         #expect(turnOn.allSatisfy { !$0.required })
-        let climate = parameters("HassClimateSetTemperature")
+        let climate = parameters("climate__HassClimateSetTemperature")
         #expect(climate.first { $0.name == "temperature" }.map { ($0.kind, $0.required) } ?? (.string, false) == (.number, true))
-        let light = parameters("HassLightSet")
+        let light = parameters("light__HassLightSet")
         #expect(light.first { $0.name == "brightness" }?.kind == .integer)
-        #expect(light.first { $0.name == "brightness" }?.description == "(0 to 100)")
-        let todo = parameters("todo_get_items")
+        #expect(light.first { $0.name == "brightness" }?.description
+            == "The brightness percentage of the light between 0 and 100, where 0 is off and 100 is fully lit (0 to 100)")
+        #expect(light.first { $0.name == "domain" }?.kind == .strings(["light"]))
+        let todo = parameters("todo__get_items")
         #expect(todo.first { $0.name == "status" }?.kind == .oneOf(["needs_action", "completed", "all"]))
-        #expect(parameters("GetLiveContext").isEmpty)
+        // Newer versions filter what they read; a domain may be one or a list (passed on as written).
+        let read = parameters("homeassistant__GetLiveContext")
+        #expect(read.map(\.name) == ["area", "domain", "name"])
+        if case .schema = read[1].kind {} else { Issue.record("domain: \(read[1].kind)") }
+        #expect(read.allSatisfy { !$0.description.isEmpty && !$0.required })
         // What the model sees of Home Assistant's intents: their targets described, without `device_class`.
-        let offered = ConnectedTools.parameters(tools.first { $0.name == "HassTurnOn" }!)
+        let offered = ConnectedTools.parameters(tools.first { $0.name == "intent__HassTurnOn" }!)
         #expect(offered.map(\.name) == ["area", "domain", "floor", "name"])
         #expect(offered.allSatisfy { !$0.description.isEmpty })
         // Deeper: passed on as written.
@@ -184,24 +240,29 @@ struct ConnectedToolsTests {
         let (server, client) = try await home()
         defer { server.stop() }
         let (tools, settings) = try await connected(server, client)
-        // What Maé has herself is off: lists, the date and time.
+        // What Maé has herself is off: timers, the date and time, lists.
         #expect(settings.actions.filter { !$0.enabled }.map(\.name)
-            == ["HassListAddItem", "HassListCompleteItem", "todo_get_items", "GetDateTime"])
+            == ["intent__HassCancelAllTimers", "llm__GetDateTime", "todo__get_items", "todo__HassListAddItem",
+                "todo__HassListCompleteItem", "todo__HassListRemoveItem"])
         let specs = await tools.tools()
-        #expect(specs.map(\.name) == ["HassTurnOn", "HassTurnOff", "HassSetPosition", "HassLightSet",
-                                      "HassClimateSetTemperature", "GetLiveContext"])
-        // Ask first: what acts waits for a "oui"; reading never does, even without annotations.
-        #expect(await tools.risk(of: ToolCall(name: "HassTurnOn")) == .sensitive)
-        #expect(await tools.risk(of: ToolCall(name: "GetLiveContext")) == .read)
-        // The server's own words.
-        #expect(specs.first?.description.hasPrefix("Turns on/opens/presses") == true)
+        #expect(specs.count == 20)
+        #expect(specs.prefix(6).map(\.name) == ["assist_satellite__HassBroadcast", "climate__HassClimateSetTemperature",
+                                                "homeassistant__GetLiveContext", "intent__HassTurnOn", "intent__HassTurnOff",
+                                                "intent__HassSetPosition"])
+        // Ask first: what acts waits for a "oui"; reading never does.
+        #expect(await tools.risk(of: ToolCall(name: "intent__HassTurnOn")) == .sensitive)
+        #expect(await tools.risk(of: ToolCall(name: "homeassistant__GetLiveContext")) == .read)
+        #expect(await tools.risk(of: ToolCall(name: "media_player__search_media")) == .read)
+        #expect(await tools.risk(of: ToolCall(name: "media_player__play_media")) == .sensitive)
+        // The server's own words, its title first.
+        #expect(specs.first { $0.name == "intent__HassTurnOn" }?.description.hasPrefix("Turn on. Turns on/opens/presses") == true)
         #expect(await tools.promptAddendum()?.contains("« Home Assistant »") == true)
 
         var direct = settings
         direct.whenActing = .doDirectly
         #expect(await tools.configure([ConnectedTools.Connection(settings: direct, client: client)]))
-        #expect(await tools.risk(of: ToolCall(name: "HassTurnOn")) == .undoable)
-        #expect(await tools.risk(of: ToolCall(name: "GetLiveContext")) == .read)
+        #expect(await tools.risk(of: ToolCall(name: "intent__HassTurnOn")) == .undoable)
+        #expect(await tools.risk(of: ToolCall(name: "homeassistant__GetLiveContext")) == .read)
         // Nothing changed: the model sees the same.
         #expect(!(await tools.configure([ConnectedTools.Connection(settings: direct, client: client)])))
         var off = direct
@@ -277,16 +338,18 @@ struct ConnectedToolsTests {
         defer { server.stop() }
         let mine = MCPTool(name: "minuteur", description: "A timer of its own", inputSchema: ["type": "object"])
         var first = ConnectedToolSettings(name: "Maison", address: server.address.absoluteString, access: .none)
-        first.actions = [.init(tool: MCPTool(name: "HassTurnOn", description: "On"), enabled: true),
+        first.actions = [.init(tool: MCPTool(name: "intent__HassTurnOn", description: "On"), enabled: true),
                          .init(tool: mine, enabled: true)]
         var second = ConnectedToolSettings(name: "Chalet", address: server.address.absoluteString, access: .none)
-        second.actions = [.init(tool: MCPTool(name: "HassTurnOn", description: "On"), enabled: true)]
+        second.actions = [.init(tool: MCPTool(name: "intent__HassTurnOn", description: "On"), enabled: true)]
         let tools = ConnectedTools()
         await tools.configure([.init(settings: first, client: client), .init(settings: second, client: client)])
-        #expect(await tools.tools().map(\.name) == ["HassTurnOn", "minuteur_2", "HassTurnOn_2"])
+        #expect(await tools.tools().map(\.name) == ["intent__HassTurnOn", "minuteur_2", "intent__HassTurnOn_2"])
         // The second one's call reaches the service under its own name.
-        _ = try await tools.perform(ToolCall(name: "HassTurnOn_2", arguments: ["area": "Salon"]), context: context)
-        #expect(server.calls.map(\.name) == ["HassTurnOn"])
+        let outcome = try await tools.perform(ToolCall(name: "intent__HassTurnOn_2", arguments: ["area": "Salon"]),
+                                              context: context)
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOn"])
+        #expect(outcome.spoken == ConnectedToolPhrases.done)
     }
 
     @Test func saysWhatSheIsAboutToDo() {
@@ -329,16 +392,16 @@ struct ConnectedToolsTests {
         let context = ToolContext(now: now, language: .french)
 
         // « Allume le salon », then « non »: nothing reaches Home Assistant.
-        var reply = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "salon"]), context: context)
+        var reply = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon"]), context: context)
         #expect(reply.spoken == "J’allume le salon avec Home Assistant. On y va\(nb)?")
         #expect(await runner.interception(for: "non", now: now) == .decline)
         _ = await runner.resolve(.decline, context: context)
         #expect(server.calls.isEmpty)
 
         // Again, then « oui »: done, and the model says it from Home Assistant's answer.
-        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "salon"]), context: context)
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon"]), context: context)
         reply = try #require(await runner.resolve(.confirm, context: context))
-        #expect(server.calls.map(\.name) == ["HassTurnOn"])
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOn"])
         #expect(reply.modelSpeaks)
         #expect(reply.spoken == ConnectedToolPhrases.done)
         // "annule": MCP cannot undo.
@@ -347,9 +410,9 @@ struct ConnectedToolsTests {
         #expect(reply.spoken == "Je ne peux pas défaire ce que j’ai demandé à Home Assistant.")
 
         // Reading never asks.
-        reply = await runner.handle(ToolCall(name: "GetLiveContext"), context: context)
+        reply = await runner.handle(ToolCall(name: "homeassistant__GetLiveContext"), context: context)
         #expect(reply.modelSpeaks)
-        #expect(server.calls.map(\.name) == ["HassTurnOn", "GetLiveContext"])
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOn", "homeassistant__GetLiveContext"])
         if case .object(let result) = reply.forModel, case .object(let read)? = result["résultat"] {
             #expect(read["result"]?.text?.contains("Plafonnier du salon") == true)
         } else {
@@ -357,7 +420,7 @@ struct ConnectedToolsTests {
         }
 
         // An answer that says it failed: told as a failure.
-        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "Garage"]), context: context)
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "Garage"]), context: context)
         reply = try #require(await runner.resolve(.confirm, context: context))
         #expect(reply.spoken == "Home Assistant n’a pas pu le faire.")
         if case .object(let result) = reply.forModel {
@@ -374,13 +437,13 @@ struct ConnectedToolsTests {
         let runner = ToolRunner(providers: [tools], actions: false)
         _ = await runner.tools()
         // « Allume le salon et la cuisine », as the model may write it: two calls in one request, one question.
-        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "salon"]), context: context)
-        _ = await runner.handle(ToolCall(name: "HassTurnOn", arguments: ["area": "cuisine"]), context: context,
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon"]), context: context)
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "cuisine"]), context: context,
                                 sameRequest: true)
         #expect(await runner.pendingQuestion(.french)
             == "J’allume le salon avec Home Assistant et j’allume la cuisine avec Home Assistant\(nb): on y va\(nb)?")
         let reply = try #require(await runner.resolve(.confirm, context: context))
-        #expect(server.calls.map(\.name) == ["HassTurnOn", "HassTurnOn"])
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOn", "intent__HassTurnOn"])
         #expect(reply.spoken == ConnectedToolPhrases.done)
     }
 
@@ -400,8 +463,8 @@ struct ConnectedToolsTests {
             return "<\(call.name) \(shown.joined(separator: " "))>"
         }
         let without = try #require(await tools.promptAddendum(actions: false, writeCall: written))
-        #expect(without.hasSuffix(" Exemples : à « Allume le couloir », ta réponse entière est <HassTurnOn area=couloir> ; "
-            + "à « Ferme tous les volets », <HassTurnOff domain=[cover]>"))
+        #expect(without.hasSuffix(" Exemples : à « Allume le couloir », ta réponse entière est <intent__HassTurnOn area=couloir> ; "
+            + "à « Ferme tous les volets », <intent__HassTurnOff domain=[cover]>"))
         let alone = await tools.promptAddendum()
         #expect(await tools.promptAddendum(actions: true, writeCall: written) == alone)
         // The examples of the smallest tier: the turning on asked first and the user's « Oui », then a question.
@@ -423,12 +486,34 @@ struct ConnectedToolsTests {
         defer { server.stop() }
         let (tools, _) = try await connected(server, client, whenActing: .doDirectly)
         // Home Assistant refuses an argument its tool does not list ("extra keys not allowed").
-        _ = try await tools.perform(ToolCall(name: "GetLiveContext", arguments: ["entity": "cuisine"]), context: context)
-        _ = try await tools.perform(ToolCall(name: "HassTurnOn", arguments: ["area": "salon", "pièce": "salon"]), context: context)
+        _ = try await tools.perform(ToolCall(name: "homeassistant__GetLiveContext", arguments: ["entity": "cuisine"]),
+                                    context: context)
+        _ = try await tools.perform(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon", "pièce": "salon"]),
+                                    context: context)
         #expect(server.calls.map(\.arguments) == [[:], ["area": "salon"]])
         let open: JSONValue = ["type": "object", "properties": ["a": ["type": "string"]], "additionalProperties": true]
         #expect(ConnectedTools.declared(["a": "1", "b": "2"], open) == ["a": "1", "b": "2"])
         #expect(ConnectedTools.declared(["b": "2"], ["type": "object"]) == ["b": "2"])
+    }
+
+    /// Home Assistant's newer reading tool, with filters that find nothing (a kind as a name): the whole house is read.
+    @Test func readsTheWholeHouseWhenItsFiltersFindNothing() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client)
+        let outcome = try await tools.perform(ToolCall(name: "homeassistant__GetLiveContext",
+                                                       arguments: ["area": "salon", "name": "lumière"]), context: context)
+        #expect(server.calls.map(\.arguments) == [["area": "salon", "name": "lumière"], [:]])
+        if case .object(let result) = outcome.forModel, case .object(let read)? = result["résultat"] {
+            #expect(read["result"]?.text?.contains("Lumière de la cuisine") == true)
+        } else {
+            Issue.record("unexpected result: \(outcome.forModel)")
+        }
+        // Filters that find something are kept; another tool's failure is told as it is.
+        _ = try await tools.perform(ToolCall(name: "homeassistant__GetLiveContext", arguments: ["area": "cuisine"]),
+                                    context: context)
+        _ = try await tools.perform(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "Garage"]), context: context)
+        #expect(server.calls.count == 4)
     }
 
     @Test func doesItDirectlyWhenToldTo() async throws {
@@ -437,8 +522,8 @@ struct ConnectedToolsTests {
         let (tools, _) = try await connected(server, client, whenActing: .doDirectly)
         let runner = ToolRunner(providers: [tools], actions: false)
         _ = await runner.tools()
-        let reply = await runner.handle(ToolCall(name: "HassTurnOff", arguments: ["domain": ["light"]]), context: context)
-        #expect(server.calls.map(\.name) == ["HassTurnOff"])
+        let reply = await runner.handle(ToolCall(name: "intent__HassTurnOff", arguments: ["domain": ["light"]]), context: context)
+        #expect(server.calls.map(\.name) == ["intent__HassTurnOff"])
         #expect(reply.modelSpeaks)
         #expect(server.isOn("Lampe du bureau") == false)
     }
@@ -469,7 +554,7 @@ struct ConnectedToolsTests {
         let (server, client) = try await home(options)
         defer { server.stop() }
         let (tools, _) = try await connected(server, client)
-        let outcome = try await tools.perform(ToolCall(name: "GetLiveContext"), context: context)
+        let outcome = try await tools.perform(ToolCall(name: "homeassistant__GetLiveContext"), context: context)
         guard case .object(let result) = outcome.forModel, let text = result["résultat"]?.text else {
             Issue.record("unexpected result: \(outcome.forModel)")
             return

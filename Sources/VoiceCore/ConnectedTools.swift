@@ -347,7 +347,7 @@ public actor ConnectedTools: ToolProvider {
         let title = ConnectedToolPhrases.title(tool, call.arguments)
         let cannotUndo = ConnectedToolPhrases.cannotUndo(name)
         do {
-            let result = try await connection.client.call(tool.name, arguments: Self.declared(call.arguments, tool.inputSchema))
+            let result = try await send(tool, call.arguments, to: connection)
             report(.state(id, .connected))
             report(.log(id, ConnectedToolLogEntry(
                 date: Date(), title: title,
@@ -375,6 +375,20 @@ public actor ConnectedTools: ToolProvider {
     private func lookup(_ call: ToolCall) -> (Connection, MCPTool)? {
         guard let (index, tool) = offered[call.name], connections.indices.contains(index) else { return nil }
         return (connections[index], tool)
+    }
+
+    /// A call as the service gets it: only the arguments its tool takes (`declared`). Home Assistant's newer reading tool
+    /// filters what it reads by area, domain and name, which it matches exactly, and the models write a kind or a measure
+    /// as a name (`{area: salon, domain: light, name: lumière}`, `{name: temperature}`: `voice-cli actions-bench` with
+    /// Tests/Fixtures/home-assistant-fr.json, on every tier): when its filters find nothing, the whole house is read, as
+    /// older versions always do (cut at `resultLimit`).
+    private func send(_ tool: MCPTool, _ arguments: [String: JSONValue], to connection: Connection) async throws
+        -> MCPCallResult
+    {
+        let declared = Self.declared(arguments, tool.inputSchema)
+        let result = try await connection.client.call(tool.name, arguments: declared)
+        guard result.isError, !declared.isEmpty, Self.homeAssistantName(tool.name) == "GetLiveContext" else { return result }
+        return try await connection.client.call(tool.name, arguments: [:])
     }
 
     // MARK: - What the model sees

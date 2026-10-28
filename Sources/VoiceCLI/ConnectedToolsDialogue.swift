@@ -2,7 +2,8 @@
 // turns through the whole pipeline as in the app (the voice speaks into a silent speaker): what Maé says before
 // "On y va ?", the user's "oui" and "non", what reaches the service, its log, then the same with "Do it directly".
 //
-//   voice-cli connected-tools [--tier minimum|standard|comfort] [--actions] [--do-directly] [--repeats 1]
+//   voice-cli connected-tools [--tier minimum|standard|comfort] [--actions] [--do-directly] [--older-home-assistant]
+//                             [--repeats 1]
 //   voice-cli connected-tools --long-result [--tier minimum|standard|comfort] [--repeats 3]
 //
 // Without --actions, the connected tool is offered on its own, as in the app with the actions off; with it, after the
@@ -27,7 +28,9 @@ private actor Reports {
 }
 
 func runConnectedToolsDialogue(_ o: Options) async throws {
-    let server = FakeHomeAssistant()
+    var options = FakeHomeAssistant.Options()
+    options.olderNames = o.olderHomeAssistant
+    let server = FakeHomeAssistant(options: options)
     try await server.start()
     defer { server.stop() }
     let client = MCPClient(address: server.address, token: nil)
@@ -79,7 +82,7 @@ func runConnectedToolsDialogue(_ o: Options) async throws {
                   t.said.contains("On y va") && t.calls.isEmpty)
             t = await turn("Oui")
             check("« Oui »: HassTurnOn is called and she says the result",
-                  t.calls.map(\.name) == ["HassTurnOn"] && !t.said.isEmpty && !t.said.contains("On y va")
+                  named(t.calls) == ["HassTurnOn"] && !t.said.isEmpty && !t.said.contains("On y va")
                       && t.log.map(\.result) == [.done])
             t = await turn("Éteins toutes les lumières")
             check("« Éteins toutes les lumières »: asks, calls nothing", t.said.contains("On y va") && t.calls.isEmpty)
@@ -88,13 +91,13 @@ func runConnectedToolsDialogue(_ o: Options) async throws {
                   t.calls.isEmpty && t.log.map(\.result) == [.refusedByUser])
             t = await turn("Est-ce que la lumière de la cuisine est allumée ?")
             check("a question that only reads is answered without a « oui »",
-                  t.calls.map(\.name) == ["GetLiveContext"] && !t.said.contains("On y va") && !t.said.isEmpty)
+                  named(t.calls) == ["GetLiveContext"] && !t.said.contains("On y va") && !t.said.isEmpty)
         }
         print("\n=== Do it directly (round \(round)) ===")
         try await e.pipeline.setTools(await runner(.doDirectly))
         var t = await turn("Éteins la lumière du salon")
         check("« Éteins la lumière du salon »: carried out at once",
-              t.calls.map(\.name) == ["HassTurnOff"] && !t.said.contains("On y va"))
+              named(t.calls) == ["HassTurnOff"] && !t.said.contains("On y va"))
         t = await turn("Annule")
         check("« Annule »: says it cannot be undone, calls nothing", t.calls.isEmpty && t.said.contains("défaire"))
         if !o.doDirectly { try await e.pipeline.setTools(await runner(.askFirst)) }
@@ -174,3 +177,6 @@ func measureLongResult(_ o: Options) async throws {
                      firsts.map { String(format: "%.0f", $0) }.joined(separator: ", "), median(totals) ?? 0))
     }
 }
+
+/// The calls' tools by Home Assistant's own names (`HassTurnOn` for `intent__HassTurnOn`), whichever names it lists.
+private func named(_ calls: [FakeHomeAssistant.Call]) -> [String] { calls.map { ConnectedTools.homeAssistantName($0.name) } }

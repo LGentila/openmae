@@ -94,7 +94,11 @@
 // after the others, with their part of the system prompt. A call to one is checked for the words its arguments must
 // hold ("mentions", whatever the accents and case) and the values they must have ("values"); nothing is carried out. A
 // read written after words of the model's own counts as none when the app leaves it out, with the actions or without
-// them (`ConnectedTools.ignoresAfterWords`), as a hand-over above.
+// them (`ConnectedTools.ignoresAfterWords`), as a hand-over above. It lists its tools as a current Home Assistant does
+// (`intent__HassTurnOn`…), or as older versions did with --older-home-assistant (`HassTurnOn`…, fewer tools); the corpus
+// may name a tool either way. --home-assistant-on HassTurnOn,GetLiveContext,… switches on only these of its actions (by
+// Home Assistant's own names). A read whose case says what it must find ("finds") is carried out on the pretend house
+// (it changes nothing), with the filters the model gave it.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
 // as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
@@ -241,6 +245,9 @@ private struct Corpus: Decodable {
         /// A connected tool's call: arguments it must not have (« Éteins toutes les lumières » names no device: Home
         /// Assistant refuses a `name` that is none).
         var absent: [String]?
+        /// A connected tool's read (Home Assistant's `GetLiveContext`, whose newer versions filter by area, domain and
+        /// name): carried out on the pretend house, it must find one of these devices at least.
+        var finds: [String]?
     }
 
     /// An earlier exchange, for corrections ("décale-le"), tasks already handed over and searches already made;
@@ -406,7 +413,8 @@ func runActionsBench(_ o: Options) async throws {
     let memory = corpus.memory == true || o.memory
     let journal = MemorySettings.journalOffered(on: tier) || o.journal
     let sheet = corpus.memorySheet ?? []
-    let home = try await homeAssistantTools(corpus.homeAssistant == true || o.homeAssistant)
+    let home = try await homeAssistantTools(corpus.homeAssistant == true || o.homeAssistant, olderNames: o.olderHomeAssistant,
+                                            on: o.homeAssistantOn)
     let opensPages = web && (o.pages ?? WebSearchCatalog.opensPages(on: tier))
     // In the app's order: the actions, the agents, the web search (and its pages), the built-in sources, the news, the
     // connected tools, the memory (last).
@@ -419,6 +427,12 @@ func runActionsBench(_ o: Options) async throws {
         + (news ? [NewsCatalog.read] : []) + home.tools + (memory ? [MemoryCatalog.tool(journal: journal)] : [])
     let tools = actionTools + agentTools + otherTools
     let homeNames = Set(home.tools.map(\.name))
+    defer { home.server?.stop() }
+    /// A tool as the corpus names it, read as the pretend Home Assistant's that has the same name in another version
+    /// (`HassTurnOn` for `intent__HassTurnOn`, or the other way round); any other name as it is.
+    func offeredName(_ name: String) -> String {
+        homeNames.first { ConnectedTools.homeAssistantName($0) == ConnectedTools.homeAssistantName(name) } ?? name
+    }
     let here = FixedHere(corpus.here)
     let liveSources: [String: any ToolProvider] = o.liveSources ? [
         WeatherCatalog.name: WeatherTools(on: true, here: here),
@@ -614,7 +628,7 @@ func runActionsBench(_ o: Options) async throws {
             }
         }
 
-        var expectedTool = item.expected?.tool ?? "aucun"
+        var expectedTool = offeredName(item.expected?.tool ?? "aucun")
         // Without the actions, a request for one of them expects no call: no tool does it.
         var notOffered: String?
         if !actions, expectedTool != "aucun", !tools.contains(where: { $0.name == expectedTool }) {
@@ -625,7 +639,7 @@ func runActionsBench(_ o: Options) async throws {
         var result = CaseResult(phrase: item.phrase, expected: expectedTool, chosen: chosen,
                                 writtenName: written == call?.name ? nil : written, arguments: call?.arguments,
                                 moreCalls: moreCalls ? true : nil, text: text,
-                                toolOK: chosen == expectedTool || item.expected?.or?.contains(chosen) == true,
+                                toolOK: chosen == expectedTool || item.expected?.or?.map(offeredName).contains(chosen) == true,
                                 firstOutputMs: firstOutput, callMs: callTime)
         if let callStart, let nameRead, call != nil { result.nameReadMs = nameRead - callStart }
         result.leftOutAfterWords = leftOut
@@ -656,8 +670,14 @@ func runActionsBench(_ o: Options) async throws {
                                   spoken: ActionPhrases.notUnderstood(.french))
             result.refusal = refusal?.forModel
         } else if let call, homeNames.contains(call.name) {
-            // A connected tool's call: nothing is carried out; its arguments must name what the user named.
-            if result.toolOK, let expected = item.expected { result.argumentsOK = homeArguments(call, expected) }
+            // A connected tool's call: nothing is carried out (but a read); its arguments must name what the user named.
+            if result.toolOK, let expected = item.expected, let provider = home.provider {
+                result.argumentsOK = if let finds = expected.finds {
+                    await homeReads(call, finds, provider)
+                } else {
+                    homeArguments(call, expected)
+                }
+            }
         } else if let call, AgentCatalog.names.contains(call.name) {
             // Handing a task over: what the app checks (with the tasks it knows, for a call that names one), and whether
             // the instruction keeps the user's words.
@@ -906,20 +926,38 @@ func runActionsBench(_ o: Options) async throws {
 
 /// --home-assistant: the tools a pretend Home Assistant offers once added as a connected tool (the switches a new tool
 /// starts with), and their provider, for their part of the system prompt and their example exchanges.
-private func homeAssistantTools(_ on: Bool) async throws -> (tools: [ToolSpec], provider: ConnectedTools?) {
-    guard on else { return ([], nil) }
-    let server = FakeHomeAssistant()
+private func homeAssistantTools(_ on: Bool, olderNames: Bool, on only: [String]?) async throws
+    -> (tools: [ToolSpec], provider: ConnectedTools?, server: FakeHomeAssistant?)
+{
+    guard on else { return ([], nil, nil) }
+    var options = FakeHomeAssistant.Options()
+    options.olderNames = olderNames
+    let server = FakeHomeAssistant(options: options)
     try await server.start()
-    defer { server.stop() }
     let client = MCPClient(address: server.address, token: nil)
     var settings = ConnectedToolSettings(name: "Home Assistant", address: server.address.absoluteString, access: .none)
     settings.actions = settings.merging(try await client.listTools())
+    if let only {
+        for i in settings.actions.indices {
+            settings.actions[i].enabled = only.contains(ConnectedTools.homeAssistantName(settings.actions[i].name))
+        }
+    }
     let provider = ConnectedTools()
     await provider.configure([ConnectedTools.Connection(settings: settings, client: client)])
     let tools = await provider.tools()
     print("Home Assistant (pretend): \(tools.count) of \(settings.actions.count) actions on: "
           + tools.map(\.name).joined(separator: ", "))
-    return (tools, provider)
+    return (tools, provider, server)
+}
+
+/// A read of the pretend Home Assistant, carried out as the app does (only the arguments its tool takes, the whole house
+/// when its filters find nothing), finds one of these devices at least.
+private func homeReads(_ call: ToolCall, _ finds: [String], _ provider: ConnectedTools) async -> Bool {
+    guard let outcome = try? await provider.perform(call, context: ToolContext(now: Date(), language: .french)),
+          case .object(let result) = outcome.forModel, let read = result["résultat"],
+          let text = (try? JSONEncoder().encode(read)).map({ String(decoding: $0, as: UTF8.self) })
+    else { return false }
+    return finds.contains { text.contains($0) }
 }
 
 /// A connected tool's call holds the words and the values the corpus expects, and Home Assistant would take it: the words
@@ -942,8 +980,9 @@ private func homeArguments(_ call: ToolCall, _ expected: Corpus.Expected) -> Boo
     let domains: Set<String> = ["light", "switch", "cover", "climate", "fan", "lock", "media_player", "valve", "vacuum",
                                 "scene", "script", "input_boolean", "humidifier", "water_heater", "button", "siren"]
     if let domain = call.arguments["domain"], !Set(texts(domain)).isSubset(of: domains) { return false }
-    let classes: Set<String> = ["tv", "speaker", "receiver", "awning", "blind", "curtain", "damper", "door", "garage", "gate",
-                                "shade", "shutter", "window", "water", "gas", "outlet", "switch"]
+    let classes: Set<String> = ["tv", "speaker", "receiver", "projector", "awning", "blind", "curtain", "damper", "door",
+                                "garage", "gate", "shade", "shutter", "window", "water", "gas", "outlet", "switch", "identify",
+                                "restart", "update"]
     if let deviceClass = call.arguments["device_class"], !Set(texts(deviceClass)).isSubset(of: classes) { return false }
     for (key, value) in expected.values ?? [:] {
         guard let given = call.arguments[key] else { return false }

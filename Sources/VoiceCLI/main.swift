@@ -18,10 +18,10 @@
 //                                                       the voice alone, answer after answer: its time per frame by
 //                                                       second (see VoicePace.swift)
 //   voice-cli actions-bench [--now 2026-10-15T18:42] [--corpus file.json] [--web] [--searxng <address>] [--sources]
-//                           [--news] [--home-assistant]
+//                           [--news] [--home-assistant] [--older-home-assistant] [--home-assistant-on HassTurnOn,…]
 //                                                       does the model pick the right action, or search? (text
 //                                                       only, nothing carried out; see ActionsBench.swift)
-//   voice-cli connected-tools [--actions] [--do-directly] [--repeats 1]
+//   voice-cli connected-tools [--actions] [--do-directly] [--older-home-assistant] [--repeats 1]
 //                                                       a conversation with a pretend Home Assistant connected, typed
 //                                                       turns: asks first, « oui », « non », reading, "Do it directly"
 //                                                       (see ConnectedToolsDialogue.swift)
@@ -230,6 +230,11 @@ struct Options {
     /// actions-bench: a pretend Home Assistant's tools offered too, as a connected tool; connected-tools: "Do it
     /// directly" from the start.
     var homeAssistant = false
+    /// actions-bench, connected-tools: the pretend Home Assistant lists its tools as older versions did (`HassTurnOn`…).
+    var olderHomeAssistant = false
+    /// actions-bench: only these of the pretend Home Assistant's actions are on (by Home Assistant's own names), instead of
+    /// the switches a new tool starts with.
+    var homeAssistantOn: [String]?
     var doDirectly = false
     /// connected-tools: only the time of the answer after a short and a long `GetLiveContext`.
     var longResult = false
@@ -283,6 +288,8 @@ struct Options {
             case "--actions": o.actions = true
             case "--no-actions": o.noActions = true
             case "--home-assistant": o.homeAssistant = true
+            case "--older-home-assistant": o.olderHomeAssistant = true
+            case "--home-assistant-on": o.homeAssistantOn = (it.next() ?? "").split(separator: ",").map(String.init)
             case "--do-directly": o.doDirectly = true
             case "--long-result": o.longResult = true
             case "--wake-word": o.wakeWord = true
