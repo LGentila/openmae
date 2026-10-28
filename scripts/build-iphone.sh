@@ -4,7 +4,9 @@
 #   2. compiles it for the device (Debug by default; CONFIGURATION=Release for a release build), signed
 #      automatically with the team of App/Signing.local.xcconfig (ignored by git); a new git worktree does not have
 #      that file, so the script copies the main checkout's one (SIGNING_CHECKOUT=<absolute folder> looks in another
-#      checkout instead), and stops when there is none
+#      checkout instead), and stops when there is none. It shows only the errors, the warnings about iPhone/Sources
+#      and the result (full build log: xcodebuild.log in the build folder, .build/iphone or .build/iphone-sim), and
+#      stops with an error when the build fails
 #   3. installs it and opens it with devicectl
 # DEVICE=<identifier> picks the device when several are connected (xcrun devicectl list devices); DEVICE=iPad or
 # DEVICE=iPhone picks the first one of that kind.
@@ -14,19 +16,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/signing-file.zsh
+source scripts/xcodebuild-filtered.zsh
 configuration=${CONFIGURATION:-Debug}
 
 xcodegen generate --spec iPhone/project.yml --quiet
 
 if [[ -n "${SIMULATOR:-}" ]]; then
-  xcodebuild -project iPhone/OpenMaeiPhone.xcodeproj -scheme OpenMae -configuration "$configuration" \
+  # Stops here when the build fails: the app in the folder would be an older one.
+  xcodebuild_filtered .build/iphone-sim/xcodebuild.log iPhone/Sources \
+    -project iPhone/OpenMaeiPhone.xcodeproj -scheme OpenMae -configuration "$configuration" \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/iphone-sim \
-    -skipMacroValidation -skipPackagePluginValidation build \
-    | grep -E "error:|warning: .*/iPhone/Sources/|BUILD (SUCCEEDED|FAILED)" || true
+    -skipMacroValidation -skipPackagePluginValidation build
   app=".build/iphone-sim/Build/Products/$configuration-iphonesimulator/OpenMae.app"
+  [[ -d "$app" ]] || { echo "No app at $app, although the build succeeded." >&2; exit 1 }
   echo "app : $app"
   [[ "$SIMULATOR" == 1 ]] && exit 0
-  [[ -d "$app" ]] || exit 1
   # The simulator by name (with the newest system, listed last) or by identifier.
   simulator=$(xcrun simctl list devices available | awk -v name="$SIMULATOR" '
     index($0, name " (") || index($0, "(" name ")") {
@@ -64,12 +68,13 @@ if [[ -z "$device" ]]; then
   exit 1
 fi
 
-xcodebuild -project iPhone/OpenMaeiPhone.xcodeproj -scheme OpenMae -configuration "$configuration" \
+# Stops here when the build fails, rather than install the older app left in the folder.
+xcodebuild_filtered .build/iphone/xcodebuild.log iPhone/Sources \
+  -project iPhone/OpenMaeiPhone.xcodeproj -scheme OpenMae -configuration "$configuration" \
   -destination "id=$device" -derivedDataPath .build/iphone -allowProvisioningUpdates \
-  -skipMacroValidation -skipPackagePluginValidation build \
-  | grep -E "error:|warning: .*/iPhone/Sources/|BUILD (SUCCEEDED|FAILED)" || true
+  -skipMacroValidation -skipPackagePluginValidation build
 
 app=".build/iphone/Build/Products/$configuration-iphoneos/OpenMae.app"
-[[ -d "$app" ]] || exit 1
+[[ -d "$app" ]] || { echo "No app at $app, although the build succeeded." >&2; exit 1 }
 xcrun devicectl device install app --device "$device" "$app"
 xcrun devicectl device process launch --device "$device" com.openmae.ios

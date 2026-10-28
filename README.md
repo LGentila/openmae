@@ -182,6 +182,10 @@ microphone, calendars and reminders, and once they are allowed, the permissions 
 normally signed app. `ADHOC=1 zsh scripts/build-app.sh` builds ad hoc on purpose. The script ends by printing the
 identity the app is signed with.
 
+The script shows only the errors, the warnings about `App/Sources` and the result; xcodebuild's full build log is in
+`.build/app/xcodebuild.log`. When the build fails, it prints `BUILD FAILED` with that log's path and exits with an
+error, without the app's path: the app still in the folder is an older one.
+
 To see a timestamped log of every stage, launch it with:
 
 ```bash

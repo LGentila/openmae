@@ -2,7 +2,9 @@
 # Builds the macOS app.
 #   1. finds the signing file App/Signing.local.xcconfig (below)
 #   2. generates the Xcode project from App/project.yml (xcodegen: brew install xcodegen)
-#   3. compiles it (Release by default; CONFIGURATION=Debug zsh scripts/build-app.sh for a debug build)
+#   3. compiles it (Release by default; CONFIGURATION=Debug zsh scripts/build-app.sh for a debug build), showing
+#      only the errors, the warnings about App/Sources and the result (full build log: .build/app/xcodebuild.log);
+#      when the build fails, it stops there with an error, without printing the path of the older app left in the folder
 #   4. prints the app's path and the identity it is signed with
 # The app ends up in .build/app/Build/Products/<configuration>/<product name>.app
 #
@@ -15,6 +17,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/signing-file.zsh
+source scripts/xcodebuild-filtered.zsh
 project=$(awk '/^name:/ {print $2; exit}' App/project.yml)       # Xcode project and scheme
 product=$(awk '/PRODUCT_NAME:/ {print $2; exit}' App/project.yml)  # file name of the app (no accent)
 configuration=${CONFIGURATION:-Release}
@@ -40,13 +43,14 @@ EOF
 fi
 
 xcodegen generate --spec App/project.yml --quiet
-xcodebuild -project "App/$project.xcodeproj" -scheme "$project" -configuration "$configuration" \
+# Stops here when the build fails: the app in the folder would be an older one.
+xcodebuild_filtered .build/app/xcodebuild.log App/Sources \
+  -project "App/$project.xcodeproj" -scheme "$project" -configuration "$configuration" \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/app \
-  -skipMacroValidation -skipPackagePluginValidation build "${signing_settings[@]}" \
-  | grep -E "error:|warning: .*/App/Sources/|BUILD (SUCCEEDED|FAILED)" || true
+  -skipMacroValidation -skipPackagePluginValidation build "${signing_settings[@]}"
 
 app=".build/app/Build/Products/$configuration/$product.app"
-[[ -d "$app" ]] || exit 1
+[[ -d "$app" ]] || { echo "No app at $app, although the build succeeded." >&2; exit 1 }
 echo "app : $app"
 
 # The identity the app is signed with, so that a wrong signature shows at once.
