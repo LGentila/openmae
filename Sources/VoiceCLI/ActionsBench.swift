@@ -17,6 +17,14 @@
 //                           [--record-pages file.json] [--memory [--journal]] [--memory-addendum file]
 //                           [--journal-addendum file] [--home-assistant] [--compare-beginnings]
 //                           [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts] [--own-thoughts]
+//                           [--summing-note off|text] [--repeats 1]
+//
+// A corpus whose requests ask for several actions at once (Tests/Fixtures/actions-multi-fr.json) scores every call. When
+// it recorded a search's results for a request (Tests/Fixtures/actions-search-fr.json: an action and a search), the app's
+// actions are carried out (timers, and reminders and events on a calendar kept in memory, each with the app's sentence)
+// and the model sums up the results after what the app said (`Conversation.summingUpSteps`): the report counts the
+// summaries that say such an action again. --summing-note replaces the app's note that asks for the summary, or leaves
+// it out with what the app said ("off", as before the app had them); --repeats runs each request that many times.
 //
 // With Claude Code's tools (a corpus with "agents": true), a call to them is checked by the app's own delegation tools
 // (`AgentTools`, with an agent that does nothing), which know the tasks the case's earlier exchanges handed over and the
@@ -516,7 +524,8 @@ func runActionsBench(_ o: Options) async throws {
     if corpus.cases.contains(where: { $0.expectedList != nil }) {
         try await runSeveralActions(corpus, conversation: conversation, tools: tools, dateLine: dateLine, now: now,
                                     timeZone: timeZone, model: model, maxCalls: maxCalls, tier: tier,
-                                    modelName: folder.lastPathComponent, options: o)
+                                    modelName: folder.lastPathComponent, pages: opensPages ? pageReader : nil,
+                                    resultsNote: resultsNote, options: o)
         return
     }
 
@@ -1224,8 +1233,14 @@ private func scientific(_ value: Double?) -> String {
 /// model wrote them, then what each one gave (the page's text, or that it was not carried out). `earlier`: the call is
 /// a page asked for at once, of one of the results (`results`) of this search of the case's earlier exchanges (the
 /// app's last search). No results: the app says so itself, without the model. `note`: --results-note's, instead of the
-/// app's. Returns whether the model was asked.
+/// app's. `alongside`: the search is one of several calls of the request, as the history keeps them: all of them as
+/// written, then their results in the same order (nil in the search's place, which it fills). `said`: what the app said
+/// in the turn before the summing up (an action's sentence), as the history keeps it: as in the app, it ends the model's
+/// answer so far, and the app's note (`summingNote`: `Conversation.summingUpNote`, or --summing-note's) asks for the rest
+/// (`Conversation.summingUpSteps`). Returns whether the model was asked.
 private func sumUp(_ call: ToolCall, results: WebSearchResults, earlier: ToolCall? = nil, after request: [ChatMessage],
+                   alongside: (calls: [ToolCall], results: [JSONValue?])? = nil, said appSaid: String = "",
+                   summingNote: String = Conversation.summingUpNote,
                    context: ToolContext, model: MLXChatModel, pages: BenchPageReader?, note: String? = nil,
                    into result: inout CaseResult) async throws -> Bool
 {
@@ -1254,9 +1269,15 @@ private func sumUp(_ call: ToolCall, results: WebSearchResults, earlier: ToolCal
             result.summary = outcome.spoken
             return false
         }
-        steps = [.call(call), .result(of: call, noted(outcome.forModel, note))]
-        let called = request + [.call(call)]
-        result.resultTokens = try await model.tokenCount(called + [steps[1]]) - model.tokenCount(called)
+        let read = noted(outcome.forModel, note)
+        let calls = alongside?.calls ?? [call]
+        steps = [.calls(calls)] + zip(calls, alongside?.results.map { $0 ?? read } ?? [read]).map { .result(of: $0, $1) }
+        let called = request + [.calls(calls)]
+        result.resultTokens = try await model.tokenCount(request + steps) - model.tokenCount(called)
+        if !appSaid.isEmpty {
+            // As the app: the answer so far ends with what the app said, and its note asks for the rest.
+            steps += [ChatMessage(.assistant, appSaid), ChatMessage(.system, summingNote)]
+        }
         allowed = outcome.allowedWhileSumming
         fallback = outcome.spoken
         given = clock.now
@@ -2084,6 +2105,25 @@ private struct SeveralResult: Encodable {
     var extra: Int
     var firstCallMs: Double?
     var lastCallMs: Double?
+    /// With --repeats: which run of the request.
+    var run: Int?
+    /// A search among the calls carried out, whose results the corpus recorded: what the app said at once for the other
+    /// calls (an action's sentence), in order, then the model's summary of the results, the pages it opened and the calls
+    /// it wrote meanwhile (not carried out).
+    var appSaid: [String]?
+    var summary: String?
+    var pagesOpened: [String]?
+    var callsWhileSumming: [String]?
+    var summedUpAgain: Bool?
+    /// From the results to the summary's first words, to the complete call of a page, and from the page to the first
+    /// words of the answer (`CaseResult`'s).
+    var summaryFirstMs: Double?
+    var pageCallMs: Double?
+    var pageFirstMs: Double?
+    /// The summary says again an action the app said (one of the words of that action's `answerWithout`).
+    var saysActionAgain: Bool?
+    /// The summary says what the search's `answer` wants, and none of its `answerWithout` (`answers`).
+    var summaryOK: Bool?
 }
 
 /// A corpus whose requests ask for several actions at once (`expected` written as a list): every call the model writes is
@@ -2091,19 +2131,46 @@ private struct SeveralResult: Encodable {
 /// of it: the date to the minute, the length, the shortcut, the words of a task or a search), as `runActionsBench` scores
 /// one. A call more than expected counts as an extra action. A change or a deletion of « le dernier » refers to the item
 /// created by the call before it in the same request. Nothing is carried out, and no second pass is asked for (no
-/// second try, no summary). With `maxCalls` lower than the actions asked for, the request is right when the first ones are
-/// and the model went on to another call (the app then says how many it does at a time).
+/// second try, no summary), except for a search whose results the corpus recorded for the request (`recorded`): then, as
+/// in the app (`VoicePipeline.answerWithTools`), the calls the app carries out are (the timers, and the reminders and
+/// events on a calendar kept in memory, each with the app's sentence said at once), and the model sums up the results
+/// after what the app said (`Conversation.summingUpSteps`; --summing-note replaces the app's note, or leaves both out
+/// with "off", as before). The report counts the summaries that say such an action again (a word of its
+/// `answerWithout`) and those without what the search's `answer` wants. With `maxCalls` lower than the actions asked
+/// for, the request is right when the first ones are and the model went on to another call (the app then says how many
+/// it does at a time). --repeats runs each request that many times (the model samples its answers).
 private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, tools: [ToolSpec], dateLine: String?,
                                now: Date, timeZone: TimeZone, model: MLXChatModel, maxCalls: Int, tier: HardwareTier,
-                               modelName: String, options o: Options) async throws
+                               modelName: String, pages: BenchPageReader?, resultsNote: String?,
+                               options o: Options) async throws
 {
-    let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
     func named(_ call: ToolCall) -> ToolCall { ToolNames.read(call, among: tools.map(\.name)) }
+    func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+            .replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "’", with: "'")
+    }
     let clock = ContinuousClock()
+    /// After what the app said, the summing up is asked for by the app's note (`Conversation.summingUpNote`), or
+    /// --summing-note's; "off": as before, every result summed up with nothing said before it.
+    let summingNote = o.summingNote == "off" ? nil : o.summingNote ?? Conversation.summingUpNote
+    if let given = o.summingNote {
+        print("summing up after what the app said: " + (summingNote == nil ? "as before (--summing-note off)" : "“\(given)”"))
+    }
+    let repeats = max(1, o.repeats ?? 1)
     var results: [SeveralResult] = []
-    for (index, item) in corpus.cases.enumerated() {
+    let runs = corpus.cases.enumerated().flatMap { index, item in (1...repeats).map { (index, item, $0) } }
+    for (index, item, run) in runs {
         let expected = item.expectedList ?? item.expected.map { [$0] } ?? []
-        let request = caseRequest(item, in: conversation, corpus: corpus, dateLine: dateLine, context: reference)
+        // A case may have its own reference time (a search's results found on another day).
+        guard let now = item.now.map({ LocalDateTime.parse($0, in: timeZone)?.date }) ?? now else {
+            throw CLIError("\(item.phrase): its “now” is not a date like 2026-10-15T18:42")
+        }
+        let reference = ToolContext(now: now, timeZone: timeZone, language: .french)
+        let request = caseRequest(item, in: conversation, corpus: corpus,
+                                  dateLine: item.now == nil || dateLine == nil
+                                      ? dateLine : ActionCatalog.dateLine(now, timeZone: timeZone),
+                                  context: reference, numbered: pages != nil, note: resultsNote)
         var written: [(call: ToolCall, ms: Double)] = []
         var text = ""
         var moreCalls = false
@@ -2167,11 +2234,77 @@ private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, too
         let rightCalls = calls.prefix(carriedOut).filter { $0.toolOK && $0.argumentsOK != false }.count
         let extra = max(0, calls.count - expected.count)
         let allRight = calls.count == carriedOut && rightCalls == carriedOut && (expected.count > maxCalls) == moreCalls
-        let result = SeveralResult(phrase: item.phrase, expected: expected.map(\.tool), calls: calls, moreCalls: moreCalls,
+        var result = SeveralResult(phrase: item.phrase, expected: expected.map(\.tool), calls: calls, moreCalls: moreCalls,
                                    unreadable: unreadable, text: text, allRight: allRight, extra: extra,
                                    firstCallMs: written.first?.ms, lastCallMs: written.last?.ms)
+        if repeats > 1 { result.run = run }
+        // A search among the calls the app carries out, whose results the corpus recorded: as in the app, the other calls
+        // carried out, in order (an action's sentence said at once), and the model sums up the results.
+        let carried = written.prefix(maxCalls).map { named($0.call) }
+        if let found = corpus.recorded?[item.phrase],
+           let searchAt = carried.firstIndex(where: { $0.name == WebSearchCatalog.searchName })
+        {
+            let runner = ToolRunner(providers: [MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier)),
+                                                TimerTools()])
+            _ = await runner.tools()
+            /// As the app gives them to the model (`VoicePipeline.answerWithTools`); nil in the search's place.
+            var passResults: [JSONValue?] = []
+            /// The app's sentence for each call it said at once, by the call's place.
+            var said: [Int: String] = [:]
+            for (place, call) in carried.enumerated() {
+                guard place != searchAt else {
+                    passResults.append(nil)
+                    continue
+                }
+                let reply = await runner.handle(call, context: several ? ToolContext(now: now, timeZone: timeZone,
+                                                                                     language: .french) : context,
+                                                sameRequest: place > 0)
+                if let refusal = reply.refusal {
+                    // No second try once results from outside are in the request: the app asks its question at the end.
+                    passResults.append(["erreur": .string(refusal.forModel)])
+                } else {
+                    passResults.append(reply.forModel)
+                    if !reply.waitsForYes, !reply.modelSpeaks { said[place] = reply.spoken }
+                }
+            }
+            // The page of a result, if the model opens one, gets the user's words (`VoicePipeline`: a call while summing
+            // up is no longer one of several).
+            let full = ToolContext(now: now, timeZone: timeZone, language: .french, userSaid: [item.phrase])
+            var summing = CaseResult(phrase: item.phrase, expected: "", chosen: "", text: "", toolOK: true)
+            // The app's sentences as the history keeps them (`VoicePipeline.say`), which end the answer so far.
+            var appWords = ""
+            for place in said.keys.sorted() {
+                var chunker = SentenceChunker()
+                chunker.firstPieceMinCharacters = .max
+                (chunker.push(said[place]!) + chunker.flush()).forEach { SpeakableText.record($0, in: &appWords) }
+            }
+            if try await sumUp(carried[searchAt], results: found, after: request, alongside: (carried, passResults),
+                               said: summingNote == nil ? "" : appWords,
+                               summingNote: summingNote ?? Conversation.summingUpNote, context: full, model: model,
+                               pages: pages, note: resultsNote, into: &summing)
+            {
+                result.appSaid = said.keys.sorted().compactMap { said[$0] }
+                result.summary = summing.summary
+                result.pagesOpened = summing.pagesOpened
+                result.callsWhileSumming = (summing.callsWhileSumming ?? []) + (summing.callsWhileReading ?? [])
+                result.summedUpAgain = summing.summedUpAgain
+                result.summaryFirstMs = summing.summaryFirstMs
+                result.pageCallMs = summing.pageCallMs
+                result.pageFirstMs = summing.pageFirstMs
+                let heard = folded(summing.summary ?? "")
+                result.saysActionAgain = said.keys.contains { place in
+                    place < expected.count && (expected[place].answerWithout ?? []).contains { heard.contains(folded($0)) }
+                }
+                if searchAt < expected.count, expected[searchAt].tool == WebSearchCatalog.searchName {
+                    result.summaryOK = answers(summing, expected[searchAt])
+                }
+                // The next request starts again from the system prompt alone (see `runActionsBench`).
+                try await model.prefillBeginning(conversation.beginning)
+            }
+        }
         results.append(result)
-        print(String(format: "%3d %@ %@", index + 1, allRight ? "✓" : "✗", item.phrase))
+        print(String(format: "%3d %@ %@", index + 1, allRight ? "✓" : "✗", item.phrase)
+              + (repeats > 1 ? "  (run \(run))" : ""))
         for (place, call) in calls.enumerated() {
             let mark = call.toolOK ? (call.argumentsOK == false ? "~" : "✓") : "✗"
             print("      \(mark) \(describe(written[place].call, written: nil))" + (call.resolved.map { " = \($0)" } ?? "")
@@ -2186,6 +2319,16 @@ private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, too
         }
         if unreadable > 0 { print("      unreadable calls: \(unreadable)") }
         if !text.isEmpty { print("      said: “\(text.prefix(120))”") }
+        if let summary = result.summary {
+            for sentence in result.appSaid ?? [] { print("      app said → “\(sentence)”") }
+            let opened = result.pagesOpened.map { "  [page opened: \($0.joined(separator: ", then "))]" } ?? ""
+            let calls = (result.callsWhileSumming ?? []).isEmpty ? ""
+                : "  [calls written while summing up, not carried out: \(result.callsWhileSumming!.joined(separator: "; "))]"
+            print("      summary → “\(summary)”  \(fmt(result.summaryFirstMs))" + opened + calls
+                  + (result.summedUpAgain == true ? "  [summed up once more after a call alone]" : "")
+                  + (result.saysActionAgain == true ? "  ✗ says an action again" : "")
+                  + (result.summaryOK.map { $0 ? "  ✓ answer" : "  ✗ answer" } ?? ""))
+        }
     }
 
     print("\n=== \(modelName) — \(results.count) requests, at most \(maxCalls) action(s) carried out per request ===")
@@ -2219,6 +2362,25 @@ private func runSeveralActions(_ corpus: Corpus, conversation: Conversation, too
     let lasts = several.filter { $0.calls.count > 1 }.compactMap(\.lastCallMs)
     print("first call complete: median \(fmt(median(firsts))) · last call complete (with several): median "
           + "\(fmt(median(lasts))), worst \(fmt(lasts.max()))")
+    let summed = results.filter { $0.summary != nil }
+    if !summed.isEmpty {
+        print("searches summed up: \(summed.count) (after an action the app said: "
+              + "\(summed.filter { !($0.appSaid ?? []).isEmpty }.count)) · summaries that say an action again: "
+              + "\(summed.filter { $0.saysActionAgain == true }.count) · without the search's answer: "
+              + "\(summed.filter { $0.summaryOK == false }.count)")
+        var phrases: [String] = []
+        for phrase in summed.map(\.phrase) where !phrases.contains(phrase) { phrases.append(phrase) }
+        for phrase in phrases {
+            let group = summed.filter { $0.phrase == phrase }
+            print("    · \(phrase): says an action again \(group.filter { $0.saysActionAgain == true }.count) / "
+                  + "\(group.count), the search's answer \(group.filter { $0.summaryOK == true }.count) / "
+                  + "\(group.filter { $0.summaryOK != nil }.count), both right "
+                  + "\(group.filter { $0.saysActionAgain != true && $0.summaryOK != false }.count) / \(group.count)")
+        }
+        print("results → first words of the summary: median \(fmt(median(summed.compactMap(\.summaryFirstMs)))) · "
+              + "→ a page's complete call: median \(fmt(median(summed.compactMap(\.pageCallMs)))) · page → first words: "
+              + "median \(fmt(median(summed.compactMap(\.pageFirstMs))))")
+    }
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

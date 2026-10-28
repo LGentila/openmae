@@ -503,7 +503,44 @@ struct SeveralActionsPipelineTests {
         #expect(await log.pieces.joined(separator: " ") == noted("Pain") + " Demain, il fera beau à Paris.")
         #expect(await model.requests.count == 2)
         let summing = try #require(await model.requests.last)
-        #expect(summing.suffix(3).map(\.role) == [.assistant, .tool, .tool])
+        // After the results, what the app said (the action's sentence), then its note that asks for the rest.
+        #expect(summing.suffix(5).map(\.role) == [.assistant, .tool, .tool, .assistant, .system])
+        #expect(Array(summing.suffix(2)) == Conversation.summingUpSteps(after: noted("Pain")))
+    }
+
+    /// After the app's sentence for an action, the model sums up the search's results in a turn of its own: its answer so
+    /// far ends with what the app said, and the app's note asks for the rest (`Conversation.summingUpSteps`); the history
+    /// keeps them so, then the rest of what was said as the answer. Summing up every result of the request, the model said
+    /// the action again (« C’est parti pour 5 minutes. Je te préviens à la fin. C'est parti pour le minuteur de cinq
+    /// minutes. Pour l'action Apple, … »). A search with nothing said before it is summed up as before.
+    @Test func searchIsSummedUpAfterWhatTheAppSaid() async throws {
+        let first: [ModelOutput] = [.toolCall(note("Pain")),
+                                    .toolCall(ToolCall(name: "chercher", arguments: ["requete": "météo demain Paris"]))]
+        let summary: [ModelOutput] = [.text("Demain, il fera beau à Paris.")]
+        let alone: [ModelOutput] = [.toolCall(ToolCall(name: "chercher", arguments: ["requete": "météo dimanche Paris"]))]
+        let (model, tools, search) = (ScriptedModel(scripts: [first, summary, alone, summary, Self.thanks]),
+                                      RecordingTools(), SummedSearch())
+        let (pipeline, log) = make(model, ["Note le pain et cherche la météo de demain", "Et dimanche ?", "Merci"],
+                                   [tools, search])
+        try await pipeline.start()
+        await say(pipeline, log)
+        #expect(await log.pieces.joined(separator: " ") == noted("Pain") + " Demain, il fera beau à Paris.")
+        let summing = try #require(await model.requests.last)
+        #expect(Array(summing.suffix(2)) == [ChatMessage(.assistant, noted("Pain")),
+                                             ChatMessage(.system, Conversation.summingUpNote)])
+        await say(pipeline, log)
+        // The history: the calls, their results, what the app said, its note, then the summary as the answer.
+        let requests = await model.requests
+        #expect(requests[2].map(\.role) == [.system, .user, .assistant, .tool, .tool, .assistant, .system, .assistant,
+                                            .user])
+        #expect(requests[2][5...7].map(\.content) == [noted("Pain"), Conversation.summingUpNote,
+                                                      "Demain, il fera beau à Paris."])
+        // Nothing said before this search's summing up: its results end the request, as before.
+        #expect(requests[3].suffix(2).map(\.role) == [.assistant, .tool])
+        await say(pipeline, log)
+        let history = try #require(await model.requests.last)
+        #expect(history.suffix(4).map(\.role) == [.assistant, .tool, .assistant, .user])
+        #expect(history[history.count - 2].content == "Demain, il fera beau à Paris.")
     }
 
     /// Summing up, the model writes calls and nothing else: none is carried out, it is told so and sums up once more.

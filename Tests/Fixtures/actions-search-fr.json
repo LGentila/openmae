@@ -1,0 +1,246 @@
+{
+  "_comment": "An action and a search in one request, for voice-cli actions-bench (--corpus Tests/Fixtures/actions-search-fr.json; Gemma 4 26B on the comfort tier, which carries out three actions per request; --max-calls 3 for another model). The reference time is Tuesday 20 October 2026, 9:00 (--now 2026-10-20T09:00), as web-fr.json's case for the share's price, whose pages show Monday's close. The model gets every action tool, the delegation tools (Claude Code) and chercher_web, as in the app with all three switched on. expected: the actions asked for, in the order said, as in actions-multi-fr.json. The app carries out the action (a timer, a reminder on a calendar kept in memory) and says its sentence at once, then the model sums up the search's results: \"recorded\" holds what the search found for each request, the results of web-fr.json's « Quel est le prix de l'action Apple actuellement ? » (found on DuckDuckGo, the first engine of a SearXNG, on 20 October 2026 around 21:20, Paris time), and \"pages\" what the model reads of their pages when it opens one (from web-fr.json). On the action: answerWithout, words of what the app said that the summary must not say again (the user's try of 27 October 2026: « C’est parti pour 5 minutes. Je te préviens à la fin. C'est parti pour le minuteur de cinq minutes. Pour l'action Apple, … »), whatever the accents and case. On the search: answer, words one of which the summary must say (the share, or the site of one of the results): it sums up the search, whatever the page it opened said.",
+  "now": "2026-10-20T09:00",
+  "shortcuts": [
+    "Allumer le salon",
+    "Mode concentration",
+    "Lancer la playlist du soir"
+  ],
+  "agents": true,
+  "web": true,
+  "cases": [
+    {
+      "phrase": "Mets un minuteur de cinq minutes et cherche le cours de l'action Apple.",
+      "expected": [
+        {
+          "tool": "minuteur",
+          "seconds": 300,
+          "answerWithout": [
+            "minuteur",
+            "c'est parti",
+            "previens",
+            "compte a rebours",
+            "cinq minutes",
+            "5 minutes"
+          ]
+        },
+        {
+          "tool": "chercher_web",
+          "mentions": [
+            "apple"
+          ],
+          "answer": [
+            [
+              "apple",
+              "aapl",
+              "boursorama",
+              "investing",
+              "coin academy",
+              "coinacademy",
+              "zonebourse",
+              "abcbourse"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Cherche le cours de l'action Apple et mets un minuteur de dix minutes.",
+      "expected": [
+        {
+          "tool": "chercher_web",
+          "mentions": [
+            "apple"
+          ],
+          "answer": [
+            [
+              "apple",
+              "aapl",
+              "boursorama",
+              "investing",
+              "coin academy",
+              "coinacademy",
+              "zonebourse",
+              "abcbourse"
+            ]
+          ]
+        },
+        {
+          "tool": "minuteur",
+          "seconds": 600,
+          "answerWithout": [
+            "minuteur",
+            "c'est parti",
+            "previens",
+            "compte a rebours",
+            "dix minutes",
+            "10 minutes"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Rappelle-moi demain à 9 h d'appeler la banque et cherche le cours de l'action Apple.",
+      "expected": [
+        {
+          "tool": "creer_rappel",
+          "when": "2026-10-21T09:00",
+          "answerWithout": [
+            "rappel",
+            "c'est note",
+            "banque",
+            "demain a 9"
+          ]
+        },
+        {
+          "tool": "chercher_web",
+          "mentions": [
+            "apple"
+          ],
+          "answer": [
+            [
+              "apple",
+              "aapl",
+              "boursorama",
+              "investing",
+              "coin academy",
+              "coinacademy",
+              "zonebourse",
+              "abcbourse"
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "recorded": {
+    "Mets un minuteur de cinq minutes et cherche le cours de l'action Apple.": {
+      "found": 10,
+      "results": [
+        {
+          "title": "APPLE Cours Action AAPL, Cotation Bourse NASDAQ - Boursorama",
+          "site": "boursorama.com",
+          "url": "https://www.boursorama.com/cours/AAPL/",
+          "snippet": "Le cours de l'action APPLE AAPL sur Boursorama : historique de la cotation sur NASDAQ, graphique, actualités, consensus des analystes et informations boursières"
+        },
+        {
+          "title": "Action Apple Inc. | Cours AAPL Bourse Nasdaq - Zonebourse",
+          "site": "zonebourse.com",
+          "url": "https://www.zonebourse.com/cours/action/APPLE-INC-4849/",
+          "snippet": "Apple Inc.: Cours de bourse, graphiques, cotations, conseils boursiers, données financières, analyses et actualités en temps réel Action Apple Inc. | AAPL …"
+        },
+        {
+          "title": "Apple INC | Cours Action AAPL Bourse NASDAQ - Investing.com",
+          "site": "fr.investing.com",
+          "url": "https://fr.investing.com/equities/apple-computer-inc",
+          "snippet": "Cours de l'action Apple (AAPL) en direct, y compris prix et cotation sur NASDAQ, capitalisation boursière et actualités en temps réel de l'action APPLE INC."
+        },
+        {
+          "title": "Cours de l'action Apple Inc. en bourse",
+          "site": "abcbourse.com",
+          "url": "https://www.abcbourse.com/cotation/US0378331005u",
+          "snippet": "Consultez le cours de l'action Apple Inc. en bourse : cotation en direct à Paris, graphiques, actualités financières et données clés de la valeur."
+        },
+        {
+          "title": "Cours Action Apple Inc (AAPL) en Direct… - Coin Academy",
+          "site": "coinacademy.fr",
+          "url": "https://coinacademy.fr/bourse/actions/apple-aapl/",
+          "snippet": "Le cours de l'action Apple Inc (AAPL) est actuellement de 296,49 €. Pour bien lire Apple Inc, il faut replacer ce prix dans son environnement boursier, comprendre ce que représente l'entreprise sur le marché actions et lire les variations de cours avec davantage de recul."
+        }
+      ]
+    },
+    "Cherche le cours de l'action Apple et mets un minuteur de dix minutes.": {
+      "found": 10,
+      "results": [
+        {
+          "title": "APPLE Cours Action AAPL, Cotation Bourse NASDAQ - Boursorama",
+          "site": "boursorama.com",
+          "url": "https://www.boursorama.com/cours/AAPL/",
+          "snippet": "Le cours de l'action APPLE AAPL sur Boursorama : historique de la cotation sur NASDAQ, graphique, actualités, consensus des analystes et informations boursières"
+        },
+        {
+          "title": "Action Apple Inc. | Cours AAPL Bourse Nasdaq - Zonebourse",
+          "site": "zonebourse.com",
+          "url": "https://www.zonebourse.com/cours/action/APPLE-INC-4849/",
+          "snippet": "Apple Inc.: Cours de bourse, graphiques, cotations, conseils boursiers, données financières, analyses et actualités en temps réel Action Apple Inc. | AAPL …"
+        },
+        {
+          "title": "Apple INC | Cours Action AAPL Bourse NASDAQ - Investing.com",
+          "site": "fr.investing.com",
+          "url": "https://fr.investing.com/equities/apple-computer-inc",
+          "snippet": "Cours de l'action Apple (AAPL) en direct, y compris prix et cotation sur NASDAQ, capitalisation boursière et actualités en temps réel de l'action APPLE INC."
+        },
+        {
+          "title": "Cours de l'action Apple Inc. en bourse",
+          "site": "abcbourse.com",
+          "url": "https://www.abcbourse.com/cotation/US0378331005u",
+          "snippet": "Consultez le cours de l'action Apple Inc. en bourse : cotation en direct à Paris, graphiques, actualités financières et données clés de la valeur."
+        },
+        {
+          "title": "Cours Action Apple Inc (AAPL) en Direct… - Coin Academy",
+          "site": "coinacademy.fr",
+          "url": "https://coinacademy.fr/bourse/actions/apple-aapl/",
+          "snippet": "Le cours de l'action Apple Inc (AAPL) est actuellement de 296,49 €. Pour bien lire Apple Inc, il faut replacer ce prix dans son environnement boursier, comprendre ce que représente l'entreprise sur le marché actions et lire les variations de cours avec davantage de recul."
+        }
+      ]
+    },
+    "Rappelle-moi demain à 9 h d'appeler la banque et cherche le cours de l'action Apple.": {
+      "found": 10,
+      "results": [
+        {
+          "title": "APPLE Cours Action AAPL, Cotation Bourse NASDAQ - Boursorama",
+          "site": "boursorama.com",
+          "url": "https://www.boursorama.com/cours/AAPL/",
+          "snippet": "Le cours de l'action APPLE AAPL sur Boursorama : historique de la cotation sur NASDAQ, graphique, actualités, consensus des analystes et informations boursières"
+        },
+        {
+          "title": "Action Apple Inc. | Cours AAPL Bourse Nasdaq - Zonebourse",
+          "site": "zonebourse.com",
+          "url": "https://www.zonebourse.com/cours/action/APPLE-INC-4849/",
+          "snippet": "Apple Inc.: Cours de bourse, graphiques, cotations, conseils boursiers, données financières, analyses et actualités en temps réel Action Apple Inc. | AAPL …"
+        },
+        {
+          "title": "Apple INC | Cours Action AAPL Bourse NASDAQ - Investing.com",
+          "site": "fr.investing.com",
+          "url": "https://fr.investing.com/equities/apple-computer-inc",
+          "snippet": "Cours de l'action Apple (AAPL) en direct, y compris prix et cotation sur NASDAQ, capitalisation boursière et actualités en temps réel de l'action APPLE INC."
+        },
+        {
+          "title": "Cours de l'action Apple Inc. en bourse",
+          "site": "abcbourse.com",
+          "url": "https://www.abcbourse.com/cotation/US0378331005u",
+          "snippet": "Consultez le cours de l'action Apple Inc. en bourse : cotation en direct à Paris, graphiques, actualités financières et données clés de la valeur."
+        },
+        {
+          "title": "Cours Action Apple Inc (AAPL) en Direct… - Coin Academy",
+          "site": "coinacademy.fr",
+          "url": "https://coinacademy.fr/bourse/actions/apple-aapl/",
+          "snippet": "Le cours de l'action Apple Inc (AAPL) est actuellement de 296,49 €. Pour bien lire Apple Inc, il faut replacer ce prix dans son environnement boursier, comprendre ce que représente l'entreprise sur le marché actions et lire les variations de cours avec davantage de recul."
+        }
+      ]
+    }
+  },
+  "pages": {
+    "https://www.boursorama.com/cours/AAPL/": {
+      "site": "boursorama.com",
+      "title": "APPLE Cours Action AAPL, Cotation Bourse NASDAQ - Boursorama",
+      "text": "Cours APPLE NASDAQ\n342,9400 (c) USD\n-0,15%\nvaleur indicative 305,4910 EUR\nUS0378331005 AAPL\ndonnées temps différé\nPolitique d'exécution\nsecteur (niv. 2)\nMatériel informatique\nouverture\n341,0900\nclôture veille\n343,4600\n+ haut\n346,0000\n+ bas\n340,1150\nvolume\n0\ncapital échangé\n0,00%\nvalorisation\n5 004 935 MUSD\ncapi. boursière\n5 054 593 MUSD\nlimite à la baisse\n165,2400\nlimite à la hausse\n0,0000\nrendement estimé 2026\n0,31%\nPER estimé 2026\n38,64\ndernier échange\n19/10/2026 22:00:00\nÉligibilité\nRisque ESG\n16,6/100 (faible)\n+ Portefeuille\nConnectez-vous pour ajouter APPLE à vos portefeuilles virtuels.\nNouveau sur Boursorama ? Devenez membre gratuitement\n+ Liste\nConnectez-vous pour ajouter APPLE à vos listes.\nNouveau sur Boursorama ? Devenez membre gratuitement\nCarnet d'ordres\nordres\nquantité qté\nachat\nvente\nquantité qté\n[…]\nEstim. 2027\nDividende\npar action | 1,02 USD | 1,07 USD | 1,11 USD\nRendement | 0,30% | 0,32% | 0,33%\nBénéfice net par action | 7,46 USD | 8,85 USD | 9,59 USD\nPER | 45,13 | 38,04 | 35,10\nCopyright © 2026 FactSet Research Systems Inc. All rights reserved.\névènements\nPas d'évènement en cours\nVoir l'agenda complet\nDerniers communiqués\nCette société n'est pas adhérente au service de diffusion des communiqués de presse sur Boursorama.\n[…]\nDernières actualités\nlun.\nApple pourrait dévoiler un MacBook Pro tactile le 28 octobre\nZonebourse\nlun.\nApple organisera un événement « Pro and tell » le 28 octobre à Los Angeles\nReuters\nlun.\nAlibaba indique que le stock initial d'iPhone Duo s'est écoulé presque immédiatement\nReuters\nven.\nApple mise sur l'iPhone Duo à 1 999 dollars pour soutenir sa croissance grâce au haut de gamme\nZonebourse\njeu.\nApple et Meta s'allient pour exécuter le modèle d'IA Muse Spark Open sur les Mac Studio\nZonebourse\njeu.\nTim Cook affirme qu'Apple Intelligence a été approuvé en Chine, selon The Paper\nReuters\njeu.\nPuces pour l'IA: TSMC enregistre un nouveau bond des ventes et du bénéfice net trimestriels\nAFP\njeu.\nLe bénéfice de TSMC au troisième trimestre bondit de 69 % pour atteindre un niveau record, dépassant les prévisions\nReuters\njeu.\nUn employé d'OpenAI parti chez Apple aurait emporté des fichiers concernant un appareil non encore commercialisé, selon OpenAI\nReuters\njeu.\n[…]\nReuters\nToutes les actualités à propos de APPLE\nLa valeur vue par l'IA\n[…]\nDernières analyses\nlun.\nMelius prévoit une nouvelle hausse du cours de l'action Apple avant la publication des résultats\nReuters\n09 oct.\nLe titre Apple recule suite à des informations faisant état d'une réduction de la production d'iPhone\nReuters\n17 sept.\nApple se plie en quatre pour les « applemaniaques » avec l'iPhone Duo\nInvestir\n[…]\n0 j'aime\nBonne et heureuse année 2026 les AppleAdicts\nSoyez sages et patients …. cette année on va vivre une augmentation du dividende et beaucoup de rachats d'actions ! Pour cela je vous donne RDV a 300$ ! ☺\npar 01 janv.04:13\n6 mai 2026\n2 commentaires\n2 j'aime\nNasdaq et Dow Jones\nLe cours du Nasdaq a dépassé la moitié du cours du Dow Jones\npar 29 avr.11:03\n[…]\nMoral decisions on markets\nBonjour,\nÉtant européen et avec les nombreuses attaques verbales (et potentiellement militaire à court terme) contre notre territoire, je réfléchis à vendre toutes mes actions US. Pas pour gagn …\npar 20 janv.07:32\n4 mars 2026\n3 commentaires\n1 j'aime\nles plus hauts touchés\nles mauvaises langues …. disparues\ncomme toujours …sans laisser de traces\n[…]\nLe présent consensus est fourni par la société FactSet Research Systems Inc et résulte par nature d'une diffusion de plusieurs opinions d'analystes. Il est rappelé qu'en aucune manière BOURSORAMA n'a participé à son élaboration, ni exercé un pouvoir discrétionnaire quant à la sélection des analystes financiers.\nA toutes fins utiles, les opinions de chaque analyste financier ayant participé à la création de ce consensus sont disponibles et accessibles via les bureaux d'analystes.\nActions les plus recherchées *\nAxa\nAir France-KLM\nEssilor Luxxotica\nMichelin\nSchneider Electric\nCellectis\nDanone\n[…]"
+    },
+    "https://fr.finance.yahoo.com/quote/AAPL/": {
+      "site": "fr.finance.yahoo.com",
+      "title": "Cours, actualités, cotation et historique des capital-actions Apple Inc. (AAPL) - Yahoo Finance",
+      "text": "AAPL\nApple Inc.\n343,30 +0,10 %\nNasdaqGS - BOATS Real Time Price USD\nApple Inc. (AAPL)\n342,94 -0,52 (-0,15 %)\nÀ la clôture : 19 octobre à 16:00:01 UTC−4\n343,30 +0,36 (+0,10 %)\nNuit : 22:38:31 UTC−4\nChart Range Bar\nPrincipaux événements\nGraphique avancé\nChargement du graphique de AAPL\nLe graphique ne reflète pas le cours de la nuit.\nDernière clôture 343,46\nOuverture 340,98\nOffre à l’achat 340,00 x 500\nDemande 343,78 x 300\nVar. jour 340,11 - 346,00\nVar. année 243,42 - 348,15\nVolume 34 524 344\nVolume moyen 44 451 085\nCap. boursière (intrajournalière) 5,005Bil.\nBêta (mensuel sur 5 ans) 1,07\nRatio cours/bénéfices (sur 12 mois) 39,33\nBPA (sur 12 mois) 8,72\nDate de bénéfices 2 nov. 2026\nDividende et rendement 1,08 (0,31 %)\nDate ex-dividende 10 août 2026\nObjectif sur 1 an 329,38\nApple Inc. designs, manufactures, and markets smartphones, personal computers, tablets, wearables, and accessories worldwide. The company offers iPhone, a line of smartphones; Mac, a line of personal computers; iPad, a line of multi-purpose tablets; and wearables, home, and accessories comprising AirPods, Apple Vision Pro, Apple TV, Apple Watch, Beats products, and HomePod, as well as Apple branded and third-party accessories.\nIt also provides AppleCare support and cloud services; and operates various platforms, including the App Store that allows customers to discover and download applications and digital content, such as books, music, video, games, and podcasts, as well as advertising services include third-party licensing arrangements and its own advertising platforms.\nIn addition, the company offers various subscription-based services, such as Apple Arcade, a game subscription service; Apple Fitness+, a personalized fitness service; Apple Music, which offers users a curated listening experience with on-demand radio stations; Apple News+, a subscription news and magazine service; Apple TV, which offers original content and live sports; Apple Card, a co-branded credit card; and Apple Pay, a cashless payment service, as well as licenses its intellectual property.\nThe company serves consumers, and small and mid-sized businesses; and the education, enterprise, and government markets. It distributes third-party applications for its products through the App Store. The company also sells its products through its retail and online stores, and direct sales force; and third-party cellular network carriers and resellers.\nThe company was formerly known as Apple Computer, Inc. and changed its name to Apple Inc. in January 2007. Apple Inc. was founded in 1976 and is headquartered in Cupertino, California.\nwww.apple.com\n150 000\nEmployés à temps plein\n27 septembre\nFin de l’exercice financier\nTechnology\nSecteur\nConsumer Electronics\n[…]\nDerniers articles\nAfficher davantage\nLe rallye d’Apple vers 5.000 milliards $ que \"personne n’aimait\" : Melius\nStarlink Mobile pourrait-il nuire aux ventes d’iPhone d’Apple ?\nPuces pour l'IA: TSMC enregistre un nouveau bond des ventes et du bénéfice net trimestriels\nApple lancera sa plateforme d’IA en Chine en décembre\nApple s'allie au Français Schneider Electric pour s'attaquer à la maison connectée, de la serrure au thermostat\nBourse : SpaceX «brûle du cash à la vitesse de la lumière mais Starlink Mobile fait trembler les opérateurs !»\nLes livraisons mondiales de smartphones chutent de 20% au troisième trimestre\n[…]\nTendances des bénéfices\nAfficher davantage\nRésultat par action\ngaap Principes comptables généralement admis\nnongaap Normalisé\ngaap Principes comptables généralement admis\nnongaap Normalisé\nChiffre d’affaires/ bénéfices\nyearly Annuel\nquarterly Trimestriel\n[…]\nDate 12/10/2026\nAnalyste JP Morgan\nAction de recommandation Conserve\nÉvaluation Overweight\nAction sur le cours Augmente\nCours cible 340 -> 360\nStatistiques\nAfficher davantage\nMesures d’évaluation\nÀ partir du 17/09/2026\nCap. boursière\n4.92T\n[…]\n107,72Mds\nComparer\nSélectionnez cette option pour analyser des sociétés comparables en utilisant des indicateurs de performances clés ; sélectionnez jusqu'à 4 actions.\nAAPL\nApple Inc.\n342,94\n-0,15 %\nCap. boursière 5,005Bil.\nSecteur d’activité Consumer Electronics\n005930.KS\n[…]"
+    },
+    "https://www.abcbourse.com/cotation/AAPLu": {
+      "site": "abcbourse.com",
+      "title": "Apple Inc. : cours de l'action et cotation en bourse en direct | ABC Bourse",
+      "text": "Accueil / Marchés Boursiers /\nCours de l'action Apple Inc. en bourse\nApple Inc.\nWall street ouvre dans 10h AAPL\n342,99 $ | -0,13%\n19/10/2026 - 21:59:59\nVolume | 1 151 860\nOuverture | 340,775\nPlus haut | 346,00\nPlus bas | 340,13\nClôture veille | 343,425\nVolatilité | 1,72%\nCapital échangé | 0,01%\nValorisation | 5 005 658 M$\nSRD / PEA | Non / Non\nTTF | Non\nCac 40 | 7 868,05 -1,11%\nAltaprofits Vie : Jusqu'à 1 000€ offerts · Offre limitée\nVoir l'offre →\nDernières transactions\nHeure | Quantité | Cours\nActualités Apple Inc.\n31/08/26 | John Ternus prend la tête d'Apple le 1er septembre après 15 ans de …\n30/07/26 | Apple sanctionné par Wall Street malgré un T3 record et une forte c…\n17/07/26 | Talonné par Apple, Nvidia conserve de justesse sa place de première…\n17/07/26 | Apple et Nvidia au coude-à-coude pour le titre de première capitali…\n30/01/26 | Apple pulvérise les prévisions de Wall Street grâce à l'iPhone 17 e…\n30/06/25 | Le Canada supprime sa taxe numérique ciblant Google, Meta et Amazon…\n02/05/25 | Apple confrontée à un surcoût douanier de 900 millions de dollars d…\n31/03/25 | Apple écope de 150 millions d'euros d'amende pour pratiques publici…\n10/09/24 | Rabais fiscaux/UE: Apple prévoit une charge de 10 milliards de doll…\n10/09/24 | Victoire en justice de l'UE dans deux dossiers clé contre Apple et …\n1\n2\n3\n4\n5\nApple Inc. : ses variations historiques\nPlus haut | Plus bas | Volume moyen | Variation\n1 semaine | 348,1499 | 340,115 | 44 559 743 | 0,59%\n1 mois | 348,1499 | 325,81 | 36 497 244 | 2,04%\n1er janvier | 348,1499 | 243,42 | 46 714 470 | 26,16%\n1 an | 348,1499 | 243,42 | 46 595 871 | 34,04%\n3 ans | 348,1499 | 164,08 | 52 393 737 | 95,65%\n5 ans | 348,1499 | 124,17 | 62 140 612 | 130,66%\n[…]\nExtrêmes | 348,1499 | 0,1139\nDividendes versés par\nApple Inc.\nAnnée | Montant\n2026 | 0,80 $\n2025 | 1,03 $\n2024 | 0,99 $\n2023 | 0,95 $\n2022 | 0,91 $\nLes ratios financiers de\nApple Inc.\n2025 | 2026e | 2027e\nBNPA ($) | 7,67 | - | -\nPER | 44,69 | - | -\nNote de qualité financière :\n12/20\nAgenda des résultats et événements financiers Apple Inc.\nRetrouvez le calendrier financier de Apple Inc. avec l’ensemble des événements importants pour les investisseurs : publications de résultats, versements de dividendes, assemblées générales et autres annonces financières passées ou à venir.\nFiltrer :\nDate | Evénement | Commentaires\n10/08/2026 | Détachement du dividende | Montant : 0,27$\n30/07/2026 | Résultats du 1er semestre\n11/05/2026 | Détachement du dividende | Montant : 0,27$\n30/04/2026 | Résultats du 1er trimestre\n29/04/2026 | Résultats du 1er trimestre\n[…]\n10/02/2025 | Détachement du dividende | Montant : 0,25$\n30/01/2025 | Résultats annuels\nCours historiques Apple Inc.\nTélécharger\nAccédez à l’historique des cotations de Apple Inc. et téléchargez les cours de bourse sur différentes périodes.\nAvec ABC Bourse Premium, consultez et téléchargez jusqu’à 25 ans d’historique.\nPériode\nHistorique\nDu\nAu\nDate | Ouverture | Plus Haut | Plus Bas | Volume | Dernier | Variation\n19/10/2026 | 340,775 | 346,00 | 340,13 | 1 151 860 | 342,99 | -0,14%\n[…]\nPlus bas : 309,90 $\nMoyenne : 335,061 $\nQuestions fréquentes sur Apple Inc.\nQue fait Apple Inc. ?\nApple conçoit et vend des appareils électroniques, des logiciels et des services numériques, notamment l’iPhone, le Mac, l’iPad et les AirPods.\nQuelles sont les principales sources de revenus de Apple Inc. ?\n[…]\nDans quels pays Apple Inc. est présente ?\n[…]\nQuelle est la capitalisation de Apple Inc. ?\nApple Inc. est valorisé 5 005 658 millions $\nQuel est le cours de l'action Apple Inc. ?\nLe cours de Apple Inc. est 342,99 $ aujourd'hui\nSur quelle bourse Apple Inc. est-elle cotée ?\nApple Inc. est cotée sur la bourse de New York\nApple Inc. est-elle assujetie à la taxe sur les transactions financières ?\nLa taxe sur les transactions financières (TTF) ne s'applique pas pour Apple Inc.\nPeut on acheter Apple Inc. dans un PEA ?\nL'action Apple Inc. ne peut pas être achetée dans un PEA\nLes cours de bourse en direct pour Euronext. Autres places décalées de 15 minutes.\ndiiv3NgJ-8whfm4qJ6ufwQmdlMdCoeWJ2qvY5Jn5uZceVZTP7Ce0fNfoJ-g-R2gK",
+      "published": "2026-10-19T21:59:59Z"
+    },
+    "https://fr.investing.com/equities/apple-computer-inc": {
+      "site": "fr.investing.com",
+      "title": "Apple INC | Cours Action AAPL Bourse NASDAQ - Investing.com",
+      "text": "Le directeur financier d’Apple, Kevan Parekh, cède des actions pour 480.315$\nInvesting.com\nIl y a 3 heures\nLe rallye d’Apple vers 5.000 milliards $ que \"personne n’aimait\" : Melius\nInvesting.com\nIl y a 13 heures\nLe directeur comptable d’Apple, Ben Borders, cède des actions pour 442.000$\nInvesting.com\nIl y a 3 heures\nL'action Apple Computer Inc voit sa notation mise à jour par un analyste\nPro\nInvesting.com\nIl y a 14 heures\nApple Computer Inc fait l'objet d'une mise à jour de la recommandation d'un analyste de banque d'investissement\nPro\nInvesting.com\nIl y a 14 heures\nNYSE American lance des heures de trading d’options étendues\nInvesting.com\nIl y a 14 heures\nCBOE lance des sessions Pré-ouverture et post-marché pour les options sur actions et ETF\nInvesting.com\nIl y a 12 heures\nNYSE American Options lance des heures de trading étendues\nPro\nInvesting.com\nIl y a 14 heures\nKeyBanc maintient sa note Underweight sur Apple en raison de craintes sur les mises à niveau\nInvesting.com\nIl y a 13 heures\nUn analyste signale une demande \"croissante\" en faiblesse pour l’iPhone 18\nInvesting.com\nIl y a 14 heures\nLe directeur financier d’Apple, Kevan Parekh, cède des actions pour 480.315$\nInvesting.com\nIl y a 3 heures\nLe directeur comptable d’Apple, Ben Borders, cède des actions pour 442.000$\nInvesting.com\nIl y a 3 heures\nApple Computer Inc fait l'objet d'une mise à jour de la recommandation d'un analyste de banque d'investissement\nPro\nInvesting.com\nIl y a 14 heures\nCBOE lance des sessions Pré-ouverture et post-marché pour les options sur actions et ETF\nInvesting.com\nIl y a 12 heures\nKeyBanc maintient sa note Underweight sur Apple en raison de craintes sur les mises à niveau\nInvesting.com\nIl y a 13 heures\nLe rallye d’Apple vers 5.000 milliards $ que \"personne n’aimait\" : Melius\nInvesting.com\nIl y a 13 heures\nL'action Apple Computer Inc voit sa notation mise à jour par un analyste\nPro\nInvesting.com\nIl y a 14 heures\nNYSE American lance des heures de trading d’options étendues\nInvesting.com\nIl y a 14 heures\nNYSE American Options lance des heures de trading étendues\nPro\nInvesting.com\nIl y a 14 heures\nUn analyste signale une demande \"croissante\" en faiblesse pour l’iPhone 18\nInvesting.com\nIl y a 14 heures"
+    }
+  }
+}

@@ -212,6 +212,8 @@ private actor CacheCheck {
         var request = conversation.messages(adding: user)
         var steps: [ChatMessage] = []
         var answer = ""
+        /// What `steps` already hold of the answer (`Conversation.summingUpSteps`).
+        var answerInSteps = ""
         var filter = ReasoningFilter()
         var chunker = SentenceChunker()
         func send(_ piece: SentenceChunker.Piece) {
@@ -262,6 +264,11 @@ private actor CacheCheck {
             }
             if summarize != nil, !secondTry {
                 summing = true
+                // As the app: what was said so far ends the answer, and the app's note asks for the rest.
+                if !answer.isEmpty {
+                    steps += Conversation.summingUpSteps(after: answer)
+                    answerInSteps = answer
+                }
                 request = conversation.messages(adding: user) + steps
                 continue
             }
@@ -270,7 +277,10 @@ private actor CacheCheck {
         chunker.remainingPieces().forEach(send)
         if askedForMore { SpeakableText.record(ActionPhrases.atMost(maxCalls, .french), in: &answer) }
         if record {
-            conversation.record(user: user, steps: steps, assistant: answer, interrupted: interrupted)
+            // As the app: the steps already hold what was said before the summing up.
+            let recorded = answerInSteps.isEmpty || !answer.hasPrefix(answerInSteps) ? answer
+                : String(answer.dropFirst(answerInSteps.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            conversation.record(user: user, steps: steps, assistant: recorded, interrupted: interrupted)
             if catchingUp { await catchUp(userSpeaks: interrupted) }
         }
     }

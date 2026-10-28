@@ -208,6 +208,10 @@ struct Options {
     var agentsAddendum: String?
     /// actions-bench: the note the model reads first in a search's results, read from this file.
     var resultsNote: String?
+    /// actions-bench, with an action and a search in one request: the note that asks for the summary after what the app
+    /// already said (`Conversation.summingUpNote`), this text instead; "off": none, the summing up as before the app had
+    /// it (every result of the request, nothing said before it).
+    var summingNote: String?
     var examples: String?
     var web = false
     /// dialogue-bench: Claude Code's tools offered too (cache-check reads its own --agents).
@@ -332,6 +336,7 @@ struct Options {
             case "--web-addendum": o.webAddendum = it.next()
             case "--agents-addendum": o.agentsAddendum = it.next()
             case "--results-note": o.resultsNote = it.next()
+            case "--summing-note": o.summingNote = it.next()
             case "--examples": o.examples = it.next()
             case "--web": o.web = true
             case "--agents": o.agents = true
@@ -915,6 +920,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                voice-cli actions-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                        [--web] [--searxng <address> [--searxng-user name]] [--record file.json]
                                        [--no-actions] [--addendum file] [--web-addendum file] [--results-note file]
+                                       [--summing-note off|text] [--repeats 1]
                                        [--agents-addendum file] [--sources] [--live-sources]
                                        [--record-sources file.json] [--news] [--news-addendum file]
                                        [--pages on|off] [--live-pages] [--record-pages file.json]

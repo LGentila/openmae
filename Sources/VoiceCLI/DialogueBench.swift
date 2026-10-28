@@ -383,6 +383,8 @@ private struct Talk {
         var result = TurnResult(user: text, passes: [], answer: "", goalReached: false)
         var answer = ""
         var steps: [ChatMessage] = []
+        /// What `steps` already hold of the answer (`Conversation.summingUpSteps`).
+        var answerInSteps = ""
         /// The app's own sentences, one at a time (`VoicePipeline.say`).
         func say(_ sentence: String) {
             var chunker = SentenceChunker()
@@ -580,6 +582,11 @@ private struct Talk {
                 }
                 if !toSum.isEmpty, !calls.isEmpty {
                     kind = .summing
+                    // As the app: what was said so far ends the answer, and the app's note asks for the rest.
+                    if !answer.isEmpty {
+                        steps += Conversation.summingUpSteps(after: answer)
+                        answerInSteps = answer
+                    }
                     request = conversation.messages(adding: message) + steps
                     continue
                 }
@@ -591,7 +598,10 @@ private struct Talk {
             if askedForMore { say(ActionPhrases.atMost(maxCalls, .french)) }
         }
         result.answer = answer
-        conversation.record(user: message, steps: steps, assistant: answer, interrupted: false)
+        // As the app (`VoicePipeline.Turn.answerAfterSteps`): the steps already hold what was said before the summing up.
+        let recorded = answerInSteps.isEmpty || !answer.hasPrefix(answerInSteps) ? answer
+            : String(answer.dropFirst(answerInSteps.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        conversation.record(user: message, steps: steps, assistant: recorded, interrupted: false)
         await model.catchUp(with: conversation.messages)
         return result
     }

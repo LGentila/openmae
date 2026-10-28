@@ -172,6 +172,17 @@ took. One page, read as the app reads it (the passages it gives the model around
 .build/xcode/Build/Products/Release/voice-cli read-page https://www.boursorama.com/cours/AAPL/ --words "prix action Apple"
 ```
 
+An action and a search in one request (Gemma 4 26B, the tier that carries out several actions at once; `--max-calls 3`
+for another model): the app carries out the action and says its sentence (a timer; a reminder on a calendar kept in
+memory), then the model sums up the results the corpus recorded, as in the app: its answer so far ends with the app's
+sentence, and a note from the app asks for the rest. The report counts the summaries that say the action again and
+those without the search's answer; `--repeats 10` runs each request ten times, `--summing-note off` sums up as before
+(every result of the request, with nothing said before), and `--summing-note "…"` tries another wording of the note:
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/actions-search-fr.json --repeats 10
+```
+
 `--compare-beginnings` generates nothing: it computes the beginning of the conversations (the system prompt with its
 tools) as the app does (in float32, then rounded: the same state at load and after a tools change), then in bfloat16 as
 it was computed before and with every weight in float32 as a reference, compares the model's memory after each, and

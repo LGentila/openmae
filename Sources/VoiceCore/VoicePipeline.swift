@@ -370,14 +370,18 @@ public actor VoicePipeline {
         var language: SpeechLanguage
         var pieces: [SpokenPiece]
         var from: Int
+        /// The first pieces, which the steps already hold (`Turn.piecesInSteps`).
+        var inSteps = 0
 
         /// What is said again: the pieces from the cut on, without the phrase said while the model wrote a tool call
         /// (the tool's result is known by then).
         var rest: [SpokenPiece] { pieces[from...].filter(\.inHistory) }
         /// What was heard of the answer: the pieces before the cut.
         var heard: String { SpokenPiece.answer(pieces[..<from]) }
-        /// The answer as the model wrote it, to its end.
-        var written: String { SpokenPiece.answer(pieces) }
+        /// The answer as the model wrote it, to its end, after what the steps already hold.
+        var written: String { SpokenPiece.answer(pieces[min(inSteps, pieces.count)...]) }
+        /// What the steps already hold of the answer (`Turn.answerInSteps`).
+        var inStepsText: String { SpokenPiece.answer(pieces[..<min(inSteps, pieces.count)]) }
         /// How it ended for the history: cut by the drop, after the last piece heard (`SpokenPiece.lastHeard`).
         var dropped: Conversation.Ending { .dropped(lastHeard: SpokenPiece.lastHeard(in: pieces[..<from])) }
     }
@@ -441,6 +445,16 @@ public actor VoicePipeline {
         var userMessage: ChatMessage?
         /// Tool calls and their results, between the user's message and the answer, for the history.
         var steps: [ChatMessage] = []
+        /// What the steps already hold of the answer (`Conversation.summingUpSteps`): what was said before the model sums
+        /// up what came from outside (the app's sentences), as `answer` and as many `pieces`. The history keeps the rest
+        /// as the answer (`answerAfterSteps`).
+        var answerInSteps = ""
+        var piecesInSteps = 0
+        /// The answer as the history keeps it after the steps: `answer` without what they already hold.
+        var answerAfterSteps: String {
+            guard !answerInSteps.isEmpty, answer.hasPrefix(answerInSteps) else { return answer }
+            return String(answer.dropFirst(answerInSteps.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         /// What the app says on its own in this turn (`announce`); nil in the user's turns.
         var announcement: Announcement?
         var isAnnouncement: Bool { announcement != nil }
@@ -1584,7 +1598,8 @@ public actor VoicePipeline {
     /// already obtained, and only those calls carried out from it; opening with a call when each refusal says which call
     /// to write, `ToolRefusal.secondTryIsACall`); one pass where it sums up every result that came from outside (no call
     /// carried out then, but the one call such a result allows: the page of one of a search's results, which it then sums
-    /// up in turn, `ToolOutcome.callsWhileSumming` such calls at most in the turn); the app's questions about the refused
+    /// up in turn, `ToolOutcome.callsWhileSumming` such calls at most in the turn), after what the app already said in the
+    /// turn, which ends the model's answer so far (`Conversation.summingUpSteps`); the app's questions about the refused
     /// calls; the one question for the sensitive calls, which wait together for the user's "oui"; and, when the model
     /// asked for more calls than the app carries out at once, how many it does (`ActionPhrases.atMost`), once. A first
     /// answer with neither a word nor a call is asked for once more; with nothing again, the app says it did not
@@ -1892,6 +1907,14 @@ public actor VoicePipeline {
                 pass = .summing
                 // A call it may still write gets its own waiting phrase (opening a page adds a few seconds).
                 if toSum.contains(where: { !$0.allows.isEmpty }) { fillerSaid = false }
+                if !turn.answer.isEmpty {
+                    // What was said so far (the app's sentences: an action's, said at once) ends the model's answer, and
+                    // the app's note asks for the rest (`Conversation.summingUpSteps`): summing up every result of the
+                    // request, the model said the action again (« C'est parti pour le minuteur de cinq minutes. »).
+                    turn.steps += Conversation.summingUpSteps(after: turn.answer)
+                    turn.answerInSteps = turn.answer
+                    turn.piecesInSteps = turn.pieces.count
+                }
                 request = conversation.messages(adding: turn.userMessage!) + turn.steps
                 continue
             }
@@ -2145,7 +2168,8 @@ public actor VoicePipeline {
             waiting = .repeatRequest
         } else if let message = turn.userMessage, !turn.userText.isEmpty {
             let resume = Resume(userText: turn.userText, userMessage: message, steps: turn.steps,
-                                language: turn.language, pieces: turn.pieces, from: cut.from)
+                                language: turn.language, pieces: turn.pieces, from: cut.from,
+                                inSteps: turn.piecesInSteps)
             if !resume.rest.isEmpty { waiting = .answer(resume) }
         }
         guard let waiting else {
@@ -2243,6 +2267,8 @@ public actor VoicePipeline {
             turn.pieces = Array(resume.pieces[..<resume.from])
             turn.firstVoiced = resume.from
             turn.answer = resume.heard
+            turn.answerInSteps = resume.inStepsText
+            turn.piecesInSteps = resume.inSteps
         }
         self.turn = turn
         commit(turn)
@@ -2460,7 +2486,7 @@ public actor VoicePipeline {
         self.turn = nil
         var recorded = false
         if let metrics, let message = turn.userMessage {
-            conversation.record(user: message, steps: turn.steps, assistant: turn.answer, interrupted: false)
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answerAfterSteps, interrupted: false)
             if !turn.isAnnouncement, !turn.isSilent {
                 journalExchange(user: turn.userText, answer: turn.answer, language: metrics.language, interrupted: false,
                                 steps: turn.steps)
@@ -2560,7 +2586,7 @@ public actor VoicePipeline {
             // An answer cut by a drop before: as the model wrote it so far, and the note says how far the device heard it
             // (`recordHeard`).
             let lastHeard = turn.cut.map { SpokenPiece.lastHeard(in: turn.pieces[..<$0.from]) }
-            conversation.record(user: message, steps: turn.steps, assistant: turn.answer,
+            conversation.record(user: message, steps: turn.steps, assistant: turn.answerAfterSteps,
                                 ending: lastHeard.map { .dropped(lastHeard: $0) } ?? .cutOff)
             journalExchange(user: turn.userText, answer: turn.answerHeard, language: turn.language, interrupted: true,
                             steps: turn.steps)

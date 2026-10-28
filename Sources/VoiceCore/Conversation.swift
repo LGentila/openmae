@@ -79,6 +79,30 @@ public struct Conversation: Sendable {
     /// How every `dropNote` begins.
     static let dropNotePrefix = "(La liaison avec l'appareil a coupé"
 
+    /// What the app tells the model, as a message of its own, before it sums up what came from outside (a search's
+    /// results, an agent's report) when the app already said something in the turn (an action's sentence, said at once):
+    /// the model's answer so far ends with what the app said, as the user heard it, then this note asks for the rest, in
+    /// a turn of its own (`summingUpSteps`).
+    ///
+    /// Without them, the model summed up every result of the request, the action's too, which the user had heard already:
+    /// « C’est parti pour 5 minutes. Je te préviens à la fin. C'est parti pour le minuteur de cinq minutes. Pour l'action
+    /// Apple, … » (Gemma 4 26B, 8 and 10 summaries in 10 in voice-cli actions-bench with
+    /// Tests/Fixtures/actions-search-fr.json). A note in the action's result saying that it had been said, with or
+    /// without the sentence, or in the search's results, or a rule in the system prompt: still 3 to 6 summaries in 5 to
+    /// 8. The model's answer going on after the app's sentence (that sentence as the start of its answer): never said
+    /// again, but half the summaries were then empty or only « Je cherche le cours de l'action Apple. ». Asked to « dis-lui
+    /// maintenant ce que tu as trouvé », it answered at once from the snippets, opening a page 2 times in 8. With this
+    /// note: 0 summaries in 30 (the corpus's three requests, ten times each: a timer before or after the search, a
+    /// reminder), each one the search's, a page opened as often as before.
+    public static let summingUpNote = "(L'utilisateur a entendu ta réponse ci-dessus. Continue avec le reste de sa demande.)"
+
+    /// What goes into the history before the model sums up what came from outside, after `said`, what the app already
+    /// said in the turn: the answer so far, that sentence, which the template ends there, then `summingUpNote`, as the
+    /// app's message. The answer the history keeps after them is the rest of what was said.
+    public static func summingUpSteps(after said: String) -> [ChatMessage] {
+        [ChatMessage(.assistant, said), ChatMessage(.system, summingUpNote)]
+    }
+
     /// A piece of an answer on one line, without the white space around it.
     private static func quoted(_ piece: String) -> String {
         piece.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
