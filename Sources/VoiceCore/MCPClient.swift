@@ -11,7 +11,8 @@ public enum MCPError: Error, Sendable, Codable, Equatable {
     case unreachable
     /// It did not answer in time.
     case noAnswer
-    /// 401 or 403: the token is wrong or was revoked, or the account may not connect.
+    /// 401 or 403: the token is wrong or was revoked, the account's could not be refreshed, or the account may not
+    /// connect.
     case unauthorized
     /// Something answered, but not an MCP server (a web page, a 404…): what it was.
     case notMCP(String)
@@ -56,13 +57,14 @@ public struct MCPCallResult: Sendable, Equatable {
 
 /// Talks to one MCP server at an address. Connects on first use (`initialize`, then `notifications/initialized`), keeps
 /// the server's session (`Mcp-Session-Id`) and starts a new one when the server forgot it (404 to a request in a
-/// session).
+/// session). With an account (`MCPAccountAccess`), a request the server refuses (401) is sent again once, with the
+/// token refreshed.
 public actor MCPClient {
     /// The protocol version asked for; the server answers with the one it speaks, used from then on.
     public static let protocolVersion = "2025-06-18"
 
     public nonisolated let address: URL
-    private let token: String?
+    private let authorization: (any MCPAuthorizing)?
     private let timeout: Duration
     private let session: URLSession
     private var sessionID: String?
@@ -77,8 +79,16 @@ public actor MCPClient {
     public init(address: URL, token: String?, timeout: Duration = .seconds(15),
                 configuration: URLSessionConfiguration = .ephemeral)
     {
+        self.init(address: address, authorization: token.flatMap { $0.isEmpty ? nil : MCPPastedToken($0) },
+                  timeout: timeout, configuration: configuration)
+    }
+
+    /// `authorization`: what gives the token sent as `Authorization: Bearer` (nil: no access, nothing is sent).
+    public init(address: URL, authorization: (any MCPAuthorizing)?, timeout: Duration = .seconds(15),
+                configuration: URLSessionConfiguration = .ephemeral)
+    {
         self.address = address
-        self.token = token.flatMap { $0.isEmpty ? nil : $0 }
+        self.authorization = authorization
         self.timeout = timeout
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil
@@ -224,12 +234,28 @@ public actor MCPClient {
         return result
     }
 
-    /// A 404, told apart so that a forgotten session can be started again.
-    private enum HTTPStatus: Error { case notFound }
+    /// A 404, told apart so that a forgotten session can be started again; a 401, so that a token can be renewed.
+    private enum HTTPStatus: Error { case notFound, unauthorized }
+
+    /// POSTs one message with the token; when the server refuses it (401), once again with a renewed one.
+    private func post(_ message: JSONValue, id: Int?) async throws -> JSONValue? {
+        let token = try await authorization?.token()
+        do {
+            return try await post(message, id: id, token: token)
+        } catch HTTPStatus.unauthorized {
+            guard let authorization else { throw MCPError.unauthorized }
+            let renewed = try await authorization.renewed(after: token)
+            do {
+                return try await post(message, id: id, token: renewed)
+            } catch HTTPStatus.unauthorized {
+                throw MCPError.unauthorized
+            }
+        }
+    }
 
     /// POSTs one message; for a request, its response (from a JSON body, or from the stream of events), within the
     /// timeout.
-    private func post(_ message: JSONValue, id: Int?) async throws -> JSONValue? {
+    private func post(_ message: JSONValue, id: Int?, token: String?) async throws -> JSONValue? {
         var request = URLRequest(url: address)
         request.httpMethod = "POST"
         request.httpBody = try JSONEncoder().encode(message)
@@ -272,7 +298,8 @@ public actor MCPClient {
         guard let http = response as? HTTPURLResponse else { throw MCPError.notMCP("not HTTP") }
         let newSession = http.value(forHTTPHeaderField: "Mcp-Session-Id")
         switch http.statusCode {
-        case 401, 403: throw MCPError.unauthorized
+        case 401: throw HTTPStatus.unauthorized
+        case 403: throw MCPError.unauthorized
         case 404: throw HTTPStatus.notFound
         case 202, 204: return (nil, newSession, false)
         case 200..<300: break

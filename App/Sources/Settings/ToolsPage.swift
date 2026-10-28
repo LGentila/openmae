@@ -4,8 +4,8 @@ import VoiceEngineApple
 
 // Settings › Connected tools (MCP): services Maé can ask for actions (turn on a light, add a task, search notes),
 // several at once, reached at their address. `ConnectedToolsAccess` turns the settings' connected tools and what the
-// engine reports (states, tests, logs) into what the pages show, and carries out what they change. A program on this Mac
-// (stdio) and signing in with an account (OAuth) are not built yet: shown greyed, "Soon".
+// engine reports (states, tests, logs) into what the pages show, and carries out what they change. "With my account"
+// signs in in the browser (`AccountSignIn`); a program on this Mac (stdio) is not built yet: shown greyed, "Soon".
 
 /// A connected tool, as the settings show it.
 struct ConnectedTool: Identifiable, Equatable {
@@ -135,12 +135,20 @@ final class ConnectedToolsAccess {
         }
     }
 
-    /// Removes the tool, its token and its log.
+    /// Removes the tool, its token or its account's tokens (the service is asked to forget them), and its log.
     func remove(_ id: ConnectedTool.ID) {
         guard let model else { return }
         model.settings.connectedTools.removeAll { $0.id == id }
+        Self.revoke(ConnectedToolsKeychain.credentials(for: id))
         ConnectedToolsKeychain.setToken(nil, for: id)
+        ConnectedToolsKeychain.forgetAccount(id)
         model.forgetConnectedTool(id)
+    }
+
+    /// Asks the service to forget an account's tokens, which the app no longer keeps; what it answers does not matter.
+    private static func revoke(_ credentials: MCPCredentials?) {
+        guard let credentials else { return }
+        Task.detached { await MCPAuthorization.revoke(credentials, session: URLSession(configuration: .ephemeral)) }
     }
 
     /// What "Add a tool" asks for, or "Change…" of a tool's connection.
@@ -155,7 +163,8 @@ final class ConnectedToolsAccess {
         var name = ""
         var address = ""
         var access = ConnectedTool.Access.token
-        /// Typed in the sheet; empty for "Change…" keeps the saved one. Goes to the keychain, never to the settings.
+        /// Typed in the sheet; empty for "Change…" keeps the saved one. Goes to the keychain, never to the settings. With
+        /// an account, the browser's sign-in gives the tokens instead, kept in the keychain too.
         var token = ""
         var command = ""
         var arguments = ""
@@ -187,15 +196,34 @@ final class ConnectedToolsAccess {
         model?.settings.connectedTools.first { $0.id == id }.map(Draft.init(changing:))
     }
 
-    /// Connects to the tool of a draft, to see what it offers.
+    /// Connects to the tool of a draft, to see what it offers. With an account, the user signs in in the browser first
+    /// (each time: "Reconnect" comes here).
     func trial(_ draft: Draft) async -> Trial {
         guard let model else { return .failed(String(localized: "Connected tools are not available yet.")) }
-        guard MCPClient.address(draft.address) != nil else { return .failed(String(localized: "This address can’t be one.")) }
+        guard let address = MCPClient.address(draft.address) else {
+            return .failed(String(localized: "This address can’t be one."))
+        }
         let access = Self.settings(draft.access)
-        var token = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
-        if access == .token, token.isEmpty, draft.changes { token = ConnectedToolsKeychain.token(for: draft.id) ?? "" }
-        if access == .token, token.isEmpty { return .failed(String(localized: "Paste the tool’s token first.")) }
-        ConnectedToolsKeychain.setToken(access == .token ? token : nil, for: draft.trialID, name: draft.name)
+        if access == .account {
+            do {
+                let credentials = try await AccountSignIn.signIn(address)
+                // An earlier trial's sign-in of this sheet: the service forgets it.
+                Self.revoke(ConnectedToolsKeychain.credentials(for: draft.trialID))
+                ConnectedToolsKeychain.setCredentials(credentials, for: draft.trialID, name: draft.name)
+                await ConnectedToolsKeychain.account(for: draft.trialID).reload()
+            } catch {
+                trialTools[draft.trialID] = nil
+                return .failed(Self.reason(error as? MCPSignInError ?? .unreachable))
+            }
+        } else {
+            var token = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
+            if access == .token, token.isEmpty, draft.changes, ConnectedToolsKeychain.credentials(for: draft.id) == nil {
+                token = ConnectedToolsKeychain.token(for: draft.id) ?? ""
+            }
+            if access == .token, token.isEmpty { return .failed(String(localized: "Paste the tool’s token first.")) }
+            Self.revoke(ConnectedToolsKeychain.credentials(for: draft.trialID))
+            ConnectedToolsKeychain.setToken(access == .token ? token : nil, for: draft.trialID, name: draft.name)
+        }
         let tested = ConnectedToolSettings(id: draft.trialID, name: draft.name, address: draft.address, access: access)
         switch await model.testConnectedTool(tested) {
         case .works(let tools, _):
@@ -203,7 +231,7 @@ final class ConnectedToolsAccess {
             return .connected(actions: tools.count)
         case .failed(let error):
             trialTools[draft.trialID] = nil
-            return .failed(Self.reason(error))
+            return .failed(Self.reason(error, access: access))
         }
     }
 
@@ -212,9 +240,15 @@ final class ConnectedToolsAccess {
         guard let model, let found = trialTools.removeValue(forKey: draft.trialID) else { return nil }
         let access = Self.settings(draft.access)
         if draft.trialID != draft.id {
-            ConnectedToolsKeychain.setToken(access == .token ? ConnectedToolsKeychain.token(for: draft.trialID) : nil,
+            // The trial's token or account replaces the tool's; the service forgets the account it replaces.
+            let replaced = ConnectedToolsKeychain.credentials(for: draft.id)
+            ConnectedToolsKeychain.setToken(access == .none ? nil : ConnectedToolsKeychain.token(for: draft.trialID),
                                             for: draft.id, name: draft.name)
             ConnectedToolsKeychain.setToken(nil, for: draft.trialID)
+            ConnectedToolsKeychain.forgetAccount(draft.trialID)
+            if replaced != ConnectedToolsKeychain.credentials(for: draft.id) { Self.revoke(replaced) }
+            let account = ConnectedToolsKeychain.account(for: draft.id)
+            Task { await account.reload() }
         }
         let name = draft.name.trimmingCharacters(in: .whitespaces)
         if let i = model.settings.connectedTools.firstIndex(where: { $0.id == draft.id }) {
@@ -235,12 +269,14 @@ final class ConnectedToolsAccess {
         return draft.id
     }
 
-    /// The sheet closed without adding or saving: the token of its trial goes.
+    /// The sheet closed without adding or saving: the token or the account of its trial goes.
     func discard(_ draft: Draft) {
         trialTools[draft.trialID] = nil
         guard draft.trialID != draft.id || model?.settings.connectedTools.contains(where: { $0.id == draft.id }) == false
         else { return }
+        Self.revoke(ConnectedToolsKeychain.credentials(for: draft.trialID))
         ConnectedToolsKeychain.setToken(nil, for: draft.trialID)
+        ConnectedToolsKeychain.forgetAccount(draft.trialID)
     }
 
     // MARK: - From the settings
@@ -259,7 +295,7 @@ final class ConnectedToolsAccess {
         let lastTest: ConnectedTool.Test? = switch model.connectedToolTests[tool.id] {
         case .works(let tools, let seconds)?: .works(actions: tools.count, seconds: seconds)
         case .failed(let error)? where error == .noAnswer || error == .unreachable: .noAnswer
-        case .failed(let error)?: .failed(reason(error))
+        case .failed(let error)?: .failed(reason(error, access: tool.access))
         case nil: nil
         }
         let log = (model.connectedToolLogs[tool.id] ?? []).enumerated().map { i, entry in
@@ -331,13 +367,25 @@ final class ConnectedToolsAccess {
     }
 
     /// Why a trial or a test failed, for the sheet and the tool's page.
-    static func reason(_ error: MCPError) -> String {
+    static func reason(_ error: MCPError, access: ConnectedToolSettings.Access = .token) -> String {
         switch error {
         case .unreachable: String(localized: "Nothing answers at this address. Check it, and that this Mac is on the same network.")
         case .noAnswer: String(localized: "The tool did not answer in time.")
+        case .unauthorized where access == .account:
+            String(localized: "The tool refuses this account. Sign in again, or with an account that may connect.")
         case .unauthorized: String(localized: "The tool refuses the access: check the token.")
         case .notMCP(let what): String(localized: "Something answers at this address, but not a connected tool (\(what)).")
         case .refused(let why): String(localized: "The tool refused: \(why)")
+        }
+    }
+
+    /// Why signing in with the account did not work, for the sheet.
+    static func reason(_ error: MCPSignInError) -> String {
+        switch error {
+        case .notOffered: String(localized: "This tool does not offer to sign in with an account. Choose “With a token”.")
+        case .unreachable: String(localized: "Nothing answers at this address. Check it, and that this Mac is on the same network.")
+        case .cancelled: String(localized: "Signing in was cancelled.")
+        case .refused(let why): String(localized: "The tool refused the sign-in: \(why)")
         }
     }
 }
@@ -726,7 +774,10 @@ struct AddToolSheet: View {
                         WindowSegmented(selection: $draft.access,
                                         options: [(value: .account, title: "With my account"),
                                                   (value: .token, title: "With a token"), (value: .none, title: "None")],
-                                        label: Text("Access"), fills: true, soon: [.account])
+                                        label: Text("Access"), fills: true)
+                    }
+                    if draft.access == .account {
+                        Caption("Your browser opens so you can sign in. The access is kept in your Mac’s keychain.")
                     }
                     if draft.access == .token {
                         LabeledField(label: Text("Token")) {
@@ -737,7 +788,10 @@ struct AddToolSheet: View {
                         Caption(draft.changes ? "Leave it empty to keep the saved token. It is kept in your Mac’s keychain."
                             : "It is kept in your Mac’s keychain.")
                     }
-                    if !draft.changes {
+                    if !draft.changes, draft.access == .account {
+                        Note("For Home Assistant: add the “Model Context Protocol Server” integration in Settings › Devices & services. By default, only administrator accounts can connect.",
+                             icon: .bulb)
+                    } else if !draft.changes {
                         Note("For Home Assistant: add the “Model Context Protocol Server” integration in Settings › Devices & services, then create a long-lived access token in your profile, under Security. By default, only administrator accounts can connect.",
                              icon: .bulb)
                     }
@@ -812,7 +866,9 @@ struct AddToolSheet: View {
         switch trial {
         case .connected: draft.changes ? Text("Save") : Text("Add")
         case .failed: Text("Try again")
-        case nil: draft.kind == .program ? Text("Test and add") : Text("Test")
+        case nil where draft.kind == .program: Text("Test and add")
+        case nil where draft.access == .account: Text("Sign in")
+        case nil: Text("Test")
         }
     }
 
