@@ -24,6 +24,9 @@ struct LiveTranscript: View {
     let user: TranscriptEntry?
     let answer: TranscriptEntry?
     let invitation: Invitation
+    /// An action waits for the user's "oui": the question that ends Maé's sentence (« On y va ? ») is tinted whole, like
+    /// her most recent words.
+    var tintsQuestion = false
     var layout = TranscriptLayout.mac
 
     @Environment(\.stillFrame) private var stillFrame
@@ -101,10 +104,11 @@ struct LiveTranscript: View {
             : shown.sentence == sentence.id ? min(shown.count, sentence.words.count) : 0
         let deep = StatePalette(state).deep
         let style = layout.words
+        let question = tintsQuestion && state == .speaking ? TranscriptWords.question(in: sentence.words) : nil
         return WordFlow(spacing: 0.28 * style.size, lineHeight: style.lineHeight, maxLines: 3,
                         maxWidth: layout.wordsWidth) {
             ForEach(0..<count, id: \.self) { i in
-                let tinted = sentence.tintsRecentWords && i >= count - 2
+                let tinted = sentence.tintsRecentWords && (i >= count - 2 || question.map { i >= $0 } ?? false)
                 Text(verbatim: sentence.words[i])
                     .textStyle(style)
                     .foregroundStyle(tinted ? deep : Palette.ink)
@@ -333,5 +337,13 @@ enum TranscriptWords {
         }
         if !opening.isEmpty { words.append(opening.trimmingCharacters(in: .whitespaces)) }
         return words
+    }
+
+    /// Where the question that ends a sentence begins (« On y va ? » after « … avec Home Assistant. »): the word after
+    /// the last one that ends a sentence or a clause; nil when the sentence does not end with a question.
+    static func question(in words: [String]) -> Int? {
+        guard let last = words.last, last.hasSuffix("?") else { return nil }
+        let start = words.dropLast().lastIndex { word in ".:!?;".contains(word.last ?? " ") }.map { $0 + 1 } ?? 0
+        return start
     }
 }

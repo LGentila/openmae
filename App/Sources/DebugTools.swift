@@ -221,10 +221,58 @@ enum Snapshots {
             ownShortcut.settings = savedSettings
         }
         let shortcuts = ["Allumer le salon", "Mode concentration"]
+        await renderToolCards(to: folder, ready: ready)
         await renderTasks(to: folder, conversation: conversation, shortcuts: shortcuts)
         await renderPresence(to: folder)
         await renderPhone(to: folder)
         await renderSettings(to: folder)
+    }
+
+    /// A connected tool's card under Maé's sentence (Home Assistant, « Allume le salon »): while she asks, then waits for
+    /// the « oui » at rest; then what came of it: done (also at rest), refused, failed. In French whatever the interface's
+    /// language: Maé says these sentences in French.
+    @MainActor
+    private static func renderToolCards(to folder: URL, ready: [AssistantEvent]) async {
+        let tool = UUID()
+        let words = ConnectedToolPhrases.card(MCPTool(name: "intent__HassTurnOn", description: ""), ["area": "salon"])
+        let waiting = ConnectedToolAction(toolID: tool, toolName: "Home Assistant", words: words, title: "Allumer le salon",
+                                          status: .waiting, date: Date())
+        func outcome(_ status: ConnectedToolAction.Status) -> ConnectedToolAction {
+            var action = waiting
+            action.status = status
+            action.date = Date()
+            return action
+        }
+        func exchange(_ user: String, _ answer: String, _ actions: [ConnectedToolAction]) -> [AssistantEvent] {
+            [.state(.userSpeaking), .userTranscript(user, .french), .state(.thinking)]
+                + actions.map { .connectedToolAction($0) } + [.assistantPiece(answer), .state(.speaking),
+                                                              .levels(input: 0, output: 0.8)]
+        }
+        let asking = ready + exchange("Allume le salon.", ConnectedToolPhrases.confirm(
+            MCPTool(name: "intent__HassTurnOn", description: ""), ["area": "salon"], toolName: "Home Assistant"), [waiting])
+        let atRest: [AssistantEvent] = [.state(.listening), .levels(input: 0, output: 0)]
+        let scenes: [(name: String, events: [AssistantEvent])] = [
+            ("main-20-tool-asks", asking),
+            ("main-21-tool-asks-rest", asking + atRest),
+            ("main-22-tool-done", asking + atRest + exchange("Oui.", ConnectedToolPhrases.done, [outcome(.done)])),
+            ("main-23-tool-done-rest", asking + atRest + exchange("Oui.", ConnectedToolPhrases.done, [outcome(.done)])
+                + atRest),
+            ("main-24-tool-declined", asking + atRest + exchange("Non.", ActionPhrases.declined(.french),
+                                                                 [outcome(.refusedByUser)])),
+            ("main-25-tool-failed", asking + atRest + exchange("Oui.", "Je n’arrive pas à joindre Home Assistant.",
+                                                               [outcome(.failed(.unreachable))])),
+        ]
+        for scene in scenes where wants(scene.name) {
+            for (width, suffix) in windowWidths {
+                let model = await scriptedModel(scene.events)
+                let saved = model.settings
+                model.settings.listening = .handsFree
+                await save(ContentView(model: model, window: WindowState()).environment(\.stillFrame, 1.7)
+                    .preferredColorScheme(.light), size: CGSize(width: width, height: 700),
+                           to: folder.appending(path: scene.name + suffix + ".png"))
+                model.settings = saved
+            }
+        }
     }
 
     /// The history with three tasks handed to Claude Code: one done, one in progress, one waiting for the user's "oui"

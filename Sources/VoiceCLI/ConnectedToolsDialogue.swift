@@ -8,7 +8,9 @@
 //
 // Without --actions, the connected tool is offered on its own, as in the app with the actions off; with it, after the
 // app's actions (the calendar and reminders kept in memory, the timers running in voice-cli, as `--actions` gives them).
-// --do-directly: only the "Do it directly" part. Each step is checked: ✓ or ✗.
+// --do-directly: only the "Do it directly" part. Each step is checked: ✓ or ✗, with the card the main window shows under
+// Maé's sentence (`ConnectedToolAction`): while an action waits for the "oui", then what came of it. Two answers are
+// given as the card's "Oui" and "Non" buttons give them (`VoicePipeline.submit(answer:)`) instead of typed.
 //
 // --long-result: no voice; the time of the answer after Home Assistant's `GetLiveContext` (« Quels appareils sont
 // allumés ? ») as the app has it (the model writes its call, then reads the result and answers), for the pretend house as
@@ -19,12 +21,28 @@ import Foundation
 import VoiceCore
 import VoiceEngineApple
 
-/// The connected tools' reports, kept in order.
-private actor Reports {
-    var entries: [ConnectedToolLogEntry] = []
+/// The connected tools' reports, kept in the order they are sent (the log's lines and the cards).
+private final class Reports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [ConnectedToolLogEntry] = []
+    private var actions: [ConnectedToolAction] = []
     func add(_ report: ConnectedToolReport) {
-        if case .log(_, let entry) = report { entries.append(entry) }
+        lock.withLock {
+            switch report {
+            case .log(_, let entry): log.append(entry)
+            case .action(let action): actions.append(action)
+            default: break
+            }
+        }
     }
+    var entries: [ConnectedToolLogEntry] { lock.withLock { log } }
+    var cards: [ConnectedToolAction] { lock.withLock { actions } }
+}
+
+/// A card as the dialogue prints it: « waiting: Home Assistant · Allumer · Salon ».
+private func shown(_ card: ConnectedToolAction) -> String {
+    let words = [card.words.verb, card.words.target].compactMap { $0 }.joined(separator: " · ")
+    return "\(card.status): \(card.toolName) · \(words)" + (card.words.result.map { " → \($0)" } ?? "")
 }
 
 func runConnectedToolsDialogue(_ o: Options) async throws {
@@ -38,7 +56,7 @@ func runConnectedToolsDialogue(_ o: Options) async throws {
     settings.actions = settings.merging(try await client.listTools())
     let provider = ConnectedTools()
     let reports = Reports()
-    await provider.observe { report in Task { await reports.add(report) } }
+    await provider.observe { report in reports.add(report) }
     let actions: [any ToolProvider] = o.actions
         ? [MemoryCalendar(movingItems: ActionCatalog.movesItems(on: try tierOption(o))), TimerTools()] : []
     func runner(_ whenActing: ConnectedToolSettings.WhenActing) async -> ToolRunner {
@@ -51,23 +69,31 @@ func runConnectedToolsDialogue(_ o: Options) async throws {
     let mic = SimulatedMicrophone(pipeline: e.pipeline)
     var checks: [(String, Bool)] = []
 
-    /// One typed turn: what Maé said, the calls that reached the service, the new lines of the log.
-    func turn(_ text: String) async -> (said: String, calls: [FakeHomeAssistant.Call], log: [ConnectedToolLogEntry]) {
+    /// One typed turn (or the card's "Oui" or "Non": `button`): what Maé said, the calls that reached the service, the new
+    /// lines of the log, the cards sent.
+    func turn(_ text: String, button: Bool? = nil) async
+        -> (said: String, calls: [FakeHomeAssistant.Call], log: [ConnectedToolLogEntry], cards: [ConnectedToolAction])
+    {
         let calls = server.calls.count
-        let lines = await reports.entries.count
+        let lines = reports.entries.count
+        let cardCount = reports.cards.count
         await mic.silence(0.5)
         let before = await e.log.completedTurns
-        await e.pipeline.submit(text: text)
+        if let button { await e.pipeline.submit(answer: button) } else { await e.pipeline.submit(text: text) }
         await waitForAnswer(e, mic: mic, after: before, timeout: 90)
         await mic.silence(0.3)
         let said = await e.log.turns.last?.assistantText ?? ""
         let made = Array(server.calls.dropFirst(calls))
-        let log = Array(await reports.entries.dropFirst(lines))
-        print("■ « \(text) »\n    Maé: \(said)")
+        let log = Array(reports.entries.dropFirst(lines))
+        let cards = Array(reports.cards.dropFirst(cardCount))
+        print("■ \(button == nil ? "« \(text) »" : "[\(text)] (the card's button)")\n    Maé: \(said)")
         for call in made { print("    → Home Assistant: \(call.name) \(call.arguments)") }
         for line in log { print("    log: \(line.title) — \(line.result)") }
-        return (said, made, log)
+        for card in cards { print("    card: \(shown(card))") }
+        return (said, made, log, cards)
     }
+    /// The last card sent before this turn's, for its id.
+    var asked: ConnectedToolAction? { reports.cards.last { $0.status == .waiting } }
     func check(_ what: String, _ ok: Bool) {
         checks.append((what, ok))
         print("    \(ok ? "✓" : "✗") \(what)")
@@ -80,24 +106,57 @@ func runConnectedToolsDialogue(_ o: Options) async throws {
             var t = await turn("Allume le salon")
             check("« Allume le salon »: says what she will do and asks, calls nothing",
                   t.said.contains("On y va") && t.calls.isEmpty)
+            check("its card waits for the « oui »: Home Assistant · Allumer · Salon",
+                  t.cards.map(\.status) == [.waiting] && t.cards.first?.toolName == "Home Assistant"
+                      && t.cards.first?.words.verb == "Allumer" && t.cards.first?.words.target == "Salon")
+            var waiting = asked
             t = await turn("Oui")
             check("« Oui »: HassTurnOn is called and she says the result",
                   named(t.calls) == ["HassTurnOn"] && !t.said.isEmpty && !t.said.contains("On y va")
                       && t.log.map(\.result) == [.done])
+            check("the same card says « Salon allumé · Fait »",
+                  t.cards.map(\.status) == [.done] && t.cards.first?.id == waiting?.id
+                      && t.cards.first?.words.result == "Salon allumé")
             t = await turn("Éteins toutes les lumières")
             check("« Éteins toutes les lumières »: asks, calls nothing", t.said.contains("On y va") && t.calls.isEmpty)
+            check("its card waits", t.cards.map(\.status) == [.waiting])
+            waiting = asked
             t = await turn("Non")
             check("« Non »: nothing is called, the log says « Refused by you »",
                   t.calls.isEmpty && t.log.map(\.result) == [.refusedByUser])
+            check("the same card says « Refusé »",
+                  t.cards.map(\.status) == [.refusedByUser] && t.cards.first?.id == waiting?.id)
             t = await turn("Est-ce que la lumière de la cuisine est allumée ?")
             check("a question that only reads is answered without a « oui »",
                   named(t.calls) == ["GetLiveContext"] && !t.said.contains("On y va") && !t.said.isEmpty)
+            check("… and has no card", t.cards.isEmpty)
+
+            print("\n=== The card's buttons (round \(round)) ===")
+            t = await turn("Allume la cuisine")
+            check("« Allume la cuisine »: asks, its card waits", t.said.contains("On y va") && t.calls.isEmpty
+                      && t.cards.map(\.status) == [.waiting])
+            waiting = asked
+            t = await turn("Oui", button: true)
+            check("the card's « Oui »: HassTurnOn is called, as with a spoken « oui »",
+                  named(t.calls) == ["HassTurnOn"] && t.log.map(\.result) == [.done] && !t.said.contains("On y va"))
+            check("the same card says « Cuisine allumée · Fait »", t.cards.map(\.status) == [.done]
+                      && t.cards.first?.id == waiting?.id && t.cards.first?.words.result == "Cuisine allumée")
+            t = await turn("Éteins la lampe du bureau")
+            check("« Éteins la lampe du bureau »: asks, its card waits", t.said.contains("On y va") && t.calls.isEmpty
+                      && t.cards.map(\.status) == [.waiting])
+            waiting = asked
+            t = await turn("Non", button: false)
+            check("the card's « Non »: nothing is called, the log says « Refused by you »",
+                  t.calls.isEmpty && t.log.map(\.result) == [.refusedByUser])
+            check("the same card says « Refusé »",
+                  t.cards.map(\.status) == [.refusedByUser] && t.cards.first?.id == waiting?.id)
         }
         print("\n=== Do it directly (round \(round)) ===")
         try await e.pipeline.setTools(await runner(.doDirectly))
         var t = await turn("Éteins la lumière du salon")
         check("« Éteins la lumière du salon »: carried out at once",
               named(t.calls) == ["HassTurnOff"] && !t.said.contains("On y va"))
+        check("its card only says what came of it", t.cards.map(\.status) == [.done])
         t = await turn("Annule")
         check("« Annule »: says it cannot be undone, calls nothing", t.calls.isEmpty && t.said.contains("défaire"))
         if !o.doDirectly { try await e.pipeline.setTools(await runner(.askFirst)) }

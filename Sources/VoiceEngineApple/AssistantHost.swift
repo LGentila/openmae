@@ -236,6 +236,7 @@ public actor AssistantHost: AssistantConnection {
             switch report {
             case .log(let id, let entry): emit.yield(.connectedToolLog(id, entry))
             case .state(let id, let state): emit.yield(.connectedToolState(id, state))
+            case .action(let action): emit.yield(.connectedToolAction(action))
             case .toolsChanged(let id):
                 Task { await self?.listChanged(id) }
             }
@@ -297,6 +298,8 @@ public actor AssistantHost: AssistantConnection {
             await reportMemory()
         case .testConnectedTool(let tool):
             Task { await testConnectedTool(tool) }
+        case .answerAction(let yes):
+            await pipeline?.submit(answer: yes)
         case .typedTurn(let text):
             await pipeline?.submit(text: text)
         case .shutdown:

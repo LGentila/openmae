@@ -245,11 +245,28 @@ final class ConnectedToolsAccess {
 
     // MARK: - From the settings
 
-    private static func shown(_ tool: ConnectedToolSettings, index: Int, model: AssistantModel) -> ConnectedTool {
-        let host = MCPClient.address(tool.address)?.host() ?? ""
-        let home = tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
-        let place: ConnectedTool.Place = MCPClient.isHomeNetwork(host) ? .home : .internet
+    /// A tool's disc, in the lists and on the conversation's cards: Home Assistant's house on turquoise, otherwise a plug
+    /// (on the home network) or a globe, on a colour that follows its place in the settings' list.
+    static func disc(_ tool: ConnectedToolSettings, index: Int) -> (icon: Icon, color: RGBA) {
+        let home = isHomeAssistant(tool)
         let colors = [Palette.azureSoft, Palette.sunSoft, Palette.coralSoft]
+        return (home ? .home : place(tool) == .home ? .plug : .globe,
+                home ? Palette.turquoiseSoft : colors[index % colors.count])
+    }
+
+    private static func isHomeAssistant(_ tool: ConnectedToolSettings) -> Bool {
+        let host = MCPClient.address(tool.address)?.host() ?? ""
+        return tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
+    }
+
+    private static func place(_ tool: ConnectedToolSettings) -> ConnectedTool.Place {
+        MCPClient.isHomeNetwork(MCPClient.address(tool.address)?.host() ?? "") ? .home : .internet
+    }
+
+    private static func shown(_ tool: ConnectedToolSettings, index: Int, model: AssistantModel) -> ConnectedTool {
+        let home = isHomeAssistant(tool)
+        let place = place(tool)
+        let disc = disc(tool, index: index)
         let state: ConnectedTool.State = switch model.connectedToolStates[tool.id] {
         case _ where !tool.enabled: .paused
         case .needsReconnect?: .needsReconnect
@@ -267,8 +284,7 @@ final class ConnectedToolsAccess {
                                    result: result(entry.result))
         }
         return ConnectedTool(
-            id: tool.id, name: tool.name, icon: home ? .home : place == .home ? .plug : .globe,
-            color: home ? Palette.turquoiseSoft : colors[index % colors.count], place: place,
+            id: tool.id, name: tool.name, icon: disc.icon, color: disc.color, place: place,
             connection: .service(address: tool.address, access: shown(tool.access)), state: state, enabled: tool.enabled,
             whenActing: tool.whenActing == .askFirst ? .askFirst : .doDirectly,
             actions: tool.actions.map { ConnectedTool.Action(id: $0.name, title: title($0.tool), reads: $0.reads,

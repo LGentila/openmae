@@ -35,6 +35,30 @@ private actor Collected {
     }
 }
 
+/// What the user said, as the pipeline sends it.
+private final class Users: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [String] = []
+    func add(_ text: String) { lock.withLock { list.append(text) } }
+    var texts: [String] { lock.withLock { list } }
+}
+
+/// The cards' reports (`ConnectedToolAction`), in the order they are sent.
+private final class Cards: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [ConnectedToolAction] = []
+    func add(_ report: ConnectedToolReport) {
+        if case .action(let action) = report { lock.withLock { list.append(action) } }
+    }
+    var actions: [ConnectedToolAction] { lock.withLock { list } }
+    var statuses: [ConnectedToolAction.Status] { actions.map(\.status) }
+}
+
+private func waitUntil(_ condition: () async -> Bool) async {
+    let deadline = ContinuousClock.now + .seconds(10)
+    while !(await condition()), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+}
+
 private let context = ToolContext(now: Date(), language: .french)
 
 @Suite("Connected tools: the MCP client", .serialized)
@@ -407,6 +431,132 @@ struct ConnectedToolsTests {
             == "Je demande à Home Assistant\(nb): «\(nb)HassVacuumStart\(nb)» (name\(nb): Robot). On y va\(nb)?")
         #expect(ConnectedToolPhrases.title(MCPTool(name: "HassTurnOn", description: ""), ["area": "salon"]) == "Allumer le salon")
         #expect(ConnectedToolPhrases.title(MCPTool(name: "GetLiveContext", description: ""), [:]) == "Lire l’état de la maison")
+    }
+
+    @Test func saysTheActionOnItsCard() {
+        func card(_ name: String, _ arguments: [String: JSONValue]) -> ConnectedToolPhrases.CardWords {
+            ConnectedToolPhrases.card(MCPTool(name: name, description: ""), arguments)
+        }
+        #expect(card("intent__HassTurnOn", ["area": "salon"]) == .init(verb: "Allumer", target: "Salon", result: "Salon allumé"))
+        #expect(card("intent__HassTurnOff", ["area": "Cuisine"])
+            == .init(verb: "Éteindre", target: "Cuisine", result: "Cuisine éteinte"))
+        #expect(card("intent__HassTurnOff", ["domain": ["light"]])
+            == .init(verb: "Éteindre", target: "Toutes les lumières", result: "Toutes les lumières éteintes"))
+        #expect(card("intent__HassTurnOn", ["area": "Cuisine", "domain": ["light"]])
+            == .init(verb: "Allumer", target: "Lumières de la cuisine", result: "Lumières de la cuisine allumées"))
+        #expect(card("intent__HassTurnOff", ["name": "Lampe du salon", "area": "Salon"])
+            == .init(verb: "Éteindre", target: "Lampe du salon", result: "Lampe du salon éteinte"))
+        #expect(card("intent__HassTurnOn", ["domain": ["cover"]])
+            == .init(verb: "Ouvrir", target: "Tous les volets", result: "Tous les volets ouverts"))
+        #expect(card("intent__HassTurnOn", ["area": "Entrée"]) == .init(verb: "Allumer", target: "Entrée", result: "Entrée allumée"))
+        #expect(card("intent__HassSetPosition", ["name": "volet du salon", "position": 0])
+            == .init(verb: "Fermer", target: "Volet du salon", result: "Volet du salon fermé"))
+        // A setting: what it is set to is the result.
+        #expect(card("light__HassLightSet", ["area": "salon", "brightness": 50])
+            == .init(verb: "Régler", target: "Lumière du salon à 50\(nb)%", result: "Lumière du salon à 50\(nb)%"))
+        #expect(card("climate__HassClimateSetTemperature", ["temperature": .double(20)])
+            == .init(verb: "Régler", target: "Chauffage à 20\(nb)degrés", result: "Chauffage à 20\(nb)degrés"))
+        #expect(card("media_player__HassMediaPause", [:])
+            == .init(verb: "Mettre en pause", target: "Musique", result: "Musique en pause"))
+        #expect(card("media_player__HassMediaNext", ["area": "salon"])
+            == .init(verb: "Passer à la suite", target: "Lecteur du salon", result: nil))
+        // A name whose gender cannot be told: no result (the card shows the log's line).
+        #expect(card("intent__HassTurnOn", ["name": "Nova"]) == .init(verb: "Allumer", target: "Nova", result: nil))
+        // An older Home Assistant's names, without the integration before them: the same words.
+        #expect(card("HassTurnOn", ["area": "salon"]) == .init(verb: "Allumer", target: "Salon", result: "Salon allumé"))
+        #expect(card("HassMediaPause", [:]) == .init(verb: "Mettre en pause", target: "Musique", result: "Musique en pause"))
+        // Any other action: its title and its arguments' values.
+        #expect(ConnectedToolPhrases.card(MCPTool(name: "create_note", title: "Créer une note", description: ""),
+                                          ["title": "Courses", "tags": ["maison", "liste"]])
+            == .init(verb: "Créer une note", target: "maison, liste, Courses", result: nil))
+        #expect(ConnectedToolPhrases.card(MCPTool(name: "sync", description: ""), [:])
+            == .init(verb: "sync", target: nil, result: nil))
+    }
+
+    /// The card of an action that changes something: it waits for the « oui », then says what came of it, with the same
+    /// id; it goes when the action is dropped. Reading has none; done directly, only what came of it.
+    @Test func sendsTheActionsCardAtEachMoment() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, settings) = try await connected(server, client)
+        let cards = Cards()
+        await tools.observe { cards.add($0) }
+        let runner = ToolRunner(providers: [tools], actions: false)
+        _ = await runner.tools()
+        func call(_ name: String, _ arguments: [String: JSONValue] = [:]) -> ToolCall {
+            ToolCall(name: name, arguments: arguments)
+        }
+        _ = await runner.handle(call("intent__HassTurnOn", ["area": "salon"]), context: context)
+        _ = await runner.resolve(.confirm, context: context)
+        _ = await runner.handle(call("intent__HassTurnOff", ["area": "cuisine"]), context: context)
+        _ = await runner.resolve(.decline, context: context)
+        // Another request replaces the one that waits (a question, which has no card).
+        _ = await runner.handle(call("intent__HassTurnOn", ["area": "bureau"]), context: context)
+        _ = await runner.handle(call("homeassistant__GetLiveContext"), context: context)
+        _ = await runner.handle(call("intent__HassTurnOn", ["area": "Garage"]), context: context)
+        _ = await runner.resolve(.confirm, context: context)
+        // A new conversation.
+        _ = await runner.handle(call("intent__HassTurnOn", ["area": "chambre"]), context: context)
+        await runner.resetConversation()
+        #expect(cards.statuses == [.waiting, .done, .waiting, .refusedByUser, .waiting, .dropped, .waiting,
+                                   .failed(.said("Error calling tool: No area named Garage")), .waiting, .dropped])
+        let actions = cards.actions
+        for pair in stride(from: 0, to: actions.count, by: 2) { #expect(actions[pair].id == actions[pair + 1].id) }
+        #expect(Set(actions.map(\.id)).count == 5)
+        #expect(actions.allSatisfy { $0.toolID == settings.id && $0.toolName == "Home Assistant" })
+        #expect(actions[1].words == .init(verb: "Allumer", target: "Salon", result: "Salon allumé"))
+        #expect(actions[1].title == "Allumer le salon")
+        #expect(actions[3].words.result == "Cuisine éteinte")
+
+        // Done directly: only what came of it.
+        var direct = settings
+        direct.whenActing = .doDirectly
+        await tools.configure([ConnectedTools.Connection(settings: direct, client: client)])
+        let doing = ToolRunner(providers: [tools], actions: false)
+        _ = await doing.tools()
+        _ = await doing.handle(call("intent__HassTurnOff", ["area": "salon"]), context: context)
+        _ = await doing.handle(call("homeassistant__GetLiveContext"), context: context)
+        #expect(cards.statuses.suffix(1) == [.done])
+        #expect(cards.actions.last?.words.result == "Salon éteint")
+
+        // What the app gets is plain data.
+        let event = try JSONEncoder().encode(AssistantEvent.connectedToolAction(actions[1]))
+        guard case .connectedToolAction(let decoded) = try JSONDecoder().decode(AssistantEvent.self, from: event) else {
+            Issue.record("not decoded as a card")
+            return
+        }
+        #expect(decoded == actions[1])
+    }
+
+    /// The card's « Oui » and « Non » (`submit(answer:)`) are answers as spoken ones are: the action waits, then is
+    /// carried out or refused, without the model.
+    @Test(arguments: [true, false])
+    func theCardsButtonsAnswerAsTheVoiceDoes(yes: Bool) async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client)
+        let cards = Cards()
+        await tools.observe { cards.add($0) }
+        let model = ScriptedModel(scripts: [[.toolCall(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon"]))]])
+        let speaker = FakeSpeaker()
+        let pipeline = VoicePipeline(detector: LoudnessDetector(), transcriber: CountingTranscriber(), model: model,
+                                     synthesizer: FakeSynthesizer(), output: speaker,
+                                     tools: ToolRunner(providers: [tools], actions: false))
+        let users = Users()
+        Task { for await event in pipeline.events { if case .userTranscript(let text, _) = event { users.add(text) } } }
+        try await pipeline.start()
+        await pipeline.submit(text: "Allume le salon")
+        await waitUntil {
+            let played = await speaker.played
+            return cards.statuses == [.waiting] && played > 0
+        }
+        await pipeline.submit(answer: yes)
+        await waitUntil { cards.statuses.count == 2 }
+        #expect(cards.statuses == [.waiting, yes ? .done : .refusedByUser])
+        #expect(server.calls.map(\.name) == (yes ? ["intent__HassTurnOn"] : []))
+        #expect(users.texts == ["Allume le salon", yes ? "Oui" : "Non"])
+        #expect(await model.requests.count == 1)  // the answer never reached the model
+        await pipeline.stop()
     }
 
     @Test func asksFirstThenDoesOrNotAndKeepsALog() async throws {

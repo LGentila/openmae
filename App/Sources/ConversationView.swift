@@ -15,13 +15,23 @@ struct ConversationView: View {
     var body: some View {
         let state = isLoading ? PipelineState.listening : model.state
         let exchange = model.currentExchange
+        // A connected tool's card under the sentence: the orb gives it room, as in the design's screens.
+        let showsCard = !isLoading && !model.toolActions.isEmpty
         VStack(spacing: 0) {
-            OrbStage(model: model, state: isLoading ? .listening : model.shownState)
-            LiveTranscript(state: state, user: exchange.user, answer: exchange.answer, invitation: invitation)
-                .frame(height: 150)
+            OrbStage(model: model, state: isLoading ? .listening : model.shownState, scale: showsCard ? 0.8 : 1)
+            LiveTranscript(state: state, user: exchange.user, answer: exchange.answer, invitation: invitation,
+                           tintsQuestion: !isLoading && model.toolActionWaits)
+                .frame(height: showsCard ? 132 : 150)
+            if showsCard {
+                ToolActionCard(model: model)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 60)
+                    .transition(.opacity.combined(with: .offset(y: 8)))
+            }
             ConversationControls(model: model, isLoading: isLoading, phone: isLoading ? nil : phone)
                 .frame(maxHeight: .infinity)
         }
+        .animation(Easing.animation(Easing.rise, Timing.rise), value: showsCard)
         .overlay(alignment: .top) {
             if let hand = phone?.hand, !isLoading {
                 OnPhoneBanner(path: hand.path, kind: hand.device.kind)
@@ -35,6 +45,7 @@ struct ConversationView: View {
     private var invitation: LiveTranscript.Invitation {
         if isLoading { return .loading(loadingStep) }
         if phone?.hand != nil { return .onPhone }
+        if model.toolActionWaits { return .message(Text("Say “yes” or “no”.")) }
         let shortcut = model.hasTalkShortcut ? model.talkShortcut.title : nil
         switch model.settings.listening {
         case .handsFree: return .speak(shortcut: shortcut)
@@ -45,10 +56,11 @@ struct ConversationView: View {
 
 }
 
-/// The 380-point stage of the orb. A click on it silences Maé.
+/// The 380-point stage of the orb (`scale`: smaller while a card shows under the sentence). A click on it silences Maé.
 private struct OrbStage: View {
     let model: AssistantModel
     let state: PipelineState
+    var scale: CGFloat = 1
     @Environment(\.windowIsVisible) private var windowIsVisible
 
     var body: some View {
@@ -57,6 +69,8 @@ private struct OrbStage: View {
             .onTapGesture {
                 if state == .thinking || state == .speaking { model.stopSpeaking() }
             }
+            .scaleEffect(scale)
+            .frame(width: OrbStyle.conversation.stage * scale, height: OrbStyle.conversation.stage * scale)
             .anchorPreference(key: OrbPlacement.self, value: .bounds) {
                 OrbPlacement.Orb(anchor: $0, halo: (560, 800))
             }

@@ -1261,6 +1261,16 @@
         }
       }
     },
+    "Declined": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusé"
+          }
+        }
+      }
+    },
     "Delete": {
       "localizations": {
         "fr": {
@@ -1587,6 +1597,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Échec : %@"
+          }
+        }
+      }
+    },
+    "Failure": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec"
           }
         }
       }
@@ -2581,6 +2601,16 @@
         }
       }
     },
+    "Maé asks you to confirm": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te demande de confirmer"
+          }
+        }
+      }
+    },
     "Maé can remember what you tell her, from one conversation to the next. Everything stays on your Mac, in a folder of its own, and never goes to the internet.": {
       "localizations": {
         "fr": {
@@ -3057,6 +3087,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Morceau suivant"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non"
           }
         }
       }
@@ -4237,6 +4277,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dis « retiens que… » : Maé le garde ici et s’en sert quand c’est utile, dans chaque conversation."
+          }
+        }
+      }
+    },
+    "Say “yes” or “no”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis « oui » ou « non »."
           }
         }
       }
@@ -5951,6 +6001,16 @@
         }
       }
     },
+    "Yes": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oui"
+          }
+        }
+      }
+    },
     "You": {
       "localizations": {
         "fr": {
@@ -6307,6 +6367,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "interrompu"
+          }
+        }
+      }
+    },
+    "just now": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "à l’instant"
           }
         }
       }

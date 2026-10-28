@@ -1121,6 +1121,12 @@ public actor VoicePipeline {
         turn.task = Task { await self.runTurn(turn, audio: []) }
     }
 
+    /// The "Oui" or "Non" of a card (true: "Oui"): a typed turn in the conversation's language, which the actions waiting
+    /// for the user's "oui" take as a spoken one (`ToolRunner.interception`).
+    public func submit(answer yes: Bool) async {
+        await submit(text: language == .english ? (yes ? "Yes" : "No") : (yes ? "Oui" : "Non"))
+    }
+
     // MARK: - Talk key
 
     /// The talk key: the space bar or the button in push-to-talk mode, the global shortcut in either mode. While

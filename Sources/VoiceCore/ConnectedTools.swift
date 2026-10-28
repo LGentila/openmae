@@ -125,12 +125,55 @@ public enum ConnectedToolTest: Sendable, Codable, Equatable {
     case failed(MCPError)
 }
 
+/// An action of a connected tool that changes something, for the card under Maé's sentence in the main window: while it
+/// waits for the user's "oui", then what came of it. Sent again, with the same id, each time its status changes. An
+/// action that only reads has none.
+public struct ConnectedToolAction: Sendable, Codable, Equatable, Identifiable {
+    public enum Status: Sendable, Codable, Equatable {
+        /// It waits for the user's "oui" (the tool asks first).
+        case waiting
+        case done
+        case refusedByUser
+        case failed(ConnectedToolFailure)
+        /// It no longer waits, and will not be carried out: its time ran out, another request replaced it or a new
+        /// conversation began. The card goes.
+        case dropped
+    }
+
+    public var id: UUID
+    /// The connected tool, as the settings name it.
+    public var toolID: UUID
+    public var toolName: String
+    /// What it does and to what, and once done what is true, in French like what Maé says (`ConnectedToolPhrases.card`):
+    /// « Allumer » · « Salon », « Salon allumé ».
+    public var words: ConnectedToolPhrases.CardWords
+    /// The log's line: « Allumer le salon ».
+    public var title: String
+    public var status: Status
+    /// When it was asked for; once carried out, refused or failed, when that happened.
+    public var date: Date
+
+    public init(id: UUID = UUID(), toolID: UUID, toolName: String, words: ConnectedToolPhrases.CardWords, title: String,
+                status: Status, date: Date)
+    {
+        self.id = id
+        self.toolID = toolID
+        self.toolName = toolName
+        self.words = words
+        self.title = title
+        self.status = status
+        self.date = date
+    }
+}
+
 /// What the connected tools tell the interface, as it happens.
 public enum ConnectedToolReport: Sendable, Equatable {
     case log(UUID, ConnectedToolLogEntry)
     case state(UUID, ConnectedToolState)
     /// The service said its list of tools changed: it is fetched again (applies at the next conversation).
     case toolsChanged(UUID)
+    /// An action that changes something waits for the user's "oui", was carried out, refused, failed or dropped.
+    case action(ConnectedToolAction)
 }
 
 /// The connected tools that are on, as a `ToolProvider`: each one's enabled actions.
@@ -158,6 +201,9 @@ public actor ConnectedTools: ToolProvider {
     /// The first Home Assistant that is on, for the examples a runner without the actions shows (`exampleExchanges`).
     private var homeExample: HomeExample?
     private var report: @Sendable (ConnectedToolReport) -> Void = { _ in }
+    /// The calls that wait for the user's "oui", with their card (`ConnectedToolAction`): carried out, refused or dropped,
+    /// the card keeps its id.
+    private var waiting: [(call: ToolCall, action: ConnectedToolAction)] = []
 
     /// A Home Assistant that is on: the examples' turning on (with the service's tool, for its question), turning off and
     /// reading as the model calls them, the tool's name, and whether it asks first.
@@ -330,6 +376,12 @@ public actor ConnectedTools: ToolProvider {
 
     public func summary(of call: ToolCall, context: ToolContext) async -> String {
         guard let (connection, tool) = lookup(call) else { return call.name }
+        // Asked once per call that waits (`ToolRunner.handle`): its card, until it is carried out, refused or dropped. The
+        // same call asked again replaces it.
+        if let index = waiting.firstIndex(where: { $0.call == call }) { finish(waiting.remove(at: index).action, .dropped) }
+        let action = card(call, connection, tool, status: .waiting)
+        waiting.append((call, action))
+        report(.action(action))
         return ConnectedToolPhrases.confirm(tool, call.arguments, toolName: connection.settings.name)
     }
 
@@ -337,6 +389,47 @@ public actor ConnectedTools: ToolProvider {
         guard let (connection, tool) = lookup(call) else { return }
         report(.log(connection.settings.id, ConnectedToolLogEntry(
             date: Date(), title: ConnectedToolPhrases.title(tool, call.arguments), result: .refusedByUser)))
+        if let index = waiting.firstIndex(where: { $0.call == call }) {
+            finish(waiting.remove(at: index).action, .refusedByUser)
+        }
+    }
+
+    public func dropped(_ call: ToolCall) async {
+        if let index = waiting.firstIndex(where: { $0.call == call }) { finish(waiting.remove(at: index).action, .dropped) }
+    }
+
+    public func resetConversation() async {
+        for entry in waiting { finish(entry.action, .dropped) }
+        waiting = []
+    }
+
+    /// The card of a call (`ConnectedToolAction`), new.
+    private func card(_ call: ToolCall, _ connection: Connection, _ tool: MCPTool, status: ConnectedToolAction.Status)
+        -> ConnectedToolAction
+    {
+        ConnectedToolAction(toolID: connection.settings.id, toolName: connection.settings.name,
+                            words: ConnectedToolPhrases.card(tool, call.arguments),
+                            title: ConnectedToolPhrases.title(tool, call.arguments), status: status, date: Date())
+    }
+
+    /// A card's new status, sent with the same id.
+    private func finish(_ action: ConnectedToolAction, _ status: ConnectedToolAction.Status) {
+        var action = action
+        action.status = status
+        action.date = Date()
+        report(.action(action))
+    }
+
+    /// The card of a call carried out, or that failed: the one it had while it waited for the "oui", or a new one for an
+    /// action done directly. None for an action that only reads.
+    private func carriedOut(_ call: ToolCall, _ connection: Connection, _ tool: MCPTool,
+                            _ status: ConnectedToolAction.Status)
+    {
+        if let index = waiting.firstIndex(where: { $0.call == call }) {
+            finish(waiting.remove(at: index).action, status)
+        } else if !ConnectedTools.reads(tool) {
+            report(.action(card(call, connection, tool, status: status)))
+        }
     }
 
     public func perform(_ call: ToolCall, context: ToolContext) async throws -> ToolOutcome {
@@ -350,9 +443,10 @@ public actor ConnectedTools: ToolProvider {
         do {
             let result = try await send(tool, call.arguments, to: connection)
             report(.state(id, .connected))
-            report(.log(id, ConnectedToolLogEntry(
-                date: Date(), title: title,
-                result: result.isError ? .failed(.said(Self.firstLine(result.text))) : .done)))
+            let failure = ConnectedToolFailure.said(Self.firstLine(result.text))
+            report(.log(id, ConnectedToolLogEntry(date: Date(), title: title,
+                                                  result: result.isError ? .failed(failure) : .done)))
+            carriedOut(call, connection, tool, result.isError ? .failed(failure) : .done)
             if await connection.client.toolsChanged { report(.toolsChanged(id)) }
             let text = Self.capped(result.text)
             let forModel: JSONValue = result.isError
@@ -368,6 +462,7 @@ public actor ConnectedTools: ToolProvider {
             }
             report(.state(id, state))
             report(.log(id, ConnectedToolLogEntry(date: Date(), title: title, result: .failed(ConnectedToolFailure(error)))))
+            carriedOut(call, connection, tool, .failed(ConnectedToolFailure(error)))
             throw ToolRefusal(forModel: ConnectedToolPhrases.errorForModel(error, name),
                               spoken: ConnectedToolPhrases.unavailable(error, name), retryable: false)
         }

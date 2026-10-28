@@ -302,6 +302,9 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     /// Connect to a connected tool and list its actions, with these settings and the token the keychain keeps for its id
     /// (the "Test" button; adding a tool, before it is in the settings); answered by `.connectedToolTested`.
     case testConnectedTool(ConnectedToolSettings)
+    /// The "Oui" or "Non" of a connected tool's card (true: "Oui"): answered as if the user had said it, in the
+    /// conversation's language, through the same turn as a spoken answer (`VoicePipeline.submit(answer:)`).
+    case answerAction(Bool)
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -583,6 +586,9 @@ public enum AssistantEvent: Sendable, Codable {
     case connectedToolLog(UUID, ConnectedToolLogEntry)
     /// A connected tool answered again, refused the access or could not be reached, during an action.
     case connectedToolState(UUID, ConnectedToolState)
+    /// A connected tool's action that changes something waits for the user's "oui", or was carried out, refused, failed
+    /// or dropped: its card in the main window (sent again with the same id at each change).
+    case connectedToolAction(ConnectedToolAction)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.
     case warning(String)
