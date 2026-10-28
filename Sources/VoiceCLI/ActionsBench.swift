@@ -342,8 +342,15 @@ private struct CaseResult: Encodable {
     var namesASite: Bool?
     /// The request needs the memory's journal, which is not offered: left out of the score.
     var needsJournal: Bool?
-    /// An answer without a call that says something was noted, remembered or saved (`saysItWasSaved`): nothing was.
+    /// An answer without a call that says something was noted, remembered or saved (`SaveClaims`), as the voice says it:
+    /// nothing was.
     var claimsASave: Bool?
+    /// So did the answer as the model wrote it, before the app left those sentences out.
+    var claimsWritten: Bool?
+    /// With the memory offered, the sentences of an answer without a call that the app leaves out, and what the voice
+    /// then says (`SaveClaims.spoken`; `MemoryPhrases.acknowledged` when nothing is left).
+    var leftOut: [String]?
+    var spoken: String?
     /// With no tool at all, the case's earlier exchanges hold a call, which the app cannot have then (the tools come or go
     /// with a new conversation): left out of the score.
     var callBeforeWithoutTools: Bool?
@@ -648,7 +655,25 @@ func runActionsBench(_ o: Options) async throws {
         result.callChanceAtStart = startChance
         result.peakGB = await model.lastRequestPeakGB
         if memory, !journal, item.expected?.needsJournal == true { result.needsJournal = true }
-        if chosen == "aucun", saysItWasSaved(text) { result.claimsASave = true }
+        if chosen == "aucun" {
+            // As the app: with the memory offered, nothing saved, the sentences that say something was are left out of
+            // what the voice says, and an answer left with nothing, or too little, ends as the app ends it
+            // (`VoicePipeline.answerWithTools`).
+            var said = text
+            if memory {
+                let spoken = SaveClaims.spoken(text)
+                if !spoken.leftOut.isEmpty {
+                    said = ""
+                    for piece in SaveClaims.ending(spoken.pieces, language: .french) {
+                        SpeakableText.record(piece.text, after: piece.separator, in: &said)
+                    }
+                    result.leftOut = spoken.leftOut
+                    result.spoken = said
+                }
+            }
+            if SaveClaims.saysItWasSaved(said) { result.claimsASave = true }
+            if SaveClaims.saysItWasSaved(text) { result.claimsWritten = true }
+        }
         if tools.isEmpty, before.contains(where: { $0.call != nil }) { result.callBeforeWithoutTools = true }
         result.pageExpected = item.expected?.reads
         let earlierSearches = before.compactMap(\.call).filter { $0.name == WebSearchCatalog.searchName }
@@ -877,6 +902,10 @@ func runActionsBench(_ o: Options) async throws {
               + (moreCalls ? "  [then another call, not carried out]" : "")
               + (result.claimsASave == true ? "  [says it was saved: nothing was]" : "")
               + "  \(fmt(callTime ?? firstOutput))" + watched)
+        if let spoken = result.spoken {
+            print("      the voice says “\(spoken.prefix(70))”, the app left out: "
+                  + (result.leftOut ?? []).map { "« \($0) »" }.joined(separator: " "))
+        }
         if let second = result.secondTry {
             print("      second try → \(second)" + (result.rightAfterSecondTry == true ? "  ✓" : "  ✗"))
         }
@@ -1825,10 +1854,18 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     print("action requests answered without a tool: \(missed)")
     // Every request, those left out of the score too: whatever the request, nothing was saved.
     let claims = all.filter { $0.claimsASave == true }
-    print("answers without a call that say something was noted, remembered or saved (questions and offers aside): "
-          + "\(claims.count) / \(all.filter { $0.chosen == "aucun" }.count)" + claims.map { result in
+    let unanswered = all.filter { $0.chosen == "aucun" }.count
+    print("answers without a call that say something was noted, remembered or saved, as the voice says them (questions "
+          + "and offers aside): \(claims.count) / \(unanswered)" + claims.map { result in
+              "\n    · \(result.phrase) (expected: \(result.expected)) → “"
+                  + (result.spoken ?? result.text).replacingOccurrences(of: "\n", with: " ") + "”"
+          }.joined())
+    let written = all.filter { $0.claimsWritten == true }
+    print("  as the model wrote them, before the app left those sentences out: \(written.count) / \(unanswered)"
+          + written.map { result in
               "\n    · \(result.phrase) (expected: \(result.expected)) → “"
                   + result.text.replacingOccurrences(of: "\n", with: " ") + "”"
+                  + (result.spoken.map { " → the voice says “\($0)”" } ?? "")
           }.joined())
     func atStart(_ result: CaseResult) -> String {
         result.callChanceAtStart.map { String(format: "%.1f %% at the first token", $0 * 100) } ?? "first token not read"

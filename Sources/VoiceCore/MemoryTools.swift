@@ -95,8 +95,8 @@ public enum MemoryCatalog {
     /// (« Retiens ça » 90 → 93 %). The same sentence in the middle of the rules, or about the facts said in passing,
     /// E2B did not follow (6 and 7 in a run, the latter taking its requests down); after the sheet, E4B called the
     /// memory for 4 traps in a run and the 26B missed a request; with « c'est noté » and « je note » quoted, E4B said
-    /// « C'est noté ». E2B still answers 2 to 4 facts said in passing a run with « Je note que… » or « Je la garde en
-    /// mémoire ».
+    /// « C'est noté ». E2B still answers 2 to 6 facts said in passing a run with « Je note que… » or « Je la garde en
+    /// mémoire », and the 26B one or two: the app leaves those sentences out of what Maé says (`SaveClaims`).
     ///
     /// The journal's part costs Gemma 4 26B, the only model it is offered to, a little on the memory corpus (two runs):
     /// « N'oublie pas que Margaux fait de la natation le jeudi soir. » becomes a reminder in both (remembered in 6 runs
@@ -474,6 +474,18 @@ public enum MemoryPhrases {
 
     public static func alreadyKnown(_ language: SpeechLanguage) -> String {
         language == .french ? "Je m’en souvenais déjà, c’est dans ma mémoire." : "I already knew that, it is in my memory."
+    }
+
+    /// The model's answer only said that something was noted or remembered, with nothing saved (`SaveClaims`): left out,
+    /// this is said instead of silence. It takes what the user said without promising to remember it.
+    public static func acknowledged(_ language: SpeechLanguage) -> String {
+        language == .french ? "D’accord, merci de me le dire." : "All right, thanks for telling me."
+    }
+
+    /// Said after what is left of such an answer when it is too short for the voice to say it surely (« C’est une bonne
+    /// nouvelle. »), in the same piece (`SentenceChunker.minWords`).
+    public static func thanks(_ language: SpeechLanguage) -> String {
+        language == .french ? "Merci de me le dire." : "Thank you for telling me."
     }
 
     /// The model wrote, twice, something the user did not say.

@@ -90,6 +90,11 @@ public actor ToolRunner {
         return specs
     }
 
+    /// Whether the model is offered `tool`, as the last `tools()` listed them.
+    public func offers(_ tool: String) -> Bool {
+        byName[tool] != nil
+    }
+
     /// What the app says while the model writes a call: its tool's own phrase ("Je regarde ça sur internet, un
     /// instant."), or "Un instant, je m'en occupe tout de suite.". `tool` is nil when the call has just begun, its name
     /// not read yet: then nil when some tool has a phrase of its own (better wait for the name, a few tokens later).

@@ -248,9 +248,11 @@ an empty sheet). Its journal of past exchanges (searching them, erasing a period
 it, on the comfort tier (Gemma 4 26B) for now, or with `--journal`; without it, the requests that need it are left out
 of the score and reported apart (the same goes for `dialogue-bench` and `cache-check`). The report also counts the
 answers without a call that say something was noted, remembered or saved (« C'est noté », « Je retiens que… »,
-questions and offers aside): nothing was, and the user believes Maé will remember it; `dialogue-bench` counts them too,
-turn by turn. `--memory-addendum file` replaces the memory's rules in the system prompt (the sheet still follows), to
-try another wording without rebuilding:
+questions and offers aside): nothing was, and the user would believe Maé remembers it. The app leaves such sentences
+out of what Maé says while nothing was saved in the turn, so the report counts them as the voice says them (with the
+sentences left out), then as the model wrote them; `dialogue-bench` counts them too, turn by turn, as the app has them.
+`--memory-addendum file` replaces the memory's rules in the system prompt (the sheet still follows), and
+`--journal-addendum file` the journal's part, to try another wording without rebuilding:
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli actions-bench --corpus Tests/Fixtures/memory-actions-fr.json

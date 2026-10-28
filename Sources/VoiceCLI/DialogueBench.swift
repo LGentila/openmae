@@ -134,8 +134,13 @@ private struct TurnResult: Encodable {
     var bestCallChance: Double?
     /// The model's first answer wrote neither a word nor a call: it was asked once more (`VoicePipeline.answerWithTools`).
     var askedAgain: Bool?
-    /// Nothing done (no call, or every call refused), and the model's words say something was noted, remembered or
-    /// saved (`saysItWasSaved`).
+    /// The model's words as the voice says them: `answer` without the app's sentences.
+    var modelSaid: String?
+    /// The model's sentences the app left out, as it does with the memory offered while nothing was saved in the turn:
+    /// they said something was noted, remembered or saved (`SaveClaims`).
+    var leftOut: [String]?
+    /// Nothing done (no call, or every call refused), and the model's words, as the voice says them, say something was
+    /// noted, remembered or saved (`SaveClaims`).
     var claimsASave: Bool?
 }
 
@@ -400,7 +405,14 @@ private struct Talk {
             var request = conversation.messages(adding: message)
             var filter = ReasoningFilter()
             var chunker = SentenceChunker()
-            func send(_ piece: SentenceChunker.Piece) { SpeakableText.record(piece.text, after: piece.separator, in: &answer) }
+            var modelSaid = ""
+            func send(_ piece: SentenceChunker.Piece) {
+                SpeakableText.record(piece.text, after: piece.separator, in: &answer)
+                SpeakableText.record(piece.text, after: piece.separator, in: &modelSaid)
+            }
+            // As the app: with the memory offered, the model's sentences that say something was saved are left out
+            // while nothing was, except in a summing up (`VoicePipeline.answerWithTools`).
+            var unsaved = await runner.offers(MemoryCatalog.name)
             // As the app (`VoicePipeline.answerWithTools`): the calls carried out in order, at most `maxCalls`; one second
             // try for the refused ones, only they (or calls standing for them) carried out from it, none twice, opening with
             // a call when the refusals want one; one summing up of what came from outside,
@@ -433,6 +445,8 @@ private struct Talk {
                 // actions (the app knows it at the model's next output, before carrying the call out).
                 var outputs: [ModelOutput] = []
                 let opening = kind == .secondTry ? secondTryOpening : .free
+                let leavesOutClaims = unsaved && kind != .summing
+                chunker.leavesOutSaveClaims = leavesOutClaims
                 for try await output in model.reply(to: request, opening: opening) { outputs.append(output) }
                 for (place, output) in outputs.enumerated() {
                     let followed = outputs[(place + 1)...].first.map { if case .text = $0 { false } else { true } } ?? false
@@ -486,6 +500,10 @@ private struct Talk {
                             waitsForYes = true
                         } else {
                             carriedOut.append(call)
+                            if call.name == MemoryCatalog.name, MemoryCatalog.action(call) == .retenir {
+                                unsaved = false
+                                chunker.leavesOutSaveClaims = false
+                            }
                             if reply.modelSpeaks {
                                 toSum.append(reply.spoken)
                             } else {
@@ -510,7 +528,9 @@ private struct Talk {
                 chunker.pieces(adding: filter.flush()).forEach(send)
                 var cleaned = ReasoningFilter()
                 pass.text = (cleaned.push(pass.text) + cleaned.flush()).trimmingCharacters(in: .whitespacesAndNewlines)
-                let modelSpoke = !SpeakableText.clean(pass.text).isEmpty
+                let modelWrote = !SpeakableText.clean(pass.text).isEmpty
+                let modelSpoke = modelWrote
+                    && (!leavesOutClaims || !SpeakableText.clean(SaveClaims.spoken(pass.text).said).isEmpty)
                 if result.passes.isEmpty, watchCalls, let chances = await model.lastToolCallChances {
                     result.firstCallChance = chances.first
                     result.bestCallChance = chances.best
@@ -563,7 +583,7 @@ private struct Talk {
                     say(ActionPhrases.notUnderstood(.french))
                     break
                 }
-                if kind == .first, calls.isEmpty, !askedForMore, !modelSpoke {
+                if kind == .first, calls.isEmpty, !askedForMore, !modelWrote {
                     if !askedAgain {
                         askedAgain = true
                         result.askedAgain = true
@@ -592,10 +612,17 @@ private struct Talk {
                 }
                 break
             }
-            chunker.remainingPieces().forEach(send)
+            let last = chunker.remainingPieces()
+            last.forEach { SpeakableText.record($0.text, after: $0.separator, in: &modelSaid) }
+            // As the app: an answer left with nothing to say, or too little for the voice, once its claims are out.
+            let ending = !chunker.leftOutClaims.isEmpty && answer.isEmpty && questions.isEmpty && !waitsForYes
+                && !askedForMore ? SaveClaims.ending(last, language: .french) : last
+            ending.forEach { SpeakableText.record($0.text, after: $0.separator, in: &answer) }
             for question in questions.uniquedStrings() { say(question) }
             if waitsForYes, let question = await runner.pendingQuestion(.french) { say(question) }
             if askedForMore { say(ActionPhrases.atMost(maxCalls, .french)) }
+            if !chunker.leftOutClaims.isEmpty { result.leftOut = chunker.leftOutClaims }
+            result.modelSaid = modelSaid
         }
         result.answer = answer
         // As the app (`VoicePipeline.Turn.answerAfterSteps`): the steps already hold what was said before the summing up.
@@ -769,60 +796,13 @@ private func saysItWasDone(_ text: String) -> Bool {
 }
 
 /// Whether the model answered a turn with nothing done (no call carried out, or waiting for the user's "oui": none, or
-/// all refused) in words that say something was noted, remembered or saved (`saysItWasSaved`).
-private func claimsASave(_ turn: TurnResult) -> Bool {
+/// all refused) in words that, as the voice says them, say something was noted, remembered or saved (`SaveClaims`).
+/// `written`: in its words as it wrote them, before the app left such sentences out.
+private func claimsASave(_ turn: TurnResult, written: Bool = false) -> Bool {
     guard turn.answeredByApp != true, !turn.passes.contains(where: { $0.call != nil && $0.refused != true }) else {
         return false
     }
-    return saysItWasSaved(turn.passes.map(\.text).joined(separator: " "))
-}
-
-/// Whether the model's words say that something was noted, remembered or saved, or will be: « C'est noté », « J'ai
-/// bien retenu… », « Je l'ai enregistré dans ma mémoire », « Je note que… », « Je la garde en tête », « Je prends
-/// note… », « Je m'en souviendrai », "I've noted that". Said with no call, nothing was, and the user believes Maé will
-/// remember it. Questions and offers aside: a sentence that ends with « ? » (« Tu veux que je le note ? ») or offers
-/// (« Si tu veux, je le retiens ») promises nothing, and « Je peux la noter pour toi » says nothing was.
-func saysItWasSaved(_ text: String) -> Bool {
-    let kept = "(noté|retenu|enregistré|mémorisé|sauvegardé|gardé|consigné|pris note)"
-    let keeping = "(note|retiens|enregistre|mémorise|sauvegarde|garde|consigne)"
-    let patterns = [
-        // « C'est noté », « C'est bien retenu », « C'est dans ma mémoire ».
-        #"\bc'est (bien |donc |déjà |maintenant |désormais )?"# + kept,
-        #"\bc'est (bien |donc |déjà |maintenant |désormais )?(dans ma mémoire|en mémoire)"#,
-        // « Noté, … », « Bien noté. »
-        #"^(bien )?noté\b"#,
-        // « J'ai bien noté… », « J'en ai pris note », « Je l'ai enregistré », « Je te l'ai noté ».
-        #"\bj'(en )?ai (bien |donc |déjà )?"# + kept,
-        #"\bje (te |t')?(l'|les )ai (bien |donc |déjà )?(noté|retenu|enregistré|mémorisé|sauvegardé|gardé|ajouté|mis)"#,
-        // « Je note que… », « Je la retiens », « Je garde ça en tête » (not « Tu veux que je le note »).
-        #"(?<!que )\bje (te |t')?(le |la |les |l')?"# + keeping + #"\b"#,
-        #"\b(je|j'en) prends (bien |bonne |donc )?note\b"#,
-        // « Je le retiendrai », « Je vais le noter », « Je m'en souviendrai », « Je ne l'oublierai pas ».
-        #"\bje (te |t')?(le |la |les |l')?(noterai|retiendrai|enregistrerai|mémoriserai|garderai)\b"#,
-        #"\bje vais (te |t')?(le |la |les |l')?(noter|retenir|enregistrer|mémoriser|garder|m'en souvenir)\b"#,
-        #"\bje (m'en |me |me le |me la |me les )(souviendrai|rappellerai)\b"#,
-        #"\bje ne (l'|les |le |la )?oublierai (pas|jamais)\b"#,
-        #"\b(i've|i have|i) (noted|saved|stored|memorized|made a note)\b"#, #"\b(i'll|i will) (remember|note|keep)\b"#,
-        #"^noted\b"#,
-    ]
-    let offer = #"\bsi tu (le |la |l')?(veux|voulais|souhaites|préfères|désires)\b|\bif you (want|like)\b"#
-    // The sentences: a space after « . », « ! », « ? » or « … » begins the next one.
-    var sentences = [""]
-    var ended = false
-    for character in text.replacingOccurrences(of: "’", with: "'") {
-        if ended, character.isWhitespace {
-            sentences.append("")
-            ended = false
-            continue
-        }
-        sentences[sentences.count - 1].append(character)
-        ended = ".!?…".contains(character)
-    }
-    return sentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.contains { sentence in
-        guard !sentence.hasSuffix("?"),
-              sentence.range(of: offer, options: [.regularExpression, .caseInsensitive]) == nil else { return false }
-        return patterns.contains { sentence.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
-    }
+    return SaveClaims.saysItWasSaved(written ? turn.passes.map(\.text).joined(separator: " ") : turn.modelSaid ?? "")
 }
 
 private func show(_ turn: TurnResult, index: Int) {
@@ -849,6 +829,9 @@ private func show(_ turn: TurnResult, index: Int) {
         }
     }
     print("      🔊 \(turn.answer)")
+    if let leftOut = turn.leftOut {
+        print("      (left out, nothing was saved: " + leftOut.map { "« \($0) »" }.joined(separator: " ") + ")")
+    }
     if turn.claimsASave == true { print("      ✗ says something was saved: nothing was") }
 }
 
@@ -955,6 +938,11 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
             if !worded.isEmpty { print("  second tries in words that say it was done: \(claiming) / \(worded.count)") }
             let claims = turns.filter { $0.claimsASave == true }.count
             if claims > 0 { print("  answers with nothing done that say something was saved: \(claims) / \(turns.count)") }
+            let written = turns.filter { claimsASave($0, written: true) }.count
+            if written > 0 {
+                print("  answers with nothing done written so by the model, before the app left those sentences out: "
+                      + "\(written) / \(turns.count)")
+            }
             let silent = turns.filter { $0.answer.isEmpty }.count
             if silent > 0 { print("  silent answers (nothing said to the user): \(silent)") }
             let chances = turns.compactMap(\.firstCallChance)
@@ -966,8 +954,17 @@ private func summarize(_ runs: [RunResult], corpus: DialogueCorpus) {
     }
     let byModel = runs.flatMap(\.turns).filter { $0.answeredByApp != true }
     let claims = byModel.filter { $0.claimsASave == true }
-    print("\nanswers with nothing done that say something was noted, remembered or saved: \(claims.count) / "
-          + "\(byModel.count) turns answered by the model" + claims.map { "\n    · \($0.user) → “\($0.answer)”" }.joined())
+    print("\nanswers with nothing done that say something was noted, remembered or saved, as the voice says them: "
+          + "\(claims.count) / \(byModel.count) turns answered by the model"
+          + claims.map { "\n    · \($0.user) → “\($0.answer)”" }.joined())
+    // What the model wrote so, which the app left out (`SaveClaims`): with nothing done, or before a call.
+    let written = byModel.filter { claimsASave($0, written: true) }
+    let leftOut = byModel.filter { $0.leftOut != nil }
+    print("as the model wrote them: \(written.count) / \(byModel.count); turns with sentences left out by the app: "
+          + "\(leftOut.count)" + leftOut.map { turn in
+              "\n    · \(turn.user) → " + (turn.leftOut ?? []).map { "« \($0) »" }.joined(separator: " ")
+                  + " → “\(turn.answer)”"
+          }.joined())
 }
 
 extension Array where Element == String {

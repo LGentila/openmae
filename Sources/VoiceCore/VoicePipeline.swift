@@ -1606,6 +1606,13 @@ public actor VoicePipeline {
     /// answer with neither a word nor a call is asked for once more; with nothing again, the app says it did not
     /// understand (`ActionPhrases.notUnderstood`).
     ///
+    /// With the memory offered, as long as nothing was saved in the turn (no `retenir` carried out), the model's sentences
+    /// that say something was noted, remembered or saved are left out before the voice and the history
+    /// (`SentenceChunker.leavesOutSaveClaims`): the user would believe Maé remembers it. Not while it sums up what came
+    /// from outside, which it reports (« J’ai noté que la piscine ferme à 20 h »). A pass whose words were all left out
+    /// counts as one that said nothing; a turn left with nothing to say, or too little for the voice, ends as
+    /// `SaveClaims.ending` has it (« D’accord, merci de me le dire. »).
+    ///
     /// The history keeps each pass's calls as the model wrote them, one assistant message with all of them, then their
     /// results in the same order, as Gemma 4's template renders them: the next request goes on from the model's memory.
     private func answerWithTools(_ turn: Turn, now: Date, t1: ContinuousClock.Instant, metrics: inout TurnMetrics,
@@ -1616,6 +1623,8 @@ public actor VoicePipeline {
         var request = conversation.messages(adding: turn.userMessage!)
         let maxCalls = max(1, config.actionsPerRequest)
         var pass = Pass.first
+        /// The memory is offered, and nothing was saved in the turn yet: the claims of a save are left out.
+        var unsaved = await tools?.offers(MemoryCatalog.name) == true
         /// The model asked for more calls than the app carries out in one request (`ModelOutput.moreToolCalls`, or more
         /// calls written), on its first try or its second: said once, at the end of the turn, however it ends.
         var askedForMore = false
@@ -1676,6 +1685,8 @@ public actor VoicePipeline {
             /// The call being written comes after words of the model's own in this pass: a call to some tools is then left
             /// out (`ToolRunner.ignoresAfterWords`).
             var afterWords = false
+            let leavesOutClaims = unsaved && pass != .summing
+            chunker.leavesOutSaveClaims = leavesOutClaims
             let opening = pass == .secondTry ? secondTryOpening : .free
             DebugLog.log("turn \(turn.id): LLM request" + (pass == .first ? "" : pass == .secondTry ? " (second try)"
                                                             : " (summing up)") + (opening == .toolCall ? ", opening a call" : ""))
@@ -1742,6 +1753,11 @@ public actor VoicePipeline {
                             waitsForYes = true
                         } else {
                             carriedOut.append(named)
+                            if named.name == MemoryCatalog.name, MemoryCatalog.action(named) == .retenir {
+                                // Something is saved: from now on, the model may say so.
+                                unsaved = false
+                                chunker.leavesOutSaveClaims = false
+                            }
                             if reply.modelSpeaks {
                                 toSum.append((reply.spoken, reply.allowedWhileSumming))
                             } else {
@@ -1801,7 +1817,11 @@ public actor VoicePipeline {
             }
             chunker.pieces(adding: filter.flush()).forEach(send)
             var cleaned = ReasoningFilter()
-            let modelSpoke = !SpeakableText.clean(cleaned.push(said) + cleaned.flush()).isEmpty
+            let words = cleaned.push(said) + cleaned.flush()
+            let modelWrote = !SpeakableText.clean(words).isEmpty
+            /// Its words reach the voice: not all of them left out for saying something was saved.
+            let modelSpoke = modelWrote
+                && (!leavesOutClaims || !SpeakableText.clean(SaveClaims.spoken(words).said).isEmpty)
             if pass == .summing {
                 chunker.remainingPieces().forEach(send)
                 let notCarriedOut: JSONValue = ["erreur": .string(ToolOutcome.noCallWhileSummingUp)]
@@ -1874,7 +1894,7 @@ public actor VoicePipeline {
                 say(ActionPhrases.notUnderstood(turn.language), to: turn)
                 break
             }
-            if pass == .first, calls.isEmpty, !unreadable, !askedForMore, !modelSpoke {
+            if pass == .first, calls.isEmpty, !unreadable, !askedForMore, !modelWrote {
                 // Neither a word nor a call: the user would hear nothing at all. Gemma 4 26B ends some answers so (a request
                 // in 108 in each round of voice-cli journal-bench, 4 runs in 20 of one request): it opens a thought block of
                 // its own, which the voice never says, writes its answer in it and ends there, or writes only what stands for
@@ -1920,7 +1940,17 @@ public actor VoicePipeline {
             }
             break
         }
-        chunker.remainingPieces().forEach(send)
+        var last = chunker.remainingPieces()
+        if !chunker.leftOutClaims.isEmpty {
+            // How many, not what: as the memory's own lines, the log holds no fact of the user's.
+            DebugLog.log("turn \(turn.id): \(chunker.leftOutClaims.count) sentence(s) saying something was saved left "
+                         + "out, nothing was")
+            // Nothing else is said in the turn: what is left must still be heard (`SaveClaims.ending`).
+            if turn.pieces.isEmpty, questions.isEmpty, !waitsForYes, !askedForMore {
+                last = SaveClaims.ending(last, language: lang)
+            }
+        }
+        last.forEach(send)
         for question in questions.uniqued() { say(question, to: turn) }
         if waitsForYes, let question = await tools?.pendingQuestion(lang) { say(question, to: turn) }
         if askedForMore { say(ActionPhrases.atMost(maxCalls, lang), to: turn) }

@@ -113,6 +113,11 @@ public struct ReasoningFilter: Sendable {
 ///
 /// The white space around the pieces is cut off; `pieces(adding:)` also gives, with each piece, the white space the
 /// model wrote before it, which the history keeps (see `SpeakableText.record`).
+///
+/// With `leavesOutSaveClaims`, the sentences that say something was noted, remembered or saved (`SaveClaims`) are left
+/// out, with the white space after them: each sentence waits for its end before it is cut into pieces, except a first
+/// piece cut at its comma, which goes as early as without it when its words say nothing of the kind (the rest of its
+/// sentence is then left out if the whole sentence does). The voice never says a sentence that is taken back.
 public struct SentenceChunker: Sendable {
     /// A piece of the text, and the white space the model wrote before it, since the end of the previous piece ("\n\n"
     /// between two paragraphs; `remainingPieces` ends the text, the next piece starts a new one).
@@ -132,11 +137,22 @@ public struct SentenceChunker: Sendable {
     public var minWords = 5
     /// Safety net for text without punctuation: cut at a space after this many characters.
     public var maxPieceCharacters = 220
+    /// Leaves out the sentences that say something was noted, remembered or saved (`SaveClaims`): on while the memory is
+    /// offered and nothing was saved in the turn (`VoicePipeline.answerWithTools`). Read as each sentence ends.
+    public var leavesOutSaveClaims = false
+    /// The sentences left out (`leavesOutSaveClaims`), in order, as the model wrote them.
+    public private(set) var leftOutClaims: [String] = []
 
     private var buffer = ""
     private var emitted = 0
     /// The white space cut off since the end of the last piece's text: the next piece's separator, so far.
     private var space = ""
+    /// With `leavesOutSaveClaims`: the model's words not given to the pieces yet, the current sentence so far.
+    private var held = ""
+    /// The beginning of the current sentence already given to the pieces (a first piece cut at its comma).
+    private var sentenceStart = ""
+    /// A sentence was just left out: the white space after it goes with it.
+    private var afterLeftOut = false
 
     public init() {}
 
@@ -150,9 +166,31 @@ public struct SentenceChunker: Sendable {
 
     /// The pieces `text` completes, each with the white space before it.
     public mutating func pieces(adding text: String) -> [Piece] {
+        guard leavesOutSaveClaims || !held.isEmpty else { return cutting(text) }
+        held += text
+        var pieces: [Piece] = []
+        while let words = nextWords(final: false) { pieces += cutting(words) }
+        return pieces
+    }
+
+    /// The rest of the text as a last piece (the end of an answer, or of what the model said before a tool call).
+    public mutating func remainingPieces() -> [Piece] {
+        var pieces: [Piece] = []
+        while let words = nextWords(final: true) { pieces += cutting(words) }
+        sentenceStart = ""
+        afterLeftOut = false
+        let rest = take(buffer)
+        buffer = ""
+        emitted = 0
+        space = ""
+        return pieces + (rest.map { [$0] } ?? [])
+    }
+
+    /// The pieces that the words given to the voice complete.
+    private mutating func cutting(_ text: String) -> [Piece] {
         buffer += text
         var pieces: [Piece] = []
-        while let cut = nextCut() {
+        while let cut = nextCut(in: buffer) {
             let raw = String(buffer[..<cut])
             buffer = String(buffer[cut...])
             if let piece = take(raw) {
@@ -163,13 +201,86 @@ public struct SentenceChunker: Sendable {
         return pieces
     }
 
-    /// The rest of the text as a last piece (the end of an answer, or of what the model said before a tool call).
-    public mutating func remainingPieces() -> [Piece] {
-        let rest = take(buffer)
-        buffer = ""
-        emitted = 0
-        space = ""
-        return rest.map { [$0] } ?? []
+    /// The next words of `held` given to the pieces (empty when they were left out), or nil when what is held waits for
+    /// more (`final`: nothing more will come).
+    private mutating func nextWords(final: Bool) -> String? {
+        guard !held.isEmpty else { return nil }
+        guard leavesOutSaveClaims else {
+            defer {
+                held = ""
+                sentenceStart = ""
+            }
+            return held
+        }
+        if let first = held.first, first.isWhitespace {
+            // Between two sentences, or after a first piece cut at a comma: no sentence of its own.
+            let white = String(held.prefix { $0.isWhitespace })
+            held.removeFirst(white.count)
+            if afterLeftOut { return "" }
+            if !sentenceStart.isEmpty { sentenceStart += white }
+            return white
+        }
+        afterLeftOut = false
+        let end = SaveClaims.sentenceEnd(in: held[...])
+        // A first piece goes at its comma as without this (`firstPieceMinCharacters`), when nothing in it says so: as
+        // soon as it is written, the sentence's end known or not.
+        if emitted == 0, let cut = firstPieceCut(before: end ?? held.endIndex) {
+            let clause = String(held[..<cut])
+            held.removeSubrange(..<cut)
+            sentenceStart += clause
+            return clause
+        }
+        if let end {
+            let sentence = String(held[..<end])
+            held.removeSubrange(..<end)
+            return decided(sentence)
+        }
+        if final {
+            defer { held = "" }
+            return decided(held)
+        }
+        // A sentence that does not end (no punctuation): its words go once long enough to be cut, up to their last space,
+        // when nothing in them says so.
+        if held.count >= maxPieceCharacters, let space = held.lastIndex(where: { $0 == " " || $0 == "\n" }),
+           !SaveClaims.holdsAClaim(sentenceStart + held[..<space])
+        {
+            let words = String(held[..<space])
+            held.removeSubrange(..<space)
+            sentenceStart += words
+            return words
+        }
+        return nil
+    }
+
+    /// A whole sentence (`sentenceStart` and `sentence`, the part not given yet): `sentence` when it says nothing was
+    /// saved, otherwise nothing, and the sentence counts among those left out.
+    private mutating func decided(_ sentence: String) -> String {
+        let whole = sentenceStart + sentence
+        sentenceStart = ""
+        guard SaveClaims.claims(whole) else { return sentence }
+        leftOutClaims.append(whole.trimmingCharacters(in: .whitespacesAndNewlines))
+        afterLeftOut = true
+        return ""
+    }
+
+    /// Where in `held`, before `end` (its sentence's end), the first piece would be cut at a comma, a semicolon or a colon,
+    /// with what was given before it: right after it, when its words say nothing was saved. Nil when no first piece would
+    /// be cut there (yet), or when its words hold such a claim (the whole sentence waits for its end).
+    private func firstPieceCut(before end: String.Index) -> String.Index? {
+        var index = held.startIndex
+        while index < end {
+            let next = held.index(after: index)
+            guard next < held.endIndex else { return nil }
+            if ",;:".contains(held[index]), held[next] == " " || held[next] == "\n" {
+                let clause = held[..<next]
+                let probe = buffer + clause + String(held[next])
+                if nextCut(in: probe) == probe.index(before: probe.endIndex) {
+                    return SaveClaims.holdsAClaim(sentenceStart + clause) ? nil : next
+                }
+            }
+            index = next
+        }
+        return nil
     }
 
     /// `raw` without the white space around it, after the white space before it; nil when it is only white space, which
@@ -186,7 +297,8 @@ public struct SentenceChunker: Sendable {
         return piece
     }
 
-    private func nextCut() -> String.Index? {
+    /// Where the first piece of `buffer` ends, if it is complete.
+    private func nextCut(in buffer: String) -> String.Index? {
         var count = 0
         var words = 0
         var previousIsLetter = false
@@ -208,6 +320,17 @@ public struct SentenceChunker: Sendable {
             index = next
         }
         return nil
+    }
+
+    /// How many words `text` holds, counted as for `minWords` (« C'est » and « trente-huit » are one each).
+    public static func words(in text: String) -> Int {
+        var words = 0
+        var previousIsLetter = false
+        for c in text {
+            if c.isLetter, !previousIsLetter { words += 1 }
+            previousIsLetter = c.isLetter || c == "'" || c == "’" || c == "-"
+        }
+        return words
     }
 }
 
