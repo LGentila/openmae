@@ -1593,7 +1593,8 @@ public actor VoicePipeline {
     /// while the model writes the next one, so that its sentence can be said meanwhile; the last of several such sentences
     /// is linked to the one before (« Et c’est noté : … », see `confirm`). A call to some tools written after words of the
     /// model's own is left out, with nothing said of it (`ToolRunner.ignoresAfterWords`: without the actions, a call to the
-    /// delegation tools after an answer to something else, that the model did not mean from the start). Then, in this
+    /// delegation tools after an answer to something else, that the model did not mean from the start; with or without
+    /// them, a connected tool's read after an answer, `ConnectedTools.ignoresAfterWords`). Then, in this
     /// order: the model's second try for the calls refused for their arguments (one for the request, holding every result
     /// already obtained, and only those calls carried out from it; opening with a call when each refusal says which call
     /// to write, `ToolRefusal.secondTryIsACall`); one pass where it sums up every result that came from outside (no call
@@ -1763,10 +1764,9 @@ public actor VoicePipeline {
                     DebugLog.log("turn \(turn.id): tool call started")
                     var words = ReasoningFilter()
                     afterWords = !SpeakableText.clean(words.push(said) + words.flush()).isEmpty
-                    // After the model's words, without the actions, the call may be one left out: its name first.
-                    if !fillerSaid, !(afterWords && tools?.offersActions == false),
-                       let phrase = await waitingPhrase(for: nil, turn)
-                    {
+                    // After the model's words, the call may be one left out (a hand-over without the actions, a
+                    // connected tool's read): its name first.
+                    if !fillerSaid, !afterWords, let phrase = await waitingPhrase(for: nil, turn) {
                         fillerSaid = true
                         // Not in the history: the model would start saying it in its own answers.
                         deliver(phrase, to: turn, inHistory: false)

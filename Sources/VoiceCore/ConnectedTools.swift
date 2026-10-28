@@ -300,6 +300,33 @@ public actor ConnectedTools: ToolProvider {
         specs.first { $0.name == call.name }?.risk ?? .sensitive
     }
 
+    /// A read the model writes after words of its own is left out, with the actions or without them: not carried out,
+    /// kept out of the history, and nothing said of it (`ToolRunner.ignoresAfterWords`). The prompt's part has the model
+    /// call these tools at once, without a word before (`promptAddendum`): a read after an answer is one the user did not
+    /// ask for, unless the model gave a call a fair chance at its first token (`readMeantFrom`; unknown counts as none).
+    /// An action that changes something is never left out: with "Ask first", it waits for the user's "oui".
+    ///
+    /// In voice-cli actions-bench with the pretend Home Assistant (its older tool names), Gemma 4 E4B read the house after
+    /// an answer of its own to requests that asked nothing of it in 3 of 8 runs of Tests/Fixtures/actions-fr.json, with
+    /// the actions or without them (« Merci beaucoup, c'est parfait » : « De rien, je suis là pour toi. », then
+    /// GetLiveContext; « Qu'est-ce que tu sais faire ? »; « Tu peux me rappeler pourquoi le ciel est bleu ? »), each time
+    /// with a call under 0.0001 % at its first token: the user then heard about their house, unasked, after the answer.
+    /// Asked about it without the actions (Tests/Fixtures/home-assistant-fr.json), it read after a few words of its own
+    /// for 3 of 28 questions (« Je vérifie ça pour toi tout de suite. »), none of 16 with them; it gives each of that
+    /// corpus's four questions 55 to 99 % at its first token, so these reads are kept. A read that the model gave less is
+    /// left out, and the user hears its words alone: with an earlier prompt, E4B gave 0.0005 % to « Est-ce que la lumière
+    /// du salon est allumée ? » and answered « Laisse-moi vérifier l'état de la lumière du salon. » before reading. Gemma 4
+    /// E2B and 26B wrote no call to it after words of their own; they give those questions over 20 % at their first
+    /// token, but for « Le volet de la chambre est ouvert ? », 0.5 % on E2B without the actions, which it answers in words
+    /// without reading.
+    public func ignoresAfterWords(_ tool: String, actions: Bool, callChanceAtStart: Double?) async -> Bool {
+        specs.first { $0.name == tool }?.risk == .read && (callChanceAtStart ?? 0) < Self.readMeantFrom
+    }
+
+    /// The chance of a call at the answer's first token from which a read written after words is kept
+    /// (`ignoresAfterWords`), as a hand-over is (`AgentCatalog.handOverMeantFrom`).
+    public static let readMeantFrom = 0.1
+
     public func summary(of call: ToolCall, context: ToolContext) async -> String {
         guard let (connection, tool) = lookup(call) else { return call.name }
         return ConnectedToolPhrases.confirm(tool, call.arguments, toolName: connection.settings.name)

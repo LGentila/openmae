@@ -92,7 +92,9 @@
 // --home-assistant (or a corpus with "homeAssistant": true) offers a pretend Home Assistant's tools too, as a connected
 // tool just added gets them (FakeHomeAssistant: the tools its MCP server lists, the switches a new tool starts with),
 // after the others, with their part of the system prompt. A call to one is checked for the words its arguments must
-// hold ("mentions", whatever the accents and case) and the values they must have ("values"); nothing is carried out.
+// hold ("mentions", whatever the accents and case) and the values they must have ("values"); nothing is carried out. A
+// read written after words of the model's own counts as none when the app leaves it out, with the actions or without
+// them (`ConnectedTools.ignoresAfterWords`), as a hand-over above.
 // --compare-beginnings generates nothing: it compares the beginning of the conversations (system prompt, tools, examples)
 // as the app computes it at load and again when the tools change (in float32, then rounded), the ways it was computed
 // before (in bfloat16, as the conversations), and a float32 reference with every weight converted: the model's memory
@@ -284,14 +286,15 @@ private struct CaseResult: Encodable {
     /// The model went on to another call after this one (the app carries out one action per request).
     var moreCalls: Bool?
     /// A call written after words of the model's own that the app leaves out, saying nothing of it
-    /// (`AgentCatalog.ignoredAfterWords`: a delegation call without the actions), as written: `chosen` is then "aucun".
+    /// (`AgentCatalog.ignoredAfterWords`: a delegation call without the actions; `ConnectedTools.ignoresAfterWords`: a
+    /// connected tool's read), as written: `chosen` is then "aucun".
     var leftOutAfterWords: String?
     /// The call (`chosen`) came after words of the model's own, and the app does not leave it out (it carries it out, or
     /// refuses it as it would any call).
     var keptAfterWords: Bool?
     /// For a call written after words of the model's own: the chance the model gave to opening a tool call at the
     /// answer's first token, as the app reads it (`LanguageModel.callChanceAtStart`), what `AgentCatalog.ignoredAfterWords`
-    /// weighs.
+    /// and `ConnectedTools.ignoresAfterWords` weigh.
     var callChanceAtStart: Double?
     /// Without the actions: the action the request asks for, which no tool offered does (`expected` is then "aucun").
     var actionNotOffered: String?
@@ -591,15 +594,19 @@ func runActionsBench(_ o: Options) async throws {
         var written = call?.name
         call = call.map(named)
         // As in the app (`ToolRunner.ignoresAfterWords`): a call to some tools written after words of the model's own is
-        // left out, and the app says nothing of it (without the actions, a hand-over after an answer, unless the model
-        // meant a call from the start).
+        // left out, and the app says nothing of it (without the actions, a hand-over after an answer; with or without
+        // them, a connected tool's read after an answer; unless the model meant a call from the start).
         let startChance = model.callChanceAtStart
         var leftOut: String?
         var afterWords = false
         if let made = call {
             var words = ReasoningFilter()
             afterWords = !SpeakableText.clean(words.push(textBeforeCall ?? "") + words.flush()).isEmpty
-            if afterWords, AgentCatalog.ignoredAfterWords(made.name, actions: actions, callChanceAtStart: startChance) {
+            var ignored = AgentCatalog.ignoredAfterWords(made.name, actions: actions, callChanceAtStart: startChance)
+            if !ignored, let provider = home.provider {
+                ignored = await provider.ignoresAfterWords(made.name, actions: actions, callChanceAtStart: startChance)
+            }
+            if afterWords, ignored {
                 leftOut = describe(made, written: written)
                 call = nil
                 written = nil
@@ -1789,8 +1796,9 @@ private func summarize(_ all: [CaseResult], tier: HardwareTier, model: String, o
     }
     let leftOut = results.filter { $0.leftOutAfterWords != nil }
     print("calls written after the model's own words, left out as in the app (a call to the delegation tools without "
-          + "the actions, not meant from the start): \(leftOut.count)"
-          + leftOut.map { "\n    · \($0.phrase) (expected: \($0.expected); \(atStart($0)))" }.joined())
+          + "the actions, a connected tool's read, not meant from the start): \(leftOut.count)"
+          + leftOut.map { "\n    · \($0.phrase) → \($0.leftOutAfterWords ?? "") (expected: \($0.expected); \(atStart($0)))" }
+              .joined())
     let kept = results.filter { $0.keptAfterWords == true }
     print("calls written after the model's own words, not left out: \(kept.count)"
           + kept.map { "\n    · \($0.phrase) → \($0.chosen) (expected: \($0.expected); \(atStart($0)))" }.joined())
