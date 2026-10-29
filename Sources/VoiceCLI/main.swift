@@ -266,6 +266,13 @@ struct Options {
     var livePages = false
     /// actions-bench: where to write the pages the model opened, as it read them (the corpus's "pages" shape).
     var recordPages: String?
+    /// conversation: the web search offered, its searches answered with what this corpus recorded (`RecordedSearches`).
+    var webResults: String?
+    /// The most new tokens the model reads in one pass (`MLXChatModel.readAtMost`), for comparisons in one build.
+    var prefillStep: Int?
+    /// conversation: the model's memory locked wired only while the user speaks, as before requests locked it too
+    /// (`MLXChatModel.lockForRequests`).
+    var noRequestLock = false
     var out = URL(fileURLWithPath: "measurements")
     var files: [URL] = []
 
@@ -368,6 +375,9 @@ struct Options {
             case "--pages": o.pages = it.next() != "off"
             case "--live-pages": o.livePages = true
             case "--record-pages": o.recordPages = it.next()
+            case "--web-results": o.webResults = it.next()
+            case "--prefill-step": o.prefillStep = Int(it.next() ?? "")
+            case "--no-request-lock": o.noRequestLock = true
             default: o.files.append(URL(fileURLWithPath: a))
             }
         }
@@ -510,12 +520,16 @@ func buildEngine(_ o: Options, logPlays: Bool = false, tools: ToolRunner? = nil,
     config.bargeIn = o.bargeIn
     print("barge-in: \(o.bargeIn.summary) to interrupt Maé")
     let speaker = SimulatedSpeaker(logsPlays: logPlays)
+    var providers: [any ToolProvider] = o.actions
+        ? [MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier)), TimerTools()] : []
+    if let corpus = o.webResults {
+        providers.append(WebSearchTools(provider: try RecordedSearches(corpus: URL(fileURLWithPath: corpus))))
+    }
+    if let step = o.prefillStep { await model.readAtMost(step) }
+    if o.noRequestLock { await model.lockForRequests(false) }
     let pipeline = VoicePipeline(detector: detector, transcriber: transcriber, model: model,
                                  synthesizer: voice(synthesizer), output: speaker,
-                                 tools: tools ?? (o.actions
-                                     ? ToolRunner(providers: [MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier)),
-                                                              TimerTools()])
-                                     : nil),
+                                 tools: tools ?? (providers.isEmpty ? nil : ToolRunner(providers: providers)),
                                  config: config)
     let log = EventLog()
     await log.attach(model)
@@ -913,7 +927,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
     print("""
         usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
                          [--no-speculative] [--silence-ms 500] [--minutes 10] [--new-conversation-every n]
-                         [--barge-in mac|iphone] [--out folder] files.wav…
+                         [--barge-in mac|iphone] [--web-results corpus.json] [--prefill-step 512]
+                         [--no-request-lock] [--out folder] files.wav…
                voice-cli download [--tier minimum|standard|comfort|max]
                voice-cli verify [--tier tier | --all]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]

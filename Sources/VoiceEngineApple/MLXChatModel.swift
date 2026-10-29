@@ -125,9 +125,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private nonisolated let hold = GenerationHold()
     // Note: "wiring" the weights in memory (MLX WiredMemoryTicket) was tried against a
     // one-off 2.6 s slowdown; it made every turn SLOWER on the reference Mac (0.5–0.65 s instead of
-    // 0.28 s to process a new turn), so it is not used. Tried again against memory pressure: the weights were
-    // compressed all the same. Locking them in RAM (`mlock`) froze the whole Mac in a test where another program held
-    // 9 GB: macOS had nothing left to take. So they are only brought back and kept in use (`keepWarm`, `wakeUp`).
+    // 0.28 s to process a new turn), so it is not held between requests. Tried again against memory pressure: the weights
+    // were compressed all the same. Locking them in RAM (`mlock`) froze the whole Mac in a test where another program held
+    // 9 GB: macOS had nothing left to take. So they are only brought back and kept in use (`keepWarm`, `wakeUp`), and
+    // locked wired only from the user's speech, or a request's start, to the request's first token (`lockWired`).
     /// The weights' memory (see `MemoryResidency`).
     private nonisolated let weightPages: [Range<UInt>]
     /// When `wakeUp` last brought the weights back.
@@ -140,6 +141,11 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var holding = false
     /// The weights and the conversation's memory locked wired for the user's request (`lockWired`).
     private nonisolated let wiredLock = WiredLock()
+    /// When the model last had the GPU compute with its weights (a request, the history computed ahead, a keep-warm pass,
+    /// `wireOnGPU`): the GPU's driver keeps them wired for a few seconds after (see `lockForRequest`).
+    private var lastComputed: ContinuousClock.Instant?
+    /// Requests lock the model's memory wired (`lockForRequest`); off only for comparisons (`lockForRequests`).
+    private var requestsLock = true
 
     /// Diagnostics: how many times the cache had to be rebuilt from scratch.
     public private(set) var cacheRebuilds = 0
@@ -157,6 +163,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Diagnostics: the GPU memory peak during the last request, from its start to its answer's last token (GB, the
     /// weights included).
     public private(set) var lastRequestPeakGB = 0.0
+    /// Diagnostics: the GPU memory peak during the last request, from its start to the end of its prefill (GB, the weights
+    /// included).
+    public private(set) var lastPrefillPeakGB = 0.0
     /// Diagnostics of the last answer: the tokens it drew (its last, which ends it, included), and the time from its
     /// first token to its last, everything done meanwhile included (its writing speed: `voice-cli story-bench --speed`).
     public private(set) var lastWriting = (tokens: 0, ms: 0.0)
@@ -234,7 +243,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let tokenizer = try await ModelTokenizer.load(from: directory)
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
                                    encoding: .utf8)
-        let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
+        var parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
+        parameters.prefill.stepSize = readingStep
         let patched = template.flatMap(GemmaTemplateFix.patched)
         let model = try MLXChatModel(context: context, tokenizer: tokenizer, chatTemplate: patched ?? template,
                                      answersOpenWithThought: patched != nil, parameters: parameters)
@@ -294,6 +304,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             let task = Task {
                 defer { self.pendingRequests.subtract(1, ordering: .relaxed) }
                 do {
+                    await self.lockForRequest()
                     try await self.generate(conversation, requested: requested, opening: opening) {
                         continuation.yield($0)
                     }
@@ -441,9 +452,32 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
 
     /// Diagnostics (`voice-cli cache-check`): `observer` is called on the request's own task each time the model has read
     /// a chunk of a long prompt, with the new tokens read so far and their number (then once more when all are read).
-    /// mlx-swift-lm reads more than 512 new tokens in chunks, and between two it stops if the request was cancelled.
+    /// mlx-swift-lm reads more than `readingStep` new tokens in chunks, and between two it stops if the request was
+    /// cancelled.
     public func watchPrefill(_ observer: (@Sendable (_ read: Int, _ total: Int) -> Void)?) {
         parameters.prefill.progress = observer
+    }
+
+    /// Benchmark diagnostics (`voice-cli … --prefill-step`): the most new tokens the model reads in one pass, instead of the
+    /// app's `readingStep` (512: as before), for comparisons in one build.
+    public func readAtMost(_ tokens: Int) {
+        parameters.prefill.stepSize = max(1, tokens)
+    }
+
+    /// The most new tokens the model reads in one pass: mlx-swift-lm cuts a longer prompt into passes of about as many
+    /// tokens each, and reads its last token on its own, as the answer's first step; a prompt that fits in one pass is
+    /// read whole, the model's output computed for each of its tokens. mlx-swift-lm's default is 512: summing up a web
+    /// search's results (480 to 575 new tokens) took more memory, and the Mac's wired memory went higher meanwhile, with the
+    /// model's memory locked wired (`lockForRequest`). In `voice-cli conversation` (Gemma 4 26B QAT, four web searches in a
+    /// row, the usual apps open, on the reference Mac), with 256: MLX at most 16.22 to 16.46 GB during such a prefill
+    /// instead of 16.60 to 16.87 GB, the Mac's wired memory at most 23.8 to 24.1 GB instead of 23.8 to 25.2 GB, and the
+    /// prefill took 2.87 to 3.16 s instead of 2.87 to 3.34 s (the voice speaking meanwhile).
+    public static let readingStep = 256
+
+    /// Benchmark diagnostics (`voice-cli … --no-request-lock`): `false` locks the model's memory wired only while the user
+    /// speaks, as before requests locked it too (`lockForRequest`), for comparisons in one build.
+    public func lockForRequests(_ on: Bool) {
+        requestsLock = on
     }
 
     public func prefill(_ conversation: [ChatMessage]) throws {
@@ -738,6 +772,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             if read {
                 eval(cache.flatMap(\.state))
                 cachedTokens = Array(chunk.prefix(cachedTokenCount(upTo: chunk.count)))
+                lastComputed = clock.now
             }
             spent += clock.now - t0
             computed += cachedTokens.count - done
@@ -765,6 +800,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         _ = try readingPrompt { try readPrompt(tokens, from: start) }
         eval(cache.flatMap(\.state))
         cachedTokens = Array(tokens.prefix(cachedTokenCount(upTo: tokens.count)))
+        lastComputed = clock.now
         DebugLog.log("LLM: computed \(tokens.count - start) tokens of the conversation (reused \(start)) in \(clock.now - t0)")
         return tokens.count - start
     }
@@ -772,12 +808,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// Processes `tokens[start...]` into the cache, which holds `tokens[..<start]`, and returns the iterator that then
     /// gives the answer's tokens.
     ///
-    /// mlx-swift-lm reads more than 512 new tokens in chunks, and between two it stops if the request was cancelled: the
-    /// chunks read stay in the cache. So when it throws, `cachedTokens` is brought in step with the cache first. Left
-    /// behind, the next request trusted it and was computed from the wrong place (its tokens at the wrong positions, after
-    /// the abandoned chunks), and every later one built on that: a summing up cancelled after 353 of its 706 new tokens
-    /// (the user speaking over the waiting phrase) left the cache with 353 tokens more than the model counted, with Gemma 4
-    /// 26B, until a request went back to a snapshot or a new conversation started.
+    /// mlx-swift-lm reads more than `readingStep` new tokens in chunks, and between two it stops if the request was
+    /// cancelled: the chunks read stay in the cache. So when it throws, `cachedTokens` is brought in step with the cache
+    /// first. Left behind, the next request trusted it and was computed from the wrong place (its tokens at the wrong
+    /// positions, after the abandoned chunks), and every later one built on that: a summing up cancelled after 353 of its
+    /// 706 new tokens (the user speaking over the waiting phrase) left the cache with 353 tokens more than the model
+    /// counted, with Gemma 4 26B, until a request went back to a snapshot or a new conversation started.
     private func readPrompt(_ tokens: [Int], from start: Int, components: GenerationComponents = .init()) throws
         -> TokenIterator
     {
@@ -878,6 +914,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return
         }
         eval((context.model.parameters().flattened().map(\.1) + conversation).map { $0.sum() })
+        lastComputed = clock.now
         DebugLog.log("LLM: kept warm in \(clock.now - start) (CPU \(touched - start))")
         releaseFreeBuffers()
     }
@@ -947,7 +984,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         var letGo = 0  // wirings that found the weights let go since the one before
         var unlocked: String?  // why `lockWired` did not lock, the first time
         while userSpeaking.load(ordering: .relaxed), !windingDown, clock.now - start < Self.longestHold {
-            if pendingRequests.load(ordering: .relaxed) == 0, let why = await lockWired(), unlocked == nil {
+            if pendingRequests.load(ordering: .relaxed) == 0, let why = await lockWired(.userTurn), unlocked == nil {
                 unlocked = why
                 DebugLog.log("LLM: memory not locked wired: \(why)")
             }
@@ -999,17 +1036,22 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     ///
     /// Not when the Mac already has `lockWhenWiredBelow` or more wired: the weights are mostly wired then (a computation
     /// just used them, and `holdOnGPU` keeps them so), or the Mac could not spare their 15.5 GB (Gemma 4 26B). About 24 GB
-    /// wired at most, then, as in a request when the Mac has room (20 to 22 GB). Nor when memory pressure is critical.
+    /// wired at most, then, as in a request when the Mac has room (20 to 22 GB). Nor when memory pressure is critical. A
+    /// request that comes right after a computation locks all the same (see `lockForRequest`).
     /// Released at the request's first token, when the user's turn ends without a request (`unlockUnlessAsked`), after
-    /// `longestLock`, as soon as memory pressure turns critical, and when the model winds down: locking the weights in RAM
-    /// for good froze the Mac (see `weightPages`).
+    /// `longestLock`, as soon as memory pressure turns critical or the Mac has more than `lockCeiling` wired, and when the
+    /// model winds down: locking the weights in RAM for good froze the Mac (see `weightPages`).
     ///
     /// Returns why it did not lock; nil once locked, or locked already.
-    private func lockWired() async -> String? {
+    private func lockWired(_ moment: LockMoment) async -> String? {
         guard !wiredLock.isHeld, !windingDown else { return nil }
         let wired = MemoryResidency.wiredBytes
-        guard wired < Self.lockWhenWiredBelow else {
-            return String(format: "the Mac has %.2f GB wired", Double(wired) / 1e9)
+        if wired >= Self.lockWhenWiredBelow {
+            // Their memory wired already: the lock wires nothing more, it only keeps the driver from letting it go.
+            let weights = UInt64(weightPages.reduce(0) { $0 + $1.count })
+            guard moment == .request, let last = lastComputed, ContinuousClock.now - last < Self.recentlyComputed,
+                  wired >= weights, wired < Self.lockCeiling
+            else { return String(format: "the Mac has %.2f GB wired", Double(wired) / 1e9) }
         }
         guard !MemoryResidency.pressureIsCritical else { return "memory pressure critical" }
         // All that MLX holds: the arrays in use, its free buffers (`releaseFreeBuffers`) and the heap of its small ones.
@@ -1022,10 +1064,41 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let clock = ContinuousClock()
         let start = clock.now
         _ = await ticket.start()
-        wiredLock.watch(ticket, longest: Self.longestLock)
-        DebugLog.log(String(format: "LLM: memory locked wired (%.2f GB) in %@; the Mac had %.2f GB wired, pressure %@",
-                            Double(size) / 1e9, "\(clock.now - start)", Double(wired) / 1e9, MemoryResidency.pressure))
+        wiredLock.watch(ticket, longest: Self.longestLock, ceiling: Self.lockCeiling)
+        DebugLog.log(String(format: "LLM: memory locked wired for %@ (%.2f GB) in %@; the Mac had %.2f GB wired, pressure %@",
+                            moment == .request ? "the request" : "the user's turn", Double(size) / 1e9,
+                            "\(clock.now - start)", Double(wired) / 1e9, MemoryResidency.pressure))
         return nil
+    }
+
+    /// When `lockWired` locks: while the user speaks (`holdOnGPU`), or as a request starts (`lockForRequest`).
+    private enum LockMoment {
+        case userTurn, request
+    }
+
+    /// A request is about to read its new tokens: unless the user's turn locked the model's memory wired already, it is
+    /// locked now, until the request's first token (`lockWired`).
+    ///
+    /// A web search's results are summed up a few seconds after the request that called it, the weights still wired by
+    /// it: the Mac had 22.4 GB wired, more than `holdOnGPU`'s lock allows, so nothing kept them wired. In the app, on the
+    /// reference Mac (M1 Pro, 32 GB, the usual apps open, Gemma 4 26B QAT), one such request read its 812 new tokens in 23.6
+    /// s, then wrote its first token 6.9 s later: as the computation took more memory, the GPU's driver let the weights go
+    /// (the Mac's wired memory went from 22.4 to 7.9 GB), macOS compressed them, and the computation waited while they came
+    /// back one page after the other (the Mac decompressed 45.7 GB and compressed 58.4 GB meanwhile). So a request locks
+    /// also when the Mac has more than `lockWhenWiredBelow` wired, provided the model computed within `recentlyComputed`
+    /// and the Mac's wired memory holds at least the weights' (they are wired then: the lock wires nothing more) and stays
+    /// below `lockCeiling`.
+    ///
+    /// In `voice-cli conversation --web-results` (four web searches in a row, the same Mac and model), without this lock
+    /// the first summing up read its 483 new tokens in 4.98 s, then its first token came 4.49 s later (the Mac's wired
+    /// memory went from 22.5 to 8.8 GB, it compressed 13.6 GB, and its memory pressure turned critical twice). Locked, and
+    /// read `readingStep` tokens at a time, eight summings up read their 484 to 925 new tokens in 2.87 to 4.80 s, their
+    /// first token 0.08 to 0.26 s later, the Mac at most 24.3 GB wired, its memory pressure never critical.
+    private func lockForRequest() async {
+        guard requestsLock, !wiredLock.isHeld, !windingDown else { return }
+        if let why = await lockWired(.request) {
+            DebugLog.log("LLM: memory not locked wired for the request: \(why)")
+        }
     }
 
     /// The user's turn is over: the lock waits `lockGrace` for their request, whose first token releases it (`lockWired`),
@@ -1041,8 +1114,12 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         wiredLock.release("no request after the user's turn")
     }
 
-    /// `lockWired` locks only while the Mac has less than this wired.
+    /// `lockWired` locks only while the Mac has less than this wired (but see `lockForRequest`).
     static let lockWhenWiredBelow: UInt64 = 8_000_000_000
+    /// A lock goes as soon as the Mac has more than this wired, and a request's never locks above it (`lockForRequest`).
+    static let lockCeiling: UInt64 = 25_000_000_000
+    /// How long after the model's last computation a request still finds its memory wired (`lockForRequest`).
+    static let recentlyComputed = Duration.seconds(10)
     /// How long `lockWired`'s lock lasts at most.
     static let longestLock = Duration.seconds(30)
     /// How long the lock waits for the user's request once their turn is over (`unlockUnlessAsked`).
@@ -1064,6 +1141,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             return square(element)
         }
         eval(elements)
+        lastComputed = .now
     }
 
     /// `wakeUp` for the conversation's memory: the cache, its copies and the conversations' beginning, read from the CPU on
@@ -1254,7 +1332,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         lastPrefill = (reused, prompt.count - reused,
                        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
                        Double(waited.components.seconds) * 1000 + Double(waited.components.attoseconds) / 1e15)
-        DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms")
+        lastPrefillPeakGB = Double(Memory.peakMemory) / 1e9
+        DebugLog.log("LLM: prefill \(prompt.count - reused) tokens (reused \(reused)) in \(lastPrefill.ms) ms"
+            + String(format: " (MLX: %.2f GB at most)", lastPrefillPeakGB))
         let pagingAfterPrefill = pagingBefore.map { _ in MemoryResidency.paging }
         if let pagingBefore, let pagingAfterPrefill {
             DebugLog.log("LLM paging during the prefill: " + pagingAfterPrefill.text(since: pagingBefore))
@@ -1285,6 +1365,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             // holds the prompt plus every token returned. Its offset is the ground truth.
             let all = prompt + produced
             cachedTokens = Array(all.prefix(cachedTokenCount(upTo: all.count)))
+            lastComputed = clock.now
             let writing = firstToken.map { clock.now - $0 } ?? .zero
             lastWriting = (produced.count,
                            Double(writing.components.seconds) * 1000 + Double(writing.components.attoseconds) / 1e15)
@@ -1295,10 +1376,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             }
             releaseFreeBuffers()
         }
-        // Cancelled while the model read the prompt (up to 512 new tokens are read in one pass, which cannot stop): the
-        // answer ends before its first token, which is not fed back into the cache with the next one computed (at load,
-        // the warm-up's first compiles the answer's kernels: the app quitting meanwhile waited 0.16 to 0.62 s for it with
-        // Gemma 4 26B on the reference Mac). The cache holds the prompt.
+        // Cancelled while the model read the prompt (up to `readingStep` new tokens are read in one pass, which cannot
+        // stop): the answer ends before its first token, which is not fed back into the cache with the next one computed
+        // (at load, the warm-up's first compiles the answer's kernels: the app quitting meanwhile waited 0.16 to 0.62 s for
+        // it with Gemma 4 26B on the reference Mac). The cache holds the prompt.
         guard !Task.isCancelled else {
             DebugLog.log("LLM: cancelled before its first token")
             return
@@ -1306,7 +1387,8 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         while let token = iterator.next() {
             if firstToken == nil {
                 firstToken = clock.now
-                DebugLog.log("LLM: first token \(clock.now - prefillEnd) after the prefill")
+                DebugLog.log("LLM: first token \(clock.now - prefillEnd) after the prefill"
+                    + String(format: " (MLX: %.2f GB at most since the request)", Double(Memory.peakMemory) / 1e9))
                 wiredLock.release("first token")
             }
             produced.append(token)
@@ -2036,7 +2118,8 @@ final class WakeUpTimes: @unchecked Sendable {
 /// The memory `MLXChatModel.lockWired` locked wired, one lock at a time, released from any thread.
 final class WiredLock: @unchecked Sendable {
     private let lock = NSLock()
-    private var held: (ticket: WiredMemoryTicket, since: ContinuousClock.Instant)?  // guarded by `lock`
+    /// `highest`: the Mac's wired memory at its highest while the lock is held, as `watch` saw it.
+    private var held: (ticket: WiredMemoryTicket, since: ContinuousClock.Instant, highest: UInt64)?  // guarded by `lock`
 
     var isHeld: Bool {
         lock.lock()
@@ -2049,7 +2132,7 @@ final class WiredLock: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard held == nil else { return false }
-        held = (ticket, ContinuousClock.now)
+        held = (ticket, ContinuousClock.now, MemoryResidency.wiredBytes)
         return true
     }
 
@@ -2063,36 +2146,47 @@ final class WiredLock: @unchecked Sendable {
         let wired = MemoryResidency.wiredBytes
         Task(priority: .userInitiated) {
             _ = await released.ticket.end()
-            DebugLog.log(String(format: "LLM: memory lock released (%@) after %@; the Mac had %.2f GB wired, pressure %@",
+            DebugLog.log(String(format: "LLM: memory lock released (%@) after %@; the Mac had %.2f GB wired (%.2f GB at "
+                                + "most meanwhile), pressure %@",
                                 why, "\(ContinuousClock.now - released.since)", Double(wired) / 1e9,
-                                MemoryResidency.pressure))
+                                Double(max(released.highest, wired)) / 1e9, MemoryResidency.pressure))
         }
     }
 
-    /// Once `ticket` started: releases it after `longest`, or as soon as memory pressure turns critical, whatever holds
-    /// the model's actor. Then ends it once more: a release while it started may have reached MLX first, and an end
-    /// before the start goes unheeded.
-    func watch(_ ticket: WiredMemoryTicket, longest: Duration) {
+    /// Once `ticket` started: releases it after `longest`, as soon as memory pressure turns critical, or as soon as the
+    /// Mac has more than `ceiling` wired, whatever holds the model's actor; it looks every `watchSpacing`. Then ends it
+    /// once more: a release while it started may have reached MLX first, and an end before the start goes unheeded.
+    func watch(_ ticket: WiredMemoryTicket, longest: Duration, ceiling: UInt64) {
         Task.detached(priority: .userInitiated) { [self] in
             let clock = ContinuousClock()
             let start = clock.now
-            while holds(ticket) {
+            while let wired = wiredWhileHeld(ticket) {
                 if clock.now - start >= longest {
                     release("after \(longest)")
                 } else if MemoryResidency.pressureIsCritical {
                     release("memory pressure critical")
+                } else if wired > ceiling {
+                    release(String(format: "the Mac has %.2f GB wired", Double(wired) / 1e9))
                 } else {
-                    try? await Task.sleep(for: .milliseconds(100))
+                    try? await Task.sleep(for: Self.watchSpacing)
                 }
             }
             _ = await ticket.end()
         }
     }
 
-    private func holds(_ ticket: WiredMemoryTicket) -> Bool {
+    /// How often `watch` looks at the Mac's memory.
+    static let watchSpacing = Duration.milliseconds(50)
+
+    /// The Mac's wired memory now, kept as the lock's highest if it is, while `ticket` is the lock; nil once it is not.
+    private func wiredWhileHeld(_ ticket: WiredMemoryTicket) -> UInt64? {
+        let wired = MemoryResidency.wiredBytes
         lock.lock()
         defer { lock.unlock() }
-        return held?.ticket.id == ticket.id
+        guard var current = held, current.ticket.id == ticket.id else { return nil }
+        current.highest = max(current.highest, wired)
+        held = current
+        return wired
     }
 }
 
