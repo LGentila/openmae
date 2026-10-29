@@ -191,6 +191,12 @@ extension Snapshots {
             s.memory.enabled = true
             s.memory.journal = true
         }
+        // The model that finds a past conversation asked about in other words, downloading: 46 % of its 204.4 MB; then the
+        // connection lost.
+        let journalSearchDownload = DownloadProgress(doneBytes: 94_100_000,
+                                                     totalBytes: ModelCatalog.journalSearch.totalBytes)
+        var journalSearchOffline = journalSearchDownload
+        journalSearchOffline.waitingForNetwork = true
         // The same Mac on the standard tier, whose model is not offered the past conversations.
         var standardInfo = Demo.info
         standardInfo.tier = .standard
@@ -447,6 +453,16 @@ extension Snapshots {
             SettingsScene(name: "RgMemoire-effacer-conversations", page: .memory,
                           events: [memory(Array(remembered.prefix(4)), exchanges: 1_248)], settings: journalOn,
                           prepare: { navigation, _, _ in navigation.sheet = .clearMemoryJournal }),
+            // The model that finds a past conversation asked about in other words, downloading; then waiting for the
+            // network
+            SettingsScene(name: "RgMemoire-conversations-telechargement", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)), exchanges: 1_248),
+                                   .journalSearchDownload(journalSearchDownload)],
+                          settings: journalOn),
+            SettingsScene(name: "RgMemoire-conversations-telechargement-reseau", page: .memory,
+                          events: [memory(Array(remembered.prefix(4)), exchanges: 1_248),
+                                   .journalSearchDownload(journalSearchOffline)],
+                          settings: journalOn),
             // Connected tools
             SettingsScene(name: "RgMcp", page: .tools, tools: tools),
             SettingsScene(name: "RgMcpVide", page: .tools),

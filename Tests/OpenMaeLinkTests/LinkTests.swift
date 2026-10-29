@@ -156,6 +156,9 @@ struct MessageTests {
     @Test func relayedEvents() {
         #expect(RemoteCommandPolicy.relayed(.levels(input: 1, output: 0)) == nil)
         #expect(RemoteCommandPolicy.relayed(.diagnostics(EngineDiagnostics())) == nil)
+        // The memory page's download: the Mac's own screens (an iPhone app from before it would not understand it).
+        #expect(RemoteCommandPolicy.relayed(.journalSearchDownload(DownloadProgress(doneBytes: 1, totalBytes: 2))) == nil)
+        #expect(RemoteCommandPolicy.relayed(.journalSearchDownload(nil)) == nil)
         // Relayed, but only to the devices that list it (`neededFeature`): an iPhone app from before it would not
         // understand it (ConversationClearedLinkTests).
         guard case .conversationCleared? = RemoteCommandPolicy.relayed(.conversationCleared) else {

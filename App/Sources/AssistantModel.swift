@@ -68,6 +68,9 @@ final class AssistantModel {
     private(set) var isTestingWebSearch = false
     /// What Maé remembers and how many exchanges the journal holds (the memory page); nil until the engine said.
     private(set) var memory: MemoryOverview?
+    /// The download of the model that finds a past conversation asked about in other words, while it runs (the memory
+    /// page); nil otherwise, and once the model is in place.
+    private(set) var journalSearchDownload: DownloadProgress?
     /// The connected tools: where each stands after its last action or test, its last test, its log (the most recent
     /// first, kept across launches).
     private(set) var connectedToolStates: [UUID: ConnectedToolState] = [:]
@@ -334,6 +337,7 @@ final class AssistantModel {
         switch event {
         case .levels, .diagnostics: break
         case .downloadProgress(let p) where p.doneBytes % 20 != 0: break  // about one in twenty
+        case .journalSearchDownload(let p?) where p.doneBytes % 20 != 0: break
         default: DebugLog.log("event: \(event)")
         }
         #endif
@@ -412,6 +416,8 @@ final class AssistantModel {
             self.tasks = tasks
         case .memory(let overview):
             memory = overview
+        case .journalSearchDownload(let progress):
+            journalSearchDownload = progress
         case .webSearchTested(let test):
             if testedWebSearch.map({ $0 == settings.webSearch }) ?? true { webSearchTest = test }
             isTestingWebSearch = false

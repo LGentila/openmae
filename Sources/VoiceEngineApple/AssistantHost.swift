@@ -836,9 +836,10 @@ public actor AssistantHost: AssistantConnection {
     }
 
     /// The journal's search by meaning, as the settings say: with the journal on and the engine running, its model is
-    /// downloaded if this Mac does not have it yet (204 MB, in the background), then loaded (0.4 s, 199 MB); with the
-    /// journal off, it is unloaded. Until it is loaded, the journal is searched in full text only. A download that fails
-    /// (no network) is tried again when the engine starts again or the memory's settings change.
+    /// downloaded if this Mac does not have it yet (204 MB, in the background; the memory page shows its progress), then
+    /// loaded (0.4 s, 199 MB); with the journal off, it is unloaded. Until it is loaded, the journal is searched in full
+    /// text only. A download that fails (no network) is tried again when the engine starts again or the memory's settings
+    /// change.
     private func configureMeaning() async {
         guard settings.memory.journalOn(on: tier) else {
             meaningSetUp?.cancel()
@@ -848,14 +849,23 @@ public actor AssistantHost: AssistantConnection {
         guard stage == .running, !quitting, embedder == nil, meaningSetUp == nil else { return }
         let pack = ModelCatalog.journalSearch
         let store = self.store
+        let emit = emit
         meaningSetUp = Task { [weak self] in
             let missing = store.bytesToDownload([pack])
             if !store.missingFiles(pack).isEmpty {
                 DebugLog.log("memory: downloading the model of the search by meaning (\(missing) bytes)")
+                // The memory page shows the download as it goes, and nothing once it is over, whatever the outcome. Every
+                // progress is sent before `download` returns or throws (each file's transfer is awaited to its end), so
+                // none comes after the nil; the nil comes before another download can start (`meaningSetUpEnded`).
+                var failure: Error?
                 do {
-                    try await ModelDownloader(store: store).download([pack]) { _ in }
+                    try await ModelDownloader(store: store).download([pack]) { emit.yield(.journalSearchDownload($0)) }
                 } catch {
-                    DebugLog.log("memory: the model of the search by meaning was not downloaded: \(error)")
+                    failure = error
+                }
+                emit.yield(.journalSearchDownload(nil))
+                if let failure {
+                    DebugLog.log("memory: the model of the search by meaning was not downloaded: \(failure)")
                     await self?.meaningSetUpEnded(nil)
                     return
                 }

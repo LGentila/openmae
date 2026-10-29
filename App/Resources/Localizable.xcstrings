@@ -2641,6 +2641,16 @@
         }
       }
     },
+    "Maé is downloading what she needs to find a conversation even when you talk about it in other words: %@ of %@.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé télécharge ce qu’il lui faut pour retrouver une conversation même quand tu en parles avec d’autres mots : %1$@ de %2$@."
+          }
+        }
+      }
+    },
     "Maé is on your iPad": {
       "localizations": {
         "fr": {

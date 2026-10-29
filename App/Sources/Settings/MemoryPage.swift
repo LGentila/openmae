@@ -4,7 +4,8 @@ import VoiceCore
 /// Settings › Memory: the memory's switch, named after what it does. With it on: the past conversations, their switch
 /// named after what it keeps, how long they are kept and how many exchanges are; what Maé remembers (newest first, ten at
 /// a time, each entry can be deleted); erasing the past conversations, or everything. Everything stays on this Mac, in
-/// the memory's folder.
+/// the memory's folder. While the model that finds a past conversation asked about in other words downloads (the past
+/// conversations on, the model not on this Mac yet), a note under the introduction says so, with its progress.
 ///
 /// The past conversations (the journal) are offered with some tiers' model only (`MemorySettings.journalOffered(on:)`):
 /// on another one, their switch is off and disabled, a line says why, and nothing more is shown of them; the saved
@@ -27,6 +28,13 @@ struct MemoryPage: View {
         SettingsPageScroll {
             PageHead(Text("Memory"))
             PageIntro("Maé can remember what you tell her, from one conversation to the next. Everything stays on your Mac, in a folder of its own, and never goes to the internet.")
+            // As Settings › Advanced shows the first download of the models: a note, then its progress bar.
+            if memory.enabled, memory.journal, journalOffered, let download = model.journalSearchDownload {
+                Note(Self.downloading(download))
+                    .padding(.top, 16)
+                ProgressTrack(fraction: download.fraction)
+                    .padding(EdgeInsets(top: 10, leading: 4, bottom: 0, trailing: 4))
+            }
             PageSection("Setting")
             SettingsCard {
                 SwitchRow("Remember when you ask", isOn: $model.settings.memory.enabled)
@@ -91,6 +99,16 @@ struct MemoryPage: View {
         case .oneYear: Text("1 year")
         case .unlimited: Text("Unlimited")
         }
+    }
+
+    /// The model that finds a past conversation asked about in other words, downloading (once the past conversations are
+    /// on, if this Mac does not have it yet): what it is for, in plain words, and how far it got. Nothing once it is in
+    /// place.
+    static func downloading(_ download: DownloadProgress) -> Text {
+        let progress = Text("Maé is downloading what she needs to find a conversation even when you talk about it in other words: \(Units.percent(download.fraction)) of \(Units.bytes(download.totalBytes)).")
+        guard download.waitingForNetwork else { return progress }
+        return progress + Text(verbatim: " ")
+            + Text("Connection lost. The download will resume by itself as soon as the Internet is back.")
     }
 
     /// How many exchanges the journal holds so far, said as a count of what she kept: under "Keep for", "5 exchanges

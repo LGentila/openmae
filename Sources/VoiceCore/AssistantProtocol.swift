@@ -573,6 +573,10 @@ public enum AssistantEvent: Sendable, Codable {
     case webSearchTested(WebSearchTest)
     /// What Maé remembers, for the memory page: sent at start-up, after `.refreshMemory` and after every change.
     case memory(MemoryOverview)
+    /// The model that finds a past conversation asked about in other words (`ModelCatalog.journalSearch`) downloads, for
+    /// the memory page: its progress as it goes, then nil once the download is over (the model is in place, or the
+    /// download stopped). Never sent while the model is already on this Mac. The Mac's own screens only: never relayed.
+    case journalSearchDownload(DownloadProgress?)
     /// What `.testConnectedTool` found, for that tool's id. Also sent when a tool said its actions changed (fetched again).
     case connectedToolTested(UUID, ConnectedToolTest)
     /// A connected tool's action was carried out, refused by the user or failed: a line of its log.
