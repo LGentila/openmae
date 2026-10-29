@@ -240,23 +240,37 @@ struct ConnectedToolsTests {
         let (server, client) = try await home()
         defer { server.stop() }
         let (tools, settings) = try await connected(server, client)
-        // What Maé has herself is off: timers, the date and time, lists.
-        #expect(settings.actions.filter { !$0.enabled }.map(\.name)
+        // Off when added: what Maé has herself (timers, the date and time, lists), and, until the user turns them on, the
+        // media players', the vacuums' and the broadcast.
+        let offWhenAdded = settings.actions.filter { !$0.enabled }.map(\.name)
+        #expect(offWhenAdded.filter { ConnectedTools.duplicatesBuiltIn($0) }
             == ["intent__HassCancelAllTimers", "llm__GetDateTime", "todo__get_items", "todo__HassListAddItem",
                 "todo__HassListCompleteItem", "todo__HassListRemoveItem"])
+        #expect(offWhenAdded.filter { !ConnectedTools.duplicatesBuiltIn($0) }
+            == ["assist_satellite__HassBroadcast", "media_player__HassMediaUnpause", "media_player__HassMediaPause",
+                "media_player__HassMediaNext", "media_player__HassMediaPrevious", "media_player__HassSetVolume",
+                "media_player__HassSetVolumeRelative", "media_player__HassMediaPlayerMute",
+                "media_player__HassMediaPlayerUnmute", "media_player__search_media", "media_player__play_media",
+                "vacuum__HassVacuumStart", "vacuum__HassVacuumReturnToBase", "vacuum__HassVacuumCleanArea"])
         let specs = await tools.tools()
-        #expect(specs.count == 20)
-        #expect(specs.prefix(6).map(\.name) == ["assist_satellite__HassBroadcast", "climate__HassClimateSetTemperature",
-                                                "homeassistant__GetLiveContext", "intent__HassTurnOn", "intent__HassTurnOff",
-                                                "intent__HassSetPosition"])
+        #expect(specs.map(\.name) == ["climate__HassClimateSetTemperature", "homeassistant__GetLiveContext",
+                                      "intent__HassTurnOn", "intent__HassTurnOff", "intent__HassSetPosition",
+                                      "light__HassLightSet"])
         // Ask first: what acts waits for a "oui"; reading never does.
         #expect(await tools.risk(of: ToolCall(name: "intent__HassTurnOn")) == .sensitive)
         #expect(await tools.risk(of: ToolCall(name: "homeassistant__GetLiveContext")) == .read)
-        #expect(await tools.risk(of: ToolCall(name: "media_player__search_media")) == .read)
-        #expect(await tools.risk(of: ToolCall(name: "media_player__play_media")) == .sensitive)
         // The server's own words, its title first.
         #expect(specs.first { $0.name == "intent__HassTurnOn" }?.description.hasPrefix("Turn on. Turns on/opens/presses") == true)
         #expect(await tools.promptAddendum()?.contains("« Home Assistant »") == true)
+        // The media players' turned on by the user: offered, and they read or act as Home Assistant says.
+        var media = settings
+        for i in media.actions.indices where media.actions[i].name.hasPrefix("media_player__") {
+            media.actions[i].enabled = true
+        }
+        #expect(await tools.configure([ConnectedTools.Connection(settings: media, client: client)]))
+        #expect(await tools.tools().count == 16)
+        #expect(await tools.risk(of: ToolCall(name: "media_player__search_media")) == .read)
+        #expect(await tools.risk(of: ToolCall(name: "media_player__play_media")) == .sensitive)
 
         var direct = settings
         direct.whenActing = .doDirectly
@@ -306,6 +320,21 @@ struct ConnectedToolsTests {
         // … but not the rest.
         for name in ["intent__HassTurnOn", "light__HassLightSet", "media_player__HassMediaPause", "vacuum__HassVacuumStart"] {
             #expect(!ConnectedTools.duplicatesBuiltIn(name), "\(name)")
+        }
+        // Off when added too, until the user turns them on: the media players', the vacuums' and the broadcast, by their
+        // integration (one Home Assistant adds later as well) or by their older names.
+        for name in ["media_player__HassMediaPause", "media_player__HassSetVolume", "media_player__search_media",
+                     "media_player__play_media", "media_player__HassMediaShuffle", "vacuum__HassVacuumStart",
+                     "vacuum__HassVacuumCleanArea", "assist_satellite__HassBroadcast", "HassMediaPause", "HassSetVolume",
+                     "HassMediaSearchAndPlay", "HassVacuumStart", "HassBroadcast", "llm__GetDateTime"]
+        {
+            #expect(!ConnectedTools.onWhenAdded(name), "\(name)")
+        }
+        for name in ["intent__HassTurnOn", "intent__HassTurnOff", "intent__HassSetPosition", "light__HassLightSet",
+                     "climate__HassClimateSetTemperature", "homeassistant__GetLiveContext", "HassTurnOn", "GetLiveContext",
+                     "search_notes", "play_music"]
+        {
+            #expect(ConnectedTools.onWhenAdded(name), "\(name)")
         }
         #expect(ConnectedTools.reads(MCPTool(name: "homeassistant__GetLiveContext", description: "")))
         #expect(ConnectedToolPhrases.confirm(MCPTool(name: "intent__HassTurnOn", title: "Turn on", description: ""),
@@ -579,5 +608,12 @@ struct ConnectedToolsTests {
         known.actions[0].enabled = false
         let merged = known.merging([MCPTool(name: "HassTurnOn", description: "On"), MCPTool(name: "HassTurnOff", description: "Off")])
         #expect(merged.map(\.enabled) == [false, true])
+        // A media player's action starts off; one the user turned on stays on when the list comes again.
+        var media = known
+        media.actions = media.merging([MCPTool(name: "media_player__HassMediaPause", description: "")])
+        #expect(media.actions.map(\.enabled) == [false])
+        media.actions[0].enabled = true
+        #expect(media.merging([MCPTool(name: "media_player__HassMediaPause", description: ""),
+                               MCPTool(name: "media_player__HassMediaNext", description: "")]).map(\.enabled) == [true, false])
     }
 }

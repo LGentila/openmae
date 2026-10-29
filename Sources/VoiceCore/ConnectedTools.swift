@@ -62,11 +62,12 @@ public struct ConnectedToolSettings: Sendable, Codable, Equatable, Identifiable 
     }
 
     /// The actions a new list gives, keeping the switches of those already known; a new one is on, unless Maé has a
-    /// built-in action for it (`ConnectedTools.duplicatesBuiltIn`).
+    /// built-in action for it or it is one of Home Assistant's media players', vacuums' or broadcasts'
+    /// (`ConnectedTools.onWhenAdded`).
     public func merging(_ tools: [MCPTool]) -> [Action] {
         tools.map { tool in
             Action(tool: tool, enabled: actions.first { $0.name == tool.name }?.enabled
-                ?? !ConnectedTools.duplicatesBuiltIn(tool.name))
+                ?? ConnectedTools.onWhenAdded(tool.name))
         }
     }
 }
@@ -538,6 +539,36 @@ public actor ConnectedTools: ToolProvider {
             || words.contains("time") && (words.contains("current") || words.contains("get"))
             || words.contains("datetime")
     }
+
+    /// Home Assistant's actions for its media players, its vacuums and its broadcasts, by their names as older versions
+    /// list them (`homeAssistantName`): off when the tool is added, until the user turns them on (`offUntilTurnedOn`).
+    static let homeAssistantExtras: Set<String> = [
+        "HassMediaPause", "HassMediaUnpause", "HassMediaNext", "HassMediaPrevious", "HassSetVolume", "HassSetVolumeRelative",
+        "HassMediaPlayerMute", "HassMediaPlayerUnmute", "HassMediaSearchAndPlay", "media_player_search_media",
+        "media_player_play_media", "HassVacuumStart", "HassVacuumReturnToBase", "HassVacuumCleanArea", "HassBroadcast",
+    ]
+
+    /// The integrations of those actions, which newer versions of Home Assistant put before each name
+    /// (`media_player__HassMediaPause`, `vacuum__HassVacuumStart`, `assist_satellite__HassBroadcast`): any action of
+    /// theirs is off when added too, one they add later as well.
+    static let homeAssistantExtraIntegrations = ["media_player", "vacuum", "assist_satellite"]
+
+    /// One of Home Assistant's actions for its media players, its vacuums or its broadcasts (`homeAssistantExtras`): off
+    /// when the tool is added, until the user turns it on in the settings. With the 24 tools the user's Home Assistant
+    /// listed on 2026-10-27 (20 on when added, these among them), the models called the lights', the covers' and the
+    /// thermostat's actions less well than with those alone: in voice-cli actions-bench with
+    /// Tests/Fixtures/home-assistant-fr.json and the actions off, Gemma 4 26B wrote a lamp's brightness as the speakers'
+    /// `volume_level` (« Baisse la lampe du bureau à 30 pour cent »), and with Tests/Fixtures/actions-fr.json, E4B skipped
+    /// to the next track at « J'adore la playlist que j'ai écoutée hier ».
+    public static func offUntilTurnedOn(_ name: String) -> Bool {
+        homeAssistantExtras.contains(homeAssistantName(name))
+            || homeAssistantExtraIntegrations.contains { name.hasPrefix($0 + "__") }
+    }
+
+    /// Whether a tool's action is on when the tool is added, or when its service lists it for the first time: not when Maé
+    /// has a built-in action for it (`duplicatesBuiltIn`), nor for Home Assistant's media players, vacuums and broadcasts
+    /// (`offUntilTurnedOn`). The user may turn any of them on.
+    public static func onWhenAdded(_ name: String) -> Bool { !duplicatesBuiltIn(name) && !offUntilTurnedOn(name) }
 
     // MARK: - Results
 
