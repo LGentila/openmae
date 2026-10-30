@@ -13,6 +13,14 @@ import Foundation
 // found among the 4 excerpts 0 → 69 %, the exchange's own words still 100 %; journal-bench's requests in other words
 // found 0 → 50 % (Gemma 4 E2B), 11 → 78 % (E4B), 17 → 58–67 % (26B), those with the same words unchanged; about 30 ms per
 // search, 25 ms per exchange written, 199 MB of weights.
+//
+// A period without keywords (`chercher {quand: la semaine dernière}`, which E4B writes for most requests with a period
+// since #197's wording of the journal's part): the exchanges closest in meaning to the user's words come first, then
+// the period's latest, when their words name what they ask about; a recap (« Qu'est-ce qu'on s'est dit hier ? ») keeps
+// the period's latest, latest first (`JournalMeaning.texts`, issue #209). journal-bench on E4B, two runs each:
+// requests in other words found 63 → 83 %, used 40 → 50 %; those with the same words found 99 % before and after (one
+// search refused in a run of each: its period, « séance de kiné », unreadable); E2B and the 26B nearly always write
+// keywords.
 
 /// A sentence-embedding model: a text's vector, of length 1 (the dot product of two is their cosine).
 public protocol SentenceEmbedding: Sendable {
@@ -32,9 +40,9 @@ public enum JournalMeaning {
     public static let closestFirst = 3
 
     /// The excerpts' ids, `limit` at most: the `closestFirst` closest in meaning (cosine `cosineFloor` at least), then
-    /// the full-text search's, best first, then the rest of those close in meaning. With 4 excerpts, the full-text
-    /// search's best is always among them: what the exchange's own words find never loses (a rare name, which the
-    /// meaning may rank lower). `meaning`: closest first.
+    /// the full-text search's, best first (without keywords, the period's latest), then the rest of those close in
+    /// meaning. With 4 excerpts, the full-text search's best is always among them: what the exchange's own words find
+    /// never loses (a rare name, which the meaning may rank lower). `meaning`: closest first.
     public static func merge(fullText: [Int64], meaning: [(id: Int64, cosine: Float)], limit: Int) -> [Int64] {
         var chosen: [Int64] = []
         func add(_ id: Int64) {
@@ -49,6 +57,68 @@ public enum JournalMeaning {
 
     /// What is embedded of an exchange: the user's words, then Maé's answer.
     public static func document(_ entry: JournalEntry) -> String { entry.user + "\n" + entry.answer }
+
+    /// What a search reads by meaning: the model's keywords and the user's words (`JournalQuery.request`). Without
+    /// keywords (a period alone), the user's words only when they name what they ask about (`namesATopic`), and nothing
+    /// otherwise: the period's latest exchanges answer a recap better than the meaning of words that name nothing.
+    public static func texts(of query: JournalQuery) -> [String] {
+        let request = nonEmpty(query.request)
+        guard !JournalSearch.terms(query.text ?? "").isEmpty, let keywords = nonEmpty(query.text) else {
+            return request.map { namesATopic($0) ? [$0] : [] } ?? []
+        }
+        return [keywords] + (request.map { [$0] } ?? [])
+    }
+
+    /// Whether the user's words name what they ask about, besides when and that it was said: a word that carries
+    /// meaning (`MemoryText.contentWords`) other than a period's (`periodWords`, a number), the asking's
+    /// (`askingWords`, `askingRoots`) or Maé's name. « La semaine dernière tu m'avais dit quoi ne pas manquer pendant
+    /// notre voyage au Portugal ? » does; a recap does not: « Qu'est-ce qu'on s'est dit hier ? », « Tu peux me résumer
+    /// ce qu'on s'est raconté la semaine dernière ? ». The exchanges closest in meaning to words that name nothing are
+    /// any of the period's: with LFM2.5, « Qu'est-ce qu'on s'est dit hier ? » put the day's first two, the weather and
+    /// the cat's night, before its latest (issue #209).
+    public static func namesATopic(_ words: String) -> Bool {
+        MemoryText.contentWords(words).contains { word in
+            !periodWords.contains(word) && !askingWords.contains(word) && !askingRoots.contains { word.hasPrefix($0) }
+                && word.range(of: #"^[0-9]+(h[0-9]*|e|er|eme|ieme)?$"#, options: .regularExpression) == nil
+        }
+    }
+
+    /// The words of a period, folded and stemmed as `MemoryText.contentWords` gives them: « hier », « la semaine
+    /// dernière », « samedi soir », « il y a quinze jours », « début septembre », « l'autre jour », « ce mois-ci »
+    /// (numbers in digits aside); in English too.
+    static let periodWords: Set<String> = Set([
+        "hier", "veille", "aujourd", "hui", "matin", "matinee", "midi", "minuit", "soir", "soiree", "nuit", "jour",
+        "jours", "journee", "heure", "heures", "semaine", "semaines", "mois", "annee", "annees", "ans", "week", "end",
+        "weekend", "dernier", "derniere", "derniers", "dernieres", "dernierement", "recemment", "passe", "passee",
+        "passes", "passees", "precedent", "precedente", "autre", "fois", "debut", "fin", "ci", "premier", "premiere",
+        "jusqu", "jusque", "partir", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche", "janvier",
+        "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre",
+        "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "quinze", "vingt",
+        "trente", "today", "yesterday", "tonight", "morning", "afternoon", "evening", "night", "day", "days", "weeks",
+        "month", "months", "year", "years", "last", "ago", "past", "previous", "earlier", "recently", "time", "monday",
+        "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february", "march", "april",
+        "may", "june", "july", "august", "september", "october", "november", "december", "two", "three", "four", "five",
+        "seven", "eight", "nine", "ten",
+    ].map(MemoryText.stem))
+
+    /// The other words of a question that names nothing (« quels sujets », « redis-moi », « les choses dites »), Maé's
+    /// name and what one calls her with, folded and stemmed.
+    static let askingWords: Set<String> = Set([
+        "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles", "sujet", "sujets",
+        "ensemble", "truc", "trucs", "dite", "dites", "dits", "disait", "disions", "disaient", "redis", "redire",
+        "repete", "repetes", "repeter", "dialogue", "dialogues", "mae", "ok", "okay", "he", "hey", "bonjour", "salut",
+        "remind", "recall", "us",
+    ].map(MemoryText.stem))
+
+    /// How the words that say that something was said or asked begin: « raconté », « résumer », « discuté »,
+    /// « échangé », « nos conversations », « demandé », « abordé », « parlé » (the forms the small words miss).
+    static let askingRoots = ["racont", "resum", "recap", "discut", "discuss", "echang", "convers", "bavard", "parl",
+                              "demand", "abord", "evoqu", "mention", "talk", "summar", "ask"]
+
+    private static func nonEmpty(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
 
     /// Every exchange of `vectors`, closest first (ties: the oldest first), by its best cosine with one of `queries`.
     public static func ranking(queries: [[Float]], vectors: [Int64: [Float]]) -> [(id: Int64, cosine: Float)] {
@@ -138,13 +208,15 @@ public actor MeaningMemoryStore: MemoryStore {
         return id
     }
 
-    /// With keywords and a model: the closest in meaning to the keywords or to the user's words (`JournalQuery.request`),
-    /// put together with the full-text search's best (`JournalMeaning.merge`). A period alone (no keywords): its latest
-    /// exchanges, as the store gives them. The search by meaning failing, the full-text search's.
+    /// With a model: the closest in meaning to the keywords or to the user's words (`JournalQuery.request`), put
+    /// together with the full-text search's best (`JournalMeaning.merge`). Without keywords (a period alone): the
+    /// closest in meaning to the user's words, then the period's latest, when their words name what they ask about
+    /// (`JournalMeaning.texts`); otherwise (a recap, « Qu'est-ce qu'on s'est dit hier ? »), or without a model, the
+    /// period's latest exchanges, as the store gives them. The search by meaning failing, the full-text search's.
     public func searchJournal(_ query: JournalQuery) async throws -> [JournalHit] {
-        guard let embedder, !windingDown, !JournalSearch.terms(query.text ?? "").isEmpty else {
-            return try await store.searchJournal(query)
-        }
+        guard let embedder, !windingDown else { return try await store.searchJournal(query) }
+        let texts = JournalMeaning.texts(of: query)
+        guard !texts.isEmpty else { return try await store.searchJournal(query) }
         var wide = query
         wide.limit = max(20, query.limit)
         let fullText = try await store.searchJournal(wide)
@@ -153,7 +225,7 @@ public actor MeaningMemoryStore: MemoryStore {
             let vectors = try await store.journalVectors(model: embedder.model, from: query.from, to: query.to)
             if !vectors.isEmpty {
                 var queries: [[Float]] = []
-                for text in [query.text, query.request].compactMap({ Self.nonEmpty($0) }) {
+                for text in texts {
                     queries.append(try await embed(text, query: true, with: embedder))
                 }
                 meaning = JournalMeaning.ranking(queries: queries, vectors: vectors)
@@ -188,11 +260,6 @@ public actor MeaningMemoryStore: MemoryStore {
     public func deleteJournal(ids: [Int64]) async throws -> Int { try await store.deleteJournal(ids: ids) }
 
     // MARK: Embedding
-
-    private static func nonEmpty(_ text: String?) -> String? {
-        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
-        return text
-    }
 
     private func embed(_ text: String, query: Bool, with embedder: any SentenceEmbedding) async throws -> [Float] {
         embedding += 1

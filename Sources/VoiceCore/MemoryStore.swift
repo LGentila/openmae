@@ -49,15 +49,16 @@ public struct JournalEntry: Sendable, Codable, Equatable {
 
 /// A search of the journal: words, a period, or both.
 public struct JournalQuery: Sendable, Equatable {
-    /// The words to look for (any of them); nil or empty: the period's latest exchanges.
+    /// The words to look for (any of them); nil or empty: the period's latest exchanges (searched by meaning too, those
+    /// closest to the user's words first when they name what they ask about: `MeaningMemoryStore`).
     public var text: String?
     public var from: Date?
     public var to: Date?
     public var limit: Int
     /// For the bonus of recent exchanges.
     public var now: Date
-    /// What the user said when they asked (their words, not the model's keywords): the search by meaning reads it too
-    /// (`MeaningMemoryStore`). nil: the keywords alone.
+    /// What the user said when they asked (their words, not the model's keywords): the search by meaning reads it too,
+    /// and ranks a period by it when the model wrote no keywords (`MeaningMemoryStore`). nil: the keywords alone.
     public var request: String?
 
     public init(text: String?, from: Date? = nil, to: Date? = nil, limit: Int = 4, now: Date = Date(),
