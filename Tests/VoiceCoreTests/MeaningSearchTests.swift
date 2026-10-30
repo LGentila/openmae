@@ -135,6 +135,50 @@ struct MeaningSearchTests {
         #expect(small.first?.entry.user.contains("Lisbonne") == true)
     }
 
+    @Test func keywordsThatNameOnlyThePeriodOrTheConversationAreNoKeywords() async throws {
+        let (store, embedder) = try await week()
+        // Early in the week, an exchange that holds the keywords' words and names no topic: searched in full text and
+        // by meaning, « nos conversations » or « samedi dernier » would bring it in.
+        try await store.addExchange(exchange(5.5, "Samedi dernier on a eu une longue conversation avec les voisins",
+                                             "C'est bien de prendre le temps."))
+        await store.indexNow()
+        let lastWeek = (from: now.addingTimeInterval(-7 * 86_400), to: now)
+        // A recap: the period's latest, latest first, as without keywords; nothing embedded.
+        let recapWords = "Qu'est-ce qu'on s'est dit cette semaine ?"
+        let recap = try await store.searchJournal(JournalQuery(text: "nos conversations", from: lastWeek.from,
+                                                               to: lastWeek.to, now: now, request: recapWords))
+        #expect(recap.map { String($0.entry.user.prefix(7)) } == ["Il fait", "Bonjour", "Il pleu", "Mets un"])
+        #expect(await embedder.queriesEmbedded.isEmpty)
+        // The user's words name a topic: the closest in meaning to them first, then the period's latest.
+        let request = "Samedi dernier tu m'avais dit quoi pour notre voyage au Portugal ?"
+        let asked = try await store.searchJournal(JournalQuery(text: "samedi dernier", from: lastWeek.from,
+                                                               to: lastWeek.to, now: now, request: request))
+        #expect(asked.map { String($0.entry.user.prefix(7)) } == ["On part", "Il fait", "Bonjour", "Il pleu"])
+        #expect(await embedder.queriesEmbedded == [request])
+        // Keywords that name a topic are searched as before, by meaning with the user's words, and in full text
+        // (« voisins », which no exchange about Portugal holds).
+        let topic = try await store.searchJournal(JournalQuery(text: "voisins Portugal", from: lastWeek.from,
+                                                               to: lastWeek.to, now: now, request: request))
+        #expect(topic.map { String($0.entry.user.prefix(7)) } == ["On part", "Samedi "])
+        #expect(await embedder.queriesEmbedded == [request, "voisins Portugal", request])
+    }
+
+    @Test func keywordsCountOnlyWhenTheyNameATopic() {
+        let request = "Qu'est-ce que je t'ai dit samedi dernier ?"
+        for keywords in ["nos conversations", "notre conversation", "samedi dernier", "conversation hier",
+                         "sujets abordés", "tout", " "] {
+            let query = JournalQuery(text: keywords, request: request)
+            #expect(JournalMeaning.keywords(of: query) == nil, "\(keywords)")
+            #expect(JournalMeaning.texts(of: query).isEmpty, "\(keywords)")
+        }
+        for keywords in ["devis cuisine", "recette cookies", "voyage Portugal", "Severance", "lapin lièvre",
+                         "cuisine hier"] {
+            let query = JournalQuery(text: keywords, request: request)
+            #expect(JournalMeaning.keywords(of: query) == keywords, "\(keywords)")
+            #expect(JournalMeaning.texts(of: query) == [keywords, request], "\(keywords)")
+        }
+    }
+
     @Test func onlyWordsThatNameATopicRankAPeriod() {
         // journal-bench's requests with a period, and others that name what they ask about.
         for words in [
@@ -224,9 +268,12 @@ struct MeaningSearchTests {
         let tools = MemoryTools(store: store, enabled: true, journal: true)
         let runner = ToolRunner(providers: [tools])
         _ = await runner.tools()
-        /// The first excerpt a search of this month with no keywords gives, the user having said `said`.
-        func firstExcerpt(_ said: String) async -> String? {
-            let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "chercher", "quand": "ce mois-ci"])
+        /// The first excerpt a search of this month with these keywords (none by default) gives, the user having said
+        /// `said`.
+        func firstExcerpt(_ said: String, keywords: String? = nil) async -> String? {
+            var arguments: [String: JSONValue] = ["action": "chercher", "quand": "ce mois-ci"]
+            if let keywords { arguments["texte"] = .string(keywords) }
+            let call = ToolCall(name: MemoryCatalog.name, arguments: arguments)
             let reply = await runner.handle(call, context: ToolContext(now: now, timeZone: paris, language: .french,
                                                                        userSaid: [said]))
             guard case .object(let fields) = reply.forModel, case .array(let excerpts)? = fields["extraits"],
@@ -238,5 +285,9 @@ struct MeaningSearchTests {
         #expect(asked?.contains("Lisbonne") == true)
         let recap = await firstExcerpt("Qu'est-ce qu'on s'est dit ce mois-ci ?")
         #expect(recap?.hasPrefix("Il fait combien") == true)
+        // Keywords that name only the conversation, as Gemma 4 26B writes them for a recap: the same.
+        let recapWithKeywords = await firstExcerpt("Tu peux me résumer ce qu'on s'est raconté ce mois-ci ?",
+                                                   keywords: "nos conversations")
+        #expect(recapWithKeywords?.hasPrefix("Il fait combien") == true)
     }
 }

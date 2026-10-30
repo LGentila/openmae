@@ -50,7 +50,8 @@ public struct JournalEntry: Sendable, Codable, Equatable {
 /// A search of the journal: words, a period, or both.
 public struct JournalQuery: Sendable, Equatable {
     /// The words to look for (any of them); nil or empty: the period's latest exchanges (searched by meaning too, those
-    /// closest to the user's words first when they name what they ask about: `MeaningMemoryStore`).
+    /// closest to the user's words first when they name what they ask about: `MeaningMemoryStore`, where words that name
+    /// nothing but the period or the asking count as none, `JournalMeaning.keywords`).
     public var text: String?
     public var from: Date?
     public var to: Date?

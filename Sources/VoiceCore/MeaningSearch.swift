@@ -21,6 +21,10 @@ import Foundation
 // requests in other words found 63 → 83 %, used 40 → 50 %; those with the same words found 99 % before and after (one
 // search refused in a run of each: its period, « séance de kiné », unreadable); E2B and the 26B nearly always write
 // keywords.
+//
+// Keywords that name only the period or the asking (« nos conversations », « samedi dernier »), which Gemma 4 26B writes
+// for some recaps, count as none, in full text too (`JournalMeaning.keywords`, issue #212): such a recap gets the
+// period's latest, latest first, as without keywords. Without a model, the store searches them as it gets them.
 
 /// A sentence-embedding model: a text's vector, of length 1 (the dot product of two is their cosine).
 public protocol SentenceEmbedding: Sendable {
@@ -58,15 +62,26 @@ public enum JournalMeaning {
     /// What is embedded of an exchange: the user's words, then Maé's answer.
     public static func document(_ entry: JournalEntry) -> String { entry.user + "\n" + entry.answer }
 
-    /// What a search reads by meaning: the model's keywords and the user's words (`JournalQuery.request`). Without
-    /// keywords (a period alone), the user's words only when they name what they ask about (`namesATopic`), and nothing
-    /// otherwise: the period's latest exchanges answer a recap better than the meaning of words that name nothing.
+    /// What a search reads by meaning: the model's keywords (`keywords`) and the user's words (`JournalQuery.request`).
+    /// Without keywords (a period alone, or keywords that name nothing), the user's words only when they name what they
+    /// ask about (`namesATopic`), and nothing otherwise: the period's latest exchanges answer a recap better than the
+    /// meaning of words that name nothing.
     public static func texts(of query: JournalQuery) -> [String] {
         let request = nonEmpty(query.request)
-        guard !JournalSearch.terms(query.text ?? "").isEmpty, let keywords = nonEmpty(query.text) else {
+        guard let keywords = Self.keywords(of: query) else {
             return request.map { namesATopic($0) ? [$0] : [] } ?? []
         }
         return [keywords] + (request.map { [$0] } ?? [])
+    }
+
+    /// The model's keywords when they name what is searched (`namesATopic`); nil otherwise, as without keywords:
+    /// small words only (« tout »), or the period's and the asking's words only (« nos conversations »,
+    /// « samedi dernier », « conversation hier »), which Gemma 4 26B wrote in 7 of its 44 searches for four recaps
+    /// (« Tu peux me résumer ce qu'on s'est raconté la semaine dernière ? »). Searched, such words gave the few
+    /// exchanges that hold them and the closest in meaning to words that name nothing, instead of the period's latest:
+    /// none of last week's latest four, 2 of Saturday's 7 exchanges (issue #212).
+    public static func keywords(of query: JournalQuery) -> String? {
+        nonEmpty(query.text).flatMap { namesATopic($0) ? $0 : nil }
     }
 
     /// Whether the user's words name what they ask about, besides when and that it was said: a word that carries
@@ -209,12 +224,16 @@ public actor MeaningMemoryStore: MemoryStore {
     }
 
     /// With a model: the closest in meaning to the keywords or to the user's words (`JournalQuery.request`), put
-    /// together with the full-text search's best (`JournalMeaning.merge`). Without keywords (a period alone): the
-    /// closest in meaning to the user's words, then the period's latest, when their words name what they ask about
-    /// (`JournalMeaning.texts`); otherwise (a recap, « Qu'est-ce qu'on s'est dit hier ? »), or without a model, the
-    /// period's latest exchanges, as the store gives them. The search by meaning failing, the full-text search's.
+    /// together with the full-text search's best (`JournalMeaning.merge`). Without keywords (a period alone, or keywords
+    /// that name nothing: `JournalMeaning.keywords`, which are then not searched in full text either): the closest in
+    /// meaning to the user's words, then the period's latest, when their words name what they ask about
+    /// (`JournalMeaning.texts`); otherwise (a recap, « Qu'est-ce qu'on s'est dit hier ? »), the period's latest
+    /// exchanges, as the store gives them. Without a model, the store's search, keywords and all. The search by meaning
+    /// failing, the full-text search's.
     public func searchJournal(_ query: JournalQuery) async throws -> [JournalHit] {
         guard let embedder, !windingDown else { return try await store.searchJournal(query) }
+        var query = query
+        query.text = JournalMeaning.keywords(of: query)
         let texts = JournalMeaning.texts(of: query)
         guard !texts.isEmpty else { return try await store.searchJournal(query) }
         var wide = query
