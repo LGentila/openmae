@@ -483,6 +483,58 @@ struct MemoryTests {
         #expect(await runner.handle(call, context: context(["Cherche"])).spoken == MemoryPhrases.journalOff(.french))
     }
 
+    /// A search that finds nothing in the journal: the sheet's entries on its keywords go to the model, which answers
+    /// with them (issue #205: the 26B searched the journal for a fact its sheet holds); with none, or with a period
+    /// alone, the app says it finds nothing itself. An entry forgotten meanwhile is not given.
+    @Test func aSearchThatFindsNothingGivesTheSheetsEntriesOnItsKeywords() async throws {
+        let store = TransientMemoryStore(sheet: ["Ma filleule s'appelle Romane et elle a six ans", "Allergique aux noix",
+                                                 "Mes filleuls jumeaux habitent à Brest"])
+        try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-2 * 86_400), user: "Il pleut encore",
+                                                 answer: "Oui, prends un parapluie.", language: .french))
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
+        _ = await runner.tools()
+        func search(_ arguments: [String: JSONValue]) async -> ToolRunner.Reply {
+            await runner.handle(ToolCall(name: MemoryCatalog.name, arguments: ["action": "chercher"].merging(arguments) { $1 }),
+                                context: context(["Comment s'appelle ma filleule, déjà ?"]))
+        }
+        let reply = await search(["texte": "nom filleule"])
+        #expect(reply.modelSpeaks && reply.refusal == nil)
+        #expect(reply.spoken == MemoryPhrases.nothingFound(.french))  // if the model says nothing
+        guard case .object(let fields) = reply.forModel else {
+            Issue.record("no result")
+            return
+        }
+        #expect(fields["extraits"] == [])
+        // The singular and the plural: « filleule » and « filleuls ».
+        #expect(fields["memoire"] == ["Ma filleule s'appelle Romane et elle a six ans", "Mes filleuls jumeaux habitent à Brest"])
+        #expect(fields["note"]?.text == MemoryCatalog.sheetNote)
+        #expect(fields["requete"]?.text == "nom filleule")
+        // No entry on the keywords, or a period alone: the app says it finds nothing, the model does not speak.
+        for arguments: [String: JSONValue] in [["texte": "vétérinaire chien"], ["quand": "la semaine dernière"]] {
+            let nothing = await search(arguments)
+            #expect(!nothing.modelSpeaks && nothing.spoken == MemoryPhrases.nothingFound(.french), "\(arguments)")
+            guard case .object(let fields) = nothing.forModel else {
+                Issue.record("no result")
+                return
+            }
+            #expect(fields["extraits"] == [] && fields["memoire"] == nil && fields["note"] == nil, "\(arguments)")
+        }
+        // Found in the journal: its excerpts, not the sheet.
+        let found = await search(["texte": "pluie parapluie filleule"])
+        guard case .object(let excerpts) = found.forModel else {
+            Issue.record("no result")
+            return
+        }
+        #expect(found.modelSpeaks && excerpts["memoire"] == nil && excerpts["extraits"] != [])
+        // Forgotten since the conversation began: not given, though the prompt still shows it.
+        try await store.saveSheet(["Allergique aux noix"])
+        let forgotten = await search(["texte": "filleule"])
+        #expect(!forgotten.modelSpeaks && forgotten.spoken == MemoryPhrases.nothingFound(.french))
+        // An empty sheet: as before.
+        try await store.saveSheet([])
+        #expect(await search(["texte": "filleule"]).modelSpeaks == false)
+    }
+
     @Test func thePeriodsOfThePast() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = paris
