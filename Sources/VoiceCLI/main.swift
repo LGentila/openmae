@@ -248,7 +248,8 @@ struct Options {
     var newsAddendum: String?
     /// actions-bench: the memory's rules in the system prompt, read from this file (the sheet still follows).
     var memoryAddendum: String?
-    /// actions-bench: the journal's part of the memory's rules, read from this file (with the journal only).
+    /// actions-bench, journal-bench: the journal's part of the memory's rules, read from this file (with the journal
+    /// only).
     var journalAddendum: String?
     /// story-bench: these requests only, instead of the corpus's; journal-bench: only the corpus's requests that hold one
     /// of these texts.

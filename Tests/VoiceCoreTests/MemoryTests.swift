@@ -555,6 +555,38 @@ struct MemoryTests {
         #expect(await search(["texte": "filleule"]).modelSpeaks == false)
     }
 
+    /// A summary of a period is a search with the period alone (issue #214: told only to find a conversation with
+    /// keywords, Gemma 4 26B said it had no access to past conversations): the journal's part says so, and such a
+    /// search gives the period's latest exchanges, the latest first, to sum up.
+    @Test func aPeriodAloneGivesItsExchangesToSumUp() async throws {
+        let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true)
+        #expect(rules.contains("ou tout ce que vous vous êtes dit pendant une période, même pour le résumer, action "
+                               + "chercher"))
+        #expect(rules.contains("(quand seul s'il ne donne pas de sujet)"))
+        #expect(!MemoryCatalog.promptAddendum(sheet: [], journal: false).contains("pendant une période"))
+        let store = TransientMemoryStore()
+        let days = [12.0, 9, 8, 2]  // the Saturday before last week, its Tuesday and Wednesday, then this Tuesday
+        for (index, daysAgo) in days.enumerated() {
+            try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-daysAgo * 86_400),
+                                                     user: "Échange \(index)", answer: "Réponse \(index)",
+                                                     language: .french))
+        }
+        let runner = ToolRunner(providers: [MemoryTools(store: store, enabled: true, journal: true)])
+        _ = await runner.tools()
+        let call = ToolCall(name: MemoryCatalog.name, arguments: ["action": "chercher", "quand": "la semaine dernière"])
+        let reply = await runner.handle(call, context: context(["Résume-moi ce qu'on s'est dit la semaine dernière."]))
+        #expect(reply.modelSpeaks && reply.refusal == nil)
+        guard case .object(let fields) = reply.forModel, case .array(let excerpts)? = fields["extraits"] else {
+            Issue.record("no excerpts")
+            return
+        }
+        #expect(fields["quand"]?.text == "la semaine dernière" && fields["requete"] == nil)
+        #expect(excerpts.compactMap { excerpt -> String? in
+            guard case .object(let fields) = excerpt else { return nil }
+            return fields["utilisateur"]?.text
+        } == ["Échange 2", "Échange 1"])
+    }
+
     @Test func thePeriodsOfThePast() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = paris
