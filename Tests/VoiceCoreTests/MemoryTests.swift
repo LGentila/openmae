@@ -476,6 +476,26 @@ struct MemoryTests {
         }
         #expect(fields["note"]?.text == MemoryCatalog.excerptsNote)
         #expect(excerpts.count == 1)
+        // The note follows the tier's model: E2B and E4B are told what to say when the excerpts are about something else
+        // (issue #166), the 26B is not; another note to try (voice-cli journal-bench --results-note) wins on any tier.
+        let sayingNotFound = "dis-lui simplement que tu ne retrouves pas cette conversation"
+        #expect(MemoryCatalog.excerptsNote(on: .minimum).contains(sayingNotFound))
+        #expect(MemoryCatalog.excerptsNote(on: .standard).contains(sayingNotFound))
+        #expect(MemoryCatalog.excerptsNote(on: .comfort) == MemoryCatalog.excerptsNote)
+        #expect(MemoryCatalog.excerptsNote(on: .max) == MemoryCatalog.excerptsNote)
+        func note(tier: HardwareTier, tried: String? = nil, configured: HardwareTier? = nil) async -> String? {
+            let tools = MemoryTools(store: store, enabled: true, journal: true, tier: tier, excerptsNote: tried)
+            if let configured { await tools.configure(enabled: true, journal: true, tier: configured) }
+            let runner = ToolRunner(providers: [tools])
+            _ = await runner.tools()
+            let reply = await runner.handle(call, context: context(["Qu'est-ce que je t'avais dit sur le garagiste ?"]))
+            guard case .object(let fields) = reply.forModel else { return nil }
+            return fields["note"]?.text
+        }
+        #expect(await note(tier: .standard) == MemoryCatalog.excerptsNote(on: .standard))
+        #expect(await note(tier: .comfort) == MemoryCatalog.excerptsNote)
+        #expect(await note(tier: .comfort, configured: .minimum) == MemoryCatalog.excerptsNote(on: .minimum))
+        #expect(await note(tier: .minimum, tried: "Une autre note.", configured: .comfort) == "Une autre note.")
         // Without the journal, the model is not offered the search.
         await tools.configure(enabled: true, journal: false)
         let without = await runner.tools()

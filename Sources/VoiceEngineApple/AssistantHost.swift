@@ -823,7 +823,7 @@ public actor AssistantHost: AssistantConnection {
     private func configureMemory() async -> Bool {
         let memory = settings.memory
         let journalOn = memory.journalOn(on: tier)
-        let changed = await memoryTools.configure(enabled: memory.enabled, journal: journalOn)
+        let changed = await memoryTools.configure(enabled: memory.enabled, journal: journalOn, tier: tier)
         if journalOn {
             let writer = journalWriter ?? StoreJournal(store: meaningStore)
             journalWriter = writer

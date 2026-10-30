@@ -280,7 +280,9 @@ often the answer used it; and how often it searched when nothing asked for it:
 ```
 
 It also counts the answers the user would hear nothing of, those saying « much » (the word Gemma 4 26B writes for one of
-its marks, see `ReasoningFilter`) and the first answers that said nothing, asked again as in the app. A rare case runs
+its marks, see `ReasoningFilter`) and the first answers that said nothing, asked again as in the app. `--results-note
+file` replaces the note the model reads with the excerpts (`MemoryCatalog.excerptsNote(on:)`), to try another
+wording without rebuilding. A rare case runs
 many times on its own with `--request` (the corpus's requests holding these words); `--watch-calls` prints each pass as
 the model wrote it, special tokens included, and the report keeps it with its tokens, each with its chance, and counts
 the passes that open a thought block of the model's own or hold « much ». `--own-thoughts` (also for `actions-bench` and

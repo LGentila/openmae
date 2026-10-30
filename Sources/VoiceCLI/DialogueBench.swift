@@ -183,7 +183,7 @@ func runDialogueBench(_ o: Options) async throws {
     let offered = MemorySettings.journalOffered(on: tier)
     let journal = offered || o.journal
     let memoryStore = TransientMemoryStore()
-    let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: journal)
+    let memoryTools = MemoryTools(store: memoryStore, enabled: memory, journal: journal, tier: tier)
     if memory {
         print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")
             : "without the journal, as the app on this tier (--journal to offer it)"))

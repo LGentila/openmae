@@ -207,7 +207,8 @@ struct Options {
     var webAddendum: String?
     /// actions-bench: the delegation's part of the system prompt, read from this file.
     var agentsAddendum: String?
-    /// actions-bench: the note the model reads first in a search's results, read from this file.
+    /// actions-bench: the note the model reads first in a search's results, read from this file; journal-bench: the note
+    /// it reads with the journal's excerpts (`MemoryCatalog.excerptsNote(on:)`).
     var resultsNote: String?
     /// actions-bench, with an action and a search in one request: the note that asks for the summary after what the app
     /// already said (`Conversation.summingUpNote`), this text instead; "off": none, the summing up as before the app had

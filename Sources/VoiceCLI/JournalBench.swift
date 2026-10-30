@@ -4,7 +4,7 @@
 //   voice-cli journal-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/journal-fr.json] [--repeats 3] [--examples app|none|file]
 //                           [--web] [--request "cookies"] [--watch-calls] [--own-thoughts] [--out measurements]
-//                           [--full-text | --embedder folder]
+//                           [--full-text | --embedder folder] [--results-note file]
 //
 // The journal is searched as the app searches it: in full text and by meaning (`MeaningMemoryStore`, with the app's
 // sentence-embedding model, `ModelCatalog.journalSearch`, which must be on this Mac: `voice-cli download
@@ -17,6 +17,8 @@
 // model's own or hold « much ».
 // --own-thoughts: Gemma 4 26B may write thought blocks of its own in its answers, as before it was kept from it
 // (`MLXChatModel.allowOwnThoughts`), to compare in one build.
+// --results-note: the note the model reads with the excerpts, this file's text instead of the app's
+// on this tier (`MemoryCatalog.excerptsNote(on:)`), to try another wording without rebuilding.
 //
 // Text only, and nothing is carried out for real. The journal is switched on for this run only, on any tier, whatever
 // the app's settings say and whether the app offers it on that tier (`MemorySettings.journalOffered(on:)`, which the
@@ -37,8 +39,10 @@
 // searching and the periods it wrote (`quand`). For the requests that must not search (a new question on a topic the
 // journal holds, a fact to remember, a general question), the runs that searched anyway. Then each request on its own,
 // with the keywords the model wrote. When a search missed the exchange, the report also counts the answers that say so
-// (by their words, roughly) rather than tell something else. The corpus is checked first: a request "with other words"
-// that shares a search term with its exchange, or "with the same words" that shares none, is reported.
+// (by their words, roughly) rather than tell something else. The JSON report keeps, with the search by meaning, each
+// excerpt's cosine to the model's keywords and to the user's words (`closeness`). The corpus is checked first: a request
+// "with other words" that shares a search term with its exchange, or "with the same words" that shares none, is
+// reported.
 
 import Foundation
 import VoiceCore
@@ -107,6 +111,8 @@ private struct JournalRun: Encodable {
     var searches: [Search]
     /// The exchanges the searches gave the model, by the corpus's ids, in order.
     var excerpts: [String]
+    /// With the search by meaning: each of them with its cosine to the model's keywords and to the user's words.
+    var closeness: [Closeness]?
     var searched: Bool
     var found: Bool?
     var used: Bool?
@@ -126,6 +132,12 @@ private struct JournalRun: Encodable {
         /// The period the app read from `quand` holds the expected exchange.
         var periodHoldsIt: Bool?
     }
+
+    struct Closeness: Encodable {
+        var id: String
+        var keywords: Float?
+        var request: Float?
+    }
 }
 
 /// The app's store, keeping what each search gave the model (the exchanges' ids), for the report. It never deletes
@@ -135,12 +147,26 @@ private actor RecordingStore: MemoryStore {
     private(set) var found: [Int64] = []
     /// How long each search took, as the tool waited for it.
     private(set) var searchMilliseconds: [Double] = []
+    /// With the search by meaning: the model and each exchange's vector, to tell how close in meaning each excerpt given
+    /// is to the model's keywords and to the user's words (`closeness`), after the search (not in its time).
+    private var embedder: (any SentenceEmbedding)?
+    private var vectors: [Int64: [Float]] = [:]
+    /// Each excerpt given since `forget`, in order, with its cosine to the keywords and to the user's words.
+    private(set) var closeness: [(id: Int64, keywords: Float?, request: Float?)] = []
 
     init(_ store: any MemoryStore) {
         self.store = store
     }
 
-    func forget() { found = [] }
+    func measureCloseness(with embedder: any SentenceEmbedding, vectors: [Int64: [Float]]) {
+        self.embedder = embedder
+        self.vectors = vectors
+    }
+
+    func forget() {
+        found = []
+        closeness = []
+    }
 
     func loadSheet() async throws -> [String] { try await store.loadSheet() }
     func saveSheet(_ entries: [String]) async throws { try await store.saveSheet(entries) }
@@ -151,6 +177,24 @@ private actor RecordingStore: MemoryStore {
         let took = ContinuousClock.now - start
         searchMilliseconds.append(Double(took.components.seconds) * 1000 + Double(took.components.attoseconds) / 1e15)
         found += hits.compactMap(\.entry.id)
+        var keywords: [Float]?
+        var request: [Float]?
+        if let embedder {
+            func embed(_ text: String?) async -> [Float]? {
+                guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !JournalSearch.terms(text).isEmpty else { return nil }
+                return try? await embedder.embed(text, query: true)
+            }
+            keywords = await embed(query.text)
+            request = await embed(query.request)
+        }
+        func cosine(_ query: [Float]?, _ vector: [Float]?) -> Float? {
+            guard let query, let vector else { return nil }
+            return JournalMeaning.dot(query, vector)
+        }
+        for id in hits.compactMap(\.entry.id) {
+            closeness.append((id, cosine(keywords, vectors[id]), cosine(request, vectors[id])))
+        }
         return hits
     }
     func countJournal(from: Date?, to: Date?) async throws -> Int { try await store.countJournal(from: from, to: to) }
@@ -227,6 +271,9 @@ func runJournalBench(_ o: Options) async throws {
         await journal.indexNow()
         print("searching in full text and by meaning (\(embedder.model)): \(exchanges.count) exchanges embedded in "
               + "\(clock.now - start)")
+        await store.measureCloseness(with: embedder,
+                                     vectors: try await journal.store.journalVectors(model: embedder.model, from: nil,
+                                                                                     to: nil))
     } else {
         print("searching in full text only (--full-text)")
     }
@@ -258,7 +305,12 @@ func runJournalBench(_ o: Options) async throws {
     if o.ownThoughts { print("thought blocks of the model's own allowed in its answers (--own-thoughts)") }
     let web = corpus.web == true || o.web
     let calendar = MemoryCalendar(movingItems: ActionCatalog.movesItems(on: tier))
-    let memory = MemoryTools(store: store, enabled: true, journal: true)
+    let excerptsNote = try o.resultsNote.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    print("the excerpts' note: " + (excerptsNote.map { "--results-note's: \($0)" }
+        ?? "the app's on this tier: \(MemoryCatalog.excerptsNote(on: tier))"))
+    let memory = MemoryTools(store: store, enabled: true, journal: true, tier: tier, excerptsNote: excerptsNote)
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (web ? [UnsearchedWeb()] : []) + [memory]
     let runner = ToolRunner(providers: providers)
     let tools = await runner.tools()
@@ -310,6 +362,12 @@ func runJournalBench(_ o: Options) async throws {
             var result = JournalRun(phrase: request.phrase, label: request.label, run: run,
                                     first: calls.first.map { describeChoice($0.call) } ?? "no call", searches: searches,
                                     excerpts: excerpts, searched: !searches.isEmpty, answer: answer, seconds: seconds)
+            let closeness = await store.closeness
+            if !closeness.isEmpty, closeness.contains(where: { $0.keywords != nil || $0.request != nil }) {
+                result.closeness = closeness.compactMap { close in
+                    corpusID[close.id].map { JournalRun.Closeness(id: $0, keywords: close.keywords, request: close.request) }
+                }
+            }
             if askedAgain { result.askedAgain = true }
             if o.watchCalls {
                 let passes = steps.filter { $0.raw != nil }
