@@ -24,7 +24,9 @@ import Foundation
 //
 // Keywords that name only the period or the asking (« nos conversations », « samedi dernier »), which Gemma 4 26B writes
 // for some recaps, count as none, in full text too (`JournalMeaning.keywords`, issue #212): such a recap gets the
-// period's latest, latest first, as without keywords. Without a model, the store searches them as it gets them.
+// period's latest, latest first, as without keywords. Without the model too (not loaded yet, or the app quitting: the
+// full-text search alone), where the 26B's searches with such words found nothing at all, 7 of its 32 for four recaps:
+// the period's exchanges seldom hold « conversation », « samedi » or « dernier » (issue #213).
 
 /// A sentence-embedding model: a text's vector, of length 1 (the dot product of two is their cosine).
 public protocol SentenceEmbedding: Sendable {
@@ -79,7 +81,8 @@ public enum JournalMeaning {
     /// « samedi dernier », « conversation hier »), which Gemma 4 26B wrote in 7 of its 44 searches for four recaps
     /// (« Tu peux me résumer ce qu'on s'est raconté la semaine dernière ? »). Searched, such words gave the few
     /// exchanges that hold them and the closest in meaning to words that name nothing, instead of the period's latest:
-    /// none of last week's latest four, 2 of Saturday's 7 exchanges (issue #212).
+    /// none of last week's latest four, 2 of Saturday's 7 exchanges (issue #212); without the model, in full text alone,
+    /// nothing at all (issue #213).
     public static func keywords(of query: JournalQuery) -> String? {
         nonEmpty(query.text).flatMap { namesATopic($0) ? $0 : nil }
     }
@@ -156,7 +159,8 @@ public enum JournalMeaning {
 }
 
 /// The memory's store, with its journal searched by meaning too, once a sentence-embedding model is given
-/// (`setEmbedder`); without one, it searches as the store does (full text).
+/// (`setEmbedder`); without one, it searches in full text as the store does, keywords that name nothing aside
+/// (`JournalMeaning.keywords`).
 ///
 /// The exchanges are embedded in the background, only while that is allowed (`allowIndexing`: the app allows it while
 /// nobody speaks and Maé neither thinks nor speaks, so that the GPU it takes never holds up a request or the voice): those
@@ -228,12 +232,13 @@ public actor MeaningMemoryStore: MemoryStore {
     /// that name nothing: `JournalMeaning.keywords`, which are then not searched in full text either): the closest in
     /// meaning to the user's words, then the period's latest, when their words name what they ask about
     /// (`JournalMeaning.texts`); otherwise (a recap, « Qu'est-ce qu'on s'est dit hier ? »), the period's latest
-    /// exchanges, as the store gives them. Without a model, the store's search, keywords and all. The search by meaning
-    /// failing, the full-text search's.
+    /// exchanges, as the store gives them. Without a model (not there yet, or winding down), the store's full-text
+    /// search, with the same keywords: those that name nothing are not searched there either, so that a recap gets the
+    /// period's latest too (issue #213). The search by meaning failing, the full-text search's.
     public func searchJournal(_ query: JournalQuery) async throws -> [JournalHit] {
-        guard let embedder, !windingDown else { return try await store.searchJournal(query) }
         var query = query
         query.text = JournalMeaning.keywords(of: query)
+        guard let embedder, !windingDown else { return try await store.searchJournal(query) }
         let texts = JournalMeaning.texts(of: query)
         guard !texts.isEmpty else { return try await store.searchJournal(query) }
         var wide = query

@@ -245,6 +245,30 @@ struct MeaningSearchTests {
         #expect(try await store.searchJournal(JournalQuery(text: "Lisbonne", now: now)).count == 1)
     }
 
+    @Test func withoutAModelKeywordsThatNameNothingAreNoKeywordsEither() async throws {
+        let (store, embedder) = try await week()
+        // Early in the week, the only exchange that holds the keywords' words: searched in full text, « nos
+        // conversations » or « samedi dernier » would give it alone.
+        try await store.addExchange(exchange(5.5, "Samedi dernier on a eu une longue conversation avec les voisins",
+                                             "C'est bien de prendre le temps."))
+        await store.setEmbedder(nil)
+        let lastWeek = (from: now.addingTimeInterval(-7 * 86_400), to: now)
+        let recapWords = "Qu'est-ce qu'on s'est dit cette semaine ?"
+        // A recap: the period's latest, latest first, as without keywords.
+        for keywords in ["nos conversations", "samedi dernier", "conversation hier"] {
+            let recap = try await store.searchJournal(JournalQuery(text: keywords, from: lastWeek.from, to: lastWeek.to,
+                                                                   now: now, request: recapWords))
+            #expect(recap.map { String($0.entry.user.prefix(7)) } == ["Il fait", "Bonjour", "Il pleu", "Mets un"],
+                    "\(keywords)")
+        }
+        // Keywords that name a topic are still searched in full text, as the store gets them: only the exchanges that
+        // hold one of their words (« voisins »; « Portugal », which no exchange holds, finds nothing by meaning).
+        let topic = try await store.searchJournal(JournalQuery(text: "voisins Portugal", from: lastWeek.from,
+                                                               to: lastWeek.to, now: now, request: recapWords))
+        #expect(topic.map { String($0.entry.user.prefix(7)) } == ["Samedi "])
+        #expect(await embedder.queriesEmbedded.isEmpty)
+    }
+
     @Test func theToolHandsTheUsersWordsToTheSearch() async throws {
         let (store, _, _) = try await journal()
         let tools = MemoryTools(store: store, enabled: true, journal: true)
