@@ -13,8 +13,8 @@ struct ToolActionCard: View {
     static let width: CGFloat = 580
 
     var body: some View {
-        let waiting = model.toolActions.filter { $0.status == .waiting }
-        let finished = model.toolActions.filter { $0.status != .waiting }
+        let waiting = model.toolActions.waiting
+        let finished = model.toolActions.finished
         VStack(spacing: 12) {
             if !waiting.isEmpty { WaitingLine(model: model, actions: waiting) }
             if !waiting.isEmpty, !finished.isEmpty { Hairline() }
@@ -58,12 +58,9 @@ private struct WaitingLine: View {
         .accessibilityLabel(Text("Maé asks you to confirm"))
     }
 
-    /// The tool's disc as its settings show it; Home Assistant's if it was removed meanwhile.
+    /// The tool's disc as its settings show it; as a tool by that name if it was removed meanwhile.
     static func disc(_ action: ConnectedToolAction, settings: [ConnectedToolSettings]) -> (icon: Icon, color: RGBA) {
-        let index = settings.firstIndex { $0.id == action.toolID }
-        let tool = index.map { settings[$0] }
-            ?? ConnectedToolSettings(id: action.toolID, name: action.toolName, address: "", access: .none)
-        return ConnectedToolsAccess.disc(tool, index: index ?? 0)
+        ConnectedToolDisc(of: action, among: settings).look
     }
 
     /// « Home Assistant », or the names of the tools of a request that asks several.

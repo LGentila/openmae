@@ -170,21 +170,40 @@ struct FloatingDisc: View {
     }
 }
 
-/// A white pill with a hairline: the link's state, the Mac's name, a status.
+/// A white pill with a hairline: the link's state, the Mac's name, a status. `leading`: 11 points before an icon, 14
+/// before words alone.
 struct PhoneChip<Content: View>: View {
     var background = Palette.white
     var outlined = true
+    var leading: CGFloat = 11
     @ViewBuilder let content: Content
 
     var body: some View {
         HStack(spacing: 8) { content }
             .textStyle(.phoneChip)
             .foregroundStyle(Palette.ink)
-            .padding(.leading, 11)
+            .padding(.leading, leading)
             .padding(.trailing, 14)
             .frame(height: 36)
             .background(background, in: Capsule())
             .overlay { if outlined { Capsule().strokeBorder(Palette.line) } }
+    }
+}
+
+/// A disc of colour with an icon: a row of the settings (the Mac, the relay), a connected tool on its action's card.
+struct RowDisc: View {
+    let icon: Icon
+    let color: RGBA
+    var size: CGFloat = 40
+    var iconSize: CGFloat = 22
+    var iconColor = Palette.ink
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .overlay { IconView(icon: icon, size: iconSize).foregroundStyle(iconColor) }
+            .accessibilityHidden(true)
     }
 }
 

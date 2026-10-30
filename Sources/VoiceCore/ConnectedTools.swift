@@ -125,9 +125,9 @@ public enum ConnectedToolTest: Sendable, Codable, Equatable {
     case failed(MCPError)
 }
 
-/// An action of a connected tool that changes something, for the card under Maé's sentence in the main window: while it
-/// waits for the user's "oui", then what came of it. Sent again, with the same id, each time its status changes. An
-/// action that only reads has none.
+/// An action of a connected tool that changes something, for the card under Maé's sentence in the main window (and on the
+/// iPhones and iPads, through the link): while it waits for the user's "oui", then what came of it. Sent again, with the
+/// same id, each time its status changes. An action that only reads has none.
 public struct ConnectedToolAction: Sendable, Codable, Equatable, Identifiable {
     public enum Status: Sendable, Codable, Equatable {
         /// It waits for the user's "oui" (the tool asks first).
@@ -152,9 +152,12 @@ public struct ConnectedToolAction: Sendable, Codable, Equatable, Identifiable {
     public var status: Status
     /// When it was asked for; once carried out, refused or failed, when that happened.
     public var date: Date
+    /// The tool's disc as the Mac's settings draw it, for a screen that does not have them (an iPhone, an iPad): set by the
+    /// Mac's link (`LinkHost`) when it relays the card. nil on the Mac, whose card looks the tool up in its settings.
+    public var disc: ConnectedToolDisc?
 
     public init(id: UUID = UUID(), toolID: UUID, toolName: String, words: ConnectedToolPhrases.CardWords, title: String,
-                status: Status, date: Date)
+                status: Status, date: Date, disc: ConnectedToolDisc? = nil)
     {
         self.id = id
         self.toolID = toolID
@@ -163,6 +166,48 @@ public struct ConnectedToolAction: Sendable, Codable, Equatable, Identifiable {
         self.title = title
         self.status = status
         self.date = date
+        self.disc = disc
+    }
+}
+
+/// What a connected tool's disc shows, in the settings' lists and on its actions' cards: Home Assistant's house, or a
+/// plug (a service on the home network) or a globe (on the internet), on a colour that follows its place in the
+/// settings' list. The interfaces draw it (`look`, in their design files).
+public struct ConnectedToolDisc: Sendable, Codable, Equatable {
+    public enum Kind: String, Sendable, Codable {
+        case homeAssistant, homeNetwork, internet
+    }
+
+    public var kind: Kind
+    /// Its place in the settings' list.
+    public var index: Int
+
+    public init(kind: Kind, index: Int) {
+        self.kind = kind
+        self.index = index
+    }
+
+    /// The disc of `tool`, `index`th in the settings' list.
+    public init(_ tool: ConnectedToolSettings, index: Int) {
+        let home = Self.isHomeAssistant(tool)
+        let homeNetwork = MCPClient.isHomeNetwork(MCPClient.address(tool.address)?.host() ?? "")
+        self.init(kind: home ? .homeAssistant : homeNetwork ? .homeNetwork : .internet, index: index)
+    }
+
+    /// The disc of an action's tool, as the settings' list `tools` draws it; as the first one of a tool by that name
+    /// when it is no longer in the list (removed meanwhile).
+    public init(of action: ConnectedToolAction, among tools: [ConnectedToolSettings]) {
+        if let index = tools.firstIndex(where: { $0.id == action.toolID }) {
+            self.init(tools[index], index: index)
+        } else {
+            self.init(ConnectedToolSettings(id: action.toolID, name: action.toolName, address: "", access: .none), index: 0)
+        }
+    }
+
+    /// Home Assistant, by its name or its address.
+    public static func isHomeAssistant(_ tool: ConnectedToolSettings) -> Bool {
+        let host = MCPClient.address(tool.address)?.host() ?? ""
+        return tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
     }
 }
 
@@ -401,6 +446,12 @@ public actor ConnectedTools: ToolProvider {
     public func resetConversation() async {
         for entry in waiting { finish(entry.action, .dropped) }
         waiting = []
+    }
+
+    /// The action of that card (`ConnectedToolAction.id`) waits for the user's "oui": a card's "Oui" or "Non" may answer
+    /// it (`AssistantCommand.answerAction`).
+    public func waits(_ action: UUID) -> Bool {
+        waiting.contains { $0.action.id == action }
     }
 
     /// The card of a call (`ConnectedToolAction`), new.

@@ -191,6 +191,16 @@
         }
       }
     },
+    "Completed": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fait"
+          }
+        }
+      }
+    },
     "Connecting…": {
       "localizations": {
         "fr": {
@@ -221,6 +231,16 @@
         }
       }
     },
+    "Declined": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refusé"
+          }
+        }
+      }
+    },
     "Does not answer right now": {
       "localizations": {
         "fr": {
@@ -247,6 +267,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "C’est fait : tu peux parler à Maé depuis ton iPhone."
+          }
+        }
+      }
+    },
+    "Failure": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec"
           }
         }
       }
@@ -601,6 +631,16 @@
         }
       }
     },
+    "Maé asks you to confirm": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maé te demande de confirmer"
+          }
+        }
+      }
+    },
     "Maé has a problem on your Mac.": {
       "localizations": {
         "fr": {
@@ -727,6 +767,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nouvelle conversation"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non"
           }
         }
       }
@@ -867,6 +917,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Relâche pour envoyer"
+          }
+        }
+      }
+    },
+    "Say “yes” or “no”.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dis « oui » ou « non »."
           }
         }
       }
@@ -1211,6 +1271,16 @@
         }
       }
     },
+    "Yes": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oui"
+          }
+        }
+      }
+    },
     "You": {
       "localizations": {
         "fr": {
@@ -1267,6 +1337,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ton propre relais"
+          }
+        }
+      }
+    },
+    "just now": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "à l’instant"
           }
         }
       }

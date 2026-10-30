@@ -302,9 +302,11 @@ public enum AssistantCommand: Sendable, Codable, Equatable {
     /// Connect to a connected tool and list its actions, with these settings and the token the keychain keeps for its id
     /// (the "Test" button; adding a tool, before it is in the settings); answered by `.connectedToolTested`.
     case testConnectedTool(ConnectedToolSettings)
-    /// The "Oui" or "Non" of a connected tool's card (true: "Oui"): answered as if the user had said it, in the
-    /// conversation's language, through the same turn as a spoken answer (`VoicePipeline.submit(answer:)`).
-    case answerAction(Bool)
+    /// The "Oui" or "Non" of a connected tool's card (true: "Oui"), on the Mac or on an iPhone or iPad: answered as if the
+    /// user had said it, in the conversation's language, through the same turn as a spoken answer
+    /// (`VoicePipeline.submit(answer:)`). `action`: the card's action that waits (`ConnectedToolAction.id`); ignored when
+    /// it no longer does, so that a card left on a screen after its action was dropped answers nothing.
+    case answerAction(Bool, action: UUID)
     /// A turn typed instead of spoken (debug tools).
     case typedTurn(String)
     /// Release the microphone and the speakers (the app is quitting).
@@ -587,7 +589,8 @@ public enum AssistantEvent: Sendable, Codable {
     /// A connected tool answered again, refused the access or could not be reached, during an action.
     case connectedToolState(UUID, ConnectedToolState)
     /// A connected tool's action that changes something waits for the user's "oui", or was carried out, refused, failed
-    /// or dropped: its card in the main window (sent again with the same id at each change).
+    /// or dropped: its card in the main window (sent again with the same id at each change; the screens keep the cards
+    /// with `ToolActionCards`). Relayed only to the iPhones and iPads that list it (`LinkMessage.toolActionFeature`).
     case connectedToolAction(ConnectedToolAction)
     case problem(AssistantProblem)
     /// Something went wrong for one turn; the assistant keeps going.

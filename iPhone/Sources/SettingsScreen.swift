@@ -246,19 +246,6 @@ private struct SettingsSection<Content: View>: View {
     }
 }
 
-private struct RowDisc: View {
-    let icon: Icon
-    let color: RGBA
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 40, height: 40)
-            .overlay { IconView(icon: icon, size: 22).foregroundStyle(Palette.ink) }
-            .accessibilityHidden(true)
-    }
-}
-
 /// "Hands-free", "Hold" or "Tap": three big segments, the chosen one ink on cream.
 private struct TalkModePicker: View {
     @Binding var selection: PhoneModel.TalkMode
