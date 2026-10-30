@@ -7,9 +7,9 @@ import VoiceCore
 /// the memory's folder. While the model that finds a past conversation asked about in other words downloads (the past
 /// conversations on, the model not on this Mac yet), a note under the introduction says so, with its progress.
 ///
-/// The past conversations (the journal) are offered with some tiers' model only (`MemorySettings.journalOffered(on:)`):
-/// on another one, their switch is off and disabled, a line says why, and nothing more is shown of them; the saved
-/// switch stays as it is, for a tier that offers them.
+/// The past conversations (the journal) are offered with every tier's model (`MemorySettings.journalOffered(on:)`): with
+/// a tier that would not offer them, their switch would be off and disabled, nothing more shown of them, and the saved
+/// switch would stay as it is.
 struct MemoryPage: View {
     @Bindable var model: AssistantModel
     let navigation: SettingsNavigation
@@ -68,9 +68,7 @@ struct MemoryPage: View {
         SwitchRow("Keep past conversations", isOn: journalSwitch)
             .disabled(!journalOffered)
         Caption("Your words and Maé’s answers, so that she can find a conversation again when you ask her about it.")
-        if !journalOffered {
-            Caption("For now, only with the Comfort tier’s model.")
-        } else if memory.journal {
+        if journalOffered, memory.journal {
             Hairline()
             SettingRow("Keep for") { retentionMenu }
             if let count = model.memory?.exchanges {

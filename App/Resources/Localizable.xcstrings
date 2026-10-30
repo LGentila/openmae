@@ -1701,16 +1701,6 @@
         }
       }
     },
-    "For now, only with the Comfort tier’s model.": {
-      "localizations": {
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pour l’instant, seulement avec le modèle du palier Confort."
-          }
-        }
-      }
-    },
     "For your tests of “OK Maé”: the start of each sentence Maé hears, and what she did with it, is written in a file on this Mac.": {
       "localizations": {
         "fr": {

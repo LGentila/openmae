@@ -5,7 +5,7 @@
 // (default 20), each time in a new conversation with the app's system prompt; with --actions, --agents (Claude Code),
 // --web, --sources, --news and --memory (with an empty sheet), their parts of the prompt and their tools as in the app
 // when they are on, and the date line (nothing is carried out: a call ends the answer). The memory's journal of past
-// exchanges is offered only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: the comfort tier),
+// exchanges is offered only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: every tier),
 // or with --journal. With --hold, the model is held that many seconds after each piece of the answer, as the pipeline
 // holds it while the voice needs the GPU.
 //

@@ -858,22 +858,25 @@ struct MemoryTests {
         #expect(again.memory == all.memory)
     }
 
-    /// The journal is offered on the comfort tier only (Gemma 4 26B), and on with both switches only.
-    @Test func theJournalIsOfferedOnTheComfortTierOnly() {
-        #expect(HardwareTier.allCases.filter { MemorySettings.journalOffered(on: $0) } == [.comfort])
+    /// The journal is offered on every tier the user can choose (Gemma 4 E2B, E4B and 26B), and on with both switches
+    /// only.
+    @Test func theJournalIsOfferedOnEveryTier() {
+        #expect(HardwareTier.allCases.filter { MemorySettings.journalOffered(on: $0) } == HardwareTier.selectable)
         var settings = MemorySettings()
         settings.enabled = true
         settings.journal = true
-        #expect(HardwareTier.allCases.filter { settings.journalOn(on: $0) } == [.comfort])
-        var memoryOff = settings
-        memoryOff.enabled = false
-        #expect(!memoryOff.journalOn(on: .comfort))
-        var journalOff = settings
-        journalOff.journal = false
-        #expect(!journalOff.journalOn(on: .comfort))
+        #expect(HardwareTier.allCases.filter { settings.journalOn(on: $0) } == HardwareTier.selectable)
+        for tier in HardwareTier.selectable {
+            var memoryOff = settings
+            memoryOff.enabled = false
+            #expect(!memoryOff.journalOn(on: tier))
+            var journalOff = settings
+            journalOff.journal = false
+            #expect(!journalOff.journalOn(on: tier))
+        }
     }
 
-    /// Another tier chosen keeps the saved journal switch, as saved: off on that tier, on again back on the comfort one.
+    /// Another tier chosen keeps the saved journal switch and retention, as saved, and the journal stays on.
     @Test func theSavedJournalSwitchOutlivesAChangeOfTier() throws {
         var settings = AssistantSettings()
         settings.tierOverride = .comfort
@@ -881,25 +884,23 @@ struct MemoryTests {
         settings.memory.journal = true
         settings.memory.retention = .thirtyDays
         #expect(settings.memory.journalOn(on: .comfort))
-        for tier: HardwareTier in [.minimum, .standard, .max] {
+        for tier: HardwareTier in [.minimum, .standard, .max, .comfort] {
             settings.tierOverride = tier
             let saved = try JSONDecoder().decode(AssistantSettings.self, from: JSONEncoder().encode(settings))
             #expect(saved.memory.journal && saved.memory.retention == .thirtyDays)
-            #expect(!saved.memory.journalOn(on: tier))
+            #expect(saved.memory.journalOn(on: tier))
             settings = saved
         }
-        settings.tierOverride = .comfort
-        #expect(settings.memory.journalOn(on: .comfort))
     }
 
-    /// The tool configured as the host does it on each tier: on the comfort tier it searches the journal (`chercher`,
-    /// `quand`) and the prompt says how; on the others, the switches on all the same, it offers no search, the prompt
-    /// says nothing of a journal, and a search is refused.
-    @Test func theToolSearchesTheJournalOnTheComfortTierOnly() async throws {
-        var settings = MemorySettings()
-        settings.enabled = true
-        settings.journal = true
-        for tier in HardwareTier.selectable {
+    /// The tool configured as the host does it on each tier: with both switches on, it searches the journal
+    /// (`chercher`, `quand`) and the prompt says how; with the journal's switch off, it offers no search, the prompt says
+    /// nothing of a journal, and a search is refused.
+    @Test func theToolSearchesTheJournalOnEveryTier() async throws {
+        for (tier, journal) in HardwareTier.selectable.flatMap({ tier in [(tier, true), (tier, false)] }) {
+            var settings = MemorySettings()
+            settings.enabled = true
+            settings.journal = journal
             let store = TransientMemoryStore(sheet: ["Allergique aux noix"])
             try await store.addExchange(JournalEntry(date: now.addingTimeInterval(-3 * 86_400),
                                                      user: "Mon garagiste s'appelle Rémi, à Pontivy.",
@@ -907,16 +908,15 @@ struct MemoryTests {
             let tools = MemoryTools(store: store)
             await tools.configure(enabled: settings.enabled, journal: settings.journalOn(on: tier))
             let runner = ToolRunner(providers: [tools])
-            let offered = tier == .comfort
             let spec = try #require(await runner.tools().first)
-            #expect(spec.parameters.contains { $0.name == "quand" } == offered, "\(tier)")
-            #expect(spec.description.contains("conversations passées") == offered, "\(tier)")
+            #expect(spec.parameters.contains { $0.name == "quand" } == journal, "\(tier)")
+            #expect(spec.description.contains("conversations passées") == journal, "\(tier)")
             let addendum = try #require(await tools.promptAddendum())
-            #expect(addendum.contains("action chercher") == offered, "\(tier)")
+            #expect(addendum.contains("action chercher") == journal, "\(tier)")
             #expect(addendum.hasSuffix("- Allergique aux noix"))
             let search = ToolCall(name: MemoryCatalog.name, arguments: ["action": "chercher", "texte": "garagiste"])
             let reply = await runner.handle(search, context: context(["Comment s'appelle mon garagiste, déjà ?"]))
-            if offered {
+            if journal {
                 #expect(reply.refusal == nil && reply.modelSpeaks)
                 guard case .object(let fields) = reply.forModel, case .array(let excerpts)? = fields["extraits"] else {
                     Issue.record("no excerpts on the \(tier) tier")

@@ -30,8 +30,8 @@
 // the task is over (`answerMentions`); either way, never an answer that says it still runs (`answerNeverMentions`, which
 // any goal may have). --web offers the web search too (nothing is searched: a call is declined). --memory (or
 // "memory": true, as in Tests/Fixtures/memory-dialogues-fr.json) offers the memory's tool, with a sheet kept in memory,
-// and its journal of past exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: the
-// comfort tier) or with --journal: a dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]"
+// and its journal of past exchanges only as the app offers it on the tier (`MemorySettings.journalOffered(on:)`: every
+// tier) or with --journal: a dialogue may start with a sheet ("sheet"), a sentence "[nouvelle conversation]"
 // starts a new conversation (the sheet read again), and its goal is checked once all its sentences are said (what the
 // sheet holds, what the last answer says). --now replaces every reference time of the corpus (a dialogue may have its
 // own). --examples and --addendum are those of actions-bench. --watch-calls adds each first pass's chance of opening a

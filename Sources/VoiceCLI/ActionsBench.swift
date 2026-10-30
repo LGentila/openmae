@@ -56,7 +56,7 @@
 //
 // The memory's tool, memoire (a corpus with "memory": true, as Tests/Fixtures/memory-actions-fr.json, or --memory with
 // any corpus), with the journal of past exchanges only as the app offers it on the tier
-// (`MemorySettings.journalOffered(on:)`: the comfort tier), or with --journal. Without the journal, the requests that
+// (`MemorySettings.journalOffered(on:)`: every tier), or with --journal. Without the journal, the requests that
 // need it (to search past conversations, to erase a period of them) are left out of the score and reported apart: what
 // the model did with them. --memory-addendum <file> replaces the memory's rules in the system prompt (the journal's
 // part and the sheet still follow), --journal-addendum <file> the journal's part. With any corpus, the report counts

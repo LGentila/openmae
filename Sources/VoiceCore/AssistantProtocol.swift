@@ -114,21 +114,24 @@ public enum MemoryRetention: String, Sendable, Codable, CaseIterable {
 
 /// Maé's memory, kept on this Mac only (Application Support/<name>/Memory), never sent anywhere: a sheet of what the user
 /// asked her to remember, which goes into the beginning of each conversation, and, with its own switch, a journal of past
-/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…"). The journal is offered on the tiers whose
-/// model was measured with it (`journalOffered(on:)`).
+/// exchanges she can search when asked ("qu'est-ce que je t'avais dit sur…"). The journal is offered on every tier
+/// (`journalOffered(on:)`).
 public struct MemorySettings: Sendable, Codable, Equatable {
     /// The tiers that offer the journal, the one place that says so (the engine, Settings › Memory and the benches read
-    /// it): Gemma 4 26B's, the comfort tier. `voice-cli journal-bench` (3 runs of each request): asked with some of the
-    /// exchange's own words, the 26B searched the journal and found the exchange in every run, and its answer used it in
-    /// 94 and 97 % (two rounds); when the search missed the exchange, it said it found nothing and offered to search with
-    /// other words, in all 84 such answers of three rounds. Gemma 4 E2B and E4B then told something false as if they
-    /// remembered it (12 of 28 answers, about 5 of 31): not offered on the minimum and standard tiers until that is
-    /// fixed. The maximum tier (the 26B in 8 bits) could not be measured.
+    /// it): every tier the user can choose. First Gemma 4 26B's alone, the comfort tier: `voice-cli journal-bench` (3
+    /// runs of each request), asked with some of the exchange's own words, the 26B searched the journal and found the
+    /// exchange in every run, and its answer used it in 94 and 97 % (two rounds); when the search missed the exchange, it
+    /// said it found nothing and offered to search with other words, in all 84 such answers of three rounds. Gemma 4 E2B
+    /// and E4B then told something false as if they remembered it (12 of 28 answers, about 5 of 31). Told what to say
+    /// when the excerpts are about something else (`MemoryCatalog.excerptsNote(on:)`, issue #166): E2B none of 10 such
+    /// answers in two rounds, E4B 6 of 20, all six for one request (the user's own work told as their sister's). The
+    /// maximum tier, the 26B in 8 bits, could not be measured on the reference Mac; it offers the journal like the 26B.
     ///
-    /// On another tier, the journal is off whatever `journal` says: nothing is written to it, Maé does not search it (her
-    /// tool offers `retenir` and `oublier` only), and it is never purged (what is on disk stays as it is, until "Erase
-    /// everything"). The saved switch is kept: back on a tier that offers it, the journal is on again as it was.
-    public static func journalOffered(on tier: HardwareTier) -> Bool { tier == .comfort }
+    /// On a tier that would not offer it, the journal is off whatever `journal` says: nothing is written to it, Maé does
+    /// not search it (her tool offers `retenir` and `oublier` only), and it is never purged (what is on disk stays as it
+    /// is, until "Erase everything"). The saved switch is kept: back on a tier that offers it, the journal is on again as
+    /// it was.
+    public static func journalOffered(on tier: HardwareTier) -> Bool { HardwareTier.selectable.contains(tier) }
 
     /// Off by default. On, the sheet is on.
     public var enabled = false

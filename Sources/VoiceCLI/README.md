@@ -245,7 +245,7 @@ The memory's tool (`memoire`: remember, forget an entry, erase everything): requ
 everything, and above all traps — small talk, general knowledge, a real web search, an action, and facts said without
 asking Maé to remember them, which must not be remembered; `--memory` offers the tool with the other corpora too (with
 an empty sheet). Its journal of past exchanges (searching them, erasing a period of them) is offered as the app offers
-it, on the comfort tier (Gemma 4 26B) for now, or with `--journal`; without it, the requests that need it are left out
+it, on every tier, or with `--journal`; without it, the requests that need it are left out
 of the score and reported apart (the same goes for `dialogue-bench` and `cache-check`). The report also counts the
 answers without a call that say something was noted, remembered or saved (« C'est noté », « Je retiens que… »,
 questions and offers aside): nothing was, and the user would believe Maé remembers it. The app leaves such sentences
