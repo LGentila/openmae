@@ -131,6 +131,13 @@ public actor LinkHost: AssistantConnection {
     private var phonePushToTalk: [Data: Bool] = [:]
     private var phase: AssistantEvent?
     private var pipelineState = PipelineState.listening
+    /// The connected tools' action cards, as the Mac's window shows them: a device that comes back is sent them again,
+    /// and its "Oui" or "Non" counts only for an action that waits among them.
+    private var cards = ToolActionCards()
+    /// The cards that went since (dropped, or cleared by a newer turn), the most recent last: a device that comes back
+    /// is told they went, in case it missed it.
+    private var goneCards: [ConnectedToolAction] = []
+    static let goneCardsKept = 20
 
     private struct Peer {
         var session: LinkSession
@@ -588,6 +595,10 @@ public actor LinkHost: AssistantConnection {
         // What the iPhone needs to show the conversation at once.
         if let phase { session.send(.event(phase)) }
         session.send(.event(.state(pipelineState)))
+        // Its action cards at their latest status, the ones that went meanwhile first (it may still show them).
+        if session.peerPhone?.understands(LinkMessage.toolActionFeature) == true {
+            for card in goneCards + cards.actions { session.send(.event(.connectedToolAction(forDevices(card)))) }
+        }
         if var hand, hand.key == key {
             hand.grace?.cancel()
             hand.grace = nil
@@ -698,6 +709,14 @@ public actor LinkHost: AssistantConnection {
                 lastUsed[key] = .now
                 await takeHand(key)
                 engine.send(command)
+            case .answerAction(_, let action) where !cards.waiting.contains(where: { $0.id == action }):
+                // A card whose action was carried out, refused or dropped meanwhile (the device may have missed it, in a
+                // drop): its "Oui" answers nothing, not even an action that waits now. The device is told what became of
+                // that card.
+                DebugLog.log("link: an answer from a card whose action no longer waits, ignored")
+                if let session = sessions[key]?.session, session.peerPhone?.understands(LinkMessage.toolActionFeature) == true {
+                    session.send(.event(.connectedToolAction(forDevices(latestCard(action)))))
+                }
             default:
                 lastUsed[key] = .now
                 engine.send(command)
@@ -875,12 +894,49 @@ public actor LinkHost: AssistantConnection {
         case .state(let state): pipelineState = state
         default: break
         }
-        guard let relayed = RemoteCommandPolicy.relayed(event), !sessions.isEmpty else { return }
+        keepCards(event)
+        guard var relayed = RemoteCommandPolicy.relayed(event), !sessions.isEmpty else { return }
+        if case .connectedToolAction(let card) = relayed { relayed = .connectedToolAction(forDevices(card)) }
         // An optional event only to the devices that understand it: one from before it would close the session on it.
         let feature = RemoteCommandPolicy.neededFeature(relayed)
         for peer in sessions.values where feature.map({ peer.session.peerPhone?.understands($0) == true }) ?? true {
             peer.session.send(.event(relayed))
         }
+    }
+
+    // MARK: - The connected tools' action cards
+
+    /// The cards as the Mac's window keeps them (`ToolActionCards`), and those that went, as dropped.
+    private func keepCards(_ event: AssistantEvent) {
+        let before = cards.actions
+        switch event {
+        case .connectedToolAction(let card): cards.show(card)
+        case .userTranscript: cards.userSpoke()
+        case .conversationCleared: cards.clear()
+        default: return
+        }
+        for var card in before where !cards.actions.contains(where: { $0.id == card.id }) {
+            card.status = .dropped
+            goneCards.removeAll { $0.id == card.id }
+            goneCards.append(card)
+        }
+        goneCards.removeAll { gone in cards.actions.contains { $0.id == gone.id } }
+        if goneCards.count > Self.goneCardsKept { goneCards.removeFirst(goneCards.count - Self.goneCardsKept) }
+    }
+
+    /// What became of a card: its latest status, or dropped once it went; dropped too when this Mac never showed it
+    /// (it was restarted since: only its id is known).
+    private func latestCard(_ id: UUID) -> ConnectedToolAction {
+        cards.actions.first(where: { $0.id == id }) ?? goneCards.last(where: { $0.id == id })
+            ?? ConnectedToolAction(id: id, toolID: id, toolName: "", words: .init(verb: "", target: nil, result: nil),
+                                   title: "", status: .dropped, date: Date())
+    }
+
+    /// A card as the devices get it: with its tool's disc as the Mac's settings draw it (they do not have the settings).
+    private func forDevices(_ card: ConnectedToolAction) -> ConnectedToolAction {
+        var card = card
+        card.disc = ConnectedToolDisc(of: card, among: macSettings?.connectedTools ?? [])
+        return card
     }
 }
 

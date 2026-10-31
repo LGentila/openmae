@@ -65,6 +65,7 @@ let package = Package(
             dependencies: ["VoiceCore", "VoiceEngineApple", "OpenMaeLink", "FakeHomeAssistant",
                            .product(name: "FluidAudio", package: "FluidAudio")]),
         .testTarget(name: "VoiceCoreTests", dependencies: ["VoiceCore", "FakeHomeAssistant"]),
-        .testTarget(name: "OpenMaeLinkTests", dependencies: ["OpenMaeLink"]),
+        // The pretend Home Assistant too: a connected tool's card and its answers over the link.
+        .testTarget(name: "OpenMaeLinkTests", dependencies: ["OpenMaeLink", "FakeHomeAssistant"]),
     ]
 )

@@ -76,14 +76,14 @@ final class AssistantModel {
     private(set) var connectedToolStates: [UUID: ConnectedToolState] = [:]
     private(set) var connectedToolTests: [UUID: ConnectedToolTest] = [:]
     private(set) var connectedToolLogs: [UUID: [ConnectedToolLogEntry]] = AssistantModel.loadToolLogs()
-    /// The connected tools' actions of the request under way, for the cards under Maé's sentence (`ToolActionCards`):
-    /// those that wait for the user's "oui", then what came of them. They stay until the user's next request; one that
-    /// still waits stays until it is carried out, refused or dropped.
-    private(set) var toolActions: [ConnectedToolAction] = []
+    /// The connected tools' actions of the request under way, for the card under Maé's sentence (`ToolActionCard`):
+    /// those that wait for the user's "oui", then what came of them, until the user's next request; one that still
+    /// waits stays until it is carried out, refused or dropped. Kept as the iPhone app keeps them.
+    private(set) var toolActions = ToolActionCards()
     /// The card's "Oui" or "Non" was clicked: its buttons wait for what comes of it.
-    private(set) var isAnsweringToolAction = false
+    var isAnsweringToolAction: Bool { toolActions.isAnswering }
     /// An action waits for the user's "oui" on a card.
-    var toolActionWaits: Bool { toolActions.contains { $0.status == .waiting } }
+    var toolActionWaits: Bool { toolActions.waits }
     /// Quitting would stop a task.
     var hasRunningTask: Bool { tasks.contains { $0.status == .running } }
     /// The user is talking with the talk key: the space bar or the button held down, or the global shortcut
@@ -244,15 +244,13 @@ final class AssistantModel {
     private func clearTranscript() {
         transcript.removeAll()
         answerIndex = nil
-        toolActions.removeAll()
-        isAnsweringToolAction = false
+        toolActions.clear()
     }
 
-    /// The "Oui" or "Non" of a card: the engine takes it as if the user had said it.
+    /// The "Oui" or "Non" of a card: the engine takes it as if the user had said it, for the action that waits.
     func answerToolAction(_ yes: Bool) {
-        guard isReady, toolActionWaits, !isAnsweringToolAction else { return }
-        isAnsweringToolAction = true
-        connection.send(.answerAction(yes))
+        guard isReady, let action = toolActions.answer() else { return }
+        connection.send(.answerAction(yes, action: action))
     }
 
     /// The app is in front again: a shortcut may have been added, an access granted in System Settings, Claude Code
@@ -397,13 +395,13 @@ final class AssistantModel {
             if state == .listening, !talkKeyDown { isShortcutExchange = false }
             // The turn of a card's answer is over: if the action still waits (the answer came too late, or was cut), its
             // buttons work again.
-            if state == .listening, before != .listening { isAnsweringToolAction = false }
+            toolActions.stateChanged(from: before, to: state)
         case .partialTranscript(let text):
             setPartialUserText(text)
         case .userTranscript(let text, let language):
             setUserText(text, language: language)
             // A new turn: what the request before did goes; what still waits for the "oui" stays (this may be the answer).
-            toolActions.removeAll { $0.status != .waiting }
+            toolActions.userSpoke()
         case .assistantPiece(let piece):
             appendToAnswer(piece)
         case .turnFinished(let metrics):
@@ -465,22 +463,10 @@ final class AssistantModel {
         case .connectedToolState(let id, let state):
             connectedToolStates[id] = state
         case .connectedToolAction(let action):
-            showToolAction(action)
+            toolActions.show(action)
         case .warning(let message):
             lastWarning = message
         }
-    }
-
-    /// A card's new status, or a new card: an action of the same request joins those shown, one of a new request
-    /// replaces what the one before left.
-    private func showToolAction(_ action: ConnectedToolAction) {
-        if let i = toolActions.firstIndex(where: { $0.id == action.id }) {
-            if action.status == .dropped { toolActions.remove(at: i) } else { toolActions[i] = action }
-        } else if action.status != .dropped {
-            if action.status == .waiting { toolActions.removeAll { $0.status != .waiting } }
-            toolActions.append(action)
-        }
-        if action.status == .waiting || !toolActionWaits { isAnsweringToolAction = false }
     }
 
     private func updateTranscript(for state: PipelineState) {

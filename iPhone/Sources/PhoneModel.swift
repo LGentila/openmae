@@ -73,6 +73,9 @@ final class PhoneModel {
     private(set) var phase = Phase.unknown
     private(set) var state = PipelineState.listening
     private(set) var transcript: [TranscriptEntry] = []
+    /// The connected tools' actions of the request under way, for the card under Maé's sentence (`ToolActionCard`), as
+    /// the Mac's window keeps them: those that wait for the user's "oui", then what came of them.
+    private(set) var toolActions = ToolActionCards()
     private(set) var isConversationOpen = false
     private(set) var pause: Pause?
     private(set) var talkKeyDown = false
@@ -355,6 +358,8 @@ final class PhoneModel {
         link = nil
         phase = .unknown
         voicePlaying = false
+        // The Mac sends them again, at their latest status, when the link is back.
+        toolActions.clear()
     }
 
     /// "Try again": now rather than at the next attempt.
@@ -595,9 +600,18 @@ final class PhoneModel {
         phoneLink?.send(.newConversation)
     }
 
+    /// The "Oui" or "Non" of the card: the Mac takes it as if the user had said it, for the action that waits; the
+    /// buttons are greyed until what comes of it.
+    func answerToolAction(_ yes: Bool) {
+        guard isConnected, phase == .ready, let action = toolActions.answer() else { return }
+        phoneLink?.send(.answerAction(yes, action: action))
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
     private func clearTranscript() {
         transcript.removeAll()
         answerIndex = nil
+        toolActions.clear()
     }
 
     private func sendSettings() {
@@ -629,8 +643,10 @@ final class PhoneModel {
         case .setupNeeded: phase = .setup
         case .problem: phase = .problem
         case .state(let state):
+            let before = self.state
             self.state = state
             updateTranscript(for: state)
+            toolActions.stateChanged(from: before, to: state)
             if state == .listening {
                 talkKeyDown = false
                 taps.reset()
@@ -647,6 +663,8 @@ final class PhoneModel {
             }
         case .userTranscript(let text, let language):
             answerIndex = nil
+            // A new turn: what the request before did goes; what still waits for the "oui" stays (this may be the answer).
+            toolActions.userSpoke()
             if let i = transcript.lastIndex(where: { $0.speaker == .user && $0.pending }) {
                 transcript[i].text = text
                 transcript[i].language = language
@@ -669,6 +687,9 @@ final class PhoneModel {
             // The Mac started a new conversation (its own « New conversation », its tools that came or went, another
             // model, or this iPhone's own, cleared already): the screen no longer shows what Maé no longer has.
             clearTranscript()
+        case .connectedToolAction(let action):
+            // Also each card again at its latest status when the link comes back, those that went meanwhile first.
+            toolActions.show(action)
         default:
             break
         }
@@ -710,7 +731,8 @@ final class PhoneModel {
     #if DEBUG
     /// Still pictures of the screens (`PhoneScreenshots`): the state they show, without a Mac.
     func showForScreenshot(mac: PairedMac, link: PhoneLink.Status, state: PipelineState, open: Bool,
-                           transcript: [TranscriptEntry], voicePlaying: Bool = false, foreground: Bool = true)
+                           transcript: [TranscriptEntry], voicePlaying: Bool = false, foreground: Bool = true,
+                           toolActions: [ConnectedToolAction] = [])
     {
         self.mac = mac
         self.link = link
@@ -721,6 +743,8 @@ final class PhoneModel {
         self.voicePlaying = voicePlaying
         isInForeground = foreground
         isPluggedIn = true
+        self.toolActions = ToolActionCards()
+        for action in toolActions { self.toolActions.show(action) }
     }
     #endif
 }
