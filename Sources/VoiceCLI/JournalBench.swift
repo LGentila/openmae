@@ -12,8 +12,9 @@
 // before the search by meaning (issue #167). --embedder: another sentence-embedding model's folder (MLX).
 //
 // --request: only the corpus's requests whose phrase holds this text (repeatable), to run a rare case many times.
-// --journal-addendum: the journal's part of the memory's rules in the system prompt read from this file, as with
-// actions-bench, to try another wording without rebuilding.
+// --journal-addendum: the journal's part of the memory's rules in the system prompt, this file's text instead of the
+// app's on this tier (`MemoryCatalog.journalPart(on:)`), as with actions-bench, to try another wording without
+// rebuilding.
 // --watch-calls: each pass exactly as the model wrote it, special tokens included, under its run; the report keeps it with
 // its tokens, each with its chance and the likeliest ones there, and counts the passes that open a thought block of the
 // model's own or hold « much ».
@@ -312,7 +313,13 @@ func runJournalBench(_ o: Options) async throws {
     }
     print("the excerpts' note: " + (excerptsNote.map { "--results-note's: \($0)" }
         ?? "the app's on this tier: \(MemoryCatalog.excerptsNote(on: tier))"))
-    let memory = MemoryTools(store: store, enabled: true, journal: true, tier: tier, excerptsNote: excerptsNote)
+    let journalPart = try o.journalAddendum.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    print("the journal's part of the prompt: " + (journalPart.map { "--journal-addendum's: \($0)" }
+        ?? "the app's on this tier: \(MemoryCatalog.journalPart(on: tier))"))
+    let memory = MemoryTools(store: store, enabled: true, journal: true, tier: tier, excerptsNote: excerptsNote,
+                             journalPart: journalPart)
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (web ? [UnsearchedWeb()] : []) + [memory]
     let runner = ToolRunner(providers: providers)
     let tools = await runner.tools()
@@ -322,15 +329,6 @@ func runJournalBench(_ o: Options) async throws {
     var base = Conversation()
     let exampleCall = await model.toolCallText(ActionCatalog.example.call)
     base.systemAddenda = [ActionCatalog.promptAddendum(exampleCall: exampleCall)] + (await runner.promptAddenda())
-    if let file = o.journalAddendum {
-        // The memory's part of the prompt with this journal's part instead of the app's (the sheet still follows).
-        let journalRules = try String(contentsOfFile: file, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let apps = await memory.promptAddendum()
-        let tried = MemoryCatalog.promptAddendum(sheet: sheet, journal: true, journalRules: journalRules)
-        base.systemAddenda = base.systemAddenda.map { $0 == apps ? tried : $0 }
-        print("the journal's part of the prompt: --journal-addendum's: \(journalRules)")
-    }
     let examples = o.examples ?? (ActionCatalog.showsExamples(on: tier) ? "app" : "none")
     base.examples = try exampleExchanges(examples, now: now, timeZone: timeZone)
     try await model.prefillBeginning(base.beginning)

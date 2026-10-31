@@ -556,14 +556,15 @@ struct MemoryTests {
     }
 
     /// A summary of a period is a search with the period alone (issue #214: told only to find a conversation with
-    /// keywords, Gemma 4 26B said it had no access to past conversations): the journal's part says so, and such a
+    /// keywords, Gemma 4 26B said it had no access to past conversations): the 26B's journal part says so, and such a
     /// search gives the period's latest exchanges, the latest first, to sum up.
     @Test func aPeriodAloneGivesItsExchangesToSumUp() async throws {
-        let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true)
+        let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .comfort)
         #expect(rules.contains("ou tout ce que vous vous êtes dit pendant une période, même pour le résumer, action "
                                + "chercher"))
         #expect(rules.contains("(quand seul s'il ne donne pas de sujet)"))
-        #expect(!MemoryCatalog.promptAddendum(sheet: [], journal: false).contains("pendant une période"))
+        #expect(!MemoryCatalog.promptAddendum(sheet: [], journal: false, tier: .comfort)
+            .contains("pendant une période"))
         let store = TransientMemoryStore()
         let days = [12.0, 9, 8, 2]  // the Saturday before last week, its Tuesday and Wednesday, then this Tuesday
         for (index, daysAgo) in days.enumerated() {
@@ -585,6 +586,42 @@ struct MemoryTests {
             guard case .object(let fields) = excerpt else { return nil }
             return fields["utilisateur"]?.text
         } == ["Échange 2", "Échange 1"])
+    }
+
+    /// Only Gemma 4 26B is told that a summary of a period is a search (issue #214): with that sentence, E2B searched
+    /// less for what Maé said in other words and E4B wrote the period alone more often, so they keep the part without
+    /// it. `MemoryTools` gives its tier's model's part, as it gives the excerpts' note.
+    @Test func onlyThe26BIsToldThatASummaryIsASearch() async {
+        let summingUp = "ou tout ce que vous vous êtes dit pendant une période, même pour le résumer"
+        let withoutIt = "« qu'est-ce que tu m'avais répondu pour… »), action chercher avec quelques mots-clés et leurs "
+            + "synonymes, et quand s'il donne une période, mais jamais pour ce que ta mémoire contient déjà"
+        for tier in [HardwareTier.comfort, .max] {
+            #expect(MemoryCatalog.journalPart(on: tier).contains(summingUp))
+            #expect(MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: tier).contains(summingUp))
+        }
+        for tier in [HardwareTier.minimum, .standard] {
+            let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: tier)
+            #expect(rules.contains(withoutIt) && !rules.contains("pendant une période"))
+        }
+        // Without a tier, the 26B's, as for the excerpts' note.
+        #expect(MemoryCatalog.promptAddendum(sheet: [], journal: true)
+                == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .comfort))
+        // Another tier configured changes what the model sees only with the journal on; another part to try (voice-cli
+        // journal-bench --journal-addendum) wins on any tier.
+        let tools = MemoryTools(store: TransientMemoryStore(), enabled: true, journal: true, tier: .comfort)
+        #expect(await tools.promptAddendum() == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .comfort))
+        #expect(await tools.configure(enabled: true, journal: true, tier: .standard))
+        #expect(await tools.promptAddendum() == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .standard))
+        #expect(await tools.configure(enabled: true, journal: true, tier: .minimum) == false)  // the same part
+        #expect(await tools.configure(enabled: true, journal: false, tier: .minimum))  // the journal switched off
+        #expect(await tools.configure(enabled: true, journal: false, tier: .comfort) == false)  // no journal's part
+        #expect(await tools.configure(enabled: true, journal: true, tier: .comfort))
+        #expect(await tools.promptAddendum()?.contains(summingUp) == true)
+        let tried = MemoryTools(store: TransientMemoryStore(), enabled: true, journal: true, tier: .comfort,
+                                journalPart: "Une autre partie.")
+        await tried.configure(enabled: true, journal: true, tier: .minimum)
+        #expect(await tried.promptAddendum()?.contains("Une autre partie.") == true)
+        #expect(await tried.promptAddendum()?.contains("action chercher avec") == false)
     }
 
     @Test func thePeriodsOfThePast() {

@@ -495,6 +495,15 @@ func runActionsBench(_ o: Options) async throws {
     } ?? (actions ? AgentCatalog.promptAddendum : AgentCatalog.promptAddendumWithoutActions(exampleCall: delegationCall))
     let webPart = try o.webAddendum.map { try String(contentsOfFile: $0, encoding: .utf8) }
         ?? (opensPages ? WebSearchCatalog.promptAddendumWithPages : WebSearchCatalog.promptAddendum)
+    // The memory's part as `MemoryTools` gives it on this tier (its journal's part is the tier's model's).
+    let memoryRules = try o.memoryAddendum.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    let journalRules = try o.journalAddendum.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    let memoryPart = MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, tier: tier, rules: memoryRules,
+                                                  journalRules: journalRules)
     conversation.systemAddenda = [actionsPart] + (agents ? [agentsPart] : [])
         + (web ? [webPart] : [])
         + (sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
@@ -502,11 +511,7 @@ func runActionsBench(_ o: Options) async throws {
             : [])
         + [await home.provider?.promptAddendum(actions: actions, writeCall: { await model.toolCallText($0) })]
             .compactMap { $0 }
-        + (memory ? [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, rules: try o.memoryAddendum.map {
-            try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        }, journalRules: try o.journalAddendum.map {
-            try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        })] : [])
+        + (memory ? [memoryPart] : [])
     if memory {
         let offered = MemorySettings.journalOffered(on: tier)
         print("memory: on, " + (journal ? "with the journal" + (offered ? ", as the app on this tier" : " (--journal)")

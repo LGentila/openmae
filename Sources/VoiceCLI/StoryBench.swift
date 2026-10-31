@@ -136,7 +136,7 @@ func runStoryBench(_ o: Options) async throws {
             + (o.web ? [WebSearchCatalog.promptAddendum] : [])
             + (o.sources ? [WeatherCatalog.promptAddendum, QuoteCatalog.promptAddendum, TravelTimeCatalog.promptAddendum] : [])
             + (o.news ? [NewsCatalog.promptAddendum] : [])
-            + (o.memory ? [MemoryCatalog.promptAddendum(sheet: [], journal: journal)] : [])
+            + (o.memory ? [MemoryCatalog.promptAddendum(sheet: [], journal: journal, tier: tier)] : [])
         if o.actions, ActionCatalog.showsExamples(on: tier) {
             conversation.examples = ActionCatalog.examples(now: now, timeZone: timeZone)
         }

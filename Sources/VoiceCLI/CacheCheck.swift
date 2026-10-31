@@ -473,11 +473,12 @@ func runCacheCheck(_ o: Options, arguments: [String]) async throws {
     let fixedAddenda = [ActionCatalog.promptAddendum(exampleCall: await model.toolCallText(ActionCatalog.example.call))]
         + (agents ? [AgentCatalog.promptAddendum] : [])
     base.systemAddenda = fixedAddenda
-        + (memory ? [MemoryCatalog.promptAddendum(sheet: memorySheet, journal: journal)] : [])
+        + (memory ? [MemoryCatalog.promptAddendum(sheet: memorySheet, journal: journal, tier: tier)] : [])
     /// The beginning with this sheet (the memory's part last, as in the app).
     func withSheet(_ sheet: [String]) -> Conversation {
         var conversation = base
-        conversation.systemAddenda = fixedAddenda + [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal)]
+        conversation.systemAddenda = fixedAddenda
+            + [MemoryCatalog.promptAddendum(sheet: sheet, journal: journal, tier: tier)]
         return conversation
     }
     if memory {

@@ -293,7 +293,8 @@ the passes that open a thought block of the model's own or hold « much ». `--o
 ```
 
 `--journal-addendum file` (as for `actions-bench`) replaces the journal's part of the memory's rules in the system
-prompt, to try another wording without rebuilding.
+prompt, the tier's model's otherwise (`MemoryCatalog.journalPart(on:)`: Gemma 4 26B's also says that a summary of a
+period is a search), to try another wording without rebuilding.
 
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the
