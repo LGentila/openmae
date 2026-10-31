@@ -294,7 +294,8 @@ the passes that open a thought block of the model's own or hold « much ». `--o
 
 `--journal-addendum file` (as for `actions-bench`) replaces the journal's part of the memory's rules in the system
 prompt, the tier's model's otherwise (`MemoryCatalog.journalPart(on:)`: Gemma 4 26B's also says that a summary of a
-period is a search), to try another wording without rebuilding.
+period is a search, Gemma 4 E2B's shows more ways of asking about a past conversation), to try another wording without
+rebuilding; `--memory-addendum file` (as for `actions-bench`) replaces the memory's rules before it.
 
 How much of each request the language model finds in its memory (its KV cache), in the sequences of requests the app
 sends: plain turns, an action, two actions in one request, what the app says on its own (an announcement, which the

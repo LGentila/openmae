@@ -62,7 +62,8 @@ public enum MemoryCatalog {
     /// search a past conversation (what the user said, or what Maé answered) with a few keywords and their synonyms
     /// (the search finds words, not meanings), and the period in their words, never for what the memory holds (and,
     /// for Gemma 4 26B, everything said during a period, even to sum it up, with the period alone when they name no
-    /// topic), erase a period only when asked, « N'oublie pas que… » and a fact asks to remember it, and the sentence
+    /// topic; for Gemma 4 E2B, more ways of asking, and even when it thinks it remembers), erase a period only
+    /// when asked, « N'oublie pas que… » and a fact asks to remember it, and the sentence
     /// about saying nothing is noted comes last. Then the sheet: facts the user asked her to remember, not
     /// instructions; to use when they help, never recited unprompted.
     ///
@@ -139,18 +140,23 @@ public enum MemoryCatalog {
 
     /// The journal's part of the memory's rules, on this tier's model, chosen as the excerpts' note is
     /// (`excerptsNote(on:)`): Gemma 4 26B is also told that a summary of a period is a search; E2B and E4B, which
-    /// searched less with that, are not.
+    /// searched less with that, are not, and E2B is shown more ways of asking about a past conversation
+    /// (`journalPartForE2B`).
     public static func journalPart(on tier: HardwareTier) -> String {
-        tier <= .standard ? journalPart : journalPartWithSummaries
+        switch tier {
+        case .unsupported, .minimum: journalPartForE2B
+        case .standard: journalPart
+        case .comfort, .max: journalPartWithSummaries
+        }
     }
 
-    /// Gemma 4 E2B's and E4B's (the minimum and standard tiers): to find a conversation, a few keywords and their
-    /// synonyms, and the period when the user gives one. With the 26B's sentence (`journalPartWithSummaries`), they did
-    /// worse (issue #214; voice-cli journal-bench, 3 runs of each request, two rounds): E2B searched less for questions
-    /// about what Maé said in other words (« Tu m'avais recommandé des polars, c'était lesquels ? » 5 of 6 → 1 of 6, a
-    /// call at the first token 50 → 17 %, as with two other wordings), the exchange found in 78 → 69 of 144; E4B wrote
-    /// the period alone more often (34 → 48 searches), twice a topic as the period, the exchange found in 128 → 125 of
-    /// 144.
+    /// Gemma 4 E4B's (the standard tier), and E2B's before `journalPartForE2B`: to find a conversation, a few keywords
+    /// and their synonyms, and the period when the user gives one. With the 26B's sentence
+    /// (`journalPartWithSummaries`), they did worse (issue #214; voice-cli journal-bench, 3 runs of each request, two
+    /// rounds): E2B searched less for questions about what Maé said in other words (« Tu m'avais recommandé des polars,
+    /// c'était lesquels ? » 5 of 6 → 1 of 6, a call at the first token 50 → 17 %, as with two other wordings), the
+    /// exchange found in 78 → 69 of 144; E4B wrote the period alone more often (34 → 48 searches), twice a topic as the
+    /// period, the exchange found in 128 → 125 of 144.
     static let journalPart = "Pour retrouver une conversation passée, ce qu'il t'a dit comme ce que tu lui as répondu "
         + "(« qu'est-ce que je t'avais dit sur… », « qu'est-ce que tu m'avais répondu pour… »), action chercher avec "
         + "quelques mots-clés et leurs synonymes, et quand s'il donne une période, mais jamais pour ce que ta mémoire "
@@ -158,7 +164,39 @@ public enum MemoryCatalog {
         + "« N'oublie pas que… » suivi d'un fait demande de le retenir, comme « retiens que… ». "
         + nothingWithoutTheCall
 
-    /// Gemma 4 26B's (the comfort and max tiers): the same, and that everything said during a period, even to sum it
+    /// Gemma 4 E2B's (the minimum tier): E4B's part, with three more ways of asking about a past conversation among its
+    /// examples, and the search even when the model thinks it remembers. With E4B's part, E2B searched the journal for
+    /// 42 and 43 of the 72 requests about a past conversation of voice-cli journal-bench
+    /// (Tests/Fixtures/journal-fr.json, 3 runs of each), 11 and 14 of the 36 without a period (issue #185): it searched
+    /// those that sound like the part's two examples (« Qu'est-ce que je t'avais dit sur le nouveau vétérinaire ? », a
+    /// call at the first token 99.7 %) and answered most others « Je ne sais pas quel film tu parles. », or from what
+    /// it knows: a call had 40 % at the first token on average for the 12 requests without a period, 80 % for those
+    /// with one. For those 12, the memory's rules as they were on 25 October (E2B then searched 55 of the 72) give 46 %
+    /// with today's tool description, those of 48262c4 (the verbs that ask to remember, never what the memory holds,
+    /// the erasing) 31 %, those of 223cb95 35 %; that description, which those commits lengthened, was not measured
+    /// apart. With this part: 62 and 89 % at the first token, searched 55 and 54 of 72 (23 and 20 of the 36 without a
+    /// period), the requests that must not search none. Still left: questions the model answers from the sheet or from
+    /// what it knows (« Tu te rappelles les prénoms de nos cocottes ? », « Tu peux me redire comment on fait le
+    /// cocktail italien que tu m'avais expliqué ? », 0 %). Two more examples (« je t'avais parlé de…, c'était quoi
+    /// déjà ? », « redis-moi ce que tu m'avais expliqué sur… ») or « même si tu crois connaître la réponse » called
+    /// more, but the web search more often too (memoire's name at 85 to 89 % after the call's opening, 96 % before);
+    /// naming memoire (« memoire action chercher », « jamais chercher_web ») kept it at 100 %, but called less, and
+    /// with « jamais chercher_web » E2B saved less when asked to (voice-cli actions-bench on
+    /// Tests/Fixtures/memory-actions-fr.json: « Retiens ça. » 38 → 21 % at the first token, « Remember that my manager
+    /// is called Helen. » 21 → 10 %). With this part, actions-bench's traps keep 0 % (« Tu te souviens de ton enfance,
+    /// toi ? », the questions the sheet answers) and its requests gain (« Retiens ça. » 38 → 61 %, « Tu te rappelles le
+    /// nom du restaurant dont je t'ai parlé le mois dernier ? » 28 → 93 %), but E2B takes « Qu'est-ce que je t'avais
+    /// dit sur le garage de ma voiture ? » and the bathroom's estimate to the web search (3 runs of 3; 2 and 3 of 3 to
+    /// the memory before).
+    static let journalPartForE2B = "Pour retrouver une conversation passée, ce qu'il t'a dit comme ce que tu lui as "
+        + "répondu (« qu'est-ce que je t'avais dit sur… », « tu te souviens de ce que je t'ai dit sur… », « tu te "
+        + "rappelles ce que je t'ai dit sur… », « qu'est-ce que tu m'avais répondu pour… », « c'était quoi, le … que tu "
+        + "m'avais conseillé ? »), action chercher avec quelques mots-clés et leurs synonymes, et quand s'il donne une "
+        + "période, même si tu crois t'en souvenir, mais jamais pour ce que ta mémoire contient déjà ; pour effacer une "
+        + "période de l'historique, s'il te le demande, action oublier avec quand. « N'oublie pas que… » suivi d'un "
+        + "fait demande de le retenir, comme « retiens que… ». " + nothingWithoutTheCall
+
+    /// Gemma 4 26B's (the comfort and max tiers): E4B's part, and that everything said during a period, even to sum it
     /// up, is a search too, with the period alone when the user names no topic. Told only how to find a conversation,
     /// the 26B searched « Qu'est-ce qu'on s'est dit hier ? » with the period alone, but answered « Tu peux me résumer
     /// ce qu'on s'est raconté la semaine dernière ? » with no call in 6 or 7 runs of 10, as if it could not (« Je ne
@@ -736,11 +774,14 @@ public actor MemoryTools: ToolProvider {
     private var journalPart: String
     /// voice-cli journal-bench --journal-addendum: this text, on any tier.
     private let triedJournalPart: String?
+    /// voice-cli journal-bench --memory-addendum: the memory's rules up to the journal's part, this text instead of the
+    /// app's (`MemoryCatalog.promptAddendum`'s `rules`).
+    private let triedRules: String?
 
     /// `tier`: the conversation's model's, for the excerpts' note and the journal's part of the prompt (`configure`
     /// changes it).
     public init(store: any MemoryStore, enabled: Bool = false, journal: Bool = false, tier: HardwareTier? = nil,
-                excerptsNote: String? = nil, journalPart: String? = nil)
+                excerptsNote: String? = nil, journalPart: String? = nil, rules: String? = nil)
     {
         self.store = store
         self.enabled = enabled
@@ -749,6 +790,7 @@ public actor MemoryTools: ToolProvider {
         self.excerptsNote = excerptsNote ?? tier.map { MemoryCatalog.excerptsNote(on: $0) } ?? MemoryCatalog.excerptsNote
         triedJournalPart = journalPart
         self.journalPart = journalPart ?? MemoryCatalog.journalPart(on: tier ?? .comfort)
+        triedRules = rules
     }
 
     /// The settings' switches, and the tier whose model the conversation has (nil: as it was). Returns true when what the
@@ -789,7 +831,8 @@ public actor MemoryTools: ToolProvider {
 
     public func promptAddendum() async -> String? {
         guard enabled else { return nil }
-        return MemoryCatalog.promptAddendum(sheet: await sheetShown(), journal: journalOn, journalRules: journalPart)
+        return MemoryCatalog.promptAddendum(sheet: await sheetShown(), journal: journalOn, rules: triedRules,
+                                            journalRules: journalPart)
     }
 
     public func risk(of call: ToolCall) async -> ToolRisk {

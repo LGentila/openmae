@@ -589,8 +589,8 @@ struct MemoryTests {
     }
 
     /// Only Gemma 4 26B is told that a summary of a period is a search (issue #214): with that sentence, E2B searched
-    /// less for what Maé said in other words and E4B wrote the period alone more often, so they keep the part without
-    /// it. `MemoryTools` gives its tier's model's part, as it gives the excerpts' note.
+    /// less for what Maé said in other words and E4B wrote the period alone more often, so they keep parts without it
+    /// (E2B's own since issue #185). `MemoryTools` gives its tier's model's part, as it gives the excerpts' note.
     @Test func onlyThe26BIsToldThatASummaryIsASearch() async {
         let summingUp = "ou tout ce que vous vous êtes dit pendant une période, même pour le résumer"
         let withoutIt = "« qu'est-ce que tu m'avais répondu pour… »), action chercher avec quelques mots-clés et leurs "
@@ -599,10 +599,9 @@ struct MemoryTests {
             #expect(MemoryCatalog.journalPart(on: tier).contains(summingUp))
             #expect(MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: tier).contains(summingUp))
         }
-        for tier in [HardwareTier.minimum, .standard] {
-            let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: tier)
-            #expect(rules.contains(withoutIt) && !rules.contains("pendant une période"))
-        }
+        let standard = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .standard)
+        #expect(standard.contains(withoutIt) && !standard.contains("pendant une période"))
+        #expect(!MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .minimum).contains("pendant une période"))
         // Without a tier, the 26B's, as for the excerpts' note.
         #expect(MemoryCatalog.promptAddendum(sheet: [], journal: true)
                 == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .comfort))
@@ -612,7 +611,9 @@ struct MemoryTests {
         #expect(await tools.promptAddendum() == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .comfort))
         #expect(await tools.configure(enabled: true, journal: true, tier: .standard))
         #expect(await tools.promptAddendum() == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .standard))
-        #expect(await tools.configure(enabled: true, journal: true, tier: .minimum) == false)  // the same part
+        #expect(await tools.configure(enabled: true, journal: true, tier: .standard) == false)  // the same part
+        #expect(await tools.configure(enabled: true, journal: true, tier: .minimum))  // E2B's own part
+        #expect(await tools.promptAddendum() == MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .minimum))
         #expect(await tools.configure(enabled: true, journal: false, tier: .minimum))  // the journal switched off
         #expect(await tools.configure(enabled: true, journal: false, tier: .comfort) == false)  // no journal's part
         #expect(await tools.configure(enabled: true, journal: true, tier: .comfort))
@@ -622,6 +623,32 @@ struct MemoryTests {
         await tried.configure(enabled: true, journal: true, tier: .minimum)
         #expect(await tried.promptAddendum()?.contains("Une autre partie.") == true)
         #expect(await tried.promptAddendum()?.contains("action chercher avec") == false)
+    }
+
+    /// Gemma 4 E2B is shown more ways of asking about a past conversation, and told to search even when it thinks it
+    /// remembers (issue #185: with E4B's part, it searched the journal mostly for the requests that sound like the
+    /// part's two examples, and answered the others « Je ne sais pas… » or from what it knows). E4B and the 26B keep
+    /// their parts.
+    @Test func e2BIsShownMoreWaysOfAskingAboutAPastConversation() async {
+        let ways = "« tu te souviens de ce que je t'ai dit sur… », « tu te rappelles ce que je t'ai dit sur… »"
+        let evenIfKnown = "même si tu crois t'en souvenir, mais jamais pour ce que ta mémoire contient déjà"
+        let e2b = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: .minimum)
+        #expect(e2b.contains(ways) && e2b.contains(evenIfKnown))
+        #expect(MemoryCatalog.journalPart(on: .minimum) == MemoryCatalog.journalPartForE2B)
+        #expect(MemoryCatalog.journalPart(on: .standard) == MemoryCatalog.journalPart)
+        for tier in [HardwareTier.standard, .comfort, .max] {
+            let rules = MemoryCatalog.promptAddendum(sheet: [], journal: true, tier: tier)
+            #expect(!rules.contains(ways) && !rules.contains("même si tu crois"))
+        }
+        // Like the others, it ends with the rule that nothing is noted without the call, and the tools give it.
+        #expect(MemoryCatalog.journalPartForE2B.hasSuffix("que tu t'en souviendras."))
+        let tools = MemoryTools(store: TransientMemoryStore(), enabled: true, journal: true, tier: .minimum)
+        #expect(await tools.promptAddendum()?.contains(ways) == true)
+        // voice-cli journal-bench --memory-addendum: other rules before the journal's part, which still follows.
+        let tried = MemoryTools(store: TransientMemoryStore(), enabled: true, journal: true, tier: .minimum,
+                                rules: "D'autres règles.")
+        let prompt = await tried.promptAddendum() ?? ""
+        #expect(prompt.hasPrefix("D'autres règles. Pour retrouver une conversation passée") && prompt.contains(ways))
     }
 
     @Test func thePeriodsOfThePast() {
