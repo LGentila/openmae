@@ -140,14 +140,21 @@ public struct ModelStore: Sendable {
 
     /// Re-reads every downloaded file of `pack` and returns those whose content is not the expected one.
     /// Slow (about 1 s per GB): for diagnosis only, the downloader already checks each file it writes.
+    ///
+    /// A language model's file rewritten so that its weights can be used from it (`AlignedSafetensors`) is expected to
+    /// hold what the rewrite's manifest says it wrote from the catalogued file.
     public func corruptedFiles(_ pack: ModelPack, progress: (ModelFile) -> Void = { _ in }) throws -> [ModelFile] {
-        try pack.files.filter { file in
+        let rewritten = AlignedSafetensors.rewrittenDigests(in: folder(pack))
+        return try pack.files.filter { file in
             let url = location(file, in: pack)
             guard Self.size(of: url) == file.size else { return false }  // missing, not corrupted
             progress(file)
             var hasher = SHA256()
             try Self.hash(url, length: file.size, into: &hasher)
-            return Self.hex(hasher.finalize()) != file.sha256
+            let digest = Self.hex(hasher.finalize())
+            if digest == file.sha256 { return false }
+            guard let written = rewritten[file.path] else { return true }
+            return written.originalSHA256 != file.sha256 || written.sha256 != digest
         }
     }
 

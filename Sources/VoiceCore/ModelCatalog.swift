@@ -109,6 +109,15 @@ public enum ModelCatalog {
         }
     }
 
+    /// The language models whose weights the app uses straight from their files (`FileBackedWeights` in
+    /// VoiceEngineApple), those files rewritten once on the Mac for that (`AlignedSafetensors`): the ones whose answers
+    /// were checked to be the same, token for token, as from MLX's own copy. The others are loaded as before.
+    ///
+    /// Moving one of them to a revision whose weight files change: give it another id too (a folder of its own), as the
+    /// QAT 26B got. A rewritten file keeps its size, so `ModelStore` would not download again a new file of the same size,
+    /// and the rewrite may have moved a tensor from one file to another.
+    public static let alignedWeights: Set<String> = [gemmaE2B.id, gemmaE4B.id, gemma26BQAT.id]
+
     /// Everything a tier needs, in download order: the small models first, so the progress bar moves at once.
     public static func packs(for tier: HardwareTier) -> [ModelPack] {
         guard let languageModel = languageModel(for: tier) else { return [] }
