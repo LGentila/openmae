@@ -528,6 +528,35 @@ struct ConnectedToolsTests {
         #expect(decoded == actions[1])
     }
 
+    /// Whether a card's action still waits (`waits`), which a card's « Oui » or « Non » needs to count
+    /// (`AssistantCommand.answerAction`): while it waits for the « oui »; no longer once carried out, refused or dropped.
+    @Test func knowsWhichCardsActionWaits() async throws {
+        let (server, client) = try await home()
+        defer { server.stop() }
+        let (tools, _) = try await connected(server, client)
+        let cards = Cards()
+        await tools.observe { cards.add($0) }
+        let runner = ToolRunner(providers: [tools], actions: false)
+        _ = await runner.tools()
+        let salon = ToolCall(name: "intent__HassTurnOn", arguments: ["area": "salon"])
+        _ = await runner.handle(salon, context: context)
+        let first = try #require(cards.actions.last)
+        #expect(await tools.waits(first.id))
+        #expect(await !tools.waits(UUID()))
+        _ = await runner.resolve(.confirm, context: context)
+        #expect(await !tools.waits(first.id))
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "cuisine"]), context: context)
+        let second = try #require(cards.actions.last)
+        #expect(await tools.waits(second.id))
+        _ = await runner.resolve(.decline, context: context)
+        #expect(await !tools.waits(second.id))
+        _ = await runner.handle(ToolCall(name: "intent__HassTurnOn", arguments: ["area": "bureau"]), context: context)
+        let third = try #require(cards.actions.last)
+        await runner.resetConversation()
+        #expect(await !tools.waits(third.id))
+        #expect(cards.statuses == [.waiting, .done, .waiting, .refusedByUser, .waiting, .dropped])
+    }
+
     /// The card's « Oui » and « Non » (`submit(answer:)`) are answers as spoken ones are: the action waits, then is
     /// carried out or refused, without the model.
     @Test(arguments: [true, false])

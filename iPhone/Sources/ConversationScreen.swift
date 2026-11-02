@@ -3,18 +3,24 @@ import OpenMaeLink
 import SwiftUI
 import VoiceCore
 
-/// The conversation, as on the Mac: the link with the Mac at the top, the orb, the live transcript, and the buttons in
-/// the thumb's reach — the microphone, the main button, the sound output (hands-free and tap to talk), or one big
-/// button held while talking. It follows the window's size: an iPhone, an iPad in portrait or landscape, Split View.
+/// The conversation, as on the Mac: the link with the Mac at the top, the orb, the live transcript, a connected tool's
+/// card under it while there is one (`ToolActionCard`: the orb gives it room), and the buttons in the thumb's reach —
+/// the microphone, the main button, the sound output (hands-free and tap to talk), or one big button held while
+/// talking. It follows the window's size: an iPhone, an iPad in portrait or landscape, Split View.
 struct ConversationScreen: View {
     let model: PhoneModel
 
     var body: some View {
         let state = model.displayedState
+        // Not while the link is down: the transcript makes way for « Link interrupted » then. When it is back, the Mac
+        // sends each card again at its latest status.
+        let showsCard = !model.toolActions.isEmpty && !isReconnecting
         ZStack {
             PhoneBackground(surface: StatePalette(state).surface, halos: false)
             GeometryReader { proxy in
-                let layout = ConversationLayout(size: proxy.size, isPad: model.isPad)
+                let wide = ConversationLayout.isWide(proxy.size, isPad: model.isPad)
+                let layout = ConversationLayout(size: proxy.size, isPad: model.isPad,
+                                                card: showsCard ? ToolActionCard.height(model.toolActions, wide: wide) : 0)
                 Group {
                     if layout.sideBySide {
                         // An iPad on its side: the orb on the left, the words and the buttons on the right.
@@ -26,6 +32,7 @@ struct ConversationScreen: View {
                                 VStack(spacing: 0) {
                                     Spacer(minLength: 0)
                                     transcript(state, layout: layout)
+                                    if showsCard { card(layout: layout) }
                                     controls(state, layout: layout)
                                         .frame(height: layout.controlsHeight)
                                     Spacer(minLength: 0)
@@ -40,6 +47,7 @@ struct ConversationScreen: View {
                             if layout.isPad { Spacer(minLength: 0) }
                             orb(state, size: layout.orb)
                             transcript(state, layout: layout)
+                            if showsCard { card(layout: layout) }
                             controls(state, layout: layout)
                                 .frame(maxHeight: layout.isPad ? layout.controlsHeight : .infinity)
                             if layout.isPad { Spacer(minLength: 0) }
@@ -50,6 +58,17 @@ struct ConversationScreen: View {
             }
         }
         .animation(.easeOut(duration: 0.4), value: isReconnecting)
+        // The card comes, changes shape (its buttons go once answered) and goes; the orb makes room for it.
+        .animation(Easing.animation(Easing.rise, Timing.rise),
+                   value: showsCard ? ToolActionCard.height(model.toolActions, wide: model.isPad) : 0)
+    }
+
+    private func card(layout: ConversationLayout) -> some View {
+        ToolActionCard(model: model, wide: layout.isPad)
+            .frame(maxWidth: layout.cardWidth)
+            .padding(.horizontal, 20)
+            .padding(.top, ConversationLayout.cardGap)
+            .transition(.opacity.combined(with: .offset(y: 8)))
     }
 
     private func orb(_ state: PipelineState, size: CGFloat) -> some View {
@@ -83,7 +102,7 @@ struct ConversationScreen: View {
             } else {
                 let exchange = model.currentExchange
                 LiveTranscript(state: state, user: exchange.user, answer: exchange.answer,
-                               invitation: invitation, layout: layout.transcript)
+                               invitation: invitation, tintsQuestion: model.toolActions.waits, layout: layout.transcript)
             }
         }
         .frame(height: layout.transcriptHeight)
@@ -116,6 +135,7 @@ struct ConversationScreen: View {
             case nil: return .message(Text(" "))
             }
         }
+        if model.toolActions.waits { return .message(Text("Say “yes” or “no”.")) }
         switch model.talkMode {
         case .hold: return .message(Text("Keep your finger down while you talk."))
         case .tap: return .message(Text("Tap the orb to talk, and again when you are done."))
@@ -126,7 +146,8 @@ struct ConversationScreen: View {
 
 /// The conversation's sizes, from the window's: the iPhone's as designed (an orb of 342 points); on an iPad the orb
 /// grows with the window, which matters most from afar, and the transcript widens, for close reading. Wider than tall
-/// on an iPad: side by side.
+/// on an iPad: side by side. A connected tool's card (`card`: its height, 0 without one) goes under the transcript: the
+/// orb gives it room, at 80 % of its size at most, as on the Mac.
 struct ConversationLayout {
     let isPad: Bool
     let sideBySide: Bool
@@ -137,37 +158,53 @@ struct ConversationLayout {
     let transcriptHeight: CGFloat
     let controlsHeight: CGFloat
     let holdWidth: CGFloat
+    /// The card's width at most (the iPhone's: the window's, with room on either side).
+    let cardWidth: CGFloat
 
-    init(size: CGSize, isPad: Bool) {
+    /// Between the transcript and the card.
+    static let cardGap: CGFloat = 10
+
+    /// The iPad's layout, rather than the iPhone's: also the card's buttons beside its words.
+    static func isWide(_ size: CGSize, isPad: Bool) -> Bool { isPad && size.width >= 500 }
+
+    init(size: CGSize, isPad: Bool, card: CGFloat = 0) {
         // A narrow window (an iPhone, an iPad in Split View) is laid out as the iPhone.
-        self.isPad = isPad && size.width >= 500
+        self.isPad = Self.isWide(size, isPad: isPad)
         let bar: CGFloat = 56
+        let card = card > 0 ? card + Self.cardGap : 0
+        let shrink: CGFloat = card > 0 ? 0.8 : 1
         if !self.isPad {
             sideBySide = false
-            orb = min(342, size.width - 40, max(200, size.height - bar - 176 - 110))
+            transcriptHeight = card > 0 ? 150 : 176
+            orb = min(342 * shrink, size.width - 40,
+                      max(card > 0 ? 150 : 200, size.height - bar - transcriptHeight - card - 110))
             orbColumn = size.width
             transcript = .phone
-            transcriptHeight = 176
             controlsHeight = 110
             holdWidth = 353
+            cardWidth = .infinity
         } else if size.width > size.height * 1.15 {
             sideBySide = true
             orbColumn = size.width * 0.5
             orb = min(orbColumn - 64, size.height - bar - 48, 620)
             let words = min(size.width - orbColumn - 64, 480)
             transcript = .pad(width: words)
-            transcriptHeight = min(260, size.height * 0.4)
+            // With a card, the words make room for it if need be (the orb's column does not change).
+            transcriptHeight = card > 0 ? min(260, size.height * 0.4, max(120, size.height - bar - card - 120 - 24))
+                : min(260, size.height * 0.4)
             controlsHeight = 120
             holdWidth = min(words, 440)
+            cardWidth = words
         } else {
             sideBySide = false
             transcriptHeight = 230
             controlsHeight = 130
-            orb = min(size.width * 0.66, size.height - bar - transcriptHeight - controlsHeight - 40, 620)
+            orb = min(size.width * 0.66 * shrink, size.height - bar - transcriptHeight - card - controlsHeight - 40, 620)
             orbColumn = size.width
             let words = min(size.width - 120, 600)
             transcript = .pad(width: words)
             holdWidth = min(words, 440)
+            cardWidth = words
         }
     }
 }

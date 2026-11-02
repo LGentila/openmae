@@ -298,7 +298,13 @@ public actor AssistantHost: AssistantConnection {
             await reportMemory()
         case .testConnectedTool(let tool):
             Task { await testConnectedTool(tool) }
-        case .answerAction(let yes):
+        case .answerAction(let yes, let action):
+            // A card's action dropped meanwhile (its time ran out, another request replaced it): the "Oui" answers
+            // nothing, rather than what may wait now.
+            guard await connectedTools.waits(action) else {
+                DebugLog.log("an answer from a card whose action no longer waits, ignored")
+                return
+            }
             await pipeline?.submit(answer: yes)
         case .typedTurn(let text):
             await pipeline?.submit(text: text)

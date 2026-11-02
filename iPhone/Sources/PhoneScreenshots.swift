@@ -10,7 +10,9 @@ import VoiceCore
 /// itself, and this Xcode has no Simulator window to turn.
 ///
 /// Screens: `conversation` (Maé answers), `conversation-listening` (the user's words as they speak),
-/// `conversation-rest`, `station` (at rest), `station-speaking` (a timer rings on it), `settings`.
+/// `conversation-rest`, `station` (at rest), `station-speaking` (a timer rings on it), `settings`; a connected tool's
+/// card (Home Assistant, « Allume le salon »): `tool-asks` (while Maé asks), `tool-asks-rest` (waiting for the « oui »
+/// at rest), `tool-done`, `tool-declined`, `tool-failed`.
 enum PhoneScreenshots {
     static var requested: String? {
         let arguments = ProcessInfo.processInfo.arguments
@@ -54,9 +56,45 @@ enum PhoneScreenshots {
             model.stationMode = true
             model.showForScreenshot(mac: mac, link: .connected(.direct), state: .listening, open: false,
                                     transcript: [])
+        case _ where screen.hasPrefix("tool-"):
+            showToolCard(model, mac: mac, screen)
         default:
             break
         }
+    }
+
+    /// A connected tool's card under Maé's sentence: in French whatever the interface's language, as Maé says these
+    /// sentences in French.
+    @MainActor
+    private static func showToolCard(_ model: PhoneModel, mac: PairedMac, _ screen: String) {
+        let turnOn = MCPTool(name: "intent__HassTurnOn", description: "")
+        let waiting = ConnectedToolAction(toolID: UUID(), toolName: "Home Assistant",
+                                          words: ConnectedToolPhrases.card(turnOn, ["area": "salon"]),
+                                          title: "Allumer le salon", status: .waiting, date: Date(),
+                                          disc: ConnectedToolDisc(kind: .homeAssistant, index: 0))
+        func outcome(_ status: ConnectedToolAction.Status) -> ConnectedToolAction {
+            var action = waiting
+            action.status = status
+            return action
+        }
+        func exchange(_ user: String, _ answer: String) -> [TranscriptEntry] {
+            [TranscriptEntry(speaker: .user, text: user), TranscriptEntry(speaker: .assistant, text: answer)]
+        }
+        let asks = exchange("Allume le salon.", ConnectedToolPhrases.confirm(turnOn, ["area": "salon"],
+                                                                            toolName: "Home Assistant"))
+        let scene: (state: PipelineState, transcript: [TranscriptEntry], card: ConnectedToolAction)? = switch screen {
+        case "tool-asks": (.speaking, asks, waiting)
+        case "tool-asks-rest": (.listening, asks, waiting)
+        case "tool-done": (.speaking, exchange("Oui.", ConnectedToolPhrases.done), outcome(.done))
+        case "tool-declined": (.speaking, exchange("Non.", ActionPhrases.declined(.french)), outcome(.refusedByUser))
+        case "tool-failed":
+            (.speaking, exchange("Oui.", "Je n’arrive pas à joindre Home Assistant."), outcome(.failed(.unreachable)))
+        default: nil
+        }
+        guard let scene else { return }
+        model.talkMode = .handsFree
+        model.showForScreenshot(mac: mac, link: .connected(.direct), state: scene.state, open: true,
+                                transcript: scene.transcript, toolActions: [scene.card])
     }
 }
 

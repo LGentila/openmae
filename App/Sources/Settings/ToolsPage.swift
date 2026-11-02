@@ -245,18 +245,13 @@ final class ConnectedToolsAccess {
 
     // MARK: - From the settings
 
-    /// A tool's disc, in the lists and on the conversation's cards: Home Assistant's house on turquoise, otherwise a plug
-    /// (on the home network) or a globe, on a colour that follows its place in the settings' list.
+    /// A tool's disc, in the lists and on the conversation's cards (`ConnectedToolDisc`, drawn as the iPhone draws it).
     static func disc(_ tool: ConnectedToolSettings, index: Int) -> (icon: Icon, color: RGBA) {
-        let home = isHomeAssistant(tool)
-        let colors = [Palette.azureSoft, Palette.sunSoft, Palette.coralSoft]
-        return (home ? .home : place(tool) == .home ? .plug : .globe,
-                home ? Palette.turquoiseSoft : colors[index % colors.count])
+        ConnectedToolDisc(tool, index: index).look
     }
 
     private static func isHomeAssistant(_ tool: ConnectedToolSettings) -> Bool {
-        let host = MCPClient.address(tool.address)?.host() ?? ""
-        return tool.name.lowercased().contains("home assistant") || host.lowercased().contains("homeassistant")
+        ConnectedToolDisc.isHomeAssistant(tool)
     }
 
     private static func place(_ tool: ConnectedToolSettings) -> ConnectedTool.Place {

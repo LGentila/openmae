@@ -31,6 +31,9 @@ public enum LinkMessage: Sendable {
     /// Another optional event: the engine started a new conversation (`AssistantEvent.conversationCleared`), and the
     /// device clears its transcript.
     public static let conversationClearedFeature = "conversationCleared"
+    /// Another optional event: a connected tool's action card (`AssistantEvent.connectedToolAction`), whose "Oui" and
+    /// "Non" the device sends back (`AssistantCommand.answerAction`).
+    public static let toolActionFeature = "connectedToolAction"
 
     private enum Kind: String, Codable { case command, event, audio, ping, pong, paired, removed, mac, device }
     private enum Keys: String, CodingKey { case type, command, event, op, stream, frames, name, relay, station }
@@ -169,7 +172,8 @@ public enum HandshakePayload {
     public struct Session: Codable, Sendable, Equatable {
         public var v: Int
         /// The optional events this iPhone (or iPad) understands (`LinkMessage.partialTranscriptFeature`,
-        /// `LinkMessage.conversationClearedFeature`); nil from one from before them, which must not be sent any.
+        /// `LinkMessage.conversationClearedFeature`, `LinkMessage.toolActionFeature`); nil from one from before them,
+        /// which must not be sent any.
         public var features: [String]?
         public init(v: Int = 1, features: [String]? = nil) {
             self.v = v
@@ -180,7 +184,8 @@ public enum HandshakePayload {
 
         /// What this version's iPhone and iPad app says.
         public static let current = Session(features: [LinkMessage.partialTranscriptFeature,
-                                                       LinkMessage.conversationClearedFeature])
+                                                       LinkMessage.conversationClearedFeature,
+                                                       LinkMessage.toolActionFeature])
     }
 
     static func encode<T: Encodable>(_ value: T) -> Data {
@@ -192,13 +197,15 @@ public enum HandshakePayload {
     }
 }
 
-/// What the iPhone may ask the Mac. It has the same powers as the voice on the Mac (sensitive actions still ask
-/// for a spoken "yes"), but never those that belong to the Mac: loading, downloading or deleting models, quitting.
+/// What the iPhone may ask the Mac. It has the same powers as the voice on the Mac (sensitive actions still wait for
+/// the user's "oui", which a card's "Oui" gives as saying it does), but never those that belong to the Mac: loading,
+/// downloading or deleting models, quitting.
 public enum RemoteCommandPolicy {
-    /// An allow-list: a command added to the contract later stays the Mac's until it is added here.
+    /// An allow-list: a command added to the contract later stays the Mac's until it is added here. A card's "Oui" or
+    /// "Non" (`answerAction`) counts only while its action waits: the Mac checks it (`LinkHost`).
     public static func isAllowed(_ command: AssistantCommand) -> Bool {
         switch command {
-        case .stopSpeaking, .newConversation, .talkKey, .updateSettings: true
+        case .stopSpeaking, .newConversation, .talkKey, .updateSettings, .answerAction: true
         default: false  // start, downloads, deletions, quitting, typed turns: the Mac's own
         }
     }
@@ -207,8 +214,8 @@ public enum RemoteCommandPolicy {
     /// download or the models' storage: they belong to the Mac's screens. An allow-list too.
     public static func isRelayed(_ event: AssistantEvent) -> Bool {
         switch event {
-        case .state, .partialTranscript, .userTranscript, .assistantPiece, .turnFinished, .conversationCleared, .ready,
-             .loading, .warning, .problem, .setupNeeded:
+        case .state, .partialTranscript, .userTranscript, .assistantPiece, .turnFinished, .conversationCleared,
+             .connectedToolAction, .ready, .loading, .warning, .problem, .setupNeeded:
             true
         default: false
         }
@@ -220,6 +227,7 @@ public enum RemoteCommandPolicy {
         switch event {
         case .partialTranscript: LinkMessage.partialTranscriptFeature
         case .conversationCleared: LinkMessage.conversationClearedFeature
+        case .connectedToolAction: LinkMessage.toolActionFeature
         default: nil
         }
     }
