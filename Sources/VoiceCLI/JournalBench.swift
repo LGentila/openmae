@@ -4,7 +4,8 @@
 //   voice-cli journal-bench [--tier minimum|standard|comfort|max] [--llm folder] [--now 2026-10-15T18:42]
 //                           [--corpus Tests/Fixtures/journal-fr.json] [--repeats 3] [--examples app|none|file]
 //                           [--web] [--request "cookies"] [--watch-calls] [--own-thoughts] [--out measurements]
-//                           [--full-text | --embedder folder] [--results-note file]
+//                           [--full-text | --embedder folder] [--results-note file] [--journal-addendum file]
+//                           [--memory-addendum file]
 //
 // The journal is searched as the app searches it: in full text and by meaning (`MeaningMemoryStore`, with the app's
 // sentence-embedding model, `ModelCatalog.journalSearch`, which must be on this Mac: `voice-cli download
@@ -14,7 +15,8 @@
 // --request: only the corpus's requests whose phrase holds this text (repeatable), to run a rare case many times.
 // --journal-addendum: the journal's part of the memory's rules in the system prompt, this file's text instead of the
 // app's on this tier (`MemoryCatalog.journalPart(on:)`), as with actions-bench, to try another wording without
-// rebuilding.
+// rebuilding. --memory-addendum: the memory's rules before the journal's part, this file's text instead of the app's
+// (as with actions-bench; the journal's part and the sheet still follow).
 // --watch-calls: each pass exactly as the model wrote it, special tokens included, under its run; the report keeps it with
 // its tokens, each with its chance and the likeliest ones there, and counts the passes that open a thought block of the
 // model's own or hold « much ».
@@ -318,8 +320,12 @@ func runJournalBench(_ o: Options) async throws {
     }
     print("the journal's part of the prompt: " + (journalPart.map { "--journal-addendum's: \($0)" }
         ?? "the app's on this tier: \(MemoryCatalog.journalPart(on: tier))"))
+    let memoryRules = try o.memoryAddendum.map {
+        try String(contentsOfFile: $0, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if let memoryRules { print("the memory's rules before the journal's part: --memory-addendum's: \(memoryRules)") }
     let memory = MemoryTools(store: store, enabled: true, journal: true, tier: tier, excerptsNote: excerptsNote,
-                             journalPart: journalPart)
+                             journalPart: journalPart, rules: memoryRules)
     let providers: [any ToolProvider] = [calendar, TimerTools()] + (web ? [UnsearchedWeb()] : []) + [memory]
     let runner = ToolRunner(providers: providers)
     let tools = await runner.tools()

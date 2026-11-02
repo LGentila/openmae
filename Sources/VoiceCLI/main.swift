@@ -246,7 +246,8 @@ struct Options {
     /// this file.
     var news = false
     var newsAddendum: String?
-    /// actions-bench: the memory's rules in the system prompt, read from this file (the sheet still follows).
+    /// actions-bench, journal-bench: the memory's rules in the system prompt, read from this file (the journal's part
+    /// and the sheet still follow).
     var memoryAddendum: String?
     /// actions-bench, journal-bench: the journal's part of the memory's rules, read from this file (with the journal
     /// only).
