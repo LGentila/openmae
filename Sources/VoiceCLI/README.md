@@ -18,6 +18,18 @@ Check every downloaded file against its SHA-256 (about one second per GB):
 
 Both take `--models <folder>` to work on another models folder than the app's.
 
+The app uses the language model's weights straight from its files, mapped into memory, once it has rewritten them for
+that: before it first loads the model, it moves every tensor to a page boundary of its file, in place, each file keeping
+its size (Gemma 4 E2B, E4B and 26B QAT; about a second per gigabyte). `align-model` does the same to a tier's language
+model (`--models <folder>`: another models folder; `--status`: only says what the folder holds):
+
+```bash
+.build/xcode/Build/Products/Release/voice-cli align-model --tier comfort --status
+```
+
+Every command then loads that model's weights from its files; with `VOICE_FILE_BACKED_WEIGHTS=0`, into MLX's memory as
+before, to compare the two.
+
 Measure the engine with recorded speech, played in real time as a microphone would. First generate the test
 phrases with macOS's built-in voices:
 

@@ -130,6 +130,9 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     // 9 GB: macOS had nothing left to take. So they are only brought back and kept in use (`keepWarm`, `wakeUp`).
     /// The weights' memory (see `MemoryResidency`).
     private nonisolated let weightPages: [Range<UInt>]
+    /// The model's files, when the weights are used from them (`FileBackedWeights`): held as long as the model, and read
+    /// back from them rather than page by page (`bringWeightsBack`, `wakeUp`, `keepWarm`).
+    private nonisolated let fileBacked: FileBackedWeights?
     /// When `wakeUp` last brought the weights back.
     private nonisolated let lastWakeUp = WakeUpTimes()
     /// `wakeUp` reads the weights from the CPU (`holdOnGPU` waits for it).
@@ -193,13 +196,15 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     private var ownThoughtsAllowed = false
 
     /// `answersOpenWithThought`: the template opens every answer with an empty thought block (`GemmaTemplateFix`).
+    /// `fileBacked`: the files the weights are used from, if they are.
     private init(context: ModelContext, tokenizer: any Tokenizers.Tokenizer, chatTemplate: String?,
-                 answersOpenWithThought: Bool, parameters: GenerateParameters) throws
+                 answersOpenWithThought: Bool, parameters: GenerateParameters, fileBacked: FileBackedWeights?) throws
     {
         self.context = context
         self.tokenizer = tokenizer
         self.chatTemplate = chatTemplate
         self.parameters = parameters
+        self.fileBacked = fileBacked
         var stops = context.configuration.eosTokenIds
         if let eos = context.tokenizer.eosTokenId { stops.insert(eos) }
         for token in context.configuration.extraEOSTokens {
@@ -229,15 +234,44 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     }
 
     /// Loads an MLX model folder (config.json, *.safetensors, tokenizer files, chat template), and warms it up.
+    ///
+    /// The weights of a folder rewritten for it (`FileBackedWeights.prepare`) are used straight from its files, mapped
+    /// into memory (`FileBackedWeights`): macOS drops their pages rather than compressing them when it runs short, and
+    /// does not count them in the app's memory. Those of any other folder, or of one whose files are not what its
+    /// manifest says, are read into MLX's own memory, as mlx-swift-lm's loader does; so are they if the weights cannot be
+    /// used from the files after all (a copy, a weight out of place): the load then starts again that way.
+    /// `VOICE_FILE_BACKED_WEIGHTS=0`: always that way, for comparisons.
     public static func load(directory: URL, maxAnswerTokens: Int = 400) async throws -> MLXChatModel {
-        let context = try await LLMModelFactory.shared.load(from: directory, using: TokenizerLoaderBridge())
+        if let manifest = FileBackedWeights.usableManifest(directory) {
+            do {
+                return try await load(directory: directory, maxAnswerTokens: maxAnswerTokens, manifest: manifest)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                DebugLog.log("LLM: the weights cannot be used from the files (\(error)): loading them into MLX's memory")
+                releaseCachedMemory()
+            }
+        }
+        return try await load(directory: directory, maxAnswerTokens: maxAnswerTokens, manifest: nil)
+    }
+
+    /// `load`, the weights used from the files the manifest describes, or read into MLX's memory without one.
+    private static func load(directory: URL, maxAnswerTokens: Int, manifest: AlignedSafetensors.Manifest?) async throws
+        -> MLXChatModel
+    {
+        let (context, fileBacked): (ModelContext, FileBackedWeights?) = if let manifest {
+            try await FileBackedWeights.loadModel(directory: directory, manifest: manifest)
+        } else {
+            (try await LLMModelFactory.shared.load(from: directory, using: TokenizerLoaderBridge()), nil)
+        }
         let tokenizer = try await ModelTokenizer.load(from: directory)
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
                                    encoding: .utf8)
         let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: temperature, topP: 0.9)
         let patched = template.flatMap(GemmaTemplateFix.patched)
         let model = try MLXChatModel(context: context, tokenizer: tokenizer, chatTemplate: patched ?? template,
-                                     answersOpenWithThought: patched != nil, parameters: parameters)
+                                     answersOpenWithThought: patched != nil, parameters: parameters,
+                                     fileBacked: fileBacked)
         loaded.withLock { models in
             models.removeAll { $0.model == nil }
             models.append(LoadedModel(model: model))
@@ -248,6 +282,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         await model.bringWeightsBack()
         try Task.checkCancellation()
         try await model.warmUp()
+        try await model.checkFileBackedWeights()
         return model
     }
 
@@ -271,12 +306,35 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// of the load, 61 to 97% of Gemma 4 26B's weights were out of RAM on the reference Mac, and the first passes waited
     /// for them (the warm-up's 14 tokens: 1.9 s; then the conversation's beginning, 124 tokens: 5.3 s). Read back from
     /// 8 threads, they come back in 0.57 to 1.3 s, and the warm-up then takes 0.24 to 0.71 s (see `MemoryResidency`).
+    /// Weights used from the files are read from them where macOS does not have them in memory yet
+    /// (`FileBackedWeights.bringBack`: Gemma 4 26B's, none in memory, in 2.3 s; 0.4 s all in memory), and the warm-up
+    /// then takes 0.3 s.
     private func bringWeightsBack() {
         logResidency("after loading")
         let start = ContinuousClock.now
-        MemoryResidency.touch(weightPages, threads: 8)
+        if let fileBacked {
+            fileBacked.bringBack()
+        } else {
+            MemoryResidency.touch(weightPages, threads: 8)
+        }
         DebugLog.log("LLM: weights brought back into memory in \(ContinuousClock.now - start)")
         logResidency("after bringing them back")
+    }
+
+    /// Once warmed up, with weights used from the files (`FileBackedWeights`): checks that every weight still is the
+    /// files' memory, at its own tensor's place, while the model computes in float32 (its small weights then float32
+    /// copies; its experts and embedding tables swapped for `ReadingExperts` and `Float32Rows`, the same arrays) and after
+    /// (the small weights then copies of their own, `prepareFloat32Swap`: 361 for Gemma 4 26B, 2.8 MB). Throws otherwise.
+    private func checkFileBackedWeights() throws {
+        guard let fileBacked else { return }
+        let swap = float32Swap ?? prepareFloat32Swap()
+        float32Swap = swap
+        let small = Set(swap.weights.flattened().map(\.0))
+        let during = try withFloat32Activations {
+            try fileBacked.verify(context.model.parameters().flattened(), copyAccepted: small.contains)
+        }
+        let after = try fileBacked.verify(context.model.parameters().flattened(), copyAccepted: small.contains)
+        DebugLog.log("LLM: weights from the files, while computing in float32: \(during); after: \(after)")
     }
 
     // MARK: - VoiceCore.LanguageModel
@@ -902,13 +960,21 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// The model winding down (`windDown`: the app quits) stops the reads from the CPU where they are, and nothing is
     /// computed on the GPU: the app waited for the whole pass, up to 1.4 s with Gemma 4 26B when macOS had compressed a
     /// quarter of the weights (0.87 s of reads from the CPU, then the GPU).
+    ///
+    /// Weights used from the files are read back from them (`FileBackedWeights.bringBack`): read one fault at a time,
+    /// Gemma 4 26B's, dropped whole, took 6.2 s a pass on the reference Mac; 2.35 s that way.
     public func keepWarm() {
         guard backgroundAllowed, !windingDown else { return }
         logResidency("before keep-warm")
         let clock = ContinuousClock()
         let start = clock.now
         let conversation = conversationMemory
-        MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversation), threads: 4) { [self] in windingDown }
+        if let fileBacked {
+            fileBacked.bringBack { [self] in windingDown }
+            MemoryResidency.touch(MemoryResidency.ranges(conversation), threads: 4) { [self] in windingDown }
+        } else {
+            MemoryResidency.touch(weightPages + MemoryResidency.ranges(conversation), threads: 4) { [self] in windingDown }
+        }
         let touched = clock.now
         guard !windingDown else {
             DebugLog.log("LLM: keep-warm given up after \(touched - start), the model winds down")
@@ -924,12 +990,21 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// a request that comes meanwhile does not wait for it; at most once every 5 s. The conversation's memory comes back
     /// meanwhile too (`wakeConversationUp`). If it is the user's turn, the GPU's driver then wires it all (`holdOnGPU`).
     /// Not once the model winds down (`windDown`).
+    ///
+    /// Weights used from the files are read back from them (`FileBackedWeights.bringBack`): the app's lock (`lockWired`)
+    /// wires the pages in memory, but does not read back those macOS dropped; left to the GPU's driver, Gemma 4 26B's,
+    /// dropped whole, delayed the request's first token by 1.4 to 3.3 s on the reference Mac, while read back here they
+    /// were in memory before the request, the user's speech hiding the 2.2 to 2.6 s it takes.
     public nonisolated func wakeUp() {
         guard !windingDown, lastWakeUp.claim(spacing: .seconds(5)) else { return }
         wakingUp.store(true, ordering: .relaxed)
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let start = ContinuousClock.now
-            MemoryResidency.touch(weightPages, threads: 4)
+            if let fileBacked {
+                fileBacked.bringBack()
+            } else {
+                MemoryResidency.touch(weightPages, threads: 4)
+            }
             DebugLog.log("LLM: weights woken up in \(ContinuousClock.now - start)")
             wakingUp.store(false, ordering: .relaxed)
         }

@@ -57,6 +57,8 @@
 //   voice-cli web-search --searxng <address> keywords…  one search as the app makes it (see WebSearch.swift)
 //   voice-cli read-page <address> [--words "…"]         one page read as the app reads it (see WebSearch.swift)
 //   voice-cli download | verify | catalog               the models (see ModelCommands.swift)
+//   voice-cli align-model [--models folder] [--status]  the language model's files rewritten so that its weights are
+//                                                       used from them, as the app does once (see AlignModel.swift)
 //   voice-cli link-client [--pair "<link>"] [--relay-only | --direct-only] <phrase.wav>...
 //                                                       a fake iPhone: latency through the link (LinkClient.swift)
 //   voice-cli inbound --relay <home relay> [--name Essai] [--seconds 600]
@@ -101,7 +103,7 @@
 //                            an iPhone has the conversation (BargeInProfile; VOICE_BARGE_IN_IPHONE_DB/_MS apply)
 //   --out <folder>           where reports and audio go (default ./measurements)
 //   --greedy                 actions-bench: the likeliest token every time, every answer's tokens in the report
-//   --models <folder>        download, verify: this models folder instead of the app's
+//   --models <folder>        download, verify, align-model: this models folder instead of the app's
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
 // voice is "played" in real time by a silent simulated speaker, so timings match the real app
@@ -265,7 +267,7 @@ struct Options {
     /// actions-bench: the likeliest token drawn every time (`MLXChatModel.sampleGreedily`), and every answer's tokens in
     /// the report, to compare two runs token for token.
     var greedy = false
-    /// download, verify: the models folder at this path instead of the app's (`ModelStore(root:)`).
+    /// download, verify, align-model: the models folder at this path instead of the app's (`ModelStore(root:)`).
     var models: String?
     /// story-bench: the tokens are not watched (it slows the writing), and each answer's time to its first word and
     /// writing speed are measured.
@@ -863,7 +865,7 @@ setvbuf(stdout, nil, _IOLBF, 0)  // one line at a time, even into a file: a cras
 if let options = Options.parse(CommandLine.arguments),
    ["voice-onset", "voice-pace", "download", "verify", "catalog", "actions-bench", "dialogue-bench", "cache-check",
     "cut-off-bench", "story-bench", "read-sizes", "memory-bench", "journal-bench", "link-client", "delegate",
-    "web-search", "read-page", "inbound"].contains(options.command)
+    "web-search", "read-page", "inbound", "align-model"].contains(options.command)
 {
     do {
         switch options.command {
@@ -884,6 +886,7 @@ if let options = Options.parse(CommandLine.arguments),
         case "read-page": try await runReadPage(CommandLine.arguments)
         case "inbound": try await runInbound(CommandLine.arguments)
         case "voice-pace": try await runVoicePace(options)
+        case "align-model": try await runAlignModel(options, arguments: CommandLine.arguments)
         default: try await runVoiceOnset(options)
         }
     } catch {
@@ -938,6 +941,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                          [--barge-in mac|iphone] [--out folder] files.wav…
                voice-cli download [--tier minimum|standard|comfort|max | --journal-search] [--models folder]
                voice-cli verify [--tier tier | --all] [--models folder]
+               voice-cli align-model [--tier tier] [--models folder] [--status]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]
                voice-cli voice-pace [--tier tier] [--repeats 5] [--with-llm [--model-writes n]] [--tts gpu|cpu]

@@ -160,7 +160,8 @@ public actor AssistantHost: AssistantConnection {
     ///
     /// The command under way stops: new tools (also the news coming or going) or a new conversation at the beginning's
     /// next chunk, a start-up at its next step (`start`: a quit during the language model's load waits for its weights and
-    /// its warm-up's prompt, then the start-up stops before the conversations' beginning), and so does the start-up that
+    /// its warm-up's prompt, then the start-up stops before the conversations' beginning; the rewrite of its files stops
+    /// within a few megabytes, and the next launch finishes it), and so does the start-up that
     /// follows a download, outside the command loop; the microphone and an iPhone's no longer feed the pipeline; the
     /// pipeline stops (the answer under way at its next token, its voice at once, the history computed ahead at its next
     /// chunk, no more keep-warm passes); a timer that rings, received information, the news coming or going and an
@@ -376,6 +377,11 @@ public actor AssistantHost: AssistantConnection {
             try stopIfQuitting(before: "the language model")
             emit.yield(.loading(.languageModel))
             MLXChatModel.releaseCachedMemory()  // what a previous tier's model may have left
+            // Once per model, after its download or on the first launch of this version: its files rewritten so that its
+            // weights can be used from them (17 s for Gemma 4 26B on the reference Mac), or a rewrite the app quit
+            // in the middle of finished; left as they are without room on the disk (`FileBackedWeights.prepare`).
+            await FileBackedWeights.prepare(languageModel, in: store)
+            try stopIfQuitting(before: "the language model's load")
             model = try await MLXChatModel.load(directory: store.folder(languageModel))
             loaded.append(model)
             try stopIfQuitting(before: "the conversations' beginning")

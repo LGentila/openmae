@@ -201,12 +201,14 @@ enum MemoryResidency {
     /// Diagnostics: the paging of the whole Mac since it started (`host_statistics64`) and this process's page faults
     /// (`task_info`), to tell what a computation waited for: the pages macOS brought back from its compressor or from swap
     /// meanwhile, and what it compressed or wrote to swap to make room; and the memory wired on the whole Mac (the GPU's
-    /// driver wires the memory a computation uses, and lets it go again when the Mac runs short).
+    /// driver wires the memory a computation uses, and lets it go again when the Mac runs short). The pages read from
+    /// files too: weights used from the model's files (`FileBackedWeights`) that macOS dropped come back that way.
     struct Paging {
         var decompressions: UInt64 = 0
         var compressions: UInt64 = 0
         var swapins: UInt64 = 0
         var swapouts: UInt64 = 0
+        var pageins: UInt64 = 0
         var faults: Int64 = 0
         var wired: UInt64 = 0
 
@@ -214,10 +216,12 @@ enum MemoryResidency {
         func text(since earlier: Paging) -> String {
             let pageGB = Double(page) / 1e9
             return String(format: "the Mac decompressed %.2f GB and compressed %.2f GB, read %.2f GB from swap and wrote "
-                          + "%.2f GB to it, its wired memory went from %.2f to %.2f GB; %lld page faults in this process",
+                          + "%.2f GB to it, read %.2f GB from files, its wired memory went from %.2f to %.2f GB; %lld "
+                          + "page faults in this process",
                           Double(decompressions &- earlier.decompressions) * pageGB,
                           Double(compressions &- earlier.compressions) * pageGB,
                           Double(swapins &- earlier.swapins) * pageGB, Double(swapouts &- earlier.swapouts) * pageGB,
+                          Double(pageins &- earlier.pageins) * pageGB,
                           Double(earlier.wired) * pageGB, Double(wired) * pageGB, faults - earlier.faults)
         }
     }
@@ -236,6 +240,7 @@ enum MemoryResidency {
             result.compressions = vm.compressions
             result.swapins = vm.swapins
             result.swapouts = vm.swapouts
+            result.pageins = vm.pageins
             result.wired = UInt64(vm.wire_count)
         }
         mach_port_deallocate(mach_task_self_, host)

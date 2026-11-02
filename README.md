@@ -59,7 +59,9 @@ Only the comfort tier could be measured so far. The app says so when it runs on 
    resumes by itself. Every file is checked against the SHA-256 recorded in the app: the models are pinned to
    the exact versions that were tested.
 4. The first loading of the models takes one to two minutes (macOS prepares speech recognition for the
-   chip), then about twenty seconds at each launch.
+   chip), then about twenty seconds at each launch. Before its first load, the language model's files are rewritten
+   once, in place and at the same sizes, so that its weights can be used straight from them (on an M1 Pro: 4 s for
+   Gemma 4 E2B, 6 s for E4B, 17 s for the 26B).
 
 Settings › Advanced lists the models on the Mac with the space each one takes, and can delete another tier's
 model on its own, or all of them.
@@ -84,7 +86,9 @@ Measured on an M1 Pro with 32 GB:
 - **End of your sentence → first sound:** about 1.6 s (median). The target is under 1 s, not reached yet:
   most of the delay is the voice getting started.
 - **Interruption:** the voice stops about 0.25 s after you start speaking.
-- **Memory:** about 16 GB in all, 14 GB of it for the language model.
+- **Memory:** about 16 GB in all, 14 GB of it for the language model. Its weights are used straight from its files:
+  macOS counts them as cached files rather than as the app's memory, and can drop them and read them again rather
+  than compress them.
 
 The app (SwiftUI) and the engine (a Swift package) only talk through a small set of commands and events
 (`Sources/VoiceCore/AssistantProtocol.swift`). The Apple-specific parts of the engine live in one target, so
