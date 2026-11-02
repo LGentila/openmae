@@ -12,7 +12,9 @@ public actor PocketSpeechSynthesizer: SpeechSynthesizer, KeepsWarm {
     public nonisolated let outputSampleRate = 24_000.0
 
     public static let voices: [SpeechLanguage: String] = [.french: "estelle", .english: "alba"]
-    private static let packs: [SpeechLanguage: PocketTtsLanguage] = [.french: .french24L, .english: .english]
+    // English: Kyutai's `english_2026-04` pack (`v2.1/english`, the one the downloader fetches). Since FluidAudio 0.18,
+    // `.english` is the newer `english_2026-10` pack, in another folder.
+    private static let packs: [SpeechLanguage: PocketTtsLanguage] = [.french: .french24L, .english: .english2026Apr]
 
     private let computeUnits: PocketTtsComputeUnits
     private let directory: URL

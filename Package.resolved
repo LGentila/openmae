@@ -1,5 +1,5 @@
 {
-  "originHash" : "182f881e893416bf0377325b1206bc5eaf672fce5059453efce5e7cce604fb81",
+  "originHash" : "ae959dd8ade4948d7d5999ddc3173377a030fb21c3eedb55d8903527b037e123",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/LGentila/FluidAudio.git",
       "state" : {
-        "revision" : "3bcb0e1fae15bc044066117b588682a784d408af",
-        "version" : "0.17.7-openmae.1"
+        "revision" : "5676156eb1ce384bb4cefcc2e3ea2e60391aff4a",
+        "version" : "0.18.2-openmae.1"
       }
     },
     {
