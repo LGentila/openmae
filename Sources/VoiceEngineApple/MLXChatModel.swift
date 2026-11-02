@@ -234,7 +234,7 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
         let tokenizer = try await ModelTokenizer.load(from: directory)
         let template = try? String(contentsOf: directory.appendingPathComponent("chat_template.jinja"),
                                    encoding: .utf8)
-        let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: 0.7, topP: 0.9)
+        let parameters = GenerateParameters(maxTokens: maxAnswerTokens, temperature: temperature, topP: 0.9)
         let patched = template.flatMap(GemmaTemplateFix.patched)
         let model = try MLXChatModel(context: context, tokenizer: tokenizer, chatTemplate: patched ?? template,
                                      answersOpenWithThought: patched != nil, parameters: parameters)
@@ -356,6 +356,43 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
     /// this fraction of the likeliest one is never drawn; 0: none), for comparisons in one build.
     public func sampleWithMinP(_ minP: Float) {
         parameters.minP = minP
+    }
+
+    /// Benchmark diagnostics (`voice-cli actions-bench --greedy`): `true` draws the token the model finds likeliest every
+    /// time (temperature 0), so that two runs give the same tokens when the model computes the same (two loaders, two
+    /// copies of a model's files); `false`: the app's sampling.
+    public func sampleGreedily(_ on: Bool) {
+        parameters.temperature = on ? 0 : Self.temperature
+    }
+
+    /// The app's sampling temperature.
+    private static let temperature: Float = 0.7
+
+    /// Benchmark diagnostics (`recordAnswers`): an answer as the model wrote it, its tokens (its last, which ends it,
+    /// included), with the new tokens of its prompt and the time to compute them (`lastPrefill`), and its writing time
+    /// (`lastWriting`).
+    public struct AnswerRecord: Sendable, Encodable {
+        public var tokens: [Int]
+        public var promptTokens: Int
+        public var promptMs: Double
+        public var writingMs: Double
+    }
+
+    /// Benchmark diagnostics: whether every answer is recorded (`recordAnswers`), and those recorded since `takeAnswers`.
+    private var recordingAnswers = false
+    private var answerRecords: [AnswerRecord] = []
+
+    /// Benchmark diagnostics (`voice-cli actions-bench --greedy`): records every answer from now on (`takeAnswers`), or no
+    /// more.
+    public func recordAnswers(_ on: Bool) {
+        recordingAnswers = on
+        answerRecords = []
+    }
+
+    /// The answers recorded since the last call (`recordAnswers`), forgotten here.
+    public func takeAnswers() -> [AnswerRecord] {
+        defer { answerRecords = [] }
+        return answerRecords
     }
 
     /// Benchmark diagnostics (`voice-cli … --own-thoughts`): `true` lets the model write thought blocks of its own in its
@@ -1288,6 +1325,10 @@ public actor MLXChatModel: VoiceCore.LanguageModel, KeepsWarm, YieldsToVoice {
             let writing = firstToken.map { clock.now - $0 } ?? .zero
             lastWriting = (produced.count,
                            Double(writing.components.seconds) * 1000 + Double(writing.components.attoseconds) / 1e15)
+            if recordingAnswers {
+                answerRecords.append(AnswerRecord(tokens: produced, promptTokens: lastPrefill.computed,
+                                                  promptMs: lastPrefill.ms, writingMs: lastWriting.ms))
+            }
             DebugLog.log(String(format: "LLM: done writing, %d tokens (MLX: %.2f GB in use, %.2f GB kept for reuse)",
                                 produced.count, Double(Memory.activeMemory) / 1e9, Double(Memory.cacheMemory) / 1e9))
             if let pagingAfterPrefill {

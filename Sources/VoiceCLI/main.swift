@@ -100,6 +100,8 @@
 //   --barge-in mac|iphone    what it takes to interrupt Maé: the Mac's (default), or an iPhone's as the app has it while
 //                            an iPhone has the conversation (BargeInProfile; VOICE_BARGE_IN_IPHONE_DB/_MS apply)
 //   --out <folder>           where reports and audio go (default ./measurements)
+//   --greedy                 actions-bench: the likeliest token every time, every answer's tokens in the report
+//   --models <folder>        download, verify: this models folder instead of the app's
 //
 // The recordings are played into the engine in real time, as a microphone would, and the assistant's
 // voice is "played" in real time by a silent simulated speaker, so timings match the real app
@@ -260,6 +262,11 @@ struct Options {
     var reread = false
     /// story-bench: the sampling's min-p instead of the app's (`MLXChatModel.sampleWithMinP`), for comparisons in one build.
     var minP: Float?
+    /// actions-bench: the likeliest token drawn every time (`MLXChatModel.sampleGreedily`), and every answer's tokens in
+    /// the report, to compare two runs token for token.
+    var greedy = false
+    /// download, verify: the models folder at this path instead of the app's (`ModelStore(root:)`).
+    var models: String?
     /// story-bench: the tokens are not watched (it slows the writing), and each answer's time to its first word and
     /// writing speed are measured.
     var speed = false
@@ -377,6 +384,8 @@ struct Options {
             case "--hold": o.hold = Double(it.next() ?? "")
             case "--reread": o.reread = true
             case "--min-p": o.minP = Float(it.next() ?? "")
+            case "--greedy": o.greedy = true
+            case "--models": o.models = it.next()
             case "--speed": o.speed = true
             case "--pages": o.pages = it.next() != "off"
             case "--live-pages": o.livePages = true
@@ -927,8 +936,8 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
         usage: voice-cli conversation|interruption|endurance [--tier tier] [--llm folder] [--tts gpu|cpu] [--actions]
                          [--no-speculative] [--silence-ms 500] [--minutes 10] [--new-conversation-every n]
                          [--barge-in mac|iphone] [--out folder] files.wav…
-               voice-cli download [--tier minimum|standard|comfort|max | --journal-search]
-               voice-cli verify [--tier tier | --all]
+               voice-cli download [--tier minimum|standard|comfort|max | --journal-search] [--models folder]
+               voice-cli verify [--tier tier | --all] [--models folder]
                voice-cli voice-onset [--voices a,b] [--temperatures 0.7,0.5] [--repeats 3] [--parallel 1]
                                      [--with-llm]
                voice-cli voice-pace [--tier tier] [--repeats 5] [--with-llm [--model-writes n]] [--tts gpu|cpu]
@@ -947,6 +956,7 @@ guard let options = Options.parse(CommandLine.arguments), !options.files.isEmpty
                                        [--pages on|off] [--live-pages] [--record-pages file.json]
                                        [--memory [--journal]] [--memory-addendum file] [--journal-addendum file]
                                        [--compare-beginnings] [--compare-requests] [--bfloat16-prompts] [--bfloat16-experts]
+                                       [--greedy]
                voice-cli dialogue-bench [--tier tier] [--llm folder] [--now 2026-10-15T18:42] [--corpus file.json]
                                         [--repeats 10] [--agents] [--web] [--examples app|none|file] [--addendum file]
                                         [--memory [--journal]] [--watch-calls]

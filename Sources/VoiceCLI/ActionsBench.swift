@@ -379,6 +379,8 @@ private struct CaseResult: Encodable {
     var answerOK: Bool?
     /// The corpus's `reads`: a page must be opened (the snippets lack the answer), or must not (they hold it).
     var pageExpected: Bool?
+    /// With --greedy: every answer the model wrote for the case, token for token (`MLXChatModel.recordAnswers`).
+    var answers: [MLXChatModel.AnswerRecord]?
 }
 
 /// What the model reads of a search, with --results-note's note instead of the app's.
@@ -471,6 +473,11 @@ func runActionsBench(_ o: Options) async throws {
     if o.bfloat16Experts { print("experts' products in bfloat16 in the requests and the history (--bfloat16-experts)") }
     await model.allowOwnThoughts(o.ownThoughts)
     if o.ownThoughts { print("thought blocks of the model's own allowed in its answers (--own-thoughts)") }
+    if o.greedy {
+        await model.sampleGreedily(true)
+        await model.recordAnswers(true)
+        print("the likeliest token drawn every time, every answer's tokens in the report (--greedy)")
+    }
     let maxCalls = max(1, o.maxCalls ?? ActionCatalog.actionsPerRequest(on: tier))
     await model.limitToolCalls(maxCalls)
     print("calls carried out in one request: \(maxCalls) at most")
@@ -890,6 +897,7 @@ func runActionsBench(_ o: Options) async throws {
                 result.rightAfterSecondTry = false
             }
         }
+        if o.greedy { result.answers = await model.takeAnswers() }
         results.append(result)
         let mark = result.toolOK ? (result.argumentsOK == false ? "~" : "✓") : "✗"
         let detail = call.map { describe($0, written: written) } ?? (unreadable.map { "unreadable: \($0)" } ?? "“\(text.prefix(70))”")

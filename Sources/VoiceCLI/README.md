@@ -16,6 +16,8 @@ Check every downloaded file against its SHA-256 (about one second per GB):
 .build/xcode/Build/Products/Release/voice-cli verify
 ```
 
+Both take `--models <folder>` to work on another models folder than the app's.
+
 Measure the engine with recorded speech, played in real time as a microphone would. First generate the test
 phrases with macOS's built-in voices:
 
@@ -194,8 +196,9 @@ bfloat16), with Gemma 4 26B also with its experts' products in bfloat16 rather t
 earlier exchanges with those computed first on their own (as the history computed ahead, or in one pass), against the
 same float32 reference. `--bfloat16-prompts` (also for `cache-check`) computes the requests' new tokens and the history
 in bfloat16, as the app did before, and `--bfloat16-experts` computes Gemma 4 26B's experts' products in bfloat16 while
-the rest of them is computed in float32, to compare in one build. One
-search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
+the rest of them is computed in float32, to compare in one build. `--greedy` draws the likeliest token every time and
+writes every answer's tokens in the report, to compare two builds, two loaders or two copies of a model token for token.
+One search, made as the app makes it (the password, if any, in `SEARXNG_PASSWORD`):
 
 ```bash
 .build/xcode/Build/Products/Release/voice-cli web-search --searxng https://search.example.org horaires piscine Pontoise

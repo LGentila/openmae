@@ -8,8 +8,15 @@ import VoiceCore
 //   voice-cli download --journal-search                         the model of the journal's search by meaning
 //   voice-cli verify [--tier …|--all]                           re-reads the models and checks every SHA-256
 //   voice-cli catalog                                           regenerates Sources/VoiceCore/ModelFiles.swift
+//
+// download and verify take --models <folder>: that models folder instead of the app's.
 
 // MARK: - download, verify
+
+/// The app's models folder, or the one --models gives.
+func modelStore(_ o: Options) -> ModelStore {
+    o.models.map { ModelStore(root: URL(fileURLWithPath: $0, isDirectory: true)) } ?? ModelStore()
+}
 
 func tierOption(_ o: Options) throws -> HardwareTier {
     guard let name = o.tier else { return HardwareTier.recommended(for: .current) }
@@ -20,7 +27,7 @@ func tierOption(_ o: Options) throws -> HardwareTier {
 }
 
 func runDownload(_ o: Options) async throws {
-    let store = ModelStore()
+    let store = modelStore(o)
     let packs: [ModelPack]
     if o.journalSearch {
         packs = [ModelCatalog.journalSearch]
@@ -45,7 +52,7 @@ func runDownload(_ o: Options) async throws {
 }
 
 func runVerify(_ o: Options) throws {
-    let store = ModelStore()
+    let store = modelStore(o)
     let packs = o.all ? ModelCatalog.all : ModelCatalog.packs(for: try tierOption(o))
     var problems = 0
     for pack in packs {
